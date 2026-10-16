@@ -24,7 +24,17 @@ export const PUBLIC_SOURCE_CATALOG: PublicSourceDefinition[] = [
     cadence: "realtime",
     url: "https://bgapidatafeed.vps.com.vn",
     apiKeyRequired: false,
-    notes: "Batch quotes HOSE/HNX/UPCOM — primary public quote race.",
+    notes: "Batch quotes HOSE/HNX/UPCOM, sổ lệnh 3 cấp (g1..g6) và dòng tiền khối ngoại (fBVol/fSVolume/fRoom) — 100% public.",
+  },
+  {
+    id: "cafef-proprietary-flow",
+    name: "CafeF Tự Doanh & Thị Trường",
+    domain: "vn-stocks",
+    access: "open",
+    cadence: "daily",
+    url: "https://cafef.vn",
+    apiKeyRequired: false,
+    notes: "Dòng tiền tự doanh, giao dịch khối tự doanh và biến động thị trường EOD — providers/cafef.ts.",
   },
   {
     id: "vps-histdatafeed",

@@ -216,6 +216,36 @@ export function ValuationPanel({
               <Chg value={upside} className="text-[14px] font-semibold" />
             </div>
 
+            {(() => {
+              const consensus = (data.consensus ?? null) as {
+                targetPrice?: number | null;
+                rating?: string | null;
+                ratingAsOf?: string | null;
+                source?: string;
+              } | null;
+              if (!consensus || (!consensus.targetPrice && !consensus.rating)) return null;
+              const tp = consensus.targetPrice != null && Number.isFinite(Number(consensus.targetPrice)) ? Number(consensus.targetPrice) : null;
+              const upPct = tp != null && currentPrice > 0 ? ((tp - currentPrice) / currentPrice) * 100 : null;
+              return (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-line/60 bg-bg-2/60 px-2 py-1 text-[11px]">
+                  <span className="text-ink-3">Mục tiêu CTCK (Vietcap):</span>
+                  {tp != null && (
+                    <span className="num font-semibold text-ink">{fmtPrice(tp)}</span>
+                  )}
+                  {consensus.rating && (
+                    <Badge tone={consensus.rating.toLowerCase().includes("buy") || consensus.rating.toLowerCase().includes("mua") ? "up" : "neutral"}>
+                      {consensus.rating}
+                    </Badge>
+                  )}
+                  {upPct != null && (
+                    <span className={`text-[10px] font-medium ${upPct >= 0 ? "text-positive" : "text-negative"}`}>
+                      ({upPct >= 0 ? "+" : ""}{upPct.toFixed(1)}%)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
             <ValuationMarketStrip
               price={currentPrice}
               sharesOutstanding={sharesOutstanding}

@@ -44,6 +44,11 @@ interface VpsRow {
   f?: number | string;
   floorPrice?: number | string;
   floor_price?: number | string;
+  fBVol?: number | string;
+  fBValue?: number | string;
+  fSVolume?: number | string;
+  fSValue?: number | string;
+  fRoom?: number | string;
 }
 
 const num = (v: unknown): number | null => {
@@ -104,4 +109,57 @@ export async function getVpsQuotes(symbols: string[]): Promise<Quote[]> {
   for (let i = 0; i < uniq.length; i += CHUNK) chunks.push(uniq.slice(i, i + CHUNK));
   const batches = await Promise.all(chunks.map(fetchChunk));
   return batches.flat();
+}
+
+export interface VpsForeignFlow {
+  symbol: string;
+  buyVolume: number | null;
+  buyValue: number | null;
+  sellVolume: number | null;
+  sellValue: number | null;
+  netVolume: number | null;
+  netValue: number | null;
+  foreignRoom: number | null;
+  updatedAt: string;
+}
+
+/** Lấy dòng tiền khối ngoại trực tiếp từ datafeed realtime của VPS (công khai không API key). */
+export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow | null> {
+  const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!sym) return null;
+  const res = await httpJson<VpsRow[]>(`${BASE}/getliststockdata/${sym}`, {
+    provider: "vps",
+    timeoutMs: 4_500,
+    retries: 1,
+    headers: {
+      Accept: "application/json",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    },
+  });
+  if (!res.ok || !Array.isArray(res.data) || !res.data[0]) return null;
+  const r = res.data[0];
+  const buyVol = num(r.fBVol);
+  const fBVal = num(r.fBValue);
+  const sellVol = num(r.fSVolume);
+  const fSVal = num(r.fSValue);
+  const room = num(r.fRoom);
+
+  // fBValue / fSValue trong datafeed của VPS tính theo nghìn đồng -> quy đổi VND
+  const buyVal = fBVal != null ? fBVal * 1000 : null;
+  const sellVal = fSVal != null ? fSVal * 1000 : null;
+  const netVol = buyVol != null && sellVol != null ? buyVol - sellVol : null;
+  const netVal = buyVal != null && sellVal != null ? buyVal - sellVal : null;
+
+  return {
+    symbol: sym,
+    buyVolume: buyVol,
+    buyValue: buyVal,
+    sellVolume: sellVol,
+    sellValue: sellVal,
+    netVolume: netVol,
+    netValue: netVal,
+    foreignRoom: room,
+    updatedAt: new Date().toISOString(),
+  };
 }

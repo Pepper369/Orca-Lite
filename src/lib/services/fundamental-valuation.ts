@@ -465,6 +465,15 @@ export async function runFundamentalValuation(
       marketCap: marketCapOverride,
     },
     peers: peerPack,
+    consensus:
+      vietcap?.targetPrice != null || vietcap?.rating
+        ? {
+            targetPrice: vietcap.targetPrice ?? null,
+            rating: vietcap.rating ?? null,
+            ratingAsOf: vietcap.ratingAsOf ?? null,
+            source: "vietcap-iq",
+          }
+        : null,
     notes: allNotes,
     ttmPeriod: ttm?.period ?? null,
   };

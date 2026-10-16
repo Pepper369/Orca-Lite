@@ -18,7 +18,7 @@ import {
 import { lookupVndSymbol } from "../providers/vndirect-universe";
 import { getVndSymbolForeignFlow } from "../providers/vndirect-foreign-symbol";
 import { getVietcapCompany } from "../providers/vietcap";
-import { getVpsQuotes } from "../providers/vps";
+import { getVpsQuotes, getVpsForeignFlow } from "../providers/vps";
 import { getVnOrderBook, type VnOrderBook } from "./stock-orderbook";
 import { getVnQuotes, getVnOhlcv } from "./stocks-board";
 import { fetchOhlcvResilient } from "./screener-ohlcv";
@@ -37,6 +37,19 @@ export interface VnStockDetail {
   profile: VndCompanyProfile | null;
   orderBook: VnOrderBook | null;
   foreignFlow: { latest: unknown; history: unknown } | null;
+  consensus?: {
+    targetPrice: number | null;
+    rating: string | null;
+    ratingAsOf: string | null;
+    source: string;
+  } | null;
+  ownership?: {
+    foreignerPct: number | null;
+    freeFloatPct: number | null;
+    statePct: number | null;
+    maxForeignPct: number | null;
+    source: string;
+  } | null;
   financials: {
     income?: Record<string, unknown>[] | null;
     balance?: Record<string, unknown>[] | null;
@@ -102,15 +115,18 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
   let bookRes: Awaited<ReturnType<typeof getVnOrderBook>> | null = null;
   let foreignRes: Awaited<ReturnType<typeof getVndSymbolForeignFlow>> | null = null;
   let valRatioRes: Awaited<ReturnType<typeof getVndValuationRatios>> | null = null;
+  let vietcapRes: Awaited<ReturnType<typeof getVietcapCompany>> | null = null;
   if (wallLeft() > 3_000) {
     const secondary = await Promise.all([
       soft(getVnOrderBook(sym), 3_500, "orderbook"),
       soft(getVndSymbolForeignFlow(sym), 3_500, "foreign"),
       soft(getVndValuationRatios(sym), softMs, "ratios"),
+      soft(getVietcapCompany(sym), 3_500, "vietcap"),
     ]);
     bookRes = secondary[0];
     foreignRes = secondary[1];
     valRatioRes = secondary[2];
+    vietcapRes = secondary[3];
   } else {
     notes.push("skip:secondary-budget");
   }
@@ -166,64 +182,58 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     }
   }
 
-  if (!quote || !profile || !equity) {
-    try {
-      const vietcapData = await getVietcapCompany(sym).catch(() => null);
-      if (vietcapData) {
-        if (!quote && vietcapData.price) {
-          const p = vietcapData.price >= 1000 ? vietcapData.price / 1000 : vietcapData.price;
-          quote = {
-            symbol: sym,
-            assetClass: "stock",
-            price: p,
-            name: vietcapData.name,
-            change: null,
-            changePercent: null,
-            volume: null,
-            quoteVolume: null,
-            high: null,
-            low: null,
-            open: null,
-            referencePrice: null,
-            ceilingPrice: null,
-            floorPrice: null,
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        if (!profile) {
-          profile = {
-            code: sym,
-            floor: vietcapData.exchange,
-            logo: null,
-            vnName: vietcapData.name,
-            enName: vietcapData.nameEn,
-            foundDate: vietcapData.listedDate,
-            taxCode: null,
-            registrationCode: null,
-            vnAddress: null,
-            enAddress: null,
-            phone: null,
-            fax: null,
-            website: null,
-            email: null,
-            employees: null,
-            branches: null,
-            vnSummary: vietcapData.sector ? `Ngành: ${vietcapData.sector}` : null,
-            enSummary: vietcapData.sector ? `Sector: ${vietcapData.sector}` : null,
-          };
-        }
-        if (!equity && (vietcapData.sharesOutstanding || vietcapData.marketCap)) {
-          equity = {
-            sharesOutstanding: vietcapData.sharesOutstanding,
-            totalShares: vietcapData.sharesOutstanding,
-            marketCapReported: vietcapData.marketCap,
-            reportDate: null,
-            source: "vietcap",
-          };
-        }
-      }
-    } catch {
-      /* ignore */
+  const vietcapData = vietcapRes;
+  if (vietcapData) {
+    if (!quote && vietcapData.price) {
+      const p = vietcapData.price >= 1000 ? vietcapData.price / 1000 : vietcapData.price;
+      quote = {
+        symbol: sym,
+        assetClass: "stock",
+        price: p,
+        name: vietcapData.name,
+        change: null,
+        changePercent: null,
+        volume: null,
+        quoteVolume: null,
+        high: null,
+        low: null,
+        open: null,
+        referencePrice: null,
+        ceilingPrice: null,
+        floorPrice: null,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    if (!profile) {
+      profile = {
+        code: sym,
+        floor: vietcapData.exchange,
+        logo: null,
+        vnName: vietcapData.name,
+        enName: vietcapData.nameEn,
+        foundDate: vietcapData.listedDate,
+        taxCode: null,
+        registrationCode: null,
+        vnAddress: null,
+        enAddress: null,
+        phone: null,
+        fax: null,
+        website: null,
+        email: null,
+        employees: null,
+        branches: null,
+        vnSummary: vietcapData.sector ? `Ngành: ${vietcapData.sector}` : null,
+        enSummary: vietcapData.sector ? `Sector: ${vietcapData.sector}` : null,
+      };
+    }
+    if (!equity && (vietcapData.sharesOutstanding || vietcapData.marketCap)) {
+      equity = {
+        sharesOutstanding: vietcapData.sharesOutstanding,
+        totalShares: vietcapData.sharesOutstanding,
+        marketCapReported: vietcapData.marketCap,
+        reportDate: null,
+        source: "vietcap",
+      };
     }
   }
 
@@ -262,8 +272,54 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
   }
 
   const orderBook = bookRes?.book ?? null;
-  const foreignFlow = foreignRes
+  let foreignFlow = foreignRes
     ? { latest: foreignRes.latest ?? null, history: foreignRes.history ?? null }
+    : null;
+
+  // Fallback sang dòng tiền ngoại realtime từ VPS nếu VNDirect trống
+  if (!foreignFlow?.latest) {
+    try {
+      const vpsForeign = await soft(getVpsForeignFlow(sym), 2_000, "vps-foreign");
+      if (vpsForeign && (vpsForeign.buyVolume != null || vpsForeign.sellVolume != null)) {
+        foreignFlow = {
+          latest: {
+            tradingDate: vpsForeign.updatedAt.slice(0, 10),
+            buyVol: vpsForeign.buyVolume ?? 0,
+            buyVal: vpsForeign.buyValue ?? 0,
+            sellVol: vpsForeign.sellVolume ?? 0,
+            sellVal: vpsForeign.sellValue ?? 0,
+            netVol: vpsForeign.netVolume ?? 0,
+            netVal: vpsForeign.netValue ?? 0,
+            totalRoom: null,
+            currentRoom: vpsForeign.foreignRoom,
+            floor: null,
+          },
+          history: null,
+        };
+        notes.push("foreign:vps");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const consensus = vietcapData && (vietcapData.targetPrice != null || vietcapData.rating)
+    ? {
+        targetPrice: vietcapData.targetPrice ?? null,
+        rating: vietcapData.rating ?? null,
+        ratingAsOf: vietcapData.ratingAsOf ?? null,
+        source: "vietcap-iq",
+      }
+    : null;
+
+  const ownership = vietcapData && (vietcapData.foreignerPct != null || vietcapData.freeFloatPct != null || vietcapData.statePct != null)
+    ? {
+        foreignerPct: vietcapData.foreignerPct ?? null,
+        freeFloatPct: vietcapData.freeFloatPct ?? null,
+        statePct: vietcapData.statePct ?? null,
+        maxForeignPct: vietcapData.maxForeignPct ?? null,
+        source: "vietcap-iq",
+      }
     : null;
 
   const financials = finRes?.financials ?? null;
@@ -302,6 +358,7 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     ohlcvResilient?.pack?.meta?.source ?? ohlcvLegacy?.meta?.source,
     finRes?.meta?.source,
     valRatioRes?.source,
+    vietcapData ? "vietcap" : null,
   ].filter(Boolean) as string[];
 
   if (failed.length) notes.push(`missing: ${failed.join(",")}`);
@@ -319,6 +376,8 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     profile,
     orderBook,
     foreignFlow,
+    consensus,
+    ownership,
     financials,
     financialHealth,
     financialMeta,
@@ -354,6 +413,8 @@ function emptyShell(sym: string, note: string): { detail: VnStockDetail; meta: M
       profile: null,
       orderBook: null,
       foreignFlow: null,
+      consensus: null,
+      ownership: null,
       financials: null,
       financialHealth: null,
       financialMeta: null,
