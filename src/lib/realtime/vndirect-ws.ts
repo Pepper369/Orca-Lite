@@ -1,56 +1,82 @@
 import "server-only";
 import { recordFailure, recordSuccess } from "../health";
 import { eventBus } from "../events";
+import { getVpsQuotes } from "../providers/vps";
 
 /**
- * VNDirect public realtime price feed — low-latency reconnect.
- * Multi-host CMC rotation, 14s session silent, ~15ms first hop.
- * On serverless set VNDIRECT_WS_DISABLED=true.
+ * Realtime price feed — kết nối WebSocket trực tiếp từ sàn qua VPS Socket.IO feed (100% public, live).
+ * wss://bgdatafeed.vps.com.vn/socket.io/?EIO=4&transport=websocket
+ * Hỗ trợ tự động fallback REST snapshot qua getVpsQuotes để đảm bảo tick luôn tươi mới.
  */
 
 const PROVIDER = "vndirect-ws";
-const VND_WS_HOSTS = [
-  "wss://price-cmc-04.vndirect.com.vn/realtime/websocket",
-  "wss://price-cmc-03.vndirect.com.vn/realtime/websocket",
-  "wss://price-cmc-02.vndirect.com.vn/realtime/websocket",
-  "wss://price-cmc-01.vndirect.com.vn/realtime/websocket",
-  "wss://price-cmc-05.vndirect.com.vn/realtime/websocket",
-];
-const DEFAULT_URL = VND_WS_HOSTS[0]!;
-const SILENT_MS = 30_000;
-const SILENT_MS_SESSION = 14_000;
+const VPS_WS_HOST = "wss://bgdatafeed.vps.com.vn/socket.io/?EIO=4&transport=websocket";
+const DEFAULT_URL = VPS_WS_HOST;
+const SILENT_MS = 45_000;
+const SILENT_MS_SESSION = 25_000;
 const SILENT_MS_OFFHOURS = 90_000;
-const HANDSHAKE_MS = 5_000;
-const MAX_CODES_PER_SUBSCRIBE = 80;
+const HANDSHAKE_MS = 6_000;
 const RETRY_BUDGET = 32;
-const BUDGET_COOLDOWN_MS = 20_000;
+const BUDGET_COOLDOWN_MS = 15_000;
 const URGENT_MS = 40;
 const WATCHDOG_MS = 4_000;
 
 const MI_CODE_MAP: Record<string, string> = {
-  "10": "VNINDEX", "11": "VN30", "12": "HNX30", "13": "VNXALL", "02": "HNX", "03": "UPCOM",
+  "10": "VNINDEX",
+  "11": "VN30",
+  "12": "HNX30",
+  "13": "VNXALL",
+  "02": "HNX",
+  "03": "UPCOM",
+  "20": "VNINDEX",
+  "21": "VN30",
 };
-const CORE_MI_IDS = Object.keys(MI_CODE_MAP);
+const CORE_MI_IDS = ["10", "11", "02", "03", "12"];
 
 export type VndirectWsState = "open" | "connecting" | "closed" | "disabled" | "retrying";
 type FailKind = "network" | "handshake" | "silent" | "rate_limit" | "unknown";
 
 export interface VndirectLiveQuote {
-  symbol: string; price: number; volume: number; value: number;
-  open: number | null; high: number | null; low: number | null;
-  changePercent?: number | null; ceiling?: number | null; floor?: number | null;
-  matchQtty: number | null; eventTime: number; source: "SP" | "BA";
+  symbol: string;
+  price: number;
+  volume: number;
+  value: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  changePercent?: number | null;
+  ceiling?: number | null;
+  floor?: number | null;
+  matchQtty: number | null;
+  eventTime: number;
+  source: "SP" | "BA";
 }
+
 export interface VndirectLiveIndex {
-  code: string; value: number; change: number | null; volume: number | null;
-  valueTraded: number | null; advances: number | null; declines: number | null;
-  unchanged: number | null; eventTime: number;
+  code: string;
+  value: number;
+  change: number | null;
+  volume: number | null;
+  valueTraded: number | null;
+  advances: number | null;
+  declines: number | null;
+  unchanged: number | null;
+  eventTime: number;
 }
+
 export interface VndirectWsStats {
-  enabled: boolean; state: VndirectWsState; connectedAt: number | null;
-  lastMessageAt: number | null; messagesPerMin: number; reconnectAttempts: number;
-  lastError: string | null; lastFailKind: FailKind | null; nextRetryAt: number | null;
-  symbolsTracked: number; quotesTracked: number; indicesTracked: number;
+  enabled: boolean;
+  state: VndirectWsState;
+  connectedAt: number | null;
+  lastMessageAt: number | null;
+  messagesPerMin: number;
+  reconnectAttempts: number;
+  lastError: string | null;
+  lastFailKind: FailKind | null;
+  nextRetryAt: number | null;
+  symbolsTracked: number;
+  quotesTracked: number;
+  indicesTracked: number;
 }
 
 type WsLike = {
@@ -58,7 +84,9 @@ type WsLike = {
   onmessage: ((e: { data: unknown }) => void) | null;
   onerror: ((e: unknown) => void) | null;
   onclose: ((e: { code?: number; reason?: string }) => void) | null;
-  close: () => void; send: (data: string) => void; readyState?: number;
+  close: () => void;
+  send: (data: string) => void;
+  readyState?: number;
 };
 
 const num = (v: unknown): number | null => {
@@ -67,27 +95,19 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-let _hostIdx = 0;
-let _lastGoodHost: string | null = null;
-
 function wsUrl(): string {
   const env = process.env.VNDIRECT_WS_URL?.trim();
   if (env) return env;
-  if (_lastGoodHost) return _lastGoodHost;
-  return VND_WS_HOSTS[_hostIdx % VND_WS_HOSTS.length]!;
-}
-function rotateWsHost() {
-  if (process.env.VNDIRECT_WS_URL?.trim()) return;
-  _lastGoodHost = null;
-  _hostIdx = (_hostIdx + 1) % VND_WS_HOSTS.length;
-}
-function markWsHostGood(url: string) {
-  if (!process.env.VNDIRECT_WS_URL?.trim()) _lastGoodHost = url;
+  return DEFAULT_URL;
 }
 
 function isVnSessionWindow(d = new Date()): boolean {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Ho_Chi_Minh", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "Asia/Ho_Chi_Minh",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
   }).formatToParts(d);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   if (get("weekday") === "Sat" || get("weekday") === "Sun") return false;
@@ -150,17 +170,63 @@ class VndirectWsEngine {
     this.forceOn = on;
     if (on && (this.state === "closed" || this.state === "disabled")) void this.connect();
   }
+
   private enabled(): boolean {
     if (this.forceOn) return true;
     if (process.env.VNDIRECT_WS_DISABLED === "true") return false;
     return true;
   }
+
   watchSymbol(symbol: string): () => void {
     const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!s) return () => {};
     const n = (this.symbolRefs.get(s) ?? 0) + 1;
     this.symbolRefs.set(s, n);
-    if (n === 1 && this.state === "open") this.sendSubscribe(["SP", "BA"], [s]);
+    if (n === 1 && this.state === "open") this.sendSubscribe(["regs"], [s]);
+
+    // Eager seed từ REST snapshot để UI lập tức có giá chuẩn
+    if (!this.quotes.has(s)) {
+      void getVpsQuotes([s])
+        .then((qs) => {
+          if (qs[0] && qs[0].price > 0) {
+            const q0 = qs[0];
+            const liveQ: VndirectLiveQuote = {
+              symbol: s,
+              price: q0.price,
+              volume: q0.volume ?? 0,
+              value: q0.quoteVolume ?? 0,
+              open: q0.open,
+              high: q0.high,
+              low: q0.low,
+              ceiling: q0.ceilingPrice,
+              floor: q0.floorPrice,
+              matchQtty: null,
+              eventTime: Date.now(),
+              source: "SP",
+            };
+            this.quotes.set(s, liveQ);
+            eventBus.emit(`vndirect:quote:${s}`, {
+              symbol: s,
+              price: q0.price,
+              volume: q0.volume ?? 0,
+              value: q0.quoteVolume ?? 0,
+              eventTime: liveQ.eventTime,
+              ts: liveQ.eventTime,
+            });
+            eventBus.emit(`market-tick:${s}`, {
+              symbol: s,
+              price: q0.price,
+              cumVolume: q0.volume ?? 0,
+              cumQuoteVolume: q0.quoteVolume ?? 0,
+              ts: liveQ.eventTime,
+              source: "vps-rest",
+              degraded: false,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+
     if (this.state !== "open" && this.state !== "connecting") this.reconnectUrgent("watchSymbol");
     return () => {
       const left = (this.symbolRefs.get(s) ?? 1) - 1;
@@ -168,29 +234,65 @@ class VndirectWsEngine {
       else this.symbolRefs.set(s, left);
     };
   }
+
   ensureCoreIndices() {
     if (this.state === "open" && !this.miSubscribed) {
-      this.sendSubscribe(["MI"], CORE_MI_IDS);
+      this.sendSubscribe(["regs"], CORE_MI_IDS);
       this.miSubscribed = true;
     }
   }
-  getQuote(symbol: string, maxAgeMs = 30_000): VndirectLiveQuote | null {
-    const q = this.quotes.get(symbol.toUpperCase());
+
+  getQuote(symbol: string, maxAgeMs = 45_000): VndirectLiveQuote | null {
+    const s = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const q = this.quotes.get(s);
+    if (!q || Date.now() - q.eventTime > maxAgeMs) {
+      void getVpsQuotes([s])
+        .then((qs) => {
+          if (qs[0] && qs[0].price > 0) {
+            const q0 = qs[0];
+            this.quotes.set(s, {
+              symbol: s,
+              price: q0.price,
+              volume: q0.volume ?? 0,
+              value: q0.quoteVolume ?? 0,
+              open: q0.open,
+              high: q0.high,
+              low: q0.low,
+              ceiling: q0.ceilingPrice,
+              floor: q0.floorPrice,
+              matchQtty: null,
+              eventTime: Date.now(),
+              source: "SP",
+            });
+          }
+        })
+        .catch(() => {});
+    }
     return q && Date.now() - q.eventTime <= maxAgeMs ? q : null;
   }
-  getIndex(code: string, maxAgeMs = 30_000): VndirectLiveIndex | null {
+
+  getIndex(code: string, maxAgeMs = 45_000): VndirectLiveIndex | null {
     const idx = this.indices.get(code.toUpperCase());
     return idx && Date.now() - idx.eventTime <= maxAgeMs ? idx : null;
   }
+
   getStats(): VndirectWsStats {
     return {
-      enabled: this.enabled(), state: this.state, connectedAt: this.connectedAt,
-      lastMessageAt: this.lastMessageAt, messagesPerMin: this.msgsPerMin(),
-      reconnectAttempts: this.reconnectAttempts, lastError: this.lastError,
-      lastFailKind: this.lastFailKind, nextRetryAt: this.nextRetryAt,
-      symbolsTracked: this.symbolRefs.size, quotesTracked: this.quotes.size, indicesTracked: this.indices.size,
+      enabled: this.enabled(),
+      state: this.state,
+      connectedAt: this.connectedAt,
+      lastMessageAt: this.lastMessageAt,
+      messagesPerMin: this.msgsPerMin(),
+      reconnectAttempts: this.reconnectAttempts,
+      lastError: this.lastError,
+      lastFailKind: this.lastFailKind,
+      nextRetryAt: this.nextRetryAt,
+      symbolsTracked: this.symbolRefs.size,
+      quotesTracked: this.quotes.size,
+      indicesTracked: this.indices.size,
     };
   }
+
   start() {
     if (this.started) {
       if (this.state === "closed" || this.state === "disabled") void this.connect();
@@ -201,6 +303,7 @@ class VndirectWsEngine {
     this.watchdog = setInterval(() => this.checkLiveness(), WATCHDOG_MS);
     this.watchdog.unref?.();
   }
+
   private noteMsg(now = Date.now()) {
     this.lastMessageAt = now;
     const sec = Math.floor(now / 1000);
@@ -211,72 +314,95 @@ class VndirectWsEngine {
     }
     this.secBuckets[sec % 60] += 1;
   }
+
   private msgsPerMin(now = Date.now()): number {
     const sec = Math.floor(now / 1000);
     let sum = 0;
     for (let i = 0; i < 60; i++) if (sec - i >= this.secBase - 59) sum += this.secBuckets[(sec - i) % 60] ?? 0;
     return sum;
   }
+
   private hardClose() {
     ++this.closeGen;
     const ws = this.ws;
     this.ws = null;
     this.miSubscribed = false;
     if (!ws) return;
-    try { ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null; ws.close(); } catch { /* */ }
+    try {
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      ws.close();
+    } catch {
+      /* */
+    }
   }
+
   private clearRetryTimer() {
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.nextRetryAt = null;
   }
+
   private async connect() {
-    if (!this.enabled()) { this.state = "disabled"; return; }
+    if (!this.enabled()) {
+      this.state = "disabled";
+      return;
+    }
     if (this.connecting) return;
     const WSImpl = (globalThis as unknown as { WebSocket?: new (url: string) => WsLike }).WebSocket;
-    if (!WSImpl) { this.state = "disabled"; this.lastError = "no native WebSocket in runtime"; return; }
+    if (!WSImpl) {
+      this.state = "disabled";
+      this.lastError = "no native WebSocket in runtime";
+      return;
+    }
     this.connecting = true;
     this.state = "connecting";
     this.clearRetryTimer();
     const gen = ++this.connectGen;
     this.hardClose();
+
     try {
       const url = wsUrl();
       const ws = new WSImpl(url);
       this.ws = ws;
       const myCloseGen = this.closeGen;
+
       const handshakeTimer = setTimeout(() => {
         if (gen !== this.connectGen) return;
         if (this.state === "connecting") {
           this.lastError = "handshake timeout";
-          try { ws.close(); } catch { this.failAndReconnect("handshake timeout"); }
+          try {
+            ws.close();
+          } catch {
+            this.failAndReconnect("handshake timeout");
+          }
         }
       }, HANDSHAKE_MS);
       handshakeTimer.unref?.();
+
       ws.onopen = () => {
         if (gen !== this.connectGen) return;
         clearTimeout(handshakeTimer);
-        this.connecting = false;
-        this.state = "open";
-        this.connectedAt = Date.now();
-        this.lastMessageAt = Date.now();
-        this.reconnectAttempts = 0;
-        this.lastError = null;
-        this.lastFailKind = null;
-        recordSuccess(PROVIDER, 0, "realtime");
-        try { markWsHostGood(url); } catch { /* */ }
-        this.resubscribeAll();
+        // Note: Socket.IO protocol sends 0{"sid":...} first, then client sends 40
       };
+
       ws.onmessage = (e) => {
         if (gen !== this.connectGen) return;
         clearTimeout(handshakeTimer);
         this.noteMsg();
         this.handleMessage(typeof e.data === "string" ? e.data : String(e.data ?? ""));
       };
+
       ws.onerror = () => {
         if (gen !== this.connectGen || myCloseGen !== this.closeGen) return;
         clearTimeout(handshakeTimer);
         if (this.state === "connecting") this.failAndReconnect("websocket error");
       };
+
       ws.onclose = (ev) => {
         if (gen !== this.connectGen || myCloseGen !== this.closeGen) return;
         clearTimeout(handshakeTimer);
@@ -290,28 +416,84 @@ class VndirectWsEngine {
       this.failAndReconnect(err instanceof Error ? err.message : "connect failed");
     }
   }
+
   private resubscribeAll() {
-    const symbols = [...this.symbolRefs.keys()];
-    for (let i = 0; i < symbols.length; i += MAX_CODES_PER_SUBSCRIBE) {
-      this.sendSubscribe(["SP", "BA"], symbols.slice(i, i + MAX_CODES_PER_SUBSCRIBE));
+    const codes = Array.from(new Set([...CORE_MI_IDS, ...this.symbolRefs.keys()]));
+    if (codes.length) {
+      this.sendSubscribe(["regs"], codes);
     }
-    this.sendSubscribe(["MI"], CORE_MI_IDS);
     this.miSubscribed = true;
   }
-  private sendSubscribe(types: string[], codes: string[]) {
+
+  private sendSubscribe(_types: string[], codes: string[]) {
     if (!this.ws || this.state !== "open" || !codes.length) return;
-    for (const name of types) {
-      try {
-        this.ws.send(JSON.stringify({ type: "registConsumer", data: { sequence: 0, params: { name, codes } } }));
-      } catch (e) {
-        this.lastError = e instanceof Error ? e.message : "subscribe send failed";
-      }
+    try {
+      this.ws.send('42["regs",' + JSON.stringify(JSON.stringify(codes)) + ']');
+    } catch (e) {
+      this.lastError = e instanceof Error ? e.message : "subscribe send failed";
     }
   }
+
   private handleMessage(raw: string) {
-    if (!raw || raw === "ping" || raw === "pong") return;
+    if (!raw) return;
+
+    // Socket.IO / Engine.IO protocol
+    if (raw === "2") {
+      try {
+        this.ws?.send("3");
+      } catch {
+        /* */
+      }
+      return;
+    }
+
+    if (raw.startsWith("0")) {
+      try {
+        this.ws?.send("40");
+      } catch {
+        /* */
+      }
+      return;
+    }
+
+    if (raw.startsWith("40")) {
+      this.connecting = false;
+      this.state = "open";
+      this.connectedAt = Date.now();
+      this.lastMessageAt = Date.now();
+      this.reconnectAttempts = 0;
+      this.lastError = null;
+      this.lastFailKind = null;
+      recordSuccess(PROVIDER, 0, "realtime");
+      this.resubscribeAll();
+      return;
+    }
+
+    if (raw.startsWith("42")) {
+      try {
+        const parsed = JSON.parse(raw.slice(2));
+        if (Array.isArray(parsed) && parsed.length >= 2) {
+          const event = parsed[0];
+          const payload = parsed[1];
+          if (event === "index" && payload?.data) {
+            this.handleVpsIndex(payload.data as Record<string, unknown>);
+          } else if ((event === "stock" || event === "board" || event === "spt") && payload?.data) {
+            this.handleVpsStock(payload.data as Record<string, unknown>);
+          }
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+      return;
+    }
+
+    // Fallback for legacy format if any
     let obj: { type?: string; data?: unknown };
-    try { obj = JSON.parse(raw) as { type?: string; data?: unknown }; } catch { return; }
+    try {
+      obj = JSON.parse(raw) as { type?: string; data?: unknown };
+    } catch {
+      return;
+    }
     const type = String(obj.type ?? "").toUpperCase();
     const dataStr = typeof obj.data === "string" ? obj.data : null;
     if (!dataStr) return;
@@ -320,6 +502,96 @@ class VndirectWsEngine {
     else if (type === "BA") this.onBidAsk(parts);
     else if (type === "MI") this.onMarketInfo(parts);
   }
+
+  private handleVpsIndex(d: Record<string, unknown>) {
+    const mc = String(d.mc ?? "").trim();
+    const code =
+      MI_CODE_MAP[mc] ??
+      (mc === "10" ? "VNINDEX" : mc === "11" ? "VN30" : mc === "02" ? "HNX" : mc === "03" ? "UPCOM" : null);
+    if (!code) return;
+    const val = num(d.cIndex);
+    if (val == null || val <= 0) return;
+
+    const ot = typeof d.ot === "string" ? d.ot.split("|") : [];
+    const change = num(ot[0]);
+    const adv = num(ot[3]);
+    const unc = num(ot[4]);
+    const dec = num(ot[5]);
+
+    const idx: VndirectLiveIndex = {
+      code,
+      value: val,
+      change,
+      volume: num(d.vol),
+      valueTraded: num(d.value) != null ? Number(d.value) * 1_000_000 : null,
+      advances: adv,
+      declines: dec,
+      unchanged: unc,
+      eventTime: Date.now(),
+    };
+    this.indices.set(code, idx);
+
+    eventBus.emit(`vndirect:index:${code}`, {
+      code,
+      symbol: code,
+      price: idx.value,
+      value: idx.value,
+      volume: idx.volume ?? 0,
+      eventTime: idx.eventTime,
+      ts: idx.eventTime,
+    });
+    eventBus.emit(`market-tick:${code}`, {
+      symbol: code,
+      price: idx.value,
+      cumVolume: idx.volume ?? 0,
+      cumQuoteVolume: idx.valueTraded ?? 0,
+      ts: idx.eventTime,
+      source: "vps-ws",
+      degraded: false,
+    });
+  }
+
+  private handleVpsStock(d: Record<string, unknown>) {
+    const sym = String(d.sym ?? d.stock_code ?? d.stockCode ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!sym) return;
+    const price = num(d.lastPrice ?? d.last_price);
+    if (price == null || price <= 0) return;
+
+    const q: VndirectLiveQuote = {
+      symbol: sym,
+      price,
+      volume: Math.max(0, num(d.lot ?? d.totalVol ?? d.total_vol) ?? 0),
+      value: Math.max(0, num(d.totalVal ?? d.total_val) ?? 0),
+      open: num(d.openPrice ?? d.open_price),
+      high: num(d.highPrice ?? d.high_price),
+      low: num(d.lowPrice ?? d.low_price),
+      ceiling: num(d.c ?? d.ceilingPrice),
+      floor: num(d.f ?? d.floorPrice),
+      matchQtty: num(d.lastVolume ?? d.last_volume),
+      eventTime: Date.now(),
+      source: "SP",
+    };
+    this.quotes.set(sym, q);
+
+    eventBus.emit(`vndirect:quote:${sym}`, {
+      symbol: sym,
+      price: q.price,
+      volume: q.volume,
+      value: q.value,
+      eventTime: q.eventTime,
+      ts: q.eventTime,
+    });
+    eventBus.emit(`market-tick:${sym}`, {
+      symbol: sym,
+      price: q.price,
+      cumVolume: q.volume,
+      cumQuoteVolume: q.value,
+      ts: q.eventTime,
+      source: "vps-ws",
+      degraded: false,
+    });
+  }
+
   private onStockPartial(arr: string[]) {
     if (arr.length < 12) return;
     const symbol = String(arr[3] ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -327,13 +599,28 @@ class VndirectWsEngine {
     const price = num(arr[11]) ?? num(arr[10]);
     if (price == null || price <= 0) return;
     const q: VndirectLiveQuote = {
-      symbol, price, volume: Math.max(0, num(arr[12]) ?? 0), value: Math.max(0, num(arr[18]) ?? 0),
-      open: num(arr[9]), high: num(arr[13]), low: num(arr[14]), matchQtty: num(arr[12]),
-      eventTime: Date.now(), source: "SP",
+      symbol,
+      price,
+      volume: Math.max(0, num(arr[12]) ?? 0),
+      value: Math.max(0, num(arr[18]) ?? 0),
+      open: num(arr[9]),
+      high: num(arr[13]),
+      low: num(arr[14]),
+      matchQtty: num(arr[12]),
+      eventTime: Date.now(),
+      source: "SP",
     };
     this.quotes.set(symbol, q);
-    eventBus.emit(`vndirect:quote:${symbol}`, { symbol, price: q.price, volume: q.volume, value: q.value, eventTime: q.eventTime, ts: q.eventTime });
+    eventBus.emit(`vndirect:quote:${symbol}`, {
+      symbol,
+      price: q.price,
+      volume: q.volume,
+      value: q.value,
+      eventTime: q.eventTime,
+      ts: q.eventTime,
+    });
   }
+
   private onBidAsk(arr: string[]) {
     if (arr.length < 16) return;
     const symbol = String(arr[1] ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -342,13 +629,28 @@ class VndirectWsEngine {
     if (price == null || price <= 0) return;
     const prev = this.quotes.get(symbol);
     const q: VndirectLiveQuote = {
-      symbol, price, volume: Math.max(0, num(arr[14]) ?? 0), value: Math.max(0, num(arr[17]) ?? 0),
-      open: prev?.open ?? null, high: prev?.high ?? null, low: prev?.low ?? null, matchQtty: num(arr[16]),
-      eventTime: Date.now(), source: "BA",
+      symbol,
+      price,
+      volume: Math.max(0, num(arr[14]) ?? 0),
+      value: Math.max(0, num(arr[17]) ?? 0),
+      open: prev?.open ?? null,
+      high: prev?.high ?? null,
+      low: prev?.low ?? null,
+      matchQtty: num(arr[16]),
+      eventTime: Date.now(),
+      source: "BA",
     };
     this.quotes.set(symbol, q);
-    eventBus.emit(`vndirect:quote:${symbol}`, { symbol, price: q.price, volume: q.volume, value: q.value, eventTime: q.eventTime, ts: q.eventTime });
+    eventBus.emit(`vndirect:quote:${symbol}`, {
+      symbol,
+      price: q.price,
+      volume: q.volume,
+      value: q.value,
+      eventTime: q.eventTime,
+      ts: q.eventTime,
+    });
   }
+
   private onMarketInfo(arr: string[]) {
     if (arr.length < 13) return;
     const marketId = String(arr[0] ?? "").trim();
@@ -357,12 +659,28 @@ class VndirectWsEngine {
     const value = num(arr[12]) ?? num(arr[7]);
     if (value == null || value <= 0) return;
     const idx: VndirectLiveIndex = {
-      code, value, change: num(arr[8]), volume: num(arr[2]) ?? num(arr[16]), valueTraded: num(arr[3]),
-      advances: num(arr[4]), declines: num(arr[5]), unchanged: num(arr[6]), eventTime: Date.now(),
+      code,
+      value,
+      change: num(arr[8]),
+      volume: num(arr[2]) ?? num(arr[16]),
+      valueTraded: num(arr[3]),
+      advances: num(arr[4]),
+      declines: num(arr[5]),
+      unchanged: num(arr[6]),
+      eventTime: Date.now(),
     };
     this.indices.set(code, idx);
-    eventBus.emit(`vndirect:index:${code}`, { code, symbol: code, price: idx.value, value: idx.value, volume: idx.volume ?? 0, eventTime: idx.eventTime, ts: idx.eventTime });
+    eventBus.emit(`vndirect:index:${code}`, {
+      code,
+      symbol: code,
+      price: idx.value,
+      value: idx.value,
+      volume: idx.volume ?? 0,
+      eventTime: idx.eventTime,
+      ts: idx.eventTime,
+    });
   }
+
   private checkLiveness() {
     if (!this.enabled()) return;
     if (this.state === "open") {
@@ -377,12 +695,18 @@ class VndirectWsEngine {
       this.scheduleReconnect(computeBackoffMs("network", this.reconnectAttempts || 1, isVnSessionWindow()));
     }
   }
+
   private reconnectUrgent(_why: string) {
     if (!this.enabled() || this.connecting || this.state === "open") return;
     this.scheduleReconnect(URGENT_MS + Math.floor(Math.random() * 40), true);
   }
+
   private scheduleReconnect(delayMs: number, _urgent = false) {
-    if (!this.enabled()) { this.clearRetryTimer(); this.state = "disabled"; return; }
+    if (!this.enabled()) {
+      this.clearRetryTimer();
+      this.state = "disabled";
+      return;
+    }
     const target = Date.now() + delayMs;
     if (this.timer && this.nextRetryAt != null) {
       if (this.nextRetryAt <= target) return;
@@ -390,9 +714,14 @@ class VndirectWsEngine {
     }
     this.state = "retrying";
     this.nextRetryAt = target;
-    this.timer = setTimeout(() => { this.timer = null; this.nextRetryAt = null; void this.connect(); }, Math.max(0, delayMs));
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.nextRetryAt = null;
+      void this.connect();
+    }, Math.max(0, delayMs));
     this.timer.unref?.();
   }
+
   private failAndReconnect(reason: string) {
     this.connecting = false;
     const kind = classifyFail(reason);
@@ -401,16 +730,22 @@ class VndirectWsEngine {
     this.state = "closed";
     recordFailure(PROVIDER, this.lastError, "realtime");
     this.hardClose();
-    if (!this.enabled()) { this.clearRetryTimer(); this.state = "disabled"; return; }
+    if (!this.enabled()) {
+      this.clearRetryTimer();
+      this.state = "disabled";
+      return;
+    }
     this.reconnectAttempts += 1;
-    if (this.reconnectAttempts % 2 === 0) rotateWsHost();
     if (this.reconnectAttempts > RETRY_BUDGET) {
       const cooldown = isVnSessionWindow() ? BUDGET_COOLDOWN_MS : BUDGET_COOLDOWN_MS * 2;
       this.clearRetryTimer();
       this.state = "retrying";
       this.nextRetryAt = Date.now() + cooldown;
       this.timer = setTimeout(() => {
-        this.reconnectAttempts = 0; this.timer = null; this.nextRetryAt = null; void this.connect();
+        this.reconnectAttempts = 0;
+        this.timer = null;
+        this.nextRetryAt = null;
+        void this.connect();
       }, cooldown);
       this.timer.unref?.();
       return;

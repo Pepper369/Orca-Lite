@@ -38,9 +38,9 @@ export type MultiQuoteResult = {
 };
 
 const PRICE_PRIORITY: Record<string, number> = {
-  vndirect: 100,
-  vps: 95,
-  "ssi-iboard": 90,
+  vps: 100,
+  "ssi-iboard": 95,
+  vndirect: 90,
   vietcap: 50,
   "public-vn": 30,
 };

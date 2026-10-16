@@ -15,7 +15,7 @@ function vndBases(): string[] {
     .split(/[;,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const alts = [...envFallbacks, "https://api-finfo.vndirect.com.vn", "https://finfo-api.vndirect.com.vn"];
+  const alts = [...envFallbacks, "https://api-finfo.vndirect.com.vn"];
   const out: string[] = [];
   for (const b of [primary, ...alts]) {
     const n = b.replace(/\/$/, "");

@@ -30,7 +30,7 @@ export default function VnMarketCenterPage() {
     data: boardCore,
     isLoading: coreLoading,
   } = useApi<StocksData>(`/api/v1/stocks?board=vn30`, {
-    refreshInterval: 22_000,
+    refreshInterval: 4_000,
     timeoutMs: 4_000,
     keepPreviousData: true,
   });
@@ -42,7 +42,7 @@ export default function VnMarketCenterPage() {
     isLoading,
     error,
   } = useApi<StocksData>(`/api/v1/stocks?board=full`, {
-    refreshInterval: 28_000,
+    refreshInterval: 8_000,
     timeoutMs: 6_000,
     keepPreviousData: true,
   });
