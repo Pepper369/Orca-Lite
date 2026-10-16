@@ -115,23 +115,34 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 
 async function produceMarketIntel(): Promise<{ intel: MarketIntel; meta: Meta }> {
   ensureHeartbeatStarted();
-  const [indicesPack, quotesPack] = await Promise.all([
-    withTimeout((async () => { const { getVnIndices } = await import("./stocks"); return getVnIndices(); })(), 8_000),
-    withTimeout(getVnQuotes(VN30_BOARD), 9_000),
-  ]);
-  const [snapRes, crossRes, foreignPrimary, etfRes, propRes, idxStats, marketBoardRes, newsPack, foreignFb] = await Promise.all([
-    withTimeout(buildMarketSnapshot(), 12_000),
-    withTimeout(getCrossAsset(), 12_000),
-    withTimeout(vndirect.getVndForeignFlow(), 8_000),
-    withTimeout(vndirect.getVndEtfFlow(), 5_000),
-    withTimeout((async () => { const date = await vndirect.getVndLatestSessionDate(); return getCafefPropFlow(date); })(), 5_000),
-    withTimeout(vndirect.getVndIndexSessionStats("VNINDEX"), 10_000),
-    withTimeout(getVnMarketBoard(), 12_000),
-    withTimeout(getNews({ limit: 30 }), 12_000),
+  // Tối ưu giải pháp 2: Chạy song song toàn bộ provider trong 1 đợt duy nhất, timeout siết chặt 3.5s - 4s
+  const [
+    indicesPack,
+    quotesPack,
+    snapRes,
+    crossRes,
+    foreignPrimary,
+    etfRes,
+    propRes,
+    idxStats,
+    marketBoardRes,
+    newsPack,
+    foreignFb,
+  ] = await Promise.all([
+    withTimeout((async () => { const { getVnIndices } = await import("./stocks"); return getVnIndices(); })(), 3_500),
+    withTimeout(getVnQuotes(VN30_BOARD), 4_000),
+    withTimeout(buildMarketSnapshot(), 4_000),
+    withTimeout(getCrossAsset(), 4_000),
+    withTimeout(vndirect.getVndForeignFlow(), 3_500),
+    withTimeout(vndirect.getVndEtfFlow(), 3_000),
+    withTimeout((async () => { const date = await vndirect.getVndLatestSessionDate(); return getCafefPropFlow(date); })(), 3_000),
+    withTimeout(vndirect.getVndIndexSessionStats("VNINDEX"), 3_500),
+    withTimeout(getVnMarketBoard(), 4_000),
+    withTimeout(getNews({ limit: 30 }), 3_500),
     withTimeout((async () => {
       const { getSsiForeignFlowFallback } = await import("./foreign-flow-fallback");
       return getSsiForeignFlowFallback();
-    })(), 9_000),
+    })(), 3_500),
   ]);
   const foreignRes = foreignPrimary ?? foreignFb;
   const snapshotIndices = (snapRes?.snapshot.indices ?? [])
