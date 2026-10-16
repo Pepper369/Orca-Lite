@@ -1,0 +1,8 @@
+{
+  "name": "Orca Financial Lite",
+  "description": "Nền tảng phân tích tài chính thời gian thực — Cổ phiếu Việt Nam, crypto, forex, hàng hóa và trợ lý AI.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

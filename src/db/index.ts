@@ -1,6 +1,5 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 type Db = NodePgDatabase;
 
@@ -18,21 +17,6 @@ function usableUrl(v: string | undefined): string | null {
 }
 
 function runtimeDbConfig(): RuntimeDbConfig {
-  let runtime: { env?: Record<string, unknown>; ctx?: object } | null = null;
-  try {
-    runtime = getCloudflareContext() as unknown as { env?: Record<string, unknown>; ctx?: object };
-  } catch {
-    // Ngoài request của Worker (CLI/test/build): dùng pool toàn cục với DATABASE_URL.
-  }
-  if (runtime) {
-    // Trong Worker, kết nối I/O KHÔNG được dùng chung giữa các request
-    // ("Cannot perform I/O on behalf of a different request") → luôn tạo pool theo request,
-    // dù qua Hyperdrive (ưu tiên) hay trực tiếp bằng DATABASE_URL.
-    const hyperdrive = runtime.env?.HYPERDRIVE as { connectionString?: string } | undefined;
-    const connectionString = usableUrl(hyperdrive?.connectionString) ?? usableUrl(process.env.DATABASE_URL);
-    const scope = runtime.ctx ?? runtime.env ?? null;
-    if (scope) return { scope, connectionString };
-  }
   return { scope: null, connectionString: usableUrl(process.env.DATABASE_URL) };
 }
 

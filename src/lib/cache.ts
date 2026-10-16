@@ -1,5 +1,4 @@
 import "server-only";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { env } from "./env";
 
 /**
@@ -10,14 +9,9 @@ import { env } from "./env";
  *  - stale-while-revalidate + in-flight dedupe
  */
 
-/** Chạy việc nền; trên Workers gắn vào ctx.waitUntil để không bị huỷ khi response kết thúc. */
+/** Chạy việc nền. */
 function defer(p: Promise<unknown>): void {
-  const safe = p.catch(() => undefined);
-  try {
-    getCloudflareContext().ctx.waitUntil(safe);
-  } catch {
-    /* ngoài Worker: promise tự chạy tiếp */
-  }
+  p.catch(() => undefined);
 }
 
 interface Entry {

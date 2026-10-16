@@ -1,15 +1,9 @@
 import "server-only";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 /**
  * Rate limit theo IP cho các route tốn tiền (LLM) hoặc dễ bị dò (đăng nhập).
  *
- * Trên Cloudflare Workers: dùng binding Rate Limiting khai báo trong wrangler.jsonc
- * (`ratelimits`). Binding giới hạn THEO TỪNG DATACENTER và nhất quán dần (eventually
- * consistent) — đủ để chặn lạm dụng, không phải bộ đếm chính xác tuyệt đối.
- *
- * Nơi khác (next dev, Node, hoặc thiếu binding): dùng bộ đếm trong bộ nhớ, mỗi isolate/
- * process một bản — chỉ là lớp dự phòng, không thay thế được binding.
+ * Mặc định dùng bộ đếm trong bộ nhớ, mỗi isolate/process một bản.
  */
 
 export type LimiterBinding = "RL_AI" | "RL_AUTH";
@@ -21,7 +15,7 @@ interface RateLimitBinding {
 export interface RateLimitOptions {
   /** Tên nhóm, tách bộ đếm giữa các route (vd. "agent", "login"). */
   name: string;
-  /** Binding Cloudflare dùng khi có (ngưỡng nằm trong wrangler.jsonc). */
+  /** Binding dùng khi có. */
   binding: LimiterBinding;
   /** Ngưỡng dự phòng trong bộ nhớ: tối đa `limit` lần mỗi `windowSec` giây. */
   limit: number;
@@ -54,14 +48,8 @@ function memoryAllow(key: string, limit: number, windowSec: number): { ok: boole
   return { ok: true, retryAfter: 0 };
 }
 
-function getBinding(name: LimiterBinding): RateLimitBinding | null {
-  try {
-    const env = getCloudflareContext().env as unknown as Record<string, unknown>;
-    const b = env?.[name] as RateLimitBinding | undefined;
-    return b && typeof b.limit === "function" ? b : null;
-  } catch {
-    return null;
-  }
+function getBinding(_name: LimiterBinding): RateLimitBinding | null {
+  return null;
 }
 
 /**
