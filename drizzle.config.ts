@@ -1,3 +1,5 @@
+/// <reference types="node" />
+import process from "node:process";
 import { defineConfig } from "drizzle-kit";
 import * as dotenv from "dotenv";
 
