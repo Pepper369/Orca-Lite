@@ -25,6 +25,8 @@
     "convex": "^1.46.0",
     "dotenv": "17.3.1",
     "drizzle-orm": "0.45.2",
+    "firebase": "^13.0.0",
+    "firebase-admin": "^14.5.0",
     "ioredis": "^5.6.1",
     "jose": "^6.0.11",
     "lightweight-charts": "^5.2.1",
