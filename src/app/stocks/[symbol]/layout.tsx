@@ -1,11 +1,13 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { prefetchApi, useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import { AddToWatchlist } from "@/components/watchlist-button";
 import { StockTabs } from "@/components/stocks/stock-tabs";
 import { Chg, fmtCompact, fmtNum, FreshnessDot, Loading, Panel } from "@/components/ui";
+import { getSecurity } from "@/lib/vn/master";
+import { BOOTSTRAP_VN30_QUOTES } from "@/lib/bootstrap-data";
 
 export default function StockSymbolLayout({
   children,
@@ -17,10 +19,50 @@ export default function StockSymbolLayout({
   const [symbol, setSymbol] = useState("");
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
+  const [liveTick, setLiveTick] = useState<{
+    price: number;
+    volume?: number | null;
+    high?: number | null;
+    low?: number | null;
+    ts: number;
+  } | null>(null);
 
   useEffect(() => {
     params.then((p) => setSymbol(p.symbol.toUpperCase()));
   }, [params]);
+
+  // Realtime live tick polling from VNDirect/VPS provider
+  useEffect(() => {
+    if (!symbol) return;
+    let disposed = false;
+    async function fetchLive() {
+      if (disposed) return;
+      try {
+        const res = await fetch(
+          `/api/v1/chart/live-quote?symbol=${encodeURIComponent(symbol)}&assetType=stock&_=${Date.now()}`
+        );
+        if (!res.ok) return;
+        const j = await res.json();
+        if (j?.success && j?.data?.price > 0 && !disposed) {
+          setLiveTick({
+            price: Number(j.data.price),
+            volume: Number(j.data.volume) || null,
+            high: Number(j.data.high) || null,
+            low: Number(j.data.low) || null,
+            ts: Number(j.data.ts) || Date.now(),
+          });
+        }
+      } catch {
+        /* ignore live errors */
+      }
+    }
+    fetchLive();
+    const timer = setInterval(fetchLive, 3000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [symbol]);
 
   // P6-A: soft shell — keepPreviousData + short timeout; never gate children on full payload
   const { res, data, meta, isLoading } = useApi<VnStockDetail>(
@@ -28,7 +70,7 @@ export default function StockSymbolLayout({
     {
       refreshInterval: 12_000,
       keepPreviousData: true,
-      timeoutMs: 12_000,
+      timeoutMs: 8_000,
     },
   );
 
@@ -75,6 +117,44 @@ export default function StockSymbolLayout({
     return () => io.disconnect();
   }, []);
 
+  const sec = useMemo(() => (symbol ? getSecurity(symbol) : null), [symbol]);
+  const bootQuote = useMemo(() => {
+    return symbol ? BOOTSTRAP_VN30_QUOTES.find((b) => b.symbol === symbol) ?? null : null;
+  }, [symbol]);
+
+  const rawQ = data?.quote ?? bootQuote;
+  const q = useMemo(() => {
+    if (liveTick && rawQ) {
+      const chg = rawQ.referencePrice ? liveTick.price - rawQ.referencePrice : rawQ.change;
+      const chgPct = rawQ.referencePrice ? (chg! / rawQ.referencePrice) * 100 : rawQ.changePercent;
+      return {
+        ...rawQ,
+        price: liveTick.price,
+        change: chg,
+        changePercent: chgPct,
+        volume: liveTick.volume ?? rawQ.volume,
+        high: liveTick.high ?? rawQ.high,
+        low: liveTick.low ?? rawQ.low,
+      };
+    }
+    if (liveTick && !rawQ) {
+      return {
+        symbol,
+        name: sec?.name ?? symbol,
+        price: liveTick.price,
+        change: 0,
+        changePercent: 0,
+        referencePrice: liveTick.price,
+        ceilingPrice: Number((liveTick.price * 1.07).toFixed(2)),
+        floorPrice: Number((liveTick.price * 0.93).toFixed(2)),
+        volume: liveTick.volume ?? 0,
+        quoteVolume: 0,
+        assetClass: "stock" as const,
+      };
+    }
+    return rawQ;
+  }, [rawQ, liveTick, symbol, sec]);
+
   // P6-A: only wait for symbol resolve — render soft hero + children immediately
   if (!symbol) {
     return (
@@ -84,15 +164,14 @@ export default function StockSymbolLayout({
     );
   }
 
-  const q = data?.quote;
   const ff = data?.foreignFlow?.latest as
     | { buyVal?: number; sellVal?: number; netVal?: number; currentRoom?: number }
     | undefined;
   const hasForeign =
     ff != null &&
     [ff.buyVal, ff.sellVal, ff.netVal].some((v) => v != null && Number(v) !== 0);
-  const floor = data?.profile?.floor ?? null;
-  const heroLoading = isLoading && !data && !res;
+  const floor = data?.profile?.floor || sec?.exchange || null;
+  const name = data?.name || q?.name || bootQuote?.name || sec?.name || null;
 
   return (
     <div className="stock-workspace stock-page-body">
@@ -104,10 +183,14 @@ export default function StockSymbolLayout({
               <div className="stock-hero-title-row">
                 <h1 className="stock-hero-symbol">{symbol}</h1>
                 {floor ? <span className="stock-floor-badge">{floor}</span> : null}
-                {(data?.name || q?.name) ? (
-                  <span className="stock-hero-name">{data?.name || q?.name}</span>
-                ) : heroLoading ? (
-                  <span className="stock-hero-name text-text-muted">Đang tải…</span>
+                {name ? (
+                  <span className="stock-hero-name">{name}</span>
+                ) : null}
+                {liveTick ? (
+                  <span className="inline-flex items-center gap-1 rounded bg-positive/10 px-1.5 py-0.5 text-[9px] font-semibold text-positive border border-positive/25 shadow-sm">
+                    <span className="size-1.5 rounded-full bg-positive animate-pulse" />
+                    VNDIRECT LIVE
+                  </span>
                 ) : null}
                 <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />
                 <AddToWatchlist assetType="stock" symbol={symbol} />
@@ -154,9 +237,7 @@ export default function StockSymbolLayout({
                 </div>
               ) : (
                 <p className="stock-hero-empty mt-2">
-                  {heroLoading
-                    ? "Đang lấy giá phiên…"
-                    : "Giá phiên tạm chưa có — xem các tab bên dưới."}
+                  Đang đồng bộ giá phiên khớp lệnh…
                 </p>
               )}
             </div>
