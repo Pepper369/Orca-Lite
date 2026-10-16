@@ -754,11 +754,12 @@ class VndirectWsEngine {
   }
 }
 
-function getEngine(): VndirectWsEngine {
+// Engine singleton
+const getEngine = (): VndirectWsEngine => {
   const g = globalThis as typeof globalThis & { __orcaVndirectWs?: VndirectWsEngine };
   if (!g.__orcaVndirectWs) g.__orcaVndirectWs = new VndirectWsEngine();
   return g.__orcaVndirectWs;
-}
+};
 
 export const vndirectWs = getEngine();
 
