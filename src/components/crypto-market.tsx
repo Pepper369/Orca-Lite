@@ -8,6 +8,7 @@ import type { CryptoMarketRow, Meta } from "@/lib/types";
 import { Badge, Chg, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, priceDigits, Unavailable } from "@/components/ui";
 import { usePrefCurrency } from "@/lib/fx-pref";
 import { ArrowUpRight, Coins, RefreshCw, Search, TrendingDown, TrendingUp, Waves, X } from "lucide-react";
+import { BOOTSTRAP_CRYPTO_DATA } from "@/lib/bootstrap-data";
 
 type MarketsData = { rows: CryptoMarketRow[]; summary: CryptoSummary };
 
@@ -17,15 +18,16 @@ export function CryptoMarketPage() {
   const { data, meta, isLoading, isValidating, mutate } = useApi<MarketsData>("/api/v1/crypto/markets?limit=120", {
     refreshInterval: 15_000,
     keepPreviousData: true,
-    timeoutMs: 15_000,
+    timeoutMs: 5_000,
   });
   const { fmtUsd } = usePrefCurrency();
   const [tab, setTab] = useState<FilterTab>("volume");
   const [q, setQ] = useState("");
 
+  const activeData = (data?.rows?.length ? data : BOOTSTRAP_CRYPTO_DATA) as MarketsData;
+
   const rows = useMemo(() => {
-    if (!data) return [];
-    let r = data.rows;
+    let r = activeData.rows;
     if (tab === "gainers") r = [...r].sort((a, b) => (b.changePercent ?? 0) - (a.changePercent ?? 0));
     else if (tab === "losers") r = [...r].sort((a, b) => (a.changePercent ?? 0) - (b.changePercent ?? 0));
     else if (tab === "volume") r = [...r].sort((a, b) => (b.quoteVolume ?? 0) - (a.quoteVolume ?? 0));
@@ -35,35 +37,11 @@ export function CryptoMarketPage() {
       r = r.filter((x) => x.symbol.includes(needle) || x.baseAsset.includes(needle));
     }
     return r.slice(0, 80);
-  }, [data, tab, q]);
+  }, [activeData, tab, q]);
 
-  if (isLoading && !data) return <Loading rows={12} />;
-  if (!data || !data.rows || data.rows.length === 0) {
-    return (
-      <div className="panel flex flex-col items-center justify-center p-8 text-center space-y-3">
-        <div className="flex items-center gap-2 text-base font-semibold text-text-primary">
-          <RefreshCw className={`size-4 text-accent-primary ${isValidating ? "animate-spin" : ""}`} />
-          Đang khởi tạo kết nối Binance Spot realtime...
-        </div>
-        <p className="max-w-md text-[12px] text-text-secondary leading-relaxed">
-          Hệ thống đang đồng bộ dữ liệu thị trường từ Binance WebSocket / OKX / CoinGecko. Quá trình này diễn ra tự động khi ứng dụng vừa deploy hoặc khởi động lại.
-        </p>
-        <button
-          type="button"
-          onClick={() => void mutate()}
-          disabled={isValidating}
-          className="rounded-lg border border-accent-primary/50 bg-accent-primary/10 px-4 py-2 text-[12px] font-semibold text-accent-primary hover:bg-accent-primary/20 transition-colors"
-        >
-          {isValidating ? "Đang đồng bộ..." : "Thử kết nối lại ngay"}
-        </button>
-        {meta && <MetaLine meta={meta} />}
-      </div>
-    );
-  }
-
-  const s = data.summary;
-  const btcRow = data.rows.find((r) => r.symbol === "BTCUSDT");
-  const ethRow = data.rows.find((r) => r.symbol === "ETHUSDT");
+  const s = activeData.summary;
+  const btcRow = activeData.rows.find((r) => r.symbol === "BTCUSDT");
+  const ethRow = activeData.rows.find((r) => r.symbol === "ETHUSDT");
 
   const totalBreadth = Math.max(1, s.advancers + s.decliners);
   const advancerPct = Math.round((s.advancers / totalBreadth) * 100);

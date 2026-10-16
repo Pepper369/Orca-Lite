@@ -9,6 +9,7 @@ import { Badge, Chg, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel,
 import { AddToWatchlist } from "@/components/watchlist-button";
 import { CandlestickChart, KeyRound, LayoutGrid, Search, Table2 } from "lucide-react";
 import { BangDienBoard } from "@/components/stocks/bang-dien-board";
+import { BOOTSTRAP_STOCKS_DATA } from "@/lib/bootstrap-data";
 
 type StocksData = {
   indices: IndexQuote[] | null;
@@ -30,7 +31,7 @@ export default function VnMarketCenterPage() {
     isLoading: coreLoading,
   } = useApi<StocksData>(`/api/v1/stocks?board=vn30`, {
     refreshInterval: 22_000,
-    timeoutMs: 6_000,
+    timeoutMs: 4_000,
     keepPreviousData: true,
   });
 
@@ -42,11 +43,12 @@ export default function VnMarketCenterPage() {
     error,
   } = useApi<StocksData>(`/api/v1/stocks?board=full`, {
     refreshInterval: 28_000,
-    timeoutMs: 14_000,
+    timeoutMs: 6_000,
     keepPreviousData: true,
   });
 
-  const data = boardFull?.quotes?.length ? boardFull : boardCore;
+  const rawData = boardFull?.quotes?.length ? boardFull : boardCore?.quotes?.length ? boardCore : null;
+  const data = rawData ?? BOOTSTRAP_STOCKS_DATA;
   const [q, setQ] = useState("");
   const [sector, setSector] = useState("");
   const [viewMode, setViewMode] = useState<"dien" | "table">("dien");
@@ -72,9 +74,6 @@ export default function VnMarketCenterPage() {
     }
     return { atCeiling, atFloor };
   }, [quotes]);
-
-  // Keep showing last board while revalidating / after transient errors
-  if ((isLoading || coreLoading) && !data?.quotes?.length) return <Loading rows={12} />;
 
   return (
     <div className="stock-workspace">

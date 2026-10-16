@@ -6,36 +6,16 @@ import type { ForexMarket } from "@/lib/services/forex";
 import type { ForexRow } from "@/lib/types";
 import { Chg, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
 import { Globe2, RefreshCw } from "lucide-react";
+import { BOOTSTRAP_FOREX_DATA } from "@/lib/bootstrap-data";
 
 export function ForexDashboard() {
   const { data, meta, isLoading, isValidating, mutate } = useApi<ForexMarket>("/api/v1/forex/markets", {
     refreshInterval: 25_000,
     keepPreviousData: true,
-    timeoutMs: 15_000,
+    timeoutMs: 5_000,
   });
-  if (isLoading && !data) return <Loading rows={10} />;
-  if (!data || !data.rows || data.rows.length === 0) {
-    return (
-      <div className="panel flex flex-col items-center justify-center p-8 text-center space-y-3">
-        <div className="flex items-center gap-2 text-base font-semibold text-text-primary">
-          <RefreshCw className={`size-4 text-accent-primary ${isValidating ? "animate-spin" : ""}`} />
-          Đang kết nối lại thị trường Forex...
-        </div>
-        <p className="max-w-md text-[12px] text-text-secondary leading-relaxed">
-          Đang kết nối Biquote / Yahoo Finance cho các cặp tỷ giá chính, kim loại quý và năng lượng.
-        </p>
-        <button
-          type="button"
-          onClick={() => void mutate()}
-          disabled={isValidating}
-          className="rounded-lg border border-accent-primary/50 bg-accent-primary/10 px-4 py-2 text-[12px] font-semibold text-accent-primary hover:bg-accent-primary/20 transition-colors"
-        >
-          {isValidating ? "Đang đồng bộ..." : "Thử kết nối lại ngay"}
-        </button>
-        {meta && <MetaLine meta={meta} />}
-      </div>
-    );
-  }
+
+  const activeData = (data?.rows?.length ? data : BOOTSTRAP_FOREX_DATA) as ForexMarket;
 
   const groups: { key: NonNullable<ForexRow["group"]>; title: string }[] = [
     { key: "major", title: "Cặp chính" },
@@ -54,7 +34,7 @@ export function ForexDashboard() {
               <Globe2 className="size-5 text-accent" /> Thị trường ngoại hối
               <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />
             </h1>
-            <p className="mt-1 text-[13px] text-ink-2">{data.usdStrengthNote}</p>
+            <p className="mt-1 text-[13px] text-ink-2">{activeData.usdStrengthNote}</p>
           </div>
           <MetaLine meta={meta} />
         </div>
@@ -62,7 +42,7 @@ export function ForexDashboard() {
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {groups.map((g) => {
-          const rows = data.rows.filter((r) => r.group === g.key);
+          const rows = activeData.rows.filter((r) => r.group === g.key);
           const placeholders =
             g.key === "metal"
               ? [

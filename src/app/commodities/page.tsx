@@ -23,6 +23,7 @@ import {
   resolveCommodityChartSymbol,
 } from "@/components/commodity-line-chart";
 import { Boxes, ChevronDown, ChevronUp, Flame, Info, RefreshCw, Search, TrendingDown, TrendingUp, X } from "lucide-react";
+import { BOOTSTRAP_COMMODITIES_DATA } from "@/lib/bootstrap-data";
 
 type CatalogItem = {
   key: string;
@@ -66,22 +67,25 @@ export default function CommoditiesPage() {
   const { data, meta, isLoading, isValidating, mutate } = useApi<Data>("/api/v1/commodities", {
     refreshInterval: 5 * 60_000,
     keepPreviousData: true,
+    timeoutMs: 5_000,
   });
 
+  const activeData = (data?.catalog?.length ? data : BOOTSTRAP_COMMODITIES_DATA) as unknown as Data;
+
   const groups = useMemo(() => {
-    if (data?.groups) {
+    if (activeData?.groups) {
       return [
         { key: "", title: "Tất cả", desc: "" },
-        ...Object.entries(data.groups).map(([key, v]) => ({ key, title: v.title, desc: v.desc })),
+        ...Object.entries(activeData.groups).map(([key, v]) => ({ key, title: v.title, desc: v.desc })),
       ];
     }
     return FALLBACK_GROUPS;
-  }, [data]);
+  }, [activeData]);
 
-  const bySymbol = useMemo(() => new Map((data?.rows ?? []).map((r) => [r.symbol, r])), [data]);
+  const bySymbol = useMemo(() => new Map((activeData?.rows ?? []).map((r) => [r.symbol, r])), [activeData]);
 
   const catalog = useMemo((): CatalogItem[] => {
-    let defs: CatalogItem[] = data?.catalog ?? [];
+    let defs: CatalogItem[] = (activeData?.catalog as unknown as CatalogItem[]) ?? [];
     if (group) defs = defs.filter((d) => d.group === group);
 
     if (sentimentFilter) {
@@ -100,25 +104,25 @@ export default function CommoditiesPage() {
       });
     }
     return defs;
-  }, [data, group, sentimentFilter, q]);
+  }, [activeData, group, sentimentFilter, q]);
 
   // Sentiment breakdown counts
   const sentimentStats = useMemo(() => {
     let positive = 0;
     let negative = 0;
     let mixed = 0;
-    for (const d of data?.catalog ?? []) {
+    for (const d of (activeData?.catalog as unknown as CatalogItem[]) ?? []) {
       const s = d.vnImpact?.sentiment;
       if (s === "TÍCH CỰC") positive++;
       else if (s === "TIÊU CỰC") negative++;
       else mixed++;
     }
-    return { positive, negative, mixed, total: (data?.catalog ?? []).length };
-  }, [data?.catalog]);
+    return { positive, negative, mixed, total: ((activeData?.catalog as unknown as CatalogItem[]) ?? []).length };
+  }, [activeData?.catalog]);
 
   const chartOptions = useMemo(() => {
     const acc: { chartSymbol: string; label: string }[] = [];
-    for (const d of data?.catalog ?? []) {
+    for (const d of (activeData?.catalog as unknown as CatalogItem[]) ?? []) {
       const cs = resolveCommodityChartSymbol(d.symbol, d.nameVi);
       if (!cs || acc.some((x) => x.chartSymbol === cs)) continue;
       acc.push({ chartSymbol: cs, label: d.nameVi });
@@ -138,9 +142,7 @@ export default function CommoditiesPage() {
     }
     acc.sort((a, b) => chartRank(a.chartSymbol) - chartRank(b.chartSymbol) || a.label.localeCompare(b.label, "vi"));
     return acc;
-  }, [data?.catalog]);
-
-  if (isLoading && !data) return <Loading rows={10} />;
+  }, [activeData?.catalog]);
 
   return (
     <div className="space-y-3">

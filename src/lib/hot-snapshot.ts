@@ -1,5 +1,6 @@
 import "server-only";
 import { env } from "./env";
+import { BOOTSTRAP_STOCKS_DATA, BOOTSTRAP_CRYPTO_DATA, BOOTSTRAP_FOREX_DATA } from "./bootstrap-data";
 
 /**
  * P0/P3 last-good snapshots for hot APIs.
@@ -28,7 +29,32 @@ type SlotEntry = {
   at: number;
 };
 
-const mem = new Map<HotSlot, SlotEntry>();
+const mem = new Map<HotSlot, SlotEntry>([
+  [
+    "board",
+    {
+      data: BOOTSTRAP_STOCKS_DATA,
+      meta: { source: "instant-bootstrap", partial: true, note: "Instant bootstrap" },
+      at: Date.now(),
+    },
+  ],
+  [
+    "crypto",
+    {
+      data: BOOTSTRAP_CRYPTO_DATA,
+      meta: { source: "instant-bootstrap", partial: true, note: "Instant bootstrap" },
+      at: Date.now(),
+    },
+  ],
+  [
+    "forex",
+    {
+      data: BOOTSTRAP_FOREX_DATA,
+      meta: { source: "instant-bootstrap", partial: true, note: "Instant bootstrap" },
+      at: Date.now(),
+    },
+  ],
+]);
 
 /** Prefer serving last-good if younger than this (2h). */
 export const SNAPSHOT_MAX_AGE_MS = 2 * 60 * 60_000;

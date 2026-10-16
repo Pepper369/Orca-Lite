@@ -36,9 +36,12 @@ export function Field({
   );
 }
 
+import { BOOTSTRAP_VN30_QUOTES, BOOTSTRAP_CRYPTO_ROWS } from "@/lib/bootstrap-data";
+
 export function VnScreener({ defaultSector }: { defaultSector: string | null }) {
   const { res, data, meta, isLoading, isValidating, mutate } = useApi<StocksData>(`/api/v1/stocks?symbols=${VN_BOARD}`, {
     refreshInterval: 20_000,
+    timeoutMs: 5_000,
   });
   const [sector, setSector] = useState(defaultSector ?? "");
   const [minChg, setMinChg] = useState("");
@@ -48,8 +51,10 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
   const [applied, setApplied] = useState({ sector: defaultSector ?? "", minChg: "", maxChg: "", minVol: "", q: "" });
   const [pressed, setPressed] = useState(false);
 
+  const activeQuotes = data?.quotes?.length ? data.quotes : BOOTSTRAP_VN30_QUOTES;
+
   const rows = useMemo(() => {
-    let list = data?.quotes ?? [];
+    let list = activeQuotes;
     if (applied.sector) list = list.filter((row) => sectorOf(row.symbol) === applied.sector);
     if (applied.minChg) list = list.filter((row) => (row.changePercent ?? 0) >= Number(applied.minChg));
     if (applied.maxChg) list = list.filter((row) => (row.changePercent ?? 0) <= Number(applied.maxChg));
@@ -68,7 +73,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
       );
     }
     return [...list].sort((a, b) => (b.quoteVolume ?? b.volume ?? 0) - (a.quoteVolume ?? a.volume ?? 0));
-  }, [data, applied, q]);
+  }, [activeQuotes, applied, q]);
 
   const run = useCallback(() => {
     setPressed(true);
@@ -76,18 +81,6 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
     void mutate();
     window.setTimeout(() => setPressed(false), 180);
   }, [sector, minChg, maxChg, minVol, q, mutate]);
-
-  if (isLoading && !res) return <Loading rows={8} />;
-  if (!res?.success) {
-    return (
-      <>
-        <Panel title="Bộ lọc cổ phiếu Việt Nam" pad={false}>
-          <div className="p-3 text-[12px] text-text-muted">Đang tải bộ lọc…</div>
-        </Panel>
-        <Unavailable title="VNStock chưa kết nối" note={res && !res.success ? res.error.message : undefined} />
-      </>
-    );
-  }
   return (
     <>
       <Panel
@@ -170,11 +163,11 @@ export function CryptoScreener() {
   const [url] = useState("/api/v1/screener?universe=crypto&limit=40");
   const { res, data, meta, isLoading } = useApi<{ universe: string; rows: CryptoMarketRow[] }>(url, {
     refreshInterval: 30_000,
+    timeoutMs: 5_000,
   });
-  if (isLoading && !res) return <Loading rows={8} />;
-  if (!data) return <Unavailable title="Screener không khả dụng" note={res && !res.success ? res.error.message : undefined} />;
+  const activeRows = data?.rows?.length ? data.rows : BOOTSTRAP_CRYPTO_ROWS;
   return (
-    <Panel title={`Crypto: ${data.rows.length} mã`} pad={false}>
+    <Panel title={`Crypto: ${activeRows.length} mã`} pad={false}>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[480px] text-[12px]">
           <thead>
@@ -186,7 +179,7 @@ export function CryptoScreener() {
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((r) => (
+            {activeRows.map((r) => (
               <tr key={r.symbol} className="row-hover border-b border-line/40">
                 <td className="px-3.5 py-2"><Link href={`/crypto/${r.symbol}`} className="font-semibold hover:text-accent">{r.baseAsset}</Link></td>
                 <td className="num py-2 text-right">{fmtNum(r.price, priceDigits(r.price))}</td>
