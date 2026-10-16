@@ -24,13 +24,19 @@ import { defineConfig } from "drizzle-kit";
 const url =
   process.env.DATABASE_URL_UNPOOLED?.trim() ||
   process.env.DATABASE_URL?.trim() ||
+  process.env.POSTGRES_URL?.trim() ||
+  process.env.CLOUD_SQL_DATABASE_URL?.trim() ||
   "postgresql://postgres:postgres@127.0.0.1:5432/app_db";
 
 const target = process.env.DATABASE_URL_UNPOOLED?.trim()
   ? "DATABASE_URL_UNPOOLED"
   : process.env.DATABASE_URL?.trim()
     ? "DATABASE_URL"
-    : "built-in localhost default";
+    : process.env.POSTGRES_URL?.trim()
+      ? "POSTGRES_URL"
+      : process.env.CLOUD_SQL_DATABASE_URL?.trim()
+        ? "CLOUD_SQL_DATABASE_URL"
+        : "built-in localhost default";
 
 // Printed so it is obvious which database migrations are about to touch.
 console.log(`[drizzle-kit] dialect=postgresql · schema=./src/db/schema.ts · credentials from ${target}`);

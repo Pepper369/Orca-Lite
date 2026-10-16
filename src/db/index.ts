@@ -16,8 +16,38 @@ function usableUrl(v: string | undefined): string | null {
   return url && !url.includes("<") && !url.includes(">") && !url.includes("example.com") ? url : null;
 }
 
+/** Tự động nhận diện chuỗi kết nối từ biến môi trường chuẩn hoặc do Google Cloud SQL / AI Studio inject */
+function resolveConnectionString(): string | null {
+  const direct =
+    usableUrl(process.env.DATABASE_URL) ??
+    usableUrl(process.env.DATABASE_URL_UNPOOLED) ??
+    usableUrl(process.env.POSTGRES_URL) ??
+    usableUrl(process.env.CLOUD_SQL_DATABASE_URL);
+  if (direct) return direct;
+
+  // Hỗ trợ Cloud SQL cấu hình riêng lẻ (Unix socket hoặc Host/Port nội bộ)
+  const user = process.env.DB_USER ?? process.env.POSTGRES_USER;
+  const pass = process.env.DB_PASS ?? process.env.POSTGRES_PASSWORD ?? process.env.DB_PASSWORD;
+  const dbName = process.env.DB_NAME ?? process.env.POSTGRES_DATABASE ?? "app_db";
+  const socketPath =
+    process.env.DB_SOCKET_PATH ??
+    (process.env.CLOUD_SQL_CONNECTION_NAME ? `/cloudsql/${process.env.CLOUD_SQL_CONNECTION_NAME}` : undefined);
+
+  if (socketPath && user) {
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass ?? "")}@localhost/${encodeURIComponent(dbName)}?host=${encodeURIComponent(socketPath)}`;
+  }
+
+  const host = process.env.DB_HOST ?? process.env.POSTGRES_HOST;
+  if (host && user) {
+    const port = process.env.DB_PORT ?? process.env.POSTGRES_PORT ?? "5432";
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass ?? "")}@${host}:${port}/${encodeURIComponent(dbName)}`;
+  }
+
+  return null;
+}
+
 function runtimeDbConfig(): RuntimeDbConfig {
-  return { scope: null, connectionString: usableUrl(process.env.DATABASE_URL) };
+  return { scope: null, connectionString: resolveConnectionString() };
 }
 
 /** Is a database URL configured? Lets ops endpoints report honestly without throwing. */
