@@ -18,7 +18,6 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pg"],
   experimental: {
     optimizePackageImports: ["lucide-react", "lightweight-charts"],
-    cpus: 2,
   },
   poweredByHeader: false,
   compress: true,

@@ -166,8 +166,9 @@ export function ForexDetailPage({ pair }: { pair: string }) {
   const base = data?.base || pair.slice(0, 3);
   const quote = data?.quote || (pair.slice(3) || "USD");
 
+  const dataCurrent = data?.current ?? null;
   const cur = useMemo(() => {
-    const baseCur = data?.current ?? (bootRow ? {
+    const baseCur = dataCurrent ?? (bootRow ? {
       pair,
       base,
       quote,
@@ -189,16 +190,16 @@ export function ForexDetailPage({ pair }: { pair: string }) {
       };
     }
     return baseCur;
-  }, [data?.current, bootRow, liveTick, pair, base, quote]);
+  }, [dataCurrent, bootRow, liveTick, pair, base, quote]);
 
   const price = cur?.price ?? liveTick?.price ?? data?.series?.[data.series.length - 1]?.close ?? bootRow?.price ?? null;
 
-  const rawSeries = data?.series ?? [];
   const series = useMemo(() => {
+    const rawSeries = data?.series ?? [];
     if (rawSeries.length >= 5) return rawSeries;
     if (price != null && price > 0) return makeSyntheticBars(price, 48);
     return [];
-  }, [rawSeries, price]);
+  }, [data?.series, price]);
 
   const seriesHigh = useMemo(() => {
     if (!series.length) return null;
