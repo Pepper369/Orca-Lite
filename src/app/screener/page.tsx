@@ -10,9 +10,11 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "stocks"
+  | "sector-flow"
+  | "four-m"
+  | "canslim"
   | "crypto"
   | "wyckoff"
-  | "canslim"
   | "minervini"
   | "elliott"
   | "valuation"
@@ -23,10 +25,12 @@ type Universe =
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
+  { id: "sector-flow", label: "Dòng tiền ngành 🌊" },
+  { id: "four-m", label: "Bộ lọc 4M 💎" },
+  { id: "canslim", label: "CANSLIM" },
   { id: "divergence", label: "Phân kỳ" },
   { id: "alpha-beta", label: "Hệ số cổ phiếu" },
   { id: "candlestick", label: "Mẫu nến" },
-  { id: "canslim", label: "CANSLIM" },
   { id: "minervini", label: "Minervini" },
   { id: "wyckoff", label: "Wyckoff" },
   { id: "elliott", label: "Sóng Elliott" },
@@ -88,6 +92,14 @@ const FundamentalScreener = dynamic(
   () => import("@/components/fundamental-screener").then((m) => m.FundamentalScreener),
   { ssr: false, loading: PanelFallback },
 );
+const FourMScreener = dynamic(
+  () => import("@/components/four-m-screener").then((m) => m.FourMScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const SectorFlowScreener = dynamic(
+  () => import("@/components/sector-flow-screener").then((m) => m.SectorFlowScreener),
+  { ssr: false, loading: PanelFallback },
+);
 
 function SoftPanel({
   name,
@@ -123,6 +135,12 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "sector-flow":
+      body = <SectorFlowScreener />;
+      break;
+    case "four-m":
+      body = <FourMScreener defaultSector={sector} />;
+      break;
     case "crypto":
       body = <CryptoScreener />;
       break;
