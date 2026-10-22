@@ -10,17 +10,23 @@ const sqlDbName = process.env.SQL_DB_NAME;
 const user = process.env.SQL_ADMIN_USER;
 const password = process.env.SQL_ADMIN_PASSWORD;
 
+const dbUrl = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+
 export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dialect: "postgresql",
   schemaFilter: ["public"],
-  dbCredentials: {
-    host: sqlHost || "127.0.0.1",
-    user: user || "postgres",
-    password: password || "",
-    database: sqlDbName || "cloud_sql_development_database",
-    ssl: false,
-  },
+  dbCredentials: dbUrl
+    ? {
+        url: dbUrl,
+      }
+    : {
+        host: sqlHost || "127.0.0.1",
+        user: user || "postgres",
+        password: password || "",
+        database: sqlDbName || "cloud_sql_development_database",
+        ssl: false,
+      },
   verbose: true,
 });
