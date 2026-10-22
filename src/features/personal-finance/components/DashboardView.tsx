@@ -24,6 +24,7 @@ import {
   ChevronUp,
   Sparkles,
   Heart,
+  Globe,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -312,6 +313,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* GLOBAL FINANCE HERO WIDGET */}
+      <div className="bg-gradient-to-r from-[#0d1f47] via-[#132c66] to-[#0a1838] border border-sky-500/30 p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-500/20 border border-sky-400/40 text-2xl shadow-inner">
+            🌍
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-sky-300 bg-sky-400/20 px-2 py-0.5 rounded-full border border-sky-400/30 uppercase tracking-wide font-mono">
+                TINH HOA QUỐC TẾ & VN
+              </span>
+              <span className="text-xs text-slate-300">· 4 Mô hình tài chính</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-white mt-0.5">
+              Quản trị tài chính theo 6 Chiếc Lọ (Money Lover) & YNAB & FIRE
+            </h3>
+            <p className="text-xs text-sky-100/80 mt-0.5">
+              Đo lường Tuổi dòng tiền, Tháp tài sản 4 tầng, và Radar thuê bao chống lạm chi tự động.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('orca:personal-finance-tab', { detail: 'global_finance' }));
+          }}
+          className="px-4 py-2.5 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer hover:scale-105 flex items-center gap-2 shrink-0 self-stretch md:self-auto justify-center"
+        >
+          <span>Khám phá Mô hình Quốc tế</span>
+          <ArrowUpRight className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* CHARTS GRID - Brighter & Clean */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

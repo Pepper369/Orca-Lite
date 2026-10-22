@@ -37,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: '🏠 Tổng quan' },
+    { id: 'global_finance', label: '🌍 Tinh hoa Tài chính (6 Lọ · YNAB · FIRE)' },
     { id: 'ask_orca', label: '💬 Bé Orca AI Tư Vấn' },
     { id: 'cashflow_calc', label: '⚡ Tính dòng tiền & Thuế' },
     { id: 'checkin', label: '📝 Monthly Check-in' },

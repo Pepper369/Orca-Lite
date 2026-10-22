@@ -36,6 +36,7 @@ import { ReportView } from './components/ReportView.tsx';
 import { AssumptionsAndMarketView } from './components/AssumptionsAndMarketView.tsx';
 import { PrivacyAndDataView } from './components/PrivacyAndDataView.tsx';
 import { EngineVerificationModal } from './components/EngineVerificationModal.tsx';
+import { GlobalFinanceView } from './components/GlobalFinanceView.tsx';
 
 import { QuickCashflowCalculator } from './components/QuickCashflowCalculator.tsx';
 import { AskOrcaAiView } from './components/AskOrcaAiView.tsx';
@@ -49,7 +50,7 @@ export default function App() {
   const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    const validTabs = new Set(['dashboard', 'ask_orca', 'cashflow_calc', 'checkin', 'analytics', 'planning', 'advice', 'report', 'market', 'privacy']);
+    const validTabs = new Set(['dashboard', 'global_finance', 'ask_orca', 'cashflow_calc', 'checkin', 'analytics', 'planning', 'advice', 'report', 'market', 'privacy']);
     const syncTabFromHash = () => {
       const tab = window.location.hash.slice(1);
       if (validTabs.has(tab)) setActiveTab(tab);
@@ -270,6 +271,13 @@ export default function App() {
             }}
             onToggleInsightStatus={handleToggleInsightStatus}
             onApplyCashflowToSnapshot={handleApplyCashflowToSnapshot}
+          />
+        )}
+
+        {activeTab === 'global_finance' && (
+          <GlobalFinanceView
+            currentSnapshot={currentSnapshot}
+            allSnapshots={snapshots}
           />
         )}
 
