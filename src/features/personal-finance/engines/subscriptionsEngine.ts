@@ -38,13 +38,18 @@ export interface SubscriptionsAnalysisResult {
 
 export function analyzeSubscriptionsAndRunway(
   snapshot: MonthlySnapshot,
-  customSubs?: SubscriptionItem[]
+  customSubs?: SubscriptionItem[],
+  customIncome?: number,
+  customCash?: number,
+  customEssentialExpenses?: number
 ): SubscriptionsAnalysisResult {
-  const netIncome = snapshot.metrics.totalNetIncome || 0;
+  const netIncome = customIncome !== undefined ? Math.max(0, customIncome) : (snapshot.metrics.totalNetIncome || 0);
   const expenses = snapshot.expenses || [];
-  const cashAssets = snapshot.assets
-    .filter((a) => a.category === 'cash')
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
+  const cashAssets = customCash !== undefined
+    ? Math.max(0, customCash)
+    : snapshot.assets
+        .filter((a) => a.category === 'cash')
+        .reduce((sum, a) => sum + (a.balance || 0), 0);
 
   // Nhận diện tự động các khoản thuê bao / hóa đơn định kỳ từ danh mục chi tiêu
   const detectedSubs: SubscriptionItem[] = [];
@@ -96,7 +101,9 @@ export function analyzeSubscriptionsAndRunway(
 
   // Tính Cashflow Runway (Tháng sống sót)
   // Dựa trên chi phí thiết yếu hàng tháng (Fixed Expenses)
-  const essentialMonthlyExpenses = Math.max(5_000_000, snapshot.metrics.fixedExpenses || totalMonthlyCost);
+  const essentialMonthlyExpenses = customEssentialExpenses !== undefined
+    ? Math.max(1_000_000, customEssentialExpenses)
+    : Math.max(5_000_000, snapshot.metrics.fixedExpenses || totalMonthlyCost);
   const runwayMonths = essentialMonthlyExpenses > 0
     ? Number((cashAssets / essentialMonthlyExpenses).toFixed(1))
     : 0;

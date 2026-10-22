@@ -34,13 +34,18 @@ export interface YnabAnalysisResult {
 
 export function calculateYnabMetrics(
   snapshot: MonthlySnapshot,
-  allSnapshots?: MonthlySnapshot[]
+  allSnapshots?: MonthlySnapshot[],
+  customIncome?: number,
+  customExpenses?: number,
+  customCash?: number
 ): YnabAnalysisResult {
-  const netIncome = snapshot.metrics.totalNetIncome || 0;
-  const totalExpenses = snapshot.metrics.totalExpenses || 0;
-  const cashAssets = snapshot.assets
-    .filter((a) => a.category === 'cash')
-    .reduce((sum, a) => sum + (a.balance || 0), 0);
+  const netIncome = customIncome !== undefined ? Math.max(0, customIncome) : (snapshot.metrics.totalNetIncome || 0);
+  const totalExpenses = customExpenses !== undefined ? Math.max(0, customExpenses) : (snapshot.metrics.totalExpenses || 0);
+  const cashAssets = customCash !== undefined
+    ? Math.max(0, customCash)
+    : snapshot.assets
+        .filter((a) => a.category === 'cash')
+        .reduce((sum, a) => sum + (a.balance || 0), 0);
 
   // 1. Tính toán Age of Money (Tuổi của dòng tiền tính theo ngày)
   // Ước tính chuẩn xác: Tiền mặt hiện có chia cho mức chi tiêu trung bình mỗi ngày

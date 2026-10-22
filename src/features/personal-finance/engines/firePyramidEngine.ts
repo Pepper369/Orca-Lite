@@ -44,36 +44,50 @@ export interface FirePyramidAnalysisResult {
   verdictVi: string;
 }
 
+export interface FirePyramidCustomOptions {
+  customMonthlyExpenses?: number;
+  customMonthlyIncome?: number;
+  customCashDefense?: number;
+  customInvestedAssets?: number;
+}
+
 export function calculateFireAndPyramid(
   snapshot: MonthlySnapshot,
   currentAge: number = 28,
-  expectedCagr: number = 0.10 // 10%/năm (chuẩn VN-Index dài hạn)
+  expectedCagr: number = 0.10, // 10%/năm (chuẩn VN-Index dài hạn)
+  options?: FirePyramidCustomOptions
 ): FirePyramidAnalysisResult {
   const assets = snapshot.assets || [];
-  const monthlyExpenses = snapshot.metrics.totalExpenses || 20_000_000;
+  const monthlyExpenses = options?.customMonthlyExpenses !== undefined
+    ? Math.max(1_000_000, options.customMonthlyExpenses)
+    : (snapshot.metrics.totalExpenses || 20_000_000);
   const annualExpenses = monthlyExpenses * 12;
-  const monthlySavings = Math.max(0, (snapshot.metrics.totalNetIncome || 0) - monthlyExpenses);
+  const netIncome = options?.customMonthlyIncome !== undefined
+    ? Math.max(0, options.customMonthlyIncome)
+    : (snapshot.metrics.totalNetIncome || 0);
+  const monthlySavings = Math.max(0, netIncome - monthlyExpenses);
 
   // Phân loại tài sản vào 4 tầng tháp tài sản
-  let tier1Defense = 0; // Tiền mặt, quỹ khẩn cấp
+  let tier1Defense = options?.customCashDefense !== undefined ? Math.max(0, options.customCashDefense) : 0;
   let tier2FixedIncome = 0; // Trái phiếu, gửi tiết kiệm dài hạn
-  let tier3Growth = 0; // Cổ phiếu, quỹ ETF, BĐS
+  let tier3Growth = options?.customInvestedAssets !== undefined ? Math.max(0, options.customInvestedAssets) : 0;
   let tier4Speculative = 0; // Crypto, vàng, cơ hội
 
-  for (const a of assets) {
-    const cat = a.category?.toLowerCase() || '';
-    const name = a.name?.toLowerCase() || '';
-    const bal = a.balance || 0;
+  if (options?.customCashDefense === undefined || options?.customInvestedAssets === undefined) {
+    for (const a of assets) {
+      const cat = a.category?.toLowerCase() || '';
+      const name = a.name?.toLowerCase() || '';
+      const bal = a.balance || 0;
 
-    if (cat === 'cash' || name.includes('ví') || name.includes('khẩn cấp') || name.includes('tiền mặt')) {
-      tier1Defense += bal;
-    } else if (name.includes('trái phiếu') || name.includes('tiết kiệm') || name.includes('bảo hiểm')) {
-      tier2FixedIncome += bal;
-    } else if (cat === 'crypto' || name.includes('crypto') || name.includes('bitcoin') || name.includes('vàng') || name.includes('coin')) {
-      tier4Speculative += bal;
-    } else {
-      // Mặc định cổ phiếu, quỹ, BĐS là tài sản tăng trưởng
-      tier3Growth += bal;
+      if (cat === 'cash' || name.includes('ví') || name.includes('khẩn cấp') || name.includes('tiền mặt')) {
+        if (options?.customCashDefense === undefined) tier1Defense += bal;
+      } else if (name.includes('trái phiếu') || name.includes('tiết kiệm') || name.includes('bảo hiểm')) {
+        tier2FixedIncome += bal;
+      } else if (cat === 'crypto' || name.includes('crypto') || name.includes('bitcoin') || name.includes('vàng') || name.includes('coin')) {
+        tier4Speculative += bal;
+      } else {
+        if (options?.customInvestedAssets === undefined) tier3Growth += bal;
+      }
     }
   }
 

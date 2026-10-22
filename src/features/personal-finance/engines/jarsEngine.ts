@@ -38,11 +38,14 @@ export interface JarsAnalysisResult {
 
 export function calculateJarsDistribution(
   snapshot: MonthlySnapshot,
-  customRatios?: { [key: string]: number }
+  customRatios?: { [key: string]: number },
+  customIncome?: number,
+  customExpenses?: number,
+  customSpentByJar?: Record<string, number>
 ): JarsAnalysisResult {
-  const netIncome = snapshot.metrics.totalNetIncome || 0;
+  const netIncome = customIncome !== undefined ? Math.max(0, customIncome) : (snapshot.metrics.totalNetIncome || 0);
   const expenses = snapshot.expenses || [];
-  const totalExpenses = snapshot.metrics.totalExpenses || 0;
+  const totalExpenses = customExpenses !== undefined ? Math.max(0, customExpenses) : (snapshot.metrics.totalExpenses || 0);
 
   // Tỷ lệ phân bổ mặc định chuẩn quốc tế
   const ratios = {
@@ -55,7 +58,7 @@ export function calculateJarsDistribution(
   };
 
   // Phân loại các khoản chi tiêu hiện tại vào 6 lọ
-  const spentByJar: Record<string, number> = {
+  const spentByJar: Record<string, number> = customSpentByJar ? { ...customSpentByJar } : {
     NEC: 0,
     FFA: 0,
     LTSS: 0,
@@ -64,23 +67,34 @@ export function calculateJarsDistribution(
     GIVE: 0,
   };
 
-  for (const exp of expenses) {
-    const cat = exp.category?.toLowerCase() || '';
-    const name = exp.name?.toLowerCase() || '';
-
-    if (cat.includes('invest') || name.includes('đầu tư') || name.includes('cổ phiếu') || name.includes('chứng chỉ quỹ')) {
-      spentByJar.FFA += exp.amount;
-    } else if (cat.includes('save') || cat.includes('saving') || name.includes('tiết kiệm') || name.includes('bảo hiểm')) {
-      spentByJar.LTSS += exp.amount;
-    } else if (cat.includes('edu') || name.includes('học') || name.includes('sách') || name.includes('khóa học')) {
-      spentByJar.EDU += exp.amount;
-    } else if (cat.includes('entertain') || cat.includes('play') || name.includes('du lịch') || name.includes('cà phê') || name.includes('mua sắm') || name.includes('xem phim')) {
-      spentByJar.PLAY += exp.amount;
-    } else if (cat.includes('charity') || cat.includes('give') || name.includes('biếu') || name.includes('từ thiện') || name.includes('ủng hộ')) {
-      spentByJar.GIVE += exp.amount;
+  if (!customSpentByJar) {
+    if (customExpenses !== undefined && expenses.length === 0) {
+      // Nếu user tự gõ tổng chi tiêu mà chưa có danh sách chi tiết: ước tính phân bổ thực tế theo tỷ lệ 60-10-10-5-10-5
+      spentByJar.NEC = Math.round(totalExpenses * 0.60);
+      spentByJar.FFA = Math.round(totalExpenses * 0.10);
+      spentByJar.LTSS = Math.round(totalExpenses * 0.10);
+      spentByJar.EDU = Math.round(totalExpenses * 0.05);
+      spentByJar.PLAY = Math.round(totalExpenses * 0.10);
+      spentByJar.GIVE = Math.round(totalExpenses * 0.05);
     } else {
-      // Mặc định tiền nhà, ăn uống, điện nước, xăng xe, y tế -> NEC (Thiết yếu)
-      spentByJar.NEC += exp.amount;
+      for (const exp of expenses) {
+        const cat = exp.category?.toLowerCase() || '';
+        const name = exp.name?.toLowerCase() || '';
+
+        if (cat.includes('invest') || name.includes('đầu tư') || name.includes('cổ phiếu') || name.includes('chứng chỉ quỹ')) {
+          spentByJar.FFA += exp.amount;
+        } else if (cat.includes('save') || cat.includes('saving') || name.includes('tiết kiệm') || name.includes('bảo hiểm')) {
+          spentByJar.LTSS += exp.amount;
+        } else if (cat.includes('edu') || name.includes('học') || name.includes('sách') || name.includes('khóa học')) {
+          spentByJar.EDU += exp.amount;
+        } else if (cat.includes('entertain') || cat.includes('play') || name.includes('du lịch') || name.includes('cà phê') || name.includes('mua sắm') || name.includes('xem phim')) {
+          spentByJar.PLAY += exp.amount;
+        } else if (cat.includes('charity') || cat.includes('give') || name.includes('biếu') || name.includes('từ thiện') || name.includes('ủng hộ')) {
+          spentByJar.GIVE += exp.amount;
+        } else {
+          spentByJar.NEC += exp.amount;
+        }
+      }
     }
   }
 
