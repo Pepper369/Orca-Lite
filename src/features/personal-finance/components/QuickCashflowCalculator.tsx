@@ -331,12 +331,17 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
               </div>
             </div>
 
-            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-              {expenses.map((exp, idx) => (
-                <div
-                  key={exp.id || idx}
-                  className="p-2.5 bg-[#0f1d44] border border-[#264182] rounded-xl flex items-center justify-between gap-2 text-xs hover:border-[#385cb5] transition-colors"
-                >
+            {expenses.length === 0 ? (
+              <div className="py-6 px-4 text-center rounded-xl border border-dashed border-[#264182] bg-[#0c183b]/60 text-slate-300 text-xs">
+                Chưa có khoản chi tiêu nào. Bấm nút <strong className="text-amber-300">+ Thêm khoản</strong> ở trên để thêm chi phí thực tế của bạn nha! 🐳
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                {expenses.map((exp, idx) => (
+                  <div
+                    key={exp.id || idx}
+                    className="p-2.5 bg-[#0f1d44] border border-[#264182] rounded-xl flex items-center justify-between gap-2 text-xs hover:border-[#385cb5] transition-colors"
+                  >
                   <input
                     type="text"
                     value={exp.name}
@@ -389,7 +394,8 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
                 </div>
               ))}
             </div>
-          </div>
+          )}
+        </div>
         </div>
 
         {/* RIGHT COLUMN: REALTIME CALCULATION RESULTS (5 cols) */}

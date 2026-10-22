@@ -5,6 +5,7 @@ import {
   TestTube2,
   RefreshCw,
   Trash2,
+  RotateCcw,
   Sparkles,
   Heart,
 } from 'lucide-react';
@@ -144,26 +145,26 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Check-in <span className="hidden xs:inline">(~5 ph)</span></span>
             </button>
 
-            {/* Dataset switcher */}
-            {isDemo ? (
-              <button
-                onClick={onStartBlank}
-                className="flex items-center gap-1 px-2.5 py-1.5 bg-[#172a5e] hover:bg-[#20397d] text-slate-200 hover:text-white border border-[#2d4d99] text-xs font-mono rounded-xl transition-colors cursor-pointer active:scale-95"
-                title="Xóa dữ liệu mẫu và tự nhập số liệu của bạn"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-slate-300" />
-                <span className="hidden sm:inline">Nhập sổ của bạn</span>
-                <span className="sm:hidden">Nhập sổ</span>
-              </button>
-            ) : (
+            {/* Dataset switcher: Reset to 0 or View Demo */}
+            <button
+              onClick={onStartBlank}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-[#172a5e] hover:bg-rose-950/60 text-slate-200 hover:text-rose-300 border border-[#2d4d99] hover:border-rose-500/50 text-xs font-mono rounded-xl transition-colors cursor-pointer active:scale-95"
+              title="Đặt lại toàn bộ số liệu về 0 để tự nhập từ đầu"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-300" />
+              <span className="hidden sm:inline">Đặt về 0</span>
+              <span className="sm:hidden">Về 0</span>
+            </button>
+
+            {!isDemo && (
               <button
                 onClick={onLoadDemo}
                 className="flex items-center gap-1 px-2.5 py-1.5 bg-[#172a5e] hover:bg-[#20397d] text-amber-300 hover:text-amber-200 border border-amber-400/40 text-xs font-mono rounded-xl transition-colors cursor-pointer active:scale-95"
-                title="Nạp lại bộ dữ liệu mẫu"
+                title="Nạp lại bộ dữ liệu mẫu để tham khảo"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Xem mẫu Demo</span>
-                <span className="sm:hidden">Mẫu</span>
+                <span className="sm:hidden">Demo</span>
               </button>
             )}
           </div>

@@ -19,7 +19,8 @@ import {
   saveSnapshotsToStorage,
   loadAssumptionsFromStorage,
   saveAssumptionsToStorage,
-  generateDemoSnapshots,
+  createZeroSnapshot,
+  resetAllToZero,
   INITIAL_EMPTY_PROFILE,
   wipeAllUserData,
   createSnapshotFromEntries,
@@ -96,7 +97,7 @@ export default function App() {
   const currentSnapshot = useMemo(() => {
     const found = snapshots.find((s) => s.period === currentPeriod);
     if (found) return found;
-    return snapshots[0] || generateDemoSnapshots()[2];
+    return snapshots[0] || createZeroSnapshot('2026-10');
   }, [snapshots, currentPeriod]);
 
   // Sinh danh sách lời khuyên 6 phần cho kỳ đang chọn
@@ -177,50 +178,30 @@ export default function App() {
       assets: currentSnapshot.assets,
       debts: currentSnapshot.debts,
       goals: currentSnapshot.goals,
-      isDemo: currentSnapshot.isDemo,
+      isDemo: false,
     });
 
     handleSaveSnapshot(recomputed);
   };
 
-  // Nạp lại DEMO
+  // Nạp lại DEMO (nếu người dùng muốn xem ví dụ mẫu)
   const handleLoadDemo = () => {
-    const demos = generateDemoSnapshots();
-    setSnapshots(demos);
-    saveSnapshotsToStorage(demos);
-    setCurrentPeriod('2026-10');
-    setActiveTab('dashboard');
+    import('./storage/financeStore.ts').then((mod) => {
+      const demos = mod.generateDemoSnapshots();
+      setSnapshots(demos);
+      mod.saveSnapshotsToStorage(demos);
+      setCurrentPeriod('2026-10');
+      setActiveTab('dashboard');
+    });
   };
 
-  // Bắt đầu Dữ liệu trống
+  // Bắt đầu Dữ liệu trống - Đưa toàn bộ về 0
   const handleStartBlank = () => {
-    const blankSnapshot = createSnapshotFromEntries({
-      period: '2026-10',
-      profile: INITIAL_EMPTY_PROFILE,
-      grossSalary: 20000000,
-      bonus: 0,
-      otherIncome: 0,
-      insuranceSalaryBase: 20000000,
-      expenses: [
-        { id: 'exp-housing', category: 'housing', name: 'Tiền thuê nhà', amount: 5000000, isFixed: true },
-        { id: 'exp-food', category: 'food', name: 'Ăn uống', amount: 4000000, isFixed: false },
-      ],
-      assets: [
-        { id: 'ast-cash', category: 'cash', name: 'Tiền mặt & ví', balance: 10000000, updatedAt: '05/10/2026' },
-      ],
-      debts: [],
-      goals: [
-        { id: 'g-fund', name: 'Quỹ khẩn cấp 3 tháng', targetAmount: 30000000, accumulatedAmount: 10000000, deadline: '2027-04', priority: 'high', status: 'on_track' },
-      ],
-      isDemo: false,
-    });
-
+    const zeroSnaps = resetAllToZero('2026-10');
     setProfile(INITIAL_EMPTY_PROFILE);
-    saveProfileToStorage(INITIAL_EMPTY_PROFILE);
-    setSnapshots([blankSnapshot]);
-    saveSnapshotsToStorage([blankSnapshot]);
+    setSnapshots(zeroSnaps);
     setCurrentPeriod('2026-10');
-    setActiveTab('checkin');
+    setActiveTab('dashboard');
   };
 
   // Xóa toàn bộ dữ liệu

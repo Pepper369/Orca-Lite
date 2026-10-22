@@ -59,8 +59,8 @@ export function calculateFireAndPyramid(
 ): FirePyramidAnalysisResult {
   const assets = snapshot.assets || [];
   const monthlyExpenses = options?.customMonthlyExpenses !== undefined
-    ? Math.max(1_000_000, options.customMonthlyExpenses)
-    : (snapshot.metrics.totalExpenses || 20_000_000);
+    ? Math.max(0, options.customMonthlyExpenses)
+    : (snapshot.metrics.totalExpenses || 0);
   const annualExpenses = monthlyExpenses * 12;
   const netIncome = options?.customMonthlyIncome !== undefined
     ? Math.max(0, options.customMonthlyIncome)
@@ -164,8 +164,8 @@ export function calculateFireAndPyramid(
     : 0;
 
   // Tính số năm chạm mốc FIRE theo bài toán tích lũy tăng trưởng kép
-  let yearsToFire = 99;
-  if (monthlySavings > 0) {
+  let yearsToFire = fireTargetStandard === 0 ? 0 : 99;
+  if (fireTargetStandard > 0 && monthlySavings > 0) {
     const annualSavings = monthlySavings * 12;
     let accumulated = currentInvestedAssets;
     for (let yr = 1; yr <= 45; yr++) {
@@ -177,7 +177,7 @@ export function calculateFireAndPyramid(
     }
   }
 
-  const targetFireAge = currentAge + (yearsToFire < 99 ? yearsToFire : 30);
+  const targetFireAge = currentAge + (fireTargetStandard === 0 ? 0 : (yearsToFire < 99 ? yearsToFire : 30));
 
   let verdictVi = `Bạn đã hoàn thành ${progressPercent}% lộ trình Tự do tài chính (FIRE).`;
   if (progressPercent >= 100) {

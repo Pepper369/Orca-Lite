@@ -47,16 +47,16 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
   const [showConfigDrawer, setShowConfigDrawer] = useState<boolean>(false);
 
   // Snapshot defaults
-  const snapIncome = currentSnapshot.metrics.totalNetIncome || 25_000_000;
-  const snapExpenses = currentSnapshot.metrics.totalExpenses || 15_000_000;
+  const snapIncome = currentSnapshot.metrics.totalNetIncome || 0;
+  const snapExpenses = currentSnapshot.metrics.totalExpenses || 0;
   const snapCash = currentSnapshot.assets
     .filter((a) => a.category === 'cash')
-    .reduce((sum, a) => sum + (a.balance || 0), 0) || 30_000_000;
+    .reduce((sum, a) => sum + (a.balance || 0), 0) || 0;
   const snapInvested = currentSnapshot.assets
     .filter((a) => a.category !== 'cash')
-    .reduce((sum, a) => sum + (a.balance || 0), 0) || 50_000_000;
+    .reduce((sum, a) => sum + (a.balance || 0), 0) || 0;
 
-  // Custom User Amounts State
+  // Custom User Amounts State - Mặc định về 0 đ
   const [customIncome, setCustomIncome] = useState<number>(snapIncome);
   const [customExpenses, setCustomExpenses] = useState<number>(snapExpenses);
   const [customCash, setCustomCash] = useState<number>(snapCash);
@@ -74,14 +74,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
     GIVE: 5,
   });
 
-  // Custom Subscriptions list
-  const [customSubs, setCustomSubs] = useState<SubscriptionItem[]>([
-    { id: 'sub-1', name: 'Netflix Premium', category: 'digital', monthlyAmount: 260_000, billingCycle: 'monthly', autoRenew: true, isEssential: false, color: '#ec4899', icon: '🎬' },
-    { id: 'sub-2', name: 'Spotify Music', category: 'digital', monthlyAmount: 59_000, billingCycle: 'monthly', autoRenew: true, isEssential: false, color: '#ec4899', icon: '🎵' },
-    { id: 'sub-3', name: 'iCloud 200GB', category: 'digital', monthlyAmount: 69_000, billingCycle: 'monthly', autoRenew: true, isEssential: true, color: '#38bdf8', icon: '☁️' },
-    { id: 'sub-4', name: 'ChatGPT Plus AI', category: 'productivity', monthlyAmount: 520_000, billingCycle: 'monthly', autoRenew: true, isEssential: true, color: '#818cf8', icon: '🤖' },
-    { id: 'sub-5', name: 'Internet Cáp Quang', category: 'living', monthlyAmount: 250_000, billingCycle: 'monthly', autoRenew: true, isEssential: true, color: '#38bdf8', icon: '🌐' },
-  ]);
+  // Custom Subscriptions list - Mặc định rỗng [] để người dùng tự thêm
+  const [customSubs, setCustomSubs] = useState<SubscriptionItem[]>([]);
 
   // Load custom settings from LocalStorage
   useEffect(() => {
@@ -104,6 +98,16 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
     }
   }, []);
 
+  // Đồng bộ khi snapshot thay đổi nếu người dùng đang dùng chế độ Sổ sách
+  useEffect(() => {
+    if (!useCustomAmounts) {
+      setCustomIncome(snapIncome);
+      setCustomExpenses(snapExpenses);
+      setCustomCash(snapCash);
+      setCustomInvested(snapInvested);
+    }
+  }, [snapIncome, snapExpenses, snapCash, snapInvested, useCustomAmounts]);
+
   const handleSaveToLocalStorage = () => {
     try {
       const payload = {
@@ -125,11 +129,26 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
     }
   };
 
+  const handleResetAllCustomToZero = () => {
+    setCustomIncome(0);
+    setCustomExpenses(0);
+    setCustomCash(0);
+    setCustomInvested(0);
+    setCustomSubs([]);
+    setUseCustomAmounts(true);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const handleResetToSnapshot = () => {
     setCustomIncome(snapIncome);
     setCustomExpenses(snapExpenses);
     setCustomCash(snapCash);
     setCustomInvested(snapInvested);
+    setCustomSubs([]);
     setUseCustomAmounts(false);
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -295,6 +314,16 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetAllCustomToZero}
+                  className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-950/60 px-3 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-900/60 shadow-md transition-all cursor-pointer"
+                  title="Đặt lại toàn bộ số tiền và danh sách về 0"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Đưa về 0</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleSaveToLocalStorage}

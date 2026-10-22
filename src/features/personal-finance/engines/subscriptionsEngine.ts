@@ -87,7 +87,7 @@ export function analyzeSubscriptionsAndRunway(
   }
 
   // Danh mục thuê bao hợp nhất
-  const subs = customSubs && customSubs.length > 0 ? customSubs : detectedSubs;
+  const subs = customSubs !== undefined ? customSubs : detectedSubs;
 
   const totalMonthlyCost = subs.reduce((sum, s) => sum + s.monthlyAmount, 0);
   const totalAnnualCost = totalMonthlyCost * 12;

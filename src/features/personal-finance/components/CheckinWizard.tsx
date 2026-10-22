@@ -86,18 +86,18 @@ export const CheckinWizard: React.FC<CheckinWizardProps> = ({
 
   // Bước 1: Thu nhập
   const [grossSalary, setGrossSalary] = useState<number>(
-    latestSnapshot ? latestSnapshot.income.grossSalary : 35000000
+    latestSnapshot ? latestSnapshot.income.grossSalary : 0
   );
   const [bonus, setBonus] = useState<number>(latestSnapshot ? latestSnapshot.income.bonus : 0);
   const [otherIncome, setOtherIncome] = useState<number>(
     latestSnapshot ? latestSnapshot.income.otherIncome : 0
   );
   const [insuranceSalaryBase, setInsuranceSalaryBase] = useState<number>(
-    latestSnapshot ? latestSnapshot.income.insuranceSalaryBase : 35000000
+    latestSnapshot ? latestSnapshot.income.insuranceSalaryBase : 0
   );
   const [dependentsCount, setDependentsCount] = useState<number>(profile.dependentsCount);
 
-  // Bước 2: Chi tiêu
+  // Bước 2: Chi tiêu - Mặc định về 0 đ
   const [expenses, setExpenses] = useState<ExpenseItem[]>(
     latestSnapshot && latestSnapshot.expenses.length > 0
       ? latestSnapshot.expenses
@@ -105,39 +105,30 @@ export const CheckinWizard: React.FC<CheckinWizardProps> = ({
           id: `exp-${c.key}`,
           category: c.key,
           name: c.label.split('.')[1].trim(),
-          amount: c.key === 'housing' ? 8000000 : c.key === 'food' ? 6000000 : 1000000,
+          amount: 0,
           isFixed: c.defaultFixed,
         }))
   );
 
-  // Bước 3: Tài sản
+  // Bước 3: Tài sản - Bắt đầu sạch để người dùng tự thêm
   const [assets, setAssets] = useState<AssetItem[]>(
     latestSnapshot && latestSnapshot.assets.length > 0
       ? latestSnapshot.assets
-      : [
-          { id: 'ast-1', category: 'cash', name: 'Tài khoản thanh toán Techcombank', balance: 30000000, updatedAt: '05/10/2026' },
-          { id: 'ast-2', category: 'savings', name: 'Sổ tiết kiệm VCB 6 tháng', balance: 80000000, updatedAt: '05/10/2026', interestRate: 4.8 },
-          { id: 'ast-3', category: 'gold', name: '1 cây vàng nhẫn SJC 999.9', balance: 85000000, updatedAt: '05/10/2026' },
-        ]
+      : []
   );
 
-  // Bước 4: Nợ
+  // Bước 4: Nợ - Bắt đầu sạch để người dùng tự thêm
   const [debts, setDebts] = useState<DebtItem[]>(
     latestSnapshot && latestSnapshot.debts.length > 0
       ? latestSnapshot.debts
-      : [
-          { id: 'd-1', category: 'credit_card', name: 'Thẻ tín dụng VIB', balance: 5000000, interestRate: 24, minMonthlyPayment: 2000000, remainingMonths: 3 },
-        ]
+      : []
   );
 
-  // Bước 5: Mục tiêu
+  // Bước 5: Mục tiêu - Bắt đầu sạch để người dùng tự thêm
   const [goals, setGoals] = useState<FinancialGoal[]>(
     latestSnapshot && latestSnapshot.goals.length > 0
       ? latestSnapshot.goals
-      : [
-          { id: 'g-1', name: 'Quỹ khẩn cấp 6 tháng', targetAmount: 100000000, accumulatedAmount: 80000000, deadline: '2027-06', priority: 'high', status: 'on_track' },
-          { id: 'g-2', name: 'Tích lũy mua nhà', targetAmount: 800000000, accumulatedAmount: 150000000, deadline: '2029-12', priority: 'high', status: 'lagging' },
-        ]
+      : []
   );
 
   // Live tax calculation

@@ -308,6 +308,22 @@ export function generateDemoSnapshots(): MonthlySnapshot[] {
 // STORE FUNCTIONS
 // ==========================================
 
+export function createZeroSnapshot(period = '2026-10'): MonthlySnapshot {
+  return createSnapshotFromEntries({
+    period,
+    profile: INITIAL_EMPTY_PROFILE,
+    grossSalary: 0,
+    bonus: 0,
+    otherIncome: 0,
+    insuranceSalaryBase: 0,
+    expenses: [],
+    assets: [],
+    debts: [],
+    goals: [],
+    isDemo: false,
+  });
+}
+
 export function loadProfileFromStorage(): FinanceProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PROFILE);
@@ -317,7 +333,7 @@ export function loadProfileFromStorage(): FinanceProfile {
   } catch {
     // fallback
   }
-  return DEMO_PROFILE; // Default to realistic demo on first launch, easily clearable
+  return INITIAL_EMPTY_PROFILE; // Khởi tạo với hồ sơ trắng của người dùng
 }
 
 export function saveProfileToStorage(profile: FinanceProfile): void {
@@ -334,13 +350,17 @@ export function loadSnapshotsFromStorage(): MonthlySnapshot[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Nếu toàn bộ là dữ liệu mẫu demo thì tự động chuyển sang số liệu 0 sạch
+        const hasUserCustomData = parsed.some((s: MonthlySnapshot) => s.isDemo === false);
+        if (hasUserCustomData) {
+          return parsed;
+        }
       }
     }
   } catch {
     // fallback
   }
-  return generateDemoSnapshots();
+  return [createZeroSnapshot()];
 }
 
 export function saveSnapshotsToStorage(snapshots: MonthlySnapshot[]): void {
@@ -349,6 +369,18 @@ export function saveSnapshotsToStorage(snapshots: MonthlySnapshot[]): void {
   } catch {
     // ignore
   }
+}
+
+export function resetAllToZero(period = '2026-10'): MonthlySnapshot[] {
+  const zeroSnap = createZeroSnapshot(period);
+  saveSnapshotsToStorage([zeroSnap]);
+  saveProfileToStorage(INITIAL_EMPTY_PROFILE);
+  try {
+    localStorage.removeItem('orca_global_finance_custom_config_v1');
+  } catch {
+    // ignore
+  }
+  return [zeroSnap];
 }
 
 export function loadAssumptionsFromStorage(): AssumptionSet {
@@ -378,6 +410,7 @@ export function wipeAllUserData(): void {
   localStorage.removeItem(STORAGE_KEY_PROFILE);
   localStorage.removeItem(STORAGE_KEY_SNAPSHOTS);
   localStorage.removeItem(STORAGE_KEY_ASSUMPTIONS);
+  localStorage.removeItem('orca_global_finance_custom_config_v1');
 }
 
 /**
