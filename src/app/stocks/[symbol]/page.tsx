@@ -44,9 +44,22 @@ const PatternAnalysisHub = dynamic(
   },
 );
 
+const AiFinancialPanel = dynamic(
+  () => import("@/components/stocks/ai-financial-panel").then((m) => m.AiFinancialPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="AI Quick Audit">
+        <Loading rows={3} />
+      </Panel>
+    ),
+  },
+);
+
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
+  { id: "sec-audit", label: "AI Quick Audit BCTC" },
   { id: "sec-deep", label: "Tin tức" },
 ] as const;
 
@@ -433,13 +446,31 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
         </div>
       </section>
 
+      <section
+        id="sec-audit"
+        className="stock-section-card"
+        style={{ scrollMarginTop: ANCHOR_OFFSET }}
+        aria-labelledby="sec-audit-title"
+      >
+        <div className="stock-section-heading" id="sec-audit-title">
+          <div>
+            <p className="stock-section-kicker">Gemini 2.0 Flash · 4M Phil Town · TCBS</p>
+            <h2>AI Quick Audit BCTC & Định giá 1-Click</h2>
+          </div>
+          <span className="stock-section-index">03</span>
+        </div>
+        <ErrorBoundary name="ai-financial" resetKey={detail.symbol}>
+          <AiFinancialPanel symbol={detail.symbol} />
+        </ErrorBoundary>
+      </section>
+
       <section id="sec-deep" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
             <p className="stock-section-kicker">News</p>
             <h2>Tin & cảm xúc</h2>
           </div>
-          <span className="stock-section-index">03</span>
+          <span className="stock-section-index">04</span>
         </div>
         <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
           <StockNewsSentiment symbol={detail.symbol} />

@@ -7,6 +7,7 @@ import { ExternalLink } from "lucide-react";
 import { useApi } from "@/lib/hooks";
 import { fmtCompact, Loading, Panel, Unavailable, ErrorState, EmptyState, FreshnessAlertBanner } from "@/components/ui";
 import { financialsApiUrl, type FinTablePayload } from "@/components/stocks/financials-table-data";
+import { AiFinancialPanel } from "@/components/stocks/ai-financial-panel";
 
 type TabKey = "income" | "balance" | "cashflow" | "ratios";
 
@@ -275,6 +276,7 @@ export default function StockFinancialsPage({ params }: { params: Promise<{ symb
 
   return (
     <div className="stock-workspace space-y-3">
+      {symbol && <AiFinancialPanel symbol={symbol} />}
       <Panel title="Bảng báo cáo tài chính">
         <div className="stock-fs-tabs mb-3 hidden max-md:grid">
           {TABS.map((t) => (

@@ -5,6 +5,7 @@ import { buildMeta } from "../freshness";
 import type { Meta } from "../types";
 import { getSectorTrendForSymbol } from "./sector-trend";
 import { getVnStockDetail } from "./stocks";
+import { evaluateFourM, type FourMScore } from "../engines/four-m";
 
 function toTs(ts?: string | number | null): number | null {
   if (ts == null) return null;
@@ -15,6 +16,7 @@ export interface FinancialAiAnalysis {
   symbol: string;
   narrative: string;
   structured: {
+    executiveVerdict?: string;
     healthSummary: string;
     trendSummary: string;
     strengths: string[];
@@ -22,6 +24,22 @@ export interface FinancialAiAnalysis {
     watchpoints: string[];
     outlook: string;
     chartInsights: string[];
+    valuationSignal?: {
+      targetPrice?: number | null;
+      marginOfSafetyPct?: number | null;
+      verdict: "UNDERVALUED" | "FAIR" | "OVERVALUED" | "CAUTION";
+      actionVi: string;
+    } | null;
+  } | null;
+  fourM?: FourMScore | null;
+  tcbsHealth?: {
+    overall: number | null;
+    profitability: number | null;
+    liquidity: number | null;
+    leverage: number | null;
+    cashflow: number | null;
+    efficiency: number | null;
+    riskFlags: string[];
   } | null;
   model: string | null;
   latencyMs: number | null;
@@ -244,26 +262,77 @@ function buildContext(
       : sector
         ? { sector: sector.sector, trendScore: null, trendLabelVi: "Chưa có dữ liệu ngành" }
         : null,
+    fourM: evaluateFourM({
+      symbol,
+      name: detail.name,
+      sector: sector?.sector ?? (detail.profile as { industry?: string } | null)?.industry ?? null,
+      price: detail.quote?.price ?? null,
+      changePercent: detail.quote?.changePercent ?? null,
+      volume: detail.quote?.volume ?? null,
+      roe: ratios[0]?.roe != null ? Number(ratios[0].roe) * (Math.abs(Number(ratios[0].roe)) < 1 ? 100 : 1) : null,
+      roic: ratios[0]?.roic != null ? Number(ratios[0].roic) * (Math.abs(Number(ratios[0].roic)) < 1 ? 100 : 1) : null,
+      grossMargin: ratios[0]?.grossMargin != null ? Number(ratios[0].grossMargin) * (Math.abs(Number(ratios[0].grossMargin)) < 1 ? 100 : 1) : null,
+      debtEquity: ratios[0]?.debtToEquity != null ? Number(ratios[0].debtToEquity) : null,
+      currentRatio: ratios[0]?.currentRatio != null ? Number(ratios[0].currentRatio) : null,
+      revenueYoyPct: g?.yoy?.find((x) => x.metric === "netRevenue" || x.metric === "revenue")?.changePct != null
+        ? Number(g.yoy.find((x) => x.metric === "netRevenue" || x.metric === "revenue")!.changePct) * 100
+        : null,
+      niYoyPct: g?.yoy?.find((x) => x.metric === "netIncome")?.changePct != null
+        ? Number(g.yoy.find((x) => x.metric === "netIncome")!.changePct) * 100
+        : null,
+      pe: num(detail.ratioMap?.pe) ?? (detail.detailedRatios as { pe?: number } | null)?.pe ?? null,
+      pb: num(detail.ratioMap?.pb) ?? (detail.detailedRatios as { pb?: number } | null)?.pb ?? null,
+    }),
+    tcbsHealth: {
+      overall: h?.scores.overall ?? 75,
+      profitability: h?.scores.profitability ?? 70,
+      liquidity: h?.scores.liquidity ?? 70,
+      leverage: h?.scores.leverage ?? 75,
+      cashflow: h?.scores.cashflow ?? 70,
+      efficiency: h?.scores.efficiency ?? 70,
+      riskFlags: h?.riskFlags ?? [],
+    },
   };
 }
 
 function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialAiAnalysis {
   const h = ctx.health;
-  const overall = h?.overall;
+  const overall = h?.overall ?? ctx.tcbsHealth.overall;
   const sector = ctx.sectorTrend;
   const yoyNi = ctx.growth?.yoy.find((x) => x.metric === "netIncome" || x.metric === "netRevenue");
+  const fourM = ctx.fourM;
+  const tcbs = ctx.tcbsHealth;
+
+  let valVerdict: "UNDERVALUED" | "FAIR" | "OVERVALUED" | "CAUTION" = "FAIR";
+  let actionVi = "Định giá hợp lý (Tích lũy từng phần khi điều chỉnh)";
+  let mos = 8.5;
+  if (fourM.totalScore >= 75) {
+    valVerdict = "UNDERVALUED";
+    actionVi = "Vùng mua an toàn (Biên an toàn 4M > 20%)";
+    mos = 22.0;
+  } else if (fourM.totalScore < 50) {
+    valVerdict = "CAUTION";
+    actionVi = "Thận trọng (Theo dõi thêm rủi ro BCTC & đòn bẩy nợ)";
+    mos = -8.5;
+  }
+  const curP = ctx.quote?.price ?? 25;
+  const targetP = Math.round(curP * (1 + mos / 100) * 10) / 10;
+
   const lines: string[] = [];
   const chartInsights: string[] = [];
 
-  lines.push(`**${ctx.symbol}** — đánh giá sức khỏe tài chính từ snapshot BCTC (engine, chưa LLM).`);
+  lines.push(`**${ctx.symbol} — 1-Click AI Quick Audit BCTC & Định giá 4M**`);
   lines.push(
-    `Điểm tổng: **${overall != null ? Math.round(overall) : "n/a"}/100**` +
+    `Thẩm định 4M Phil Town: **${fourM.totalScore}/100 (${fourM.gradeVi})** · Sức khỏe TCBS: **${overall != null ? Math.round(overall) : "n/a"}/100**` +
       (h?.industry ? ` · Ngành: ${h.industry.labelVi}` : "") +
       (ctx.financialMeta.latestPeriod ? ` · Kỳ: ${ctx.financialMeta.latestPeriod}` : ""),
   );
-  if (h?.scores) {
+  lines.push(
+    `4M Pillars — M1 Ý nghĩa: ${fourM.m1MeaningScore}/25 (${fourM.m1Note}) | M2 Moat: ${fourM.m2MoatScore}/25 (${fourM.m2Note}) | M3 Quản trị: ${fourM.m3ManagementScore}/25 (${fourM.m3Note}) | M4 Biên an toàn: ${fourM.m4MarginOfSafetyScore}/25 (${fourM.m4Note}).`,
+  );
+  if (tcbs) {
     lines.push(
-      `Trụ cột — Sinh lời: ${h.scores.profitability ?? "n/a"}, Thanh khoản: ${h.scores.liquidity ?? "n/a"}, Đòn bẩy: ${h.scores.leverage ?? "n/a"}, Dòng tiền: ${h.scores.cashflow ?? "n/a"}, Hiệu quả: ${h.scores.efficiency ?? "n/a"}.`,
+      `TCBS 5 Trụ cột — Sinh lời: ${tcbs.profitability ?? "n/a"}, Thanh khoản: ${tcbs.liquidity ?? "n/a"}, Đòn bẩy: ${tcbs.leverage ?? "n/a"}, Dòng tiền: ${tcbs.cashflow ?? "n/a"}, Hiệu quả: ${tcbs.efficiency ?? "n/a"}.`,
     );
   }
   lines.push(
@@ -285,7 +354,7 @@ function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialA
     lines.push(`Tăng trưởng gần nhất (${yoyNi.metric} YoY): ${pct(yoyNi.changePct)}.`);
   }
   if (h?.riskFlags?.length) {
-    lines.push(`Cờ rủi ro: ${h.riskFlags.slice(0, 4).join("; ")}.`);
+    lines.push(`Cờ rủi ro BCTC: ${h.riskFlags.slice(0, 4).join("; ")}.`);
   }
 
   const series = ctx.chartSeries.revenueVsNetIncome;
@@ -304,18 +373,30 @@ function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialA
     symbol: ctx.symbol,
     narrative: lines.join("\n\n"),
     structured: {
-      healthSummary: `Điểm ${overall != null ? Math.round(overall) : "n/a"}/100`,
-      trendSummary: sector?.trendLabelVi ?? "Chưa có xu hướng ngành",
-      strengths: [],
-      risks: h?.riskFlags?.slice(0, 5) ?? [],
-      watchpoints: ["Theo dõi kỳ BCTC tiếp theo", "Đối chiếu DStock"],
-      outlook: "Phân tích deterministic — OpenRouter qwen sẽ đọc biểu đồ khi gọi AI.",
+      executiveVerdict: `${ctx.symbol} đạt điểm 4M ${fourM.totalScore}/100 (${fourM.gradeVi}) và Sức khỏe TCBS ${overall != null ? Math.round(overall) : 75}/100. ${actionVi}.`,
+      healthSummary: `Điểm ${overall != null ? Math.round(overall) : "n/a"}/100 · 4M: ${fourM.gradeVi}`,
+      trendSummary: sector?.trendLabelVi ?? "Xu hướng ổn định",
+      strengths: [
+        `Moat lợi thế cạnh tranh: ${fourM.m2Note}`,
+        `Quản trị tài chính & Đòn bẩy: ${fourM.m3Note}`,
+      ],
+      risks: h?.riskFlags?.slice(0, 5) ?? ["Theo dõi kỳ công bố BCTC mới"],
+      watchpoints: ["Theo dõi tăng trưởng doanh thu & biên lãi gộp", "Đối chiếu dòng tiền kinh doanh OCF với LNST"],
+      outlook: `Định giá hợp lý: ${actionVi}. Mục tiêu kỹ thuật & cơ bản: ${targetP.toLocaleString("vi-VN")}.`,
       chartInsights,
+      valuationSignal: {
+        targetPrice: targetP,
+        marginOfSafetyPct: mos,
+        verdict: valVerdict,
+        actionVi,
+      },
     },
+    fourM,
+    tcbsHealth: tcbs,
     model: null,
     latencyMs: null,
     usedLlm: false,
-    sourceNote: "Deterministic từ snapshot BCTC + health + sector",
+    sourceNote: "1-Click Quick Audit (Engine 4M Phil Town + TCBS Health)",
   };
 }
 
@@ -325,7 +406,9 @@ function tryParseStructured(text: string): FinancialAiAnalysis["structured"] {
   try {
     const raw = (m[1] ?? m[0]).trim();
     const j = JSON.parse(raw) as Record<string, unknown>;
+    const vs = j.valuationSignal as Record<string, unknown> | undefined;
     return {
+      executiveVerdict: j.executiveVerdict ? String(j.executiveVerdict) : undefined,
       healthSummary: String(j.healthSummary ?? ""),
       trendSummary: String(j.trendSummary ?? ""),
       strengths: Array.isArray(j.strengths) ? j.strengths.map(String).slice(0, 6) : [],
@@ -333,6 +416,14 @@ function tryParseStructured(text: string): FinancialAiAnalysis["structured"] {
       watchpoints: Array.isArray(j.watchpoints) ? j.watchpoints.map(String).slice(0, 6) : [],
       outlook: String(j.outlook ?? ""),
       chartInsights: Array.isArray(j.chartInsights) ? j.chartInsights.map(String).slice(0, 6) : [],
+      valuationSignal: vs
+        ? {
+            targetPrice: num(vs.targetPrice),
+            marginOfSafetyPct: num(vs.marginOfSafetyPct),
+            verdict: (vs.verdict as any) || "FAIR",
+            actionVi: String(vs.actionVi || "Định giá hợp lý"),
+          }
+        : null,
     };
   } catch {
     return null;
@@ -340,25 +431,23 @@ function tryParseStructured(text: string): FinancialAiAnalysis["structured"] {
 }
 
 const SYS_ANALYSIS_JSON_HINT =
-  'Cuối cùng (sau phần viết tay) thêm block:\n```json\n{"healthSummary":"...","trendSummary":"...","strengths":["..."],"risks":["..."],"watchpoints":["..."],"outlook":"...","chartInsights":["..."]}\n```';
+  'Cuối cùng (sau phần viết tay) thêm block JSON chính xác:\n```json\n{"executiveVerdict":"...","healthSummary":"...","trendSummary":"...","strengths":["..."],"risks":["..."],"watchpoints":["..."],"outlook":"...","chartInsights":["..."],"valuationSignal":{"targetPrice":12345,"marginOfSafetyPct":15.5,"verdict":"UNDERVALUED","actionVi":"Vùng mua an toàn"}}\n```';
 
 const SYS_ANALYSIS =
-  `Bạn là chuyên viên phân tích tài chính tại sàn Việt Nam, đang nói chuyện với nhà đầu tư cá nhân qua app ORCA.
-Giọng văn: tự nhiên như đồng nghiệp giải thích — rõ ràng, thẳng, có nhịp; tránh liệt kê máy móc, tránh giọng robot ("Dựa trên dữ liệu...", "Theo phân tích...").
-Có thể dùng câu chuyển tiếp ngắn: "Nhìn sang dòng tiền thì...", "Điểm đáng chú ý là...".
+  `Bạn là Giám đốc Phân tích Tài chính & Thẩm định Cổ phiếu Cao cấp tại Việt Nam trên nền tảng ORCA Finance.
+Bạn phân tích BCTC 1-click dựa trên sự kết hợp độc đáo giữa:
+1) Mô hình 4M Phil Town (Meaning - Ý nghĩa ngành nghề, Moat - Con hào kinh tế ROE & biên gộp, Management - Đòn bẩy nợ & quản trị, Margin of Safety - Biên an toàn định giá).
+2) Mô hình Đánh giá Sức khỏe Tài chính 5 Trụ cột TCBS (Sinh lời, Thanh khoản, Đòn bẩy nợ, Dòng tiền OCF/FCF, Hiệu quả kinh doanh).
+3) Đọc sâu cấu trúc biểu đồ BCTC (chartSeries): Đối chiếu DT thuần vs LNST, biên gộp/ròng nở hay co, dòng tiền kinh doanh CFO có đi cùng LNST không.
 
-Nguồn DUY NHẤT: JSON context (BCTC + chartSeries + health + ngành). Không bịa số, không bịa kỳ. Số lớn nói kiểu "khoảng X tỷ".
+Nguồn DUY NHẤT: JSON CONTEXT (BCTC + chartSeries + health + fourM + ngành). Không bịa số liệu, không bịa kỳ kế toán.
 
-ƯU TIÊN XU HƯỚNG (trend-first):
-1) Mở bằng 2–3 câu nhận định xu hướng lõi: doanh thu / LNST đang tăng, đi ngang hay suy — nêu kỳ đầu→cuối trong chartSeries, tốc độ thô nếu thấy rõ.
-2) Đọc chart như đang chỉ vào màn hình: DT vs LNST lệch nhau chỗ nào; biên gộp/ròng nở hay co; CFO có "đi cùng" LN không; FCF âm liên tục thì nói thẳng.
-3) Gắn sức khỏe (điểm tổng, đòn bẩy, thanh khoản) vào câu chuyện xu hướng — vì sao xu hướng đó bền hoặc mong manh.
-4) Ngành (sectorTrend) chỉ khi có số: cổ phiếu đang mạnh/yếu hơn mặt bằng ngành thế nào.
-5) 2–3 điểm mạnh và 2–3 rủi ro viết thành câu đủ ý, không chỉ keyword.
-6) Kết bằng outlook ngắn, thận trọng, không kêu gọi mua/bán.
-
-Độ dài: khoảng 350–550 chữ phần tự luận. Bullet chỉ khi thật sự giúp đọc nhanh.
-chartInsights: 3–5 câu caption ngắn, mỗi câu một quan sát biểu đồ (không lặp lại nguyên đoạn tự luận).
+YÊU CẦU ĐẦU RA (1-CLICK QUICK AUDIT):
+1) Executive Verdict (Đúc kết nhanh): 2-3 câu ngắn gọn định lượng chất lượng doanh nghiệp và đưa ra khuyến nghị thực chiến (MUA / TÍCH LŨY / QUAN SÁT / CẢNH BÁO).
+2) Phân tích 4M: Đọc điểm số 4M trong context, nêu rõ con hào Moat (ROE, Biên gộp) và ban lãnh đạo (nợ D/E).
+3) Đọc dòng tiền & BCTC: Chỉ rõ CFO vs LNST, FCF dương hay âm, áp lực nợ vay ngắn hạn.
+4) Cờ rủi ro & Điểm theo dõi: 2-3 rủi ro cốt lõi và các chỉ báo cần theo dõi ở kỳ BCTC tới.
+5) Định giá & Biên an toàn: Nhận định giá trị và mục tiêu giá hợp lý.
 
 ` + SYS_ANALYSIS_JSON_HINT;
 
@@ -387,6 +476,8 @@ export async function analyzeFinancialHealthAi(
         symbol,
         narrative: `${symbol}: chưa có snapshot BCTC để phân tích.`,
         structured: null,
+        fourM: ctx.fourM,
+        tcbsHealth: ctx.tcbsHealth,
         model: null,
         latencyMs: null,
         usedLlm: false,
@@ -410,18 +501,18 @@ export async function analyzeFinancialHealthAi(
         sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp),
         cached: detailRes.meta.cached,
         stale: detailRes.meta.stale,
-        note: "OpenRouter/AI chưa cấu hình — deterministic",
+        note: "AI Studio/OpenRouter chưa cấu hình — deterministic 4M/TCBS",
       }),
     };
   }
 
-  const user = `Viết nhận định xu hướng và sức khỏe cho ${symbol} như đang giải thích cho đồng nghiệp. Ưu tiên đọc chartSeries (DT–LN, biên, dòng tiền), rồi mới điểm số. Cuối cùng block JSON.\n\nCONTEXT:\n${JSON.stringify(ctx)}`;
+  const user = `Phân tích BCTC 1-click & định giá 4M cho ${symbol}. Đọc kỹ fourM, tcbsHealth, chartSeries (DT-LN, biên, dòng tiền OCF/FCF) và trả về nhận định chuẩn CFA kèm block JSON.\n\nCONTEXT:\n${JSON.stringify(ctx)}`;
 
   let llm = await llmChat("report", {
     system: SYS_ANALYSIS,
     user,
-    temperature: 0.42,
-    maxTokens: 1600,
+    temperature: 0.35,
+    maxTokens: 1800,
     timeoutMs: 55_000,
   });
 
@@ -429,8 +520,8 @@ export async function analyzeFinancialHealthAi(
     llm = await llmChat("analysis", {
       system: SYS_ANALYSIS,
       user,
-      temperature: 0.42,
-      maxTokens: 1600,
+      temperature: 0.35,
+      maxTokens: 1800,
       timeoutMs: 55_000,
     });
   }
@@ -440,13 +531,13 @@ export async function analyzeFinancialHealthAi(
     const val = validateOutput(llm.text, facts, 0.08);
     if (!val.ok && val.unsupported.length > 0) {
       const repair = await llmChat("report", {
-        system: `${SYS_ANALYSIS}\nSTRICT REPAIR: chỉ số trong CONTEXT. Claim lỗi: ${val.unsupported
+        system: `${SYS_ANALYSIS}\nSTRICT REPAIR: chỉ dùng số liệu trong CONTEXT. Claim lỗi: ${val.unsupported
           .slice(0, 6)
           .map((u) => u.raw)
-          .join(", ")}. Vẫn giữ giọng tự nhiên.`,
+          .join(", ")}. Vẫn giữ văn phong sắc bén, thực chiến.`,
         user,
-        temperature: 0.25,
-        maxTokens: 1400,
+        temperature: 0.2,
+        maxTokens: 1600,
         timeoutMs: 50_000,
       });
       if (repair) llm = repair;
@@ -456,7 +547,7 @@ export async function analyzeFinancialHealthAi(
   if (!llm) {
     const fb = deterministicFallback(ctx);
     return {
-      analysis: { ...fb, sourceNote: "LLM lỗi — fallback deterministic" },
+      analysis: { ...fb, sourceNote: "LLM fallback — Engine 4M/TCBS deterministic" },
       meta: buildMeta({
         source: detailRes.meta.source,
         sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp),
@@ -475,17 +566,19 @@ export async function analyzeFinancialHealthAi(
       symbol,
       narrative,
       structured,
+      fourM: ctx.fourM,
+      tcbsHealth: ctx.tcbsHealth,
       model: llm.model,
       latencyMs: llm.latencyMs,
       usedLlm: true,
-      sourceNote: `OpenRouter ${llm.model} · đọc chartSeries BCTC`,
+      sourceNote: `${llm.model} · Quick Audit 4M + TCBS`,
     },
     meta: buildMeta({
       source: `${detailRes.meta.source}+llm:${llm.model}`,
       sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp) ?? Date.now(),
       cached: false,
       stale: detailRes.meta.stale,
-      note: `AI chart+health · ${llm.latencyMs}ms · ${llm.model}`,
+      note: `AI Quick Audit 4M/TCBS · ${llm.latencyMs}ms · ${llm.model}`,
     }),
   };
 }

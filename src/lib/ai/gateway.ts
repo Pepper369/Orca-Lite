@@ -78,12 +78,20 @@ export function modelFor(role: LlmRole): string {
 }
 
 export function modelsFor(role: LlmRole): string[] {
-  if (env.geminiApiKey && !env.openrouterApiKey) {
-    return ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+  if (env.geminiApiKey) {
+    return dedupeModels([
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      firstDefined(env.aiModelReport, env.aiModelAnalysis),
+      "google/gemini-2.0-flash-001",
+      env.openrouterModel,
+      "gemini-1.5-pro",
+    ]);
   }
   if (role === "reasoning") {
     return dedupeModels([
       firstDefined(env.aiModelReasoning, process.env.AI_MODEL_REASONING),
+      "google/gemini-2.0-flash-001",
       ...env.aiModelReasoningFallbacks,
       env.openrouterModel,
       env.aiModel,
@@ -93,6 +101,7 @@ export function modelsFor(role: LlmRole): string[] {
   }
   if (role === "report") {
     return dedupeModels([
+      "google/gemini-2.0-flash-001",
       firstDefined(env.aiModelReport, env.aiModelAnalysis, process.env.AI_MODEL_REPORT, process.env.AI_MODEL_ANALYSIS),
       ...env.aiModelReportFallbacks,
       ...env.aiModelAnalysisFallbacks,
@@ -105,6 +114,7 @@ export function modelsFor(role: LlmRole): string[] {
   }
   if (role === "analysis") {
     return dedupeModels([
+      "google/gemini-2.0-flash-001",
       firstDefined(env.aiModelAnalysis, env.aiModelReport, process.env.AI_MODEL_ANALYSIS, process.env.AI_MODEL_REPORT),
       ...env.aiModelAnalysisFallbacks,
       ...env.aiModelReportFallbacks,
@@ -116,6 +126,7 @@ export function modelsFor(role: LlmRole): string[] {
     ]);
   }
   return dedupeModels([
+    "google/gemini-2.0-flash-001",
     env.openrouterModel,
     env.aiModel,
     env.groqModel,
@@ -144,6 +155,13 @@ function resolveProvider(model: string, backend?: LlmBackend): {
       provider: "openrouter",
     };
   }
+  if (model.startsWith("gemini") && env.geminiApiKey) {
+    return {
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      apiKey: env.geminiApiKey,
+      provider: "openai-compatible",
+    };
+  }
   if (env.aiBaseUrl?.trim()) {
     const base = env.aiBaseUrl.replace(/\/$/, "");
     const isOr = base.includes("openrouter");
@@ -161,6 +179,13 @@ function resolveProvider(model: string, backend?: LlmBackend): {
       provider: "openrouter",
     };
   }
+  if (env.geminiApiKey) {
+    return {
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      apiKey: env.geminiApiKey,
+      provider: "openai-compatible",
+    };
+  }
   if (env.groqApiKey) {
     return {
       baseUrl: (env.groqBaseUrl ?? "https://api.groq.com/openai/v1").replace(/\/$/, ""),
@@ -172,7 +197,7 @@ function resolveProvider(model: string, backend?: LlmBackend): {
 }
 
 export function llmConfigured(): boolean {
-  return Boolean(env.openrouterApiKey || env.aiApiKey || env.groqApiKey);
+  return Boolean(env.geminiApiKey || env.openrouterApiKey || env.aiApiKey || env.groqApiKey);
 }
 
 export function llmRegistryInfo() {
