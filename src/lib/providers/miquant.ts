@@ -192,6 +192,12 @@ export interface MiQuantValuationDetail {
   valuation_rating: string;
 }
 
+export interface MiQuantStockMoneyFlowHistory {
+  timestamp: number[];
+  total_net_money_flow: number[];
+  cumulative_net_money_flow: number[];
+}
+
 export interface MiQuantFinancialCommentary {
   commentary: string;
   ticker: string;
@@ -353,6 +359,22 @@ export const MiQuantProvider = {
     const res = await fetchWithCache<{ data?: MiQuantValuationDetail }>(
       `${MIQUANT_BASE_URL}/api/v1/stock/valuation?symbol=${encodeURIComponent(symbol.toUpperCase())}`,
       300
+    );
+    return res?.data ?? null;
+  },
+
+  /** Historical active and cumulative money flow for a stock */
+  async getStockMoneyFlow(
+    symbol: string,
+    days = 60
+  ): Promise<MiQuantStockMoneyFlowHistory | null> {
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - days * 86400 * 1000).toISOString();
+    const res = await fetchWithCache<{ data?: MiQuantStockMoneyFlowHistory }>(
+      `${MIQUANT_BASE_URL}/api/v1/stock/money-flow?symbol=${encodeURIComponent(
+        symbol.toUpperCase()
+      )}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      120
     );
     return res?.data ?? null;
   },

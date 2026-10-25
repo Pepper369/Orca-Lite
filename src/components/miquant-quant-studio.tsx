@@ -49,6 +49,7 @@ import type {
   MiQuantRiskResponse,
   MiQuantFinancialCommentary,
 } from "@/lib/providers/miquant";
+import { StockQuantFlowValuationWidget } from "@/components/stocks/quant-flow-valuation-widget";
 
 type ActiveTab = "bots" | "ranking" | "signals";
 
@@ -830,6 +831,9 @@ export function MiQuantStudio() {
                 ✕
               </button>
             </div>
+
+            {/* Live Quantitative Flow & Valuation Chart */}
+            <StockQuantFlowValuationWidget symbol={inspectSymbol} />
 
             {loadingStockInfo ? (
               <Loading rows={4} />

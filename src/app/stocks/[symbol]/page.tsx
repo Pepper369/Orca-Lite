@@ -56,9 +56,25 @@ const AiFinancialPanel = dynamic(
   },
 );
 
+const StockQuantFlowValuationWidget = dynamic(
+  () =>
+    import("@/components/stocks/quant-flow-valuation-widget").then(
+      (m) => m.StockQuantFlowValuationWidget
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Định lượng & Dòng tiền AI">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
+  { id: "sec-quant", label: "Định lượng & Dòng tiền AI" },
   { id: "sec-audit", label: "AI Quick Audit BCTC" },
   { id: "sec-deep", label: "Tin tức" },
 ] as const;
@@ -447,6 +463,24 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       </section>
 
       <section
+        id="sec-quant"
+        className="stock-section-card"
+        style={{ scrollMarginTop: ANCHOR_OFFSET }}
+        aria-labelledby="sec-quant-title"
+      >
+        <div className="stock-section-heading" id="sec-quant-title">
+          <div>
+            <p className="stock-section-kicker">MiQuant Quantitative · Net Flow · Fair Value</p>
+            <h2>Dải định giá AI & Dòng tiền tích lũy lũy kế</h2>
+          </div>
+          <span className="stock-section-index">03</span>
+        </div>
+        <ErrorBoundary name="quant-flow" resetKey={detail.symbol}>
+          <StockQuantFlowValuationWidget symbol={detail.symbol} />
+        </ErrorBoundary>
+      </section>
+
+      <section
         id="sec-audit"
         className="stock-section-card"
         style={{ scrollMarginTop: ANCHOR_OFFSET }}
@@ -457,7 +491,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
             <p className="stock-section-kicker">Gemini 2.0 Flash · 4M Phil Town · TCBS</p>
             <h2>AI Quick Audit BCTC & Định giá 1-Click</h2>
           </div>
-          <span className="stock-section-index">03</span>
+          <span className="stock-section-index">04</span>
         </div>
         <ErrorBoundary name="ai-financial" resetKey={detail.symbol}>
           <AiFinancialPanel symbol={detail.symbol} />
@@ -470,7 +504,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
             <p className="stock-section-kicker">News</p>
             <h2>Tin & cảm xúc</h2>
           </div>
-          <span className="stock-section-index">04</span>
+          <span className="stock-section-index">05</span>
         </div>
         <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
           <StockNewsSentiment symbol={detail.symbol} />
