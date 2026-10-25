@@ -68,13 +68,20 @@ function getNextThirdThursday(): { days: number; dateStr: string } {
   return { days, dateStr: targetDate.toISOString().slice(0, 10) };
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export async function getDerivativesArbitrageSignal(symbol = "VN30F1M"): Promise<DerivativesArbitrageSignal> {
   const sym = symbol.toUpperCase();
 
-  // 1. Fetch live quotes concurrently
+  // 1. Fetch live quotes concurrently with strict timeouts
   const [contractPack, indicesPack] = await Promise.all([
-    getDerivativeContractDetail(sym).catch(() => null),
-    getVnIndices().catch(() => null),
+    withTimeout(getDerivativeContractDetail(sym), 2000, null).catch(() => null),
+    withTimeout(getVnIndices(), 2000, null).catch(() => null),
   ]);
 
   const contractQuote = contractPack?.data?.quote;

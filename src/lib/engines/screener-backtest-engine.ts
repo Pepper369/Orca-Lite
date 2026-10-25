@@ -138,7 +138,10 @@ function formatBarDate(t: number): string {
 }
 
 export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<ScreenerBacktestResult> {
-  const strategy = req.strategy || "breakout";
+  const validStrategies: StrategyType[] = ["breakout", "canslim", "ma_cross", "value"];
+  const strategy: StrategyType = validStrategies.includes(req.strategy as StrategyType)
+    ? (req.strategy as StrategyType)
+    : "breakout";
   const holdingDays = Math.max(5, Math.min(req.holdingDays || 20, 90));
   const stopLossPct = Math.max(2, Math.min(req.stopLossPct || 7, 20)); // %
   const takeProfitPct = Math.max(5, Math.min(req.takeProfitPct || 15, 50)); // %
@@ -377,7 +380,7 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
   const benchmarkReturnPct = Number((((benchmarkValue - initialCapital) / initialCapital) * 100).toFixed(2));
   const alphaPct = Number((totalReturnPct - benchmarkReturnPct).toFixed(2));
 
-  const meta = STRATEGY_METADATA[strategy];
+  const meta = STRATEGY_METADATA[strategy] || STRATEGY_METADATA.breakout;
 
   return {
     strategy,
