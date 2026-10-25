@@ -289,7 +289,43 @@ function detectPresets(item: {
  * Fetch and aggregate master stock screener snapshot.
  * Runs multi-source parallel race for quotes and 3-tier cascade for valuation.
  */
-export async function getMasterScreenerSnapshot(): Promise<{
+async function fetchValuationBatch(symbols: string[]): Promise<{
+  valMap: Map<string, VndValuationRatios>;
+  vietcapMap: Map<string, VietcapProfile>;
+  failoverCount: number;
+}> {
+  const valMap = new Map<string, VndValuationRatios>();
+  const vietcapMap = new Map<string, VietcapProfile>();
+  let failoverCount = 0;
+
+  await mapPool(symbols, 12, async (sym) => {
+    try {
+      // Tier 1: VNDirect ratios
+      const v = await getVndValuationRatios(sym);
+      if (v && (v.pe != null || v.pb != null)) {
+        valMap.set(sym, v);
+      } else {
+        // Tier 2: Vietcap IQ failover
+        const vc = await getVietcapCompany(sym).catch(() => null);
+        if (vc) {
+          vietcapMap.set(sym, vc);
+          failoverCount++;
+        }
+      }
+    } catch {
+      // Tier 2 catch fallback
+      const vc = await getVietcapCompany(sym).catch(() => null);
+      if (vc) {
+        vietcapMap.set(sym, vc);
+        failoverCount++;
+      }
+    }
+  });
+
+  return { valMap, vietcapMap, failoverCount };
+}
+
+type MasterSnapshotPayload = {
   items: ScreenerStockItem[];
   sourcesUsed: string[];
   redundancyInfo: {
@@ -299,22 +335,84 @@ export async function getMasterScreenerSnapshot(): Promise<{
     healthStatus: "OPTIMAL" | "HIGH_AVAILABILITY" | "DEGRADED";
   };
   meta: Meta;
-}> {
+};
+
+// L1 Fast In-Memory RAM Cache with background SWR
+let memoryMasterSnapshot: {
+  payload: MasterSnapshotPayload;
+  freshUntil: number;
+  staleUntil: number;
+} | null = null;
+let isRefreshingMaster = false;
+
+/**
+ * Fetch and aggregate master stock screener snapshot.
+ * Runs multi-source parallel race for quotes, fundamentals, valuation, and OHLCV concurrently.
+ */
+export async function getMasterScreenerSnapshot(): Promise<MasterSnapshotPayload> {
+  const now = Date.now();
+
+  // Fast-path 1: Serve instantly from L1 memory if fresh (< 60s)
+  if (memoryMasterSnapshot && now < memoryMasterSnapshot.freshUntil) {
+    return memoryMasterSnapshot.payload;
+  }
+
+  // Fast-path 2: Serve stale memory (< 15 mins) and trigger background refresh
+  if (memoryMasterSnapshot && now < memoryMasterSnapshot.staleUntil) {
+    if (!isRefreshingMaster) {
+      isRefreshingMaster = true;
+      void executeProducer()
+        .then((fresh) => {
+          memoryMasterSnapshot = {
+            payload: fresh,
+            freshUntil: Date.now() + 60_000,
+            staleUntil: Date.now() + 15 * 60_000,
+          };
+        })
+        .finally(() => {
+          isRefreshingMaster = false;
+        });
+    }
+    return memoryMasterSnapshot.payload;
+  }
+
+  return executeProducer();
+}
+
+async function executeProducer(): Promise<MasterSnapshotPayload> {
   const res = await cached("screener:master:snapshot:v2", {
     ttlMs: 2 * 60_000, // 2 minutes fresh cache
     staleMs: 30 * 60_000, // 30 minutes stale serve while refreshing
     producer: async () => {
       const symbols = getScreenerUniverse();
-      let failoverCount = 0;
 
-      // 1. Multi-source parallel race for realtime quotes (VPS + SSI + VNDirect + Vietcap)
-      const multiQuotesRes = await getMultiQuotes(symbols).catch(() => ({
-        quotes: [],
-        sources: ["vps-fallback"],
-        sourceTs: Date.now(),
-        latencies: {},
-        conflicts: 0,
-      }));
+      // PARALLEL QUAD-CORE PRODUCER: Run all 4 independent data sources simultaneously!
+      const [multiQuotesRes, fundResult, valResult, ohlcvMap] = await Promise.all([
+        // 1. Realtime multi-source quote race (VPS + SSI + VNDirect + Vietcap)
+        getMultiQuotes(symbols).catch(() => ({
+          quotes: [],
+          sources: ["vps-fallback"],
+          sourceTs: Date.now(),
+          latencies: {},
+          conflicts: 0,
+        })),
+        // 2. Fundamental balance sheet snapshots (10 concurrent workers)
+        getFundamentalSnapshots(symbols, { concurrency: 10 }).catch(() => ({ snapshots: [] })),
+        // 3. Valuation multiples (12 concurrent workers with 3-tier cascade)
+        fetchValuationBatch(symbols).catch(() => ({
+          valMap: new Map<string, VndValuationRatios>(),
+          vietcapMap: new Map<string, VietcapProfile>(),
+          failoverCount: 0,
+        })),
+        // 4. Batch OHLCV technical moving averages (6 concurrent workers)
+        batchVnOhlcv(symbols, {
+          bars: 65,
+          concurrency: 6,
+          perSymbolMs: 600,
+          deadlineMs: 3_000,
+          resilient: false,
+        }).catch(() => new Map()),
+      ]);
 
       const quotesMap = new Map<string, { price: number; change: number; changePercent: number; volume: number; name?: string }>();
       for (const q of multiQuotesRes.quotes ?? []) {
@@ -328,53 +426,13 @@ export async function getMasterScreenerSnapshot(): Promise<{
         });
       }
 
-      // 2. Fetch fundamentals in controlled concurrency
-      const fundResult = await getFundamentalSnapshots(symbols, { concurrency: 8 }).catch(() => ({ snapshots: [] }));
       const fundMap = new Map<string, FundamentalSnapshot>();
       for (const f of fundResult.snapshots ?? []) {
         fundMap.set(f.symbol.toUpperCase(), f);
       }
 
-      // 3. Multi-source valuation multiples: Primary VNDirect + Secondary Vietcap IQ + Tertiary Autonomous Computed
-      const valMap = new Map<string, VndValuationRatios>();
-      const vietcapMap = new Map<string, VietcapProfile>();
-
-      await mapPool(
-        symbols,
-        8,
-        async (sym) => {
-          try {
-            // Tier 1: VNDirect ratios
-            const v = await getVndValuationRatios(sym);
-            if (v && (v.pe != null || v.pb != null)) {
-              valMap.set(sym, v);
-            } else {
-              // Tier 2: Vietcap IQ failover
-              const vc = await getVietcapCompany(sym).catch(() => null);
-              if (vc) {
-                vietcapMap.set(sym, vc);
-                failoverCount++;
-              }
-            }
-          } catch {
-            // Tier 2 catch fallback
-            const vc = await getVietcapCompany(sym).catch(() => null);
-            if (vc) {
-              vietcapMap.set(sym, vc);
-              failoverCount++;
-            }
-          }
-        },
-      );
-
-      // 3b. Batch OHLCV for technical Moving Average analysis (MA10, MA20, MA50)
-      const ohlcvMap = await batchVnOhlcv(symbols, {
-        bars: 65,
-        concurrency: 4,
-        perSymbolMs: 800,
-        deadlineMs: 3_500,
-        resilient: false,
-      }).catch(() => new Map());
+      const { valMap, vietcapMap } = valResult;
+      let failoverCount = valResult.failoverCount;
 
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
@@ -518,7 +576,7 @@ export async function getMasterScreenerSnapshot(): Promise<{
     };
   };
 
-  return {
+  const output: MasterSnapshotPayload = {
     items: snapshotData?.items ?? [],
     sourcesUsed: snapshotData?.sourcesUsed ?? ["vps", "vndirect", "ssi", "vietcap"],
     redundancyInfo: snapshotData?.redundancyInfo ?? {
@@ -535,6 +593,15 @@ export async function getMasterScreenerSnapshot(): Promise<{
       note: `Multi-Source Screener (${snapshotData?.items?.length ?? 0} mã · ${snapshotData?.sourcesUsed?.length ?? 4} nguồn)`,
     }),
   };
+
+  // Cache in L1 memory for sub-millisecond retrieval
+  memoryMasterSnapshot = {
+    payload: output,
+    freshUntil: Date.now() + 60_000,
+    staleUntil: Date.now() + 15 * 60_000,
+  };
+
+  return output;
 }
 
 /**

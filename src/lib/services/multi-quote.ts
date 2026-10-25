@@ -48,10 +48,10 @@ const PRICE_PRIORITY: Record<string, number> = {
 const rank = (src: string) => PRICE_PRIORITY[src] ?? 0;
 const CONFLICT_PCT = 0.015;
 const CONFLICT_ABS = 200;
-const PRIMARY_COVERAGE_OK = 0.70; // P2-A
-const TIER1_TIMEOUT_MS = 3_800; // P2-A race-first
-const TIER2_TIMEOUT_MS = 4_500;
-const TIER2_BUDGET_MS = 5_500;
+const PRIMARY_COVERAGE_OK = 0.80; // High coverage target
+const TIER1_TIMEOUT_MS = 2_400; // Ultra-fast race-first
+const TIER2_TIMEOUT_MS = 3_000;
+const TIER2_BUDGET_MS = 3_600;
 
 type TaggedQuote = Quote & { _src: string; _latencyMs: number };
 type SourceBatch = { src: string; quotes: Quote[]; latencyMs: number; ok: boolean };
@@ -269,10 +269,6 @@ export async function getMultiQuotes(symbols: string[]): Promise<MultiQuoteResul
   // Tier 1: PUBLIC primary — song song, không API key
   const tier1: { src: string; p: Promise<SourceBatch> }[] = [
     {
-      src: "vndirect",
-      p: runSource("vndirect", () => vndirect.getVndQuotes(uniq), TIER1_TIMEOUT_MS),
-    },
-    {
       src: "vps",
       p: runSource("vps", () => asPack(() => getVpsQuotes(uniq)), TIER1_TIMEOUT_MS),
     },
@@ -280,11 +276,19 @@ export async function getMultiQuotes(symbols: string[]): Promise<MultiQuoteResul
       src: "ssi-iboard",
       p: runSource("ssi-iboard", () => asPack(() => getSsiIboardQuotes(uniq)), TIER1_TIMEOUT_MS),
     },
+    {
+      src: "vndirect",
+      p: runSource("vndirect", () => vndirect.getVndQuotes(uniq), TIER1_TIMEOUT_MS),
+    },
+    {
+      src: "vietcap",
+      p: runSource("vietcap", () => getVietcapQuotes(uniq), TIER1_TIMEOUT_MS),
+    },
   ];
 
   conflicts += await runParallelTier(tier1, bySym, uniq, usedSources, latencies, batches, {
-    budgetMs: TIER1_TIMEOUT_MS + 400,
-    exitCoverage: 0.72, // P2-A: return when ~72% symbols filled
+    budgetMs: TIER1_TIMEOUT_MS + 300,
+    exitCoverage: PRIMARY_COVERAGE_OK,
   });
 
   // Always fill missing symbols (and broad refresh if coverage low / aggressive)
