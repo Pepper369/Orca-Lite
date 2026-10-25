@@ -276,6 +276,16 @@ export const PUBLIC_SOURCE_CATALOG: PublicSourceDefinition[] = [
     apiKeyRequired: false,
     notes: "Official Vietnamese monetary and exchange-rate publications.",
   },
+  {
+    id: "miquant-quant-feed",
+    name: "MiQuant Multi-Factor Quant Feed",
+    domain: "vn-stocks",
+    access: "open",
+    cadence: "daily",
+    url: "https://backend.miquant.vn",
+    apiKeyRequired: false,
+    notes: "Tín hiệu Breakout, Dòng tiền lớn, AI Sentiment, Định giá Upside, 4 Macro Quant signals và AI Catalysts / Risks — 100% public endpoints.",
+  },
 ];
 
 export function listPublicSources(domain?: PublicSourceDomain): PublicSourceDefinition[] {

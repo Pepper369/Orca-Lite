@@ -82,6 +82,7 @@ const NAV_SECTIONS: {
   {
     title: "CÔNG CỤ",
     items: [
+      { href: "/quant", label: "AI Quant & Bot", icon: Bot, core: true },
       { href: "/heatmap", label: "Bản đồ nhiệt", icon: Grid2x2 },
       { href: "/screener", label: "Bộ lọc", icon: FlaskConical },
       { href: "/news", label: "Tin tức", icon: Newspaper, core: true },

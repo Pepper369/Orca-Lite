@@ -10,6 +10,7 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "stocks"
+  | "miquant-quant"
   | "ma-cross"
   | "sector-flow"
   | "four-m"
@@ -26,6 +27,7 @@ type Universe =
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
+  { id: "miquant-quant", label: "MiQuant AI Bot & Quant 🤖⚡" },
   { id: "ma-cross", label: "Đường MA (Golden/Death Cross) 📈" },
   { id: "sector-flow", label: "Dòng tiền ngành 🌊" },
   { id: "four-m", label: "Bộ lọc 4M 💎" },
@@ -50,6 +52,10 @@ function parseUniverse(raw: string | null): Universe {
 const PanelFallback = () => <Loading rows={6} />;
 
 /** Lazy panels — one broken module cannot take down the whole /screener route. */
+const MiQuantStudio = dynamic(
+  () => import("@/components/miquant-quant-studio").then((m) => m.MiQuantStudio),
+  { ssr: false, loading: PanelFallback },
+);
 const VnScreener = dynamic(
   () => import("./screener-panels").then((m) => m.VnScreener),
   { ssr: false, loading: PanelFallback },
@@ -141,6 +147,9 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "miquant-quant":
+      body = <MiQuantStudio />;
+      break;
     case "ma-cross":
       body = <MaScreener defaultSector={sector} />;
       break;
