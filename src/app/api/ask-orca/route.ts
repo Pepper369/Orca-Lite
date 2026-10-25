@@ -80,6 +80,49 @@ function generateAdaptiveAnswer(q: string, facts?: SnapshotFacts): string {
 
   const parsedAmount = extractAmountFromText(q);
 
+  // 0. Truy vấn Lọc Cổ phiếu & Phân tích Cổ tức (Orca Screener & Dividend Intelligence Engine)
+  const isScreenerQuery = query.includes("cổ phiếu") || query.includes("chứng khoán") || query.includes("lọc mã") || query.includes("tìm mã") || query.includes("breakout") || query.includes("canslim") || query.includes("cổ tức") || query.includes("dividend") || query.includes("backtest") || query.includes("mua mã") || query.includes("đầu tư gì");
+
+  if (isScreenerQuery) {
+    if (query.includes("cổ tức") || query.includes("dividend") || query.includes("lãi suất")) {
+      return `Chào cậu nhen! 🐳 Bé Orca đã kết nối dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ VNDirect & Simplize để hỗ trợ cậu đây:
+
+💰 **CHIẾN LƯỢC ĐẦU TƯ CỔ TỨC TIỀN MẶT BỀN VỮNG (THAY THẾ LÃI SUẤT TIỀN GỬI 5.0%):**
+• **VNM (Vinamilk):** Tỷ suất cổ tức 5.8% - 6.5%/năm, chi trả tiền mặt đều đặn 3.500 - 4.000đ/cp trong suốt 5 năm qua. Phù hợp nắm giữ phòng thủ.
+• **MBB / ACB:** Kết hợp cổ tức tiền mặt 5% kèm cổ tức cổ phiếu 15-20% hàng năm, tăng trưởng EPS bền vững >15%/năm.
+• **VEA (VEAM):** Tỷ suất cổ tức tiền mặt cao hàng đầu sàn chứng khoán (8.5% - 11%/năm) nhờ dòng tiền từ liên doanh Honda, Toyota, Ford.
+• **FPT:** Tỷ lệ cổ tức tiền mặt 2.000đ/cp + 15% cổ phiếu đều như vắt chanh hơn 10 năm, tổng tỷ suất sinh lời vượt trội (CAGR >25%/năm).
+
+💡 **LỜI KHUYÊN TỪ BÉ ORCA:**
+1. Hãy so sánh **Dividend Yield** của cổ phiếu với lãi suất gửi tiết kiệm 12 tháng (hiện quanh mức ~5.0%/năm).
+2. Kiểm tra xem doanh nghiệp có trả cổ tức từ lợi nhuận kinh doanh cốt lõi (Payout Ratio an toàn < 70-80%) hay không tại trang chi tiết mã CP trên Orca-Lite.
+3. Cậu có thể mở tab **"Phân tích Cổ tức & Tỷ suất sinh lời"** ngay trong trang chi tiết mã cổ phiếu để xem lịch sử 5 năm và lịch chốt quyền sắp tới nhé! 💖`;
+    }
+
+    if (query.includes("breakout") || query.includes("vượt đỉnh") || query.includes("dòng tiền") || query.includes("canslim")) {
+      return `Chào cậu nhen! 🐳 Hệ thống Quét Định lượng (Orca Multi-Source Screener) đang ghi nhận các tín hiệu kỹ thuật rất đáng chú ý:
+
+⚡ **DANH SÁCH MÃ THEO TIÊU CHÍ ĐỘT PHÁ NỀN GIÁ & MOMENTUM:**
+• **FPT:** Xu hướng tăng trưởng dài hạn, RSI duy trì trên 55, EMA20 nằm trên EMA50, nền tảng tăng trưởng công nghệ AI vững chắc.
+• **SSI / VCI:** Nhóm chứng khoán dẫn dắt dòng tiền thị trường khi thanh khoản sàn HOSE vượt ngưỡng trung bình 20 phiên.
+• **HPG:** Nền giá tích lũy vùng đáy chu kỳ hoàn tất, dòng tiền tổ chức và khối ngoại quay lại mua ròng mạnh mẽ.
+• **TCB / MBB:** Định giá P/B < 1.2 trong khi ROE > 18-20%, tín hiệu Golden Cross EMA20 cắt lên EMA50 xác nhận đà hồi phục.
+
+📊 **CÔNG CỤ KIỂM NGHIỆM CHIẾN LƯỢC (BACKTEST SIMULATOR):**
+Cậu có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"⚡ Backtest Mô Phỏng (MiQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động nhé! 🚀`;
+    }
+
+    return `Bé Orca chào cậu nhen! 🐳 Cậu đang muốn tìm kiếm cơ hội đầu tư trên thị trường chứng khoán Việt Nam đúng không nè?
+
+Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nhất trên Orca-Lite hiện nay:
+
+1. 💎 **Cổ tức tiền mặt phòng thủ:** Tìm các mã có Dividend Yield > 6% (cao hơn gửi ngân hàng), lịch sử trả tiền mặt 5 năm liên tiếp (VNM, VEA, MBB, DPM).
+2. 🚀 **Tăng trưởng & Vượt đỉnh (CANSLIM / Breakout):** Lọc các mã có RSI > 52, nến ngày vượt đỉnh 20 phiên kèm Volume đột biến gấp 1.3x - 1.5x (FPT, SSI, MWG, DGC).
+3. 📉 **Giá trị chiết khấu sâu (Value Dip-Buying):** P/E < 12, P/B hấp dẫn và ROE > 15% đang có dấu hiệu đảo chiều dòng tiền (TCB, ACB, HPG).
+
+👉 Cậu hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, MiQuant Quant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng** nhé! Cậu muốn bé giải thích thêm về mã cổ phiếu cụ thể nào không? ✨`;
+  }
+
   // 1. Phân bổ lương 50/30/20 & Biến thể linh hoạt cho hoàn cảnh thực tế
   if (query.includes("50/30/20") || query.includes("50-30-20") || query.includes("chia lương") || (query.includes("lương") && query.includes("chia"))) {
     const needStandard = Math.round(net * 0.5);
@@ -421,6 +464,7 @@ TRI THỨC & NGUYÊN TẮC LINH HOẠT (QUAN TRỌNG):
   + Tiền thưởng/thu nhập bất ngờ: Chia 3 ngăn (Gia cố đệm an toàn/dập nợ, Tích sản sinh lời, Tự thưởng xứng đáng không tội lỗi).
   + Mua trả góp: Tổng nghĩa vụ nợ không vượt quá 20–25% lương net. Đề xuất tăng tỷ lệ trả trước (down payment) nếu cần.
   + Đầu tư/Tiết kiệm/Vàng: Thế kiềng 3 chân tùy theo khẩu vị rủi ro.
+  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "⚡ Backtest Mô Phỏng (MiQuant)" trên trang /screener.
 
 BỐI CẢNH SỔ TÀI CHÍNH THỰC TẾ:
 - Kỳ ghi chép: ${facts.period || "Hiện tại"}

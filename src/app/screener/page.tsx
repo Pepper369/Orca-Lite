@@ -124,6 +124,10 @@ const MaScreener = dynamic(
   () => import("@/components/ma-screener").then((m) => m.MaScreener),
   { ssr: false, loading: PanelFallback },
 );
+const ScreenerBacktestModal = dynamic(
+  () => import("@/components/screener-backtest-modal").then((m) => m.ScreenerBacktestModal),
+  { ssr: false }
+);
 
 function SoftPanel({
   name,
@@ -155,6 +159,7 @@ function SoftPanel({
 function ScreenerInner() {
   const params = useSearchParams();
   const [universe, setUniverse] = useState<Universe>(() => parseUniverse(params.get("universe")));
+  const [showBacktest, setShowBacktest] = useState(false);
   const sector = params.get("sector");
 
   let body: React.ReactNode;
@@ -215,13 +220,24 @@ function ScreenerInner() {
     <div className="space-y-3">
       <Panel pad={false}>
         <div className="p-4">
-          <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <FlatsIcon /> Bộ lọc tài sản
-          </h1>
-          <p className="mt-1 text-[12px] text-text-muted">
-            Ưu tiên thị trường chứng khoán Việt Nam — chạy hoàn toàn trên dữ liệu thật mới nhất, không minh họa bằng dữ
-            liệu giả.
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h1 className="flex items-center gap-2 text-lg font-semibold">
+                <FlatsIcon /> Bộ lọc tài sản
+              </h1>
+              <p className="mt-1 text-[12px] text-text-muted">
+                Ưu tiên thị trường chứng khoán Việt Nam — chạy hoàn toàn trên dữ liệu thật mới nhất, không minh họa bằng dữ
+                liệu giả.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBacktest(true)}
+              className="self-start sm:self-auto px-3.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+            >
+              <span>⚡</span> Backtest Mô Phỏng (MiQuant)
+            </button>
+          </div>
           <div className="seg-scroll mt-3">
             <div className="seg" role="tablist" aria-label="Chọn bộ lọc">
               {UNIVERSE_TABS.map((tab) => (
@@ -254,6 +270,7 @@ function ScreenerInner() {
       <SoftPanel name={universe} resetKey={universe}>
         {body}
       </SoftPanel>
+      <ScreenerBacktestModal isOpen={showBacktest} onClose={() => setShowBacktest(false)} />
     </div>
   );
 }

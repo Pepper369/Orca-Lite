@@ -186,6 +186,21 @@ const BusinessGoalsPanel = dynamic(
   }
 );
 
+const DividendIntelligencePanel = dynamic(
+  () =>
+    import("@/components/stocks/dividend-intelligence-panel").then(
+      (m) => m.DividendIntelligencePanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Phân tích Cổ tức & Tỷ suất sinh lời">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
 
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
@@ -612,6 +627,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           </ErrorBoundary>
           <ErrorBoundary name="business-goals" resetKey={detail.symbol}>
             <BusinessGoalsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="dividend-intelligence" resetKey={detail.symbol}>
+            <DividendIntelligencePanel symbol={detail.symbol} />
           </ErrorBoundary>
         </div>
       </section>
