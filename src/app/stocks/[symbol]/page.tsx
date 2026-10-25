@@ -86,13 +86,44 @@ const DeepFinancialsPanel = dynamic(
   }
 );
 
+const ShareholdersPanel = dynamic(
+  () =>
+    import("@/components/stocks/shareholders-panel").then(
+      (m) => m.ShareholdersPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Cơ cấu cổ đông & Ban điều hành">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
+const AnalyticReportsPanel = dynamic(
+  () =>
+    import("@/components/stocks/analytic-reports-panel").then(
+      (m) => m.AnalyticReportsPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Báo cáo phân tích & Định giá">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
-  { id: "sec-quant", label: "Định lượng & Dòng tiền AI" },
-  { id: "sec-audit", label: "AI Quick Audit BCTC" },
-  { id: "sec-deep", label: "Tin tức" },
+  { id: "sec-quant", label: "Định lượng, BCTC & Cổ đông" },
+  { id: "sec-audit", label: "AI Quick Audit" },
+  { id: "sec-deep", label: "Báo cáo phân tích & Tin tức" },
 ] as const;
+
 
 const TREND_VI: Record<string, string> = {
   "strong-up": "Tăng mạnh",
@@ -485,8 +516,8 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       >
         <div className="stock-section-heading" id="sec-quant-title">
           <div>
-            <p className="stock-section-kicker">MiQuant Quantitative · Net Flow · Fair Value · Banking & Assets</p>
-            <h2>Dải định giá AI, Dòng tiền tích lũy & Phân rã BCTC</h2>
+            <p className="stock-section-kicker">MiQuant Quantitative · Vietcap IQ · Fair Value · Banking & Shareholders</p>
+            <h2>Dải định giá AI, Dòng tiền, Phân rã BCTC & Sổ cổ đông</h2>
           </div>
           <span className="stock-section-index">03</span>
         </div>
@@ -496,6 +527,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           </ErrorBoundary>
           <ErrorBoundary name="deep-financials" resetKey={detail.symbol}>
             <DeepFinancialsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="shareholders" resetKey={detail.symbol}>
+            <ShareholdersPanel symbol={detail.symbol} />
           </ErrorBoundary>
         </div>
       </section>
@@ -521,18 +555,24 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       <section id="sec-deep" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
-            <p className="stock-section-kicker">News</p>
-            <h2>Tin & cảm xúc</h2>
+            <p className="stock-section-kicker">VNDirect Research & News</p>
+            <h2>Báo cáo phân tích, Tin tức & Cảm xúc thị trường</h2>
           </div>
           <span className="stock-section-index">05</span>
         </div>
-        <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
-          <StockNewsSentiment symbol={detail.symbol} />
-        </ErrorBoundary>
-        <ErrorBoundary name="company-news" resetKey={detail.symbol}>
-          <CompanyNewsPanel symbol={detail.symbol} />
-        </ErrorBoundary>
+        <div className="space-y-4">
+          <ErrorBoundary name="analytic-reports" resetKey={detail.symbol}>
+            <AnalyticReportsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
+            <StockNewsSentiment symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="company-news" resetKey={detail.symbol}>
+            <CompanyNewsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+        </div>
       </section>
+
     </div>
   );
 }

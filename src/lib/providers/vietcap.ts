@@ -149,3 +149,72 @@ export async function getVietcapQuotes(symbols: string[]): Promise<{
   }
   return { quotes, sourceTs: quotes.length ? Date.now() : null };
 }
+
+export type VietcapShareholder = {
+  ownerName: string;
+  ownerNameEn: string | null;
+  ownerCode: string | null;
+  positionName: string | null;
+  positionNameEn: string | null;
+  quantity: number;
+  percentage: number;
+  ownerType: "CORPORATE" | "INDIVIDUAL" | "FOREIGN" | string;
+  updateDate: string | null;
+  publicDate: string | null;
+};
+
+type ShareholderEnvelope = {
+  successful?: boolean;
+  data?: Array<{
+    ownerName?: string;
+    ownerNameEn?: string;
+    ownerCode?: string;
+    positionName?: string;
+    positionNameEn?: string;
+    quantity?: number;
+    percentage?: number;
+    ownerType?: string;
+    updateDate?: string;
+    publicDate?: string;
+  }> | null;
+};
+
+/**
+ * Danh sách chi tiết cổ đông lớn & ban lãnh đạo từ Vietcap IQ Insight.
+ * https://iq.vietcap.com.vn/api/iq-insight-service/v1/company/{TICKER}/shareholder
+ */
+export async function getVietcapShareholders(symbol: string): Promise<VietcapShareholder[]> {
+  const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!sym) return [];
+  const res = await httpJson<ShareholderEnvelope>(`${BASE}/company/${sym}/shareholder`, {
+    provider: "vietcap",
+    timeoutMs: 8_000,
+    retries: 1,
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      Origin: "https://iq.vietcap.com.vn",
+      Referer: "https://iq.vietcap.com.vn/",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    },
+  });
+  if (!res.ok || !res.data?.successful || !Array.isArray(res.data.data)) return [];
+
+  return res.data.data.map((row) => {
+    const rawPct = Number(row.percentage) || 0;
+    const percentage = rawPct <= 1 && rawPct > 0 ? Math.round(rawPct * 10000) / 100 : Math.round(rawPct * 100) / 100;
+    return {
+      ownerName: String(row.ownerName || "—"),
+      ownerNameEn: row.ownerNameEn ? String(row.ownerNameEn) : null,
+      ownerCode: row.ownerCode ? String(row.ownerCode) : null,
+      positionName: row.positionName ? String(row.positionName) : null,
+      positionNameEn: row.positionNameEn ? String(row.positionNameEn) : null,
+      quantity: Number(row.quantity) || 0,
+      percentage,
+      ownerType: String(row.ownerType || "OTHER"),
+      updateDate: row.updateDate ? String(row.updateDate).slice(0, 10) : null,
+      publicDate: row.publicDate ? String(row.publicDate).slice(0, 10) : null,
+    };
+  });
+}
+
