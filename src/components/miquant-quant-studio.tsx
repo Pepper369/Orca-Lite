@@ -37,6 +37,7 @@ import {
 import type {
   RankedStockItem,
   QuantBotDefinition,
+  BotScannedCandidate,
   RebalancePlan,
   QuantStrategyDefinition,
 } from "@/lib/engines/miquant-quant-engine";
@@ -61,6 +62,8 @@ export function MiQuantStudio() {
   const [capitalInput, setCapitalInput] = useState<number>(100000000);
   const [rebalancePlan, setRebalancePlan] = useState<RebalancePlan | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
+  const [candidateSearch, setCandidateSearch] = useState<string>("");
+  const [candidateFilter, setCandidateFilter] = useState<"ALL" | "TOP" | "HOLDINGS">("ALL");
 
   // Stock detail modal
   const [inspectSymbol, setInspectSymbol] = useState<string | null>(null);
@@ -136,6 +139,34 @@ export function MiQuantStudio() {
     () => bots.find((b) => b.id === selectedBotId) || bots[0],
     [bots, selectedBotId]
   );
+
+  const targetHoldingSymbols = useMemo(
+    () => new Set((selectedBot?.target_holdings || []).map((h) => h.symbol)),
+    [selectedBot]
+  );
+
+  const displayedCandidates = useMemo(() => {
+    if (!selectedBot?.scanned_candidates) return [];
+    let list = selectedBot.scanned_candidates;
+
+    if (candidateSearch.trim()) {
+      const q = candidateSearch.trim().toUpperCase();
+      list = list.filter(
+        (c) =>
+          c.symbol.toUpperCase().includes(q) ||
+          c.name.toUpperCase().includes(q) ||
+          c.reason.toUpperCase().includes(q)
+      );
+    }
+
+    if (candidateFilter === "TOP") {
+      list = list.filter((c) => c.bot_score >= 80);
+    } else if (candidateFilter === "HOLDINGS") {
+      list = list.filter((c) => targetHoldingSymbols.has(c.symbol));
+    }
+
+    return list;
+  }, [selectedBot, candidateSearch, candidateFilter, targetHoldingSymbols]);
 
   const strategies = strategiesData?.data || [];
   const selectedStrategy = useMemo(
@@ -438,7 +469,8 @@ export function MiQuantStudio() {
 
           {/* Selected Bot Detailed Studio */}
           {selectedBot && (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               {/* Bot Info & Target Holdings */}
               <div className="space-y-4 lg:col-span-2">
                 <div className="rounded-2xl border border-border/80 bg-bg-surface p-5">
@@ -606,7 +638,279 @@ export function MiQuantStudio() {
                 )}
               </div>
             </div>
-          )}
+
+            {/* Live Filtered Candidate Pool */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-5 space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/50 pb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                      Bộ Lọc Định Lượng Thời Gian Thực (Live Realtime Screener)
+                    </span>
+                    <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-400 border border-blue-500/20">
+                      {selectedBot.scanned_candidates?.length || 0} Cổ Phiếu Thỏa Mãn Điều Kiện
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold text-text-primary">
+                    Danh Sách Cổ Phiếu Được {selectedBot.name} Sàng Lọc
+                  </h3>
+                  <p className="text-xs text-text-muted">
+                    Hệ thống tự động quét toàn thị trường dựa trên tiêu chí định lượng khắt khe của bot. Các mã có điểm cao nhất được lựa chọn vào danh mục nắm giữ mục tiêu.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => mutateBots()}
+                    className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-bg-base px-3 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary hover:bg-border/40 transition"
+                  >
+                    <RefreshCw className="size-3.5" />
+                    <span>Quét Lại Realtime</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Bot Screening Criteria Badges */}
+              <div className="flex flex-wrap items-center gap-2 rounded-xl bg-bg-base/60 p-3 text-xs">
+                <span className="font-semibold text-text-secondary flex items-center gap-1">
+                  <ShieldCheck className="size-3.5 text-blue-400" />
+                  Tiêu chí sàng lọc:
+                </span>
+                {selectedBot.id === "bot_breakout_momentum" && (
+                  <>
+                    <span className="rounded-lg bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-400 border border-blue-500/20">
+                      Khối lượng khớp lệnh &gt; 1.1x - 2.5x MA20
+                    </span>
+                    <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 border border-emerald-500/20">
+                      Bứt phá kháng cự / Đỉnh ngắn hạn
+                    </span>
+                    <span className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-[11px] font-medium text-purple-400 border border-purple-500/20">
+                      Điểm động lượng Momentum &gt; 60
+                    </span>
+                  </>
+                )}
+                {selectedBot.id === "bot_smart_money_flow" && (
+                  <>
+                    <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 border border-emerald-500/20">
+                      Dòng tiền tạo lập tích lũy &gt; 100 Tỷ VNĐ
+                    </span>
+                    <span className="rounded-lg bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-400 border border-blue-500/20">
+                      Khối ngoại & Tự doanh gom ròng
+                    </span>
+                    <span className="rounded-lg bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400 border border-amber-500/20">
+                      Gia tăng tỷ trọng chủ động
+                    </span>
+                  </>
+                )}
+                {selectedBot.id === "bot_deep_value_ai" && (
+                  <>
+                    <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 border border-emerald-500/20">
+                      Biên an toàn Upside AI &gt; 20% - 150%
+                    </span>
+                    <span className="rounded-lg bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-400 border border-blue-500/20">
+                      Định giá chiết khấu sâu (P/E & P/B thấp)
+                    </span>
+                    <span className="rounded-lg bg-purple-500/10 px-2 py-0.5 text-[11px] font-medium text-purple-400 border border-purple-500/20">
+                      Mô hình DCF & Graham định lượng
+                    </span>
+                  </>
+                )}
+                {selectedBot.id === "bot_growth_dividend" && (
+                  <>
+                    <span className="rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-400 border border-emerald-500/20">
+                      Điểm xếp hạng tổng hợp Multi-Factor &gt;= 60
+                    </span>
+                    <span className="rounded-lg bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-400 border border-blue-500/20">
+                      Tăng trưởng lợi nhuận & Cổ tức đều đặn
+                    </span>
+                    <span className="rounded-lg bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400 border border-amber-500/20">
+                      Sức khỏe tài chính an toàn
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Filter and Search Bar */}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCandidateFilter("ALL")}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                      candidateFilter === "ALL"
+                        ? "bg-accent-primary text-text-inverse"
+                        : "bg-bg-base text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    Tất cả ({selectedBot.scanned_candidates?.length || 0})
+                  </button>
+                  <button
+                    onClick={() => setCandidateFilter("TOP")}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                      candidateFilter === "TOP"
+                        ? "bg-accent-primary text-text-inverse"
+                        : "bg-bg-base text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    Điểm cao (≥80)
+                  </button>
+                  <button
+                    onClick={() => setCandidateFilter("HOLDINGS")}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                      candidateFilter === "HOLDINGS"
+                        ? "bg-accent-primary text-text-inverse"
+                        : "bg-bg-base text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    Đang nắm giữ ({selectedBot.target_holdings.length})
+                  </button>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-2.5 size-3.5 text-text-muted" />
+                  <input
+                    type="text"
+                    value={candidateSearch}
+                    onChange={(e) => setCandidateSearch(e.target.value)}
+                    placeholder="Tìm mã cổ phiếu..."
+                    className="w-full rounded-xl border border-border bg-bg-base pl-9 pr-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Scanned Candidates Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-border/60 text-[10px] uppercase text-text-muted">
+                      <th className="py-2.5">Thứ hạng</th>
+                      <th className="py-2.5">Mã CK</th>
+                      <th className="py-2.5">Giá Hiện Tại</th>
+                      <th className="py-2.5 text-center">Điểm Bot AI</th>
+                      <th className="py-2.5">Chỉ Số Trọng Yếu</th>
+                      <th className="py-2.5">Luận Điểm Sàng Lọc Của Bot</th>
+                      <th className="py-2.5 text-center">Trạng Thái</th>
+                      <th className="py-2.5 text-right">Phân Tích Chi Tiết</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {displayedCandidates.map((c, idx) => {
+                      const isHolding = targetHoldingSymbols.has(c.symbol);
+                      return (
+                        <tr key={c.symbol} className="hover:bg-bg-base/40 transition">
+                          <td className="py-3 font-mono font-bold text-text-muted">
+                            #{idx + 1}
+                          </td>
+                          <td className="py-3 font-bold text-accent-primary">
+                            <Link
+                              href={`/stocks/${c.symbol}`}
+                              className="hover:underline flex items-center gap-1"
+                            >
+                              {c.symbol}
+                              <ArrowUpRight className="size-3 text-text-muted" />
+                            </Link>
+                          </td>
+                          <td className="py-3 font-mono">
+                            <div className="font-semibold text-text-primary">
+                              {fmtNum(c.current_price)} đ
+                            </div>
+                            <div
+                              className={`text-[10px] font-bold ${
+                                c.pct_change > 0
+                                  ? "text-emerald-400"
+                                  : c.pct_change < 0
+                                  ? "text-rose-400"
+                                  : "text-text-muted"
+                              }`}
+                            >
+                              {c.pct_change > 0 ? "+" : ""}
+                              {c.pct_change}%
+                            </div>
+                          </td>
+                          <td className="py-3 text-center">
+                            <div className="inline-flex items-center gap-1.5">
+                              <span
+                                className={`rounded-md px-2 py-0.5 font-mono text-xs font-bold ${
+                                  c.bot_score >= 80
+                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                    : c.bot_score >= 65
+                                    ? "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                                    : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                }`}
+                              >
+                                {c.bot_score}/100
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-[11px] font-mono text-text-secondary">
+                            <div className="space-y-0.5">
+                              {c.metrics.volume_ratio && (
+                                <div>
+                                  Vol: <strong>x{c.metrics.volume_ratio.toFixed(1)} MA20</strong>
+                                </div>
+                              )}
+                              {c.metrics.money_flow_bil !== undefined && (
+                                <div>
+                                  Dòng tiền:{" "}
+                                  <strong className="text-emerald-400">
+                                    +{fmtNum(Math.round(c.metrics.money_flow_bil))} Tỷ
+                                  </strong>
+                                </div>
+                              )}
+                              {c.metrics.upside_pct !== undefined && (
+                                <div>
+                                  Upside:{" "}
+                                  <strong className="text-blue-400">
+                                    +{c.metrics.upside_pct}%
+                                  </strong>
+                                </div>
+                              )}
+                              {c.metrics.target_price && (
+                                <div>
+                                  Target:{" "}
+                                  <strong className="text-text-primary">
+                                    {fmtNum(c.metrics.target_price)} đ
+                                  </strong>
+                                </div>
+                              )}
+                              {c.metrics.score && (
+                                <div>
+                                  Composite: <strong>{c.metrics.score}/100</strong>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 text-[11px] text-text-secondary max-w-xs leading-relaxed">
+                            {c.reason}
+                          </td>
+                          <td className="py-3 text-center">
+                            {isHolding ? (
+                              <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
+                                Đang Nắm Giữ
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-slate-500/15 px-2 py-0.5 text-[10px] font-medium text-text-muted border border-border">
+                                Ứng Viên Dự Bị
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              onClick={() => setInspectSymbol(c.symbol)}
+                              className="rounded-lg border border-border bg-bg-base/80 px-2.5 py-1 text-[11px] font-medium text-accent-primary hover:bg-border/40 transition"
+                            >
+                              Phân tích AI & BCTC &rarr;
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
       )}
 

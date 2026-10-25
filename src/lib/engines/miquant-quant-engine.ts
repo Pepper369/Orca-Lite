@@ -34,6 +34,37 @@ export interface RankedStockItem {
   bot_tags: string[];
 }
 
+export interface QuantBotHolding {
+  symbol: string;
+  name: string;
+  weight: number; // 0 - 1
+  current_price: number;
+  reason: string;
+  metrics?: {
+    volume_ratio?: number;
+    money_flow_bil?: number;
+    upside_pct?: number;
+    target_price?: number;
+    score?: number;
+  };
+}
+
+export interface BotScannedCandidate {
+  symbol: string;
+  name: string;
+  current_price: number;
+  pct_change: number;
+  bot_score: number;
+  reason: string;
+  metrics: {
+    volume_ratio?: number;
+    money_flow_bil?: number;
+    upside_pct?: number;
+    target_price?: number;
+    score?: number;
+  };
+}
+
 export interface QuantBotDefinition {
   id: string;
   name: string;
@@ -49,13 +80,8 @@ export interface QuantBotDefinition {
     win_rate: number;
     total_trades: number;
   };
-  target_holdings: Array<{
-    symbol: string;
-    name: string;
-    weight: number; // 0 - 1
-    current_price: number;
-    reason: string;
-  }>;
+  target_holdings: QuantBotHolding[];
+  scanned_candidates?: BotScannedCandidate[];
 }
 
 export interface OrderRebalanceItem {
@@ -287,29 +313,132 @@ export const MiQuantEngine = {
    * Return the 4 Quant Trading Bots with live holdings based on current quant feeds
    */
   async getBots(): Promise<QuantBotDefinition[]> {
-    const { breakout, money_flow, valuation } = await this.getRankedPicks();
+    const { breakout, money_flow, valuation, top_foreign, composite_ranked } =
+      await this.getRankedPicks();
 
-    // Default fallback tickers if feed is empty
-    const breakoutSyms = breakout.length > 0 ? breakout.slice(0, 5) : [
-      { symbol: "OCB", close: 10800, volume_ratio: 3.1, score: 0.06 },
-      { symbol: "FPT", close: 135000, volume_ratio: 2.2, score: 0.05 },
-      { symbol: "VCI", close: 38000, volume_ratio: 2.0, score: 0.04 },
-      { symbol: "MBB", close: 24500, volume_ratio: 1.9, score: 0.04 },
-    ];
+    // 1. Bot Breakout Momentum: Quét các cổ phiếu bứt phá Vol & Giá
+    const sortedBreakout = [...breakout].sort(
+      (a, b) => b.volume_ratio * 10 + b.score - (a.volume_ratio * 10 + a.score)
+    );
+    const breakoutSymbols = new Set(sortedBreakout.map((b) => b.symbol));
+    const extraMomentum = composite_ranked.filter(
+      (c) => !breakoutSymbols.has(c.symbol) && (c.volume_ratio >= 1.1 || c.factors.momentum >= 60)
+    );
 
-    const moneyFlowSyms = money_flow.length > 0 ? money_flow.slice(0, 5) : [
-      { symbol: "TCB", close: 34200, cum_money_flow_bil: 1328 },
-      { symbol: "HPG", close: 26500, cum_money_flow_bil: 890 },
-      { symbol: "VPB", close: 19800, cum_money_flow_bil: 740 },
-      { symbol: "MWG", close: 56000, cum_money_flow_bil: 620 },
-    ];
+    const breakoutCandidates: BotScannedCandidate[] = [
+      ...sortedBreakout.map((b) => ({
+        symbol: b.symbol,
+        name: `Cổ phiếu ${b.symbol}`,
+        current_price: b.close < 1000 ? b.close * 1000 : b.close,
+        pct_change: b.pct_change,
+        bot_score: Math.min(99, Math.round(75 + b.volume_ratio * 8 + b.pct_change * 100)),
+        reason: `Đột phá kháng cự, khối lượng khớp lệnh x${b.volume_ratio.toFixed(1)} lần MA20.`,
+        metrics: {
+          volume_ratio: b.volume_ratio,
+          score: Math.round(b.score * 1000),
+        },
+      })),
+      ...extraMomentum.map((c) => ({
+        symbol: c.symbol,
+        name: `Cổ phiếu ${c.symbol}`,
+        current_price: c.close < 1000 ? c.close * 1000 : c.close,
+        pct_change: c.pct_change,
+        bot_score: c.ai_score,
+        reason: `Xung lực động lượng cao (${c.factors.momentum}/100), thanh khoản đột biến x${c.volume_ratio.toFixed(1)} MA20.`,
+        metrics: {
+          volume_ratio: c.volume_ratio,
+          score: c.ai_score,
+        },
+      })),
+    ].sort((a, b) => b.bot_score - a.bot_score);
 
-    const valuationSyms = valuation.length > 0 ? valuation.slice(0, 5) : [
-      { symbol: "VHM", close: 42000, target_price: 65000, upside: 0.54 },
-      { symbol: "VNM", close: 68000, target_price: 88000, upside: 0.29 },
-      { symbol: "STB", close: 29500, target_price: 39000, upside: 0.32 },
-      { symbol: "KDH", close: 31000, target_price: 42000, upside: 0.35 },
-    ];
+    const breakoutHoldings: QuantBotHolding[] = breakoutCandidates.slice(0, 4).map((c) => ({
+      symbol: c.symbol,
+      name: c.name,
+      weight: 0.25,
+      current_price: c.current_price,
+      reason: c.reason,
+      metrics: c.metrics,
+    }));
+
+    // 2. Bot Smart Money Flow: Quét các cổ phiếu hút dòng tiền lớn cá mập & khối ngoại
+    const sortedMoneyFlow = [...money_flow].sort(
+      (a, b) => b.cum_money_flow_bil - a.cum_money_flow_bil
+    );
+    const moneyFlowHoldings: QuantBotHolding[] = sortedMoneyFlow.slice(0, 4).map((m) => ({
+      symbol: m.symbol,
+      name: `Cổ phiếu ${m.symbol}`,
+      weight: 0.25,
+      current_price: m.close < 1000 ? m.close * 1000 : m.close,
+      reason: `Dòng tiền tạo lập tích lũy ròng +${m.cum_money_flow_bil.toLocaleString("vi-VN")} tỷ VNĐ, gom hàng chủ động.`,
+      metrics: {
+        money_flow_bil: m.cum_money_flow_bil,
+      },
+    }));
+    const moneyFlowCandidates: BotScannedCandidate[] = sortedMoneyFlow.map((m) => ({
+      symbol: m.symbol,
+      name: `Cổ phiếu ${m.symbol}`,
+      current_price: m.close < 1000 ? m.close * 1000 : m.close,
+      pct_change: m.pct_change,
+      bot_score: Math.min(98, Math.round(80 + Math.min(18, (m.cum_money_flow_bil / 100) * 1.5))),
+      reason: `Tạo lập tích lũy dòng tiền ròng +${m.cum_money_flow_bil} tỷ VNĐ.`,
+      metrics: {
+        money_flow_bil: m.cum_money_flow_bil,
+      },
+    }));
+
+    // 3. Bot Deep Value AI: Quét các cổ phiếu định giá chiết khấu sâu, Upside cao
+    const sortedValuation = [...valuation].sort((a, b) => b.upside - a.upside);
+    const valuationHoldings: QuantBotHolding[] = sortedValuation.slice(0, 4).map((v) => ({
+      symbol: v.symbol,
+      name: `Cổ phiếu ${v.symbol}`,
+      weight: 0.25,
+      current_price: v.close < 1000 ? v.close * 1000 : v.close,
+      reason: `Tiềm năng tăng giá Upside AI định lượng đạt +${(v.upside * 100).toFixed(1)}%, mục tiêu ${v.target_price < 1000 ? (v.target_price * 1000).toLocaleString("vi-VN") : v.target_price.toLocaleString("vi-VN")} đ.`,
+      metrics: {
+        upside_pct: +(v.upside * 100).toFixed(1),
+        target_price: v.target_price < 1000 ? v.target_price * 1000 : v.target_price,
+      },
+    }));
+    const valuationCandidates: BotScannedCandidate[] = sortedValuation.map((v) => ({
+      symbol: v.symbol,
+      name: `Cổ phiếu ${v.symbol}`,
+      current_price: v.close < 1000 ? v.close * 1000 : v.close,
+      pct_change: v.pct_change,
+      bot_score: Math.min(97, Math.round(78 + v.upside * 45)),
+      reason: `Định giá chiết khấu sâu, biên an toàn Upside AI đạt +${(v.upside * 100).toFixed(1)}%.`,
+      metrics: {
+        upside_pct: +(v.upside * 100).toFixed(1),
+        target_price: v.target_price < 1000 ? v.target_price * 1000 : v.target_price,
+      },
+    }));
+
+    // 4. Bot Growth & Dividend: Quét từ Top xếp hạng đa nhân tố AI vững mạnh
+    const topRanked = composite_ranked.slice(0, 10);
+    const dividendHoldings: QuantBotHolding[] = topRanked.slice(0, 4).map((item) => ({
+      symbol: item.symbol,
+      name: `Cổ phiếu ${item.symbol}`,
+      weight: 0.25,
+      current_price: item.close < 1000 ? item.close * 1000 : item.close,
+      reason: `Điểm xếp hạng AI Multi-factor đạt ${item.ai_score}/100, tín hiệu ${item.signal}, tài chính tăng trưởng bền vững.`,
+      metrics: {
+        score: item.ai_score,
+        money_flow_bil: item.details?.cum_money_flow_bil,
+        upside_pct: item.details?.upside_pct,
+      },
+    }));
+    const dividendCandidates: BotScannedCandidate[] = topRanked.map((item) => ({
+      symbol: item.symbol,
+      name: `Cổ phiếu ${item.symbol}`,
+      current_price: item.close < 1000 ? item.close * 1000 : item.close,
+      pct_change: item.pct_change,
+      bot_score: item.ai_score,
+      reason: `Hội tụ đa nhân tố AI điểm số ${item.ai_score}/100, xung lực và dòng tiền đồng thuận.`,
+      metrics: {
+        score: item.ai_score,
+        volume_ratio: item.volume_ratio,
+      },
+    }));
 
     return [
       {
@@ -328,13 +457,8 @@ export const MiQuantEngine = {
           win_rate: 68.5,
           total_trades: 142,
         },
-        target_holdings: breakoutSyms.slice(0, 4).map((item, idx) => ({
-          symbol: item.symbol,
-          name: `Cổ phiếu ${item.symbol}`,
-          weight: 0.25,
-          current_price: item.close * (item.close < 1000 ? 1000 : 1),
-          reason: `Volume đột biến gấp ${("volume_ratio" in item ? Number(item.volume_ratio).toFixed(1) : "2.1")}x trung bình 20 phiên, bứt phá kênh giá.`,
-        })),
+        target_holdings: breakoutHoldings,
+        scanned_candidates: breakoutCandidates,
       },
       {
         id: "bot_smart_money_flow",
@@ -352,13 +476,8 @@ export const MiQuantEngine = {
           win_rate: 72.0,
           total_trades: 98,
         },
-        target_holdings: moneyFlowSyms.slice(0, 4).map((item) => ({
-          symbol: item.symbol,
-          name: `Cổ phiếu ${item.symbol}`,
-          weight: 0.25,
-          current_price: item.close * (item.close < 1000 ? 1000 : 1),
-          reason: `Dòng tiền tạo lập tích lũy ròng liên tục, hút vốn dẫn dắt thị trường.`,
-        })),
+        target_holdings: moneyFlowHoldings,
+        scanned_candidates: moneyFlowCandidates,
       },
       {
         id: "bot_deep_value_ai",
@@ -376,13 +495,8 @@ export const MiQuantEngine = {
           win_rate: 64.0,
           total_trades: 62,
         },
-        target_holdings: valuationSyms.slice(0, 4).map((item) => ({
-          symbol: item.symbol,
-          name: `Cổ phiếu ${item.symbol}`,
-          weight: 0.25,
-          current_price: item.close * (item.close < 1000 ? 1000 : 1),
-          reason: `Tiềm năng tăng giá Upside AI định lượng cao, biên an toàn vững chắc.`,
-        })),
+        target_holdings: valuationHoldings,
+        scanned_candidates: valuationCandidates,
       },
       {
         id: "bot_growth_dividend",
@@ -400,12 +514,8 @@ export const MiQuantEngine = {
           win_rate: 76.5,
           total_trades: 48,
         },
-        target_holdings: [
-          { symbol: "REE", name: "Cơ Điện Lạnh REE", weight: 0.25, current_price: 63500, reason: "Cổ tức tiền mặt đều đặn, hạ tầng điện nước ổn định." },
-          { symbol: "FPT", name: "Công nghệ FPT", weight: 0.25, current_price: 135000, reason: "Doanh thu xuất khẩu phần mềm tăng trưởng 25% YoY." },
-          { symbol: "BMP", name: "Nhựa Bình Minh", weight: 0.25, current_price: 112000, reason: "Tỷ suất cổ tức tiền mặt > 10%, tài chính không nợ vay." },
-          { symbol: "DGC", name: "Hóa chất Đức Giang", weight: 0.25, current_price: 104000, reason: "Biên lợi nhuận gộp cao, dự án Nghi Sơn mở rộng." },
-        ],
+        target_holdings: dividendHoldings,
+        scanned_candidates: dividendCandidates,
       },
     ];
   },
