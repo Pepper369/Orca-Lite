@@ -118,6 +118,77 @@ const PERSONAL_FINANCE_NAV: typeof NAV_SECTIONS = [
   { title: "TÀI KHOẢN", items: [{ href: "/settings", label: "Cài đặt", icon: Settings }] },
 ];
 
+interface DesktopNavItemProps {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  active: boolean;
+  onNav: (href: string, e?: MouseEvent<HTMLElement>) => void;
+  onHover: (href: string) => void;
+}
+
+function DesktopNavItem({
+  href,
+  label,
+  icon: Icon,
+  active,
+  onNav,
+  onHover,
+}: DesktopNavItemProps) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => onNav(href, e)}
+      onMouseEnter={() => onHover(href)}
+      className={
+        "orca-nav-item group relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[13px] leading-none " +
+        (active
+          ? "bg-accent-primary/15 font-medium text-accent-primary"
+          : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary")
+      }
+      title={label}
+    >
+      <Icon className="size-4 shrink-0 opacity-90" />
+      <span className="orca-nav-item-label min-w-0 flex-1 truncate">{label}</span>
+    </Link>
+  );
+}
+
+interface MobileNavItemProps extends DesktopNavItemProps {
+  onClose: () => void;
+}
+
+function MobileNavItem({
+  href,
+  label,
+  icon: Icon,
+  active,
+  onNav,
+  onHover,
+  onClose,
+}: MobileNavItemProps) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => {
+        onNav(href, e);
+        onClose();
+      }}
+      onMouseEnter={() => onHover(href)}
+      className={
+        "orca-nav-item group relative flex min-h-11 shrink-0 items-center gap-2.5 rounded-lg px-3 text-[14px] leading-none " +
+        (active
+          ? "bg-accent-primary/15 font-medium text-accent-primary"
+          : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary")
+      }
+      title={label}
+    >
+      <Icon className="size-4 shrink-0 opacity-90" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </Link>
+  );
+}
+
 function isActivePath(pathname: string, href: string, activePersonalTab: string) {
   const [path, hash] = href.split("#");
   if (hash) return pathname === path && activePersonalTab === hash;
@@ -220,35 +291,6 @@ export function ShellInner({ children }: { children: ReactNode }) {
   );
 
   const renderDesktopSidebar = () => {
-    const NavItem = ({
-      href,
-      label,
-      icon: Icon,
-    }: {
-      href: string;
-      label: string;
-      icon: ComponentType<{ className?: string }>;
-    }) => {
-      const active = isActivePath(pathname, href, activePersonalTab);
-      return (
-        <Link
-          href={href}
-          onClick={(e) => onNav(href, e)}
-          onMouseEnter={() => onHover(href)}
-          className={
-            "orca-nav-item group relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[13px] leading-none " +
-            (active
-              ? "bg-accent-primary/15 font-medium text-accent-primary"
-              : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary")
-          }
-          title={label}
-        >
-          <Icon className="size-4 shrink-0 opacity-90" />
-          <span className="orca-nav-item-label min-w-0 flex-1 truncate">{label}</span>
-        </Link>
-      );
-    };
-
     return (
       <div className="orca-sidebar flex h-full flex-col" style={{ width: SIDEBAR_EXPANDED }}>
         <div className="orca-sidebar-header relative flex min-h-[3.25rem] shrink-0 items-center gap-1 border-b border-border-subtle px-2 py-2">
@@ -283,7 +325,15 @@ export function ShellInner({ children }: { children: ReactNode }) {
               </div>
               <div className="flex flex-col gap-0.5">
                 {section.items.map((item) => (
-                  <NavItem key={item.href} href={item.href} label={item.label} icon={item.icon} />
+                  <DesktopNavItem
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActivePath(pathname, item.href, activePersonalTab)}
+                    onNav={onNav}
+                    onHover={onHover}
+                  />
                 ))}
               </div>
             </div>
@@ -298,38 +348,6 @@ export function ShellInner({ children }: { children: ReactNode }) {
   };
 
   const renderMobileSidebar = () => {
-    const NavItem = ({
-      href,
-      label,
-      icon: Icon,
-    }: {
-      href: string;
-      label: string;
-      icon: ComponentType<{ className?: string }>;
-    }) => {
-      const active = isActivePath(pathname, href, activePersonalTab);
-      return (
-        <Link
-          href={href}
-          onClick={(e) => {
-            onNav(href, e);
-            setMobileOpen(false);
-          }}
-          onMouseEnter={() => onHover(href)}
-          className={
-            "orca-nav-item group relative flex min-h-11 shrink-0 items-center gap-2.5 rounded-lg px-3 text-[14px] leading-none " +
-            (active
-              ? "bg-accent-primary/15 font-medium text-accent-primary"
-              : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary")
-          }
-          title={label}
-        >
-          <Icon className="size-4 shrink-0 opacity-90" />
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-        </Link>
-      );
-    };
-
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-3 py-3.5">
@@ -361,7 +379,16 @@ export function ShellInner({ children }: { children: ReactNode }) {
               </div>
               <div className="flex flex-col gap-1">
                 {section.items.map((item) => (
-                  <NavItem key={item.href} href={item.href} label={item.label} icon={item.icon} />
+                  <MobileNavItem
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    icon={item.icon}
+                    active={isActivePath(pathname, item.href, activePersonalTab)}
+                    onNav={onNav}
+                    onHover={onHover}
+                    onClose={() => setMobileOpen(false)}
+                  />
                 ))}
               </div>
             </div>
