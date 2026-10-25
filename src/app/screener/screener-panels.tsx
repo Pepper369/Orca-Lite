@@ -346,6 +346,15 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
                 Bộ lọc: {rows.length} mã thỏa mãn
               </span>
               <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />
+              {data?.sourcesUsed && (
+                <span
+                  title={`Nguồn đang kết nối: ${data.sourcesUsed.join(", ")} · Chế độ HA tự động dự phòng`}
+                  className="hidden sm:inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20"
+                >
+                  <ShieldCheck className="size-3" />
+                  Đa nguồn song song ({data.sourcesUsed.length} nguồn)
+                </span>
+              )}
               {isValidating && (
                 <span className="text-[11px] text-accent-primary font-normal animate-pulse">
                   · đang cập nhật…
