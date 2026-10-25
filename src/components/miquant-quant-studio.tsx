@@ -38,6 +38,7 @@ import type {
   RankedStockItem,
   QuantBotDefinition,
   RebalancePlan,
+  QuantStrategyDefinition,
 } from "@/lib/engines/miquant-quant-engine";
 import type {
   MiQuantBreakoutStock,
@@ -52,7 +53,7 @@ import type {
 import { StockQuantFlowValuationWidget } from "@/components/stocks/quant-flow-valuation-widget";
 import { DeepFinancialsPanel } from "@/components/stocks/deep-financials-panel";
 
-type ActiveTab = "bots" | "ranking" | "signals";
+type ActiveTab = "bots" | "ranking" | "strategies" | "signals";
 
 export function MiQuantStudio() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("bots");
@@ -113,7 +114,14 @@ export function MiQuantStudio() {
     data: QuantBotDefinition[];
   }>("/api/v1/quant/bots", { refreshInterval: 120000 });
 
-  // 4. Fetch Stock Catalyst/Risk when inspectSymbol is active
+  // 4. Fetch Quant Strategies
+  const { data: strategiesData, isLoading: loadingStrategies, mutate: mutateStrategies } = useApi<{
+    data: QuantStrategyDefinition[];
+  }>("/api/v1/quant/strategies", { refreshInterval: 60000 });
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string>("strat_golden_cross");
+  const [strategyCategoryFilter, setStrategyCategoryFilter] = useState<string>("ALL");
+
+  // 5. Fetch Stock Catalyst/Risk when inspectSymbol is active
   const { data: stockInfoData, isLoading: loadingStockInfo } = useApi<{
     data: {
       symbol: string;
@@ -127,6 +135,12 @@ export function MiQuantStudio() {
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === selectedBotId) || bots[0],
     [bots, selectedBotId]
+  );
+
+  const strategies = strategiesData?.data || [];
+  const selectedStrategy = useMemo(
+    () => strategies.find((s) => s.id === selectedStrategyId) || strategies[0],
+    [strategies, selectedStrategyId]
   );
 
   const signals = signalsData?.data?.signals;
@@ -157,6 +171,7 @@ export function MiQuantStudio() {
     mutateSignals();
     mutatePicks();
     mutateBots();
+    mutateStrategies();
   };
 
   return (
@@ -331,6 +346,21 @@ export function MiQuantStudio() {
           <span>Bảng Xếp Hạng Đa Nhân Tố (AI Multi-Factor Ranking)</span>
           <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[9px] text-amber-300">
             Top {compositeRanked.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("strategies")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+            activeTab === "strategies"
+              ? "bg-accent-primary text-text-inverse shadow-sm"
+              : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
+          }`}
+        >
+          <Sparkles className="size-3.5" />
+          <span>Chiến Lược Định Lượng AI (Quant Strategies)</span>
+          <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
+            {strategies.length || 6} Mô Hình
           </span>
         </button>
 
@@ -811,6 +841,261 @@ export function MiQuantStudio() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB 3: QUANT INVESTMENT STRATEGIES */}
+      {activeTab === "strategies" && (
+        <div className="space-y-6">
+          {/* Strategy Categories Filter */}
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { id: "ALL", label: "Tất cả chiến lược" },
+              { id: "Trend Following", label: "Bám theo xu hướng (Trend)" },
+              { id: "Growth Momentum", label: "Tăng trưởng đà tăng (CANSLIM)" },
+              { id: "Smart Money", label: "Dòng tiền cá mập (Smart Money)" },
+              { id: "Deep Value", label: "Giá trị sâu (Magic Formula)" },
+              { id: "Income Dividend", label: "Cổ tức & Tiền mặt (Cash Cow)" },
+              { id: "Quality Banking", label: "Ngân hàng vàng (Bank Ratios)" },
+            ].map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setStrategyCategoryFilter(cat.id)}
+                className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                  strategyCategoryFilter === cat.id
+                    ? "bg-accent-primary text-text-inverse font-bold shadow-sm"
+                    : "border border-border/70 bg-bg-surface text-text-secondary hover:bg-border/30 hover:text-text-primary"
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Strategies Cards Grid */}
+          {loadingStrategies ? (
+            <Loading rows={4} />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {strategies
+                .filter(
+                  (s) =>
+                    strategyCategoryFilter === "ALL" ||
+                    s.category === strategyCategoryFilter
+                )
+                .map((s) => {
+                  const isSelected = s.id === selectedStrategyId;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => setSelectedStrategyId(s.id)}
+                      className={`cursor-pointer rounded-2xl border p-4 transition duration-200 shadow-sm space-y-3 ${
+                        isSelected
+                          ? "border-accent-primary bg-accent-primary/5 ring-1 ring-accent-primary/30"
+                          : "border-border/80 bg-bg-surface hover:border-accent-primary/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="rounded-md bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400">
+                          {s.category}
+                        </span>
+                        <span className="text-[10px] text-text-muted font-medium">
+                          {s.author_philosophy}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary">
+                          {s.name}
+                        </h3>
+                        <p className="mt-1 line-clamp-2 text-xs text-text-muted">
+                          {s.tagline}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 border-t border-border/50 pt-2 text-center text-xs">
+                        <div>
+                          <div className="text-[10px] text-text-muted">CAGR Est</div>
+                          <div className="font-mono font-bold text-emerald-400">
+                            +{s.cagr_est}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-text-muted">Win Rate</div>
+                          <div className="font-mono font-bold text-purple-400">
+                            {s.win_rate_est}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-text-muted">Cổ phiếu</div>
+                          <div className="font-mono font-bold text-accent-primary">
+                            {s.stocks.length} mã
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+
+          {/* Selected Strategy Deep Breakdown & Scanned Stocks Table */}
+          {selectedStrategy && (
+            <div className="space-y-5 rounded-2xl border border-border/80 bg-bg-surface p-5 shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-border/60 pb-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-lg bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-400">
+                      {selectedStrategy.category}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      Triết lý: <strong>{selectedStrategy.author_philosophy}</strong>
+                    </span>
+                  </div>
+                  <h3 className="mt-1 text-base font-bold text-text-primary">
+                    {selectedStrategy.name}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-text-muted">
+                    {selectedStrategy.description}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs font-mono">
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 px-3 py-1.5 text-center">
+                    <span className="block text-[10px] text-emerald-300">CAGR Kỳ Vọng</span>
+                    <strong className="text-sm text-emerald-400">+{selectedStrategy.cagr_est}%</strong>
+                  </div>
+                  <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 px-3 py-1.5 text-center">
+                    <span className="block text-[10px] text-purple-300">Tỷ Lệ Thắng</span>
+                    <strong className="text-sm text-purple-400">{selectedStrategy.win_rate_est}%</strong>
+                  </div>
+                  <div className="rounded-xl border border-blue-500/20 bg-blue-950/20 px-3 py-1.5 text-center">
+                    <span className="block text-[10px] text-blue-300">Chu Kỳ Đánh Giá</span>
+                    <strong className="text-xs text-blue-400">{selectedStrategy.rebalance}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Strategy Rules Breakdown */}
+              <div>
+                <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-text-secondary">
+                  <CheckCircle2 className="size-3.5 text-emerald-400" />
+                  Quy Tắc Lọc Định Lượng (Quant Screener Rules)
+                </h4>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {selectedStrategy.rules.map((rule, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 rounded-xl border border-border/50 bg-bg-base/50 px-3 py-2 text-xs text-text-secondary"
+                    >
+                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[10px] font-bold text-emerald-400">
+                        ✓
+                      </span>
+                      <span>{rule}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Scanned Stocks Table */}
+              <div>
+                <div className="flex items-center justify-between pb-2">
+                  <h4 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    <Sparkles className="size-3.5 text-amber-400" />
+                    Cổ Phiếu Đạt Chuẩn Thời Gian Thực ({selectedStrategy.stocks.length} mã)
+                  </h4>
+                  <span className="text-[10px] text-text-muted font-mono">
+                    Cập nhật thời gian thực từ MiQuant Data Engine
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-border/70">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-border/70 bg-bg-base/80 text-[11px] uppercase tracking-wider text-text-muted">
+                      <tr>
+                        <th className="px-3 py-2.5">Mã CK</th>
+                        <th className="px-3 py-2.5">Giá & Biến Động</th>
+                        <th className="px-3 py-2.5">Quant Score</th>
+                        <th className="px-3 py-2.5">Tín Hiệu</th>
+                        <th className="px-3 py-2.5">Chỉ Số Trọng Yếu</th>
+                        <th className="px-3 py-2.5">Động Lực (Catalyst)</th>
+                        <th className="px-3 py-2.5 text-right">Thao Tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/50">
+                      {selectedStrategy.stocks.map((stock) => (
+                        <tr
+                          key={stock.symbol}
+                          className="hover:bg-bg-base/50 transition duration-150"
+                        >
+                          <td className="px-3 py-3">
+                            <span className="font-bold text-accent-primary text-sm">
+                              {stock.symbol}
+                            </span>
+                            <span className="block text-[10px] text-text-muted truncate max-w-[140px]">
+                              {stock.name}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 font-mono">
+                            <div className="font-semibold">{fmtNum(stock.close)} đ</div>
+                            <Chg value={stock.pct_change * 100} />
+                          </td>
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`rounded px-1.5 py-0.5 font-mono text-xs font-bold ${
+                                  stock.quant_score >= 90
+                                    ? "bg-emerald-500/20 text-emerald-400"
+                                    : stock.quant_score >= 80
+                                    ? "bg-blue-500/20 text-blue-400"
+                                    : "bg-amber-500/20 text-amber-400"
+                                }`}
+                              >
+                                {stock.quant_score}/100
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                stock.signal === "BUY STRONG"
+                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                  : stock.signal === "ACCUMULATE"
+                                  ? "bg-blue-500/15 text-blue-400 border border-blue-500/30"
+                                  : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                              }`}
+                            >
+                              {stock.signal}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-[11px] font-mono text-text-secondary">
+                            <div className="space-y-0.5">
+                              {stock.metrics.pe && <div>P/E: <strong>{stock.metrics.pe}x</strong></div>}
+                              {stock.metrics.roe && <div>ROE: <strong className="text-emerald-400">{stock.metrics.roe}%</strong></div>}
+                              {stock.metrics.upside_pct && <div>Upside: <strong className="text-blue-400">+{stock.metrics.upside_pct}%</strong></div>}
+                              {stock.metrics.volume_ratio && <div>Vol: <strong>x{stock.metrics.volume_ratio.toFixed(1)}</strong></div>}
+                              {stock.metrics.money_flow_bil && <div>Dòng tiền: <strong className="text-emerald-400">+{stock.metrics.money_flow_bil} Tỷ</strong></div>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-[11px] text-text-muted max-w-[200px]">
+                            {stock.catalyst || "Mẫu hình kỹ thuật và dòng tiền đồng thuận bứt phá."}
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            <button
+                              onClick={() => setInspectSymbol(stock.symbol)}
+                              className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium text-accent-primary hover:bg-bg-base transition"
+                            >
+                              Phân tích AI & BCTC &rarr;
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
