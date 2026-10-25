@@ -50,6 +50,7 @@ import type {
   MiQuantFinancialCommentary,
 } from "@/lib/providers/miquant";
 import { StockQuantFlowValuationWidget } from "@/components/stocks/quant-flow-valuation-widget";
+import { DeepFinancialsPanel } from "@/components/stocks/deep-financials-panel";
 
 type ActiveTab = "bots" | "ranking" | "signals";
 
@@ -834,6 +835,9 @@ export function MiQuantStudio() {
 
             {/* Live Quantitative Flow & Valuation Chart */}
             <StockQuantFlowValuationWidget symbol={inspectSymbol} />
+
+            {/* Deep Financials: Bank Ratios (NIM/CASA/NPL) or Corporate Asset Composition */}
+            <DeepFinancialsPanel symbol={inspectSymbol} />
 
             {loadingStockInfo ? (
               <Loading rows={4} />

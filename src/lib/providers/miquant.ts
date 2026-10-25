@@ -205,6 +205,34 @@ export interface MiQuantFinancialCommentary {
   source: string;
 }
 
+export interface MiQuantBankRatiosItem {
+  year: number;
+  quarter: number;
+  symbol: string;
+  timestamp: string;
+  roa: number;
+  roe: number;
+  ldr: number;
+  nim: number;
+  casa: number;
+  npl: number;
+  llr: number;
+  customer_deposits_growth_yoy: number;
+  loans_to_customers_gross_growth_yoy: number;
+  loan_loss_reserve_ratio?: number;
+}
+
+export interface MiQuantAssetComposition {
+  totalAssets: number;
+  cash: number;
+  receivables: number;
+  inventory: number;
+  fixedAssets: number;
+  remaining: number;
+  year?: number;
+  quarter?: number;
+}
+
 export const MiQuantProvider = {
   /** Top breakout stocks from MiQuant */
   async getBreakoutStocks(): Promise<MiQuantBreakoutStock[]> {
@@ -386,5 +414,103 @@ export const MiQuantProvider = {
       600
     );
     return res ?? null;
+  },
+
+  /** Bank specific ratios (NIM, CASA, NPL, LLR, LDR) */
+  async getBankRatios(
+    symbol: string,
+    mode: "quarterly" | "annually" = "quarterly"
+  ): Promise<MiQuantBankRatiosItem[]> {
+    const res = await fetchWithCache<Record<string, Array<number | string>>>(
+      `${MIQUANT_BASE_URL}/finance/bank-ratios?symbol=${encodeURIComponent(
+        symbol.toUpperCase()
+      )}&quarter=${mode}`,
+      300
+    );
+
+    if (!res || !Array.isArray(res.year)) return [];
+
+    const items: MiQuantBankRatiosItem[] = [];
+    const len = res.year.length;
+
+    for (let i = 0; i < len; i++) {
+      items.push({
+        year: Number(res.year[i] || 0),
+        quarter: Number(res.quarter?.[i] || 0),
+        symbol: String(res.symbol?.[i] || symbol),
+        timestamp: String(res.timestamp?.[i] || ""),
+        roa: Number(res.roa?.[i] || 0),
+        roe: Number(res.roe?.[i] || 0),
+        ldr: Number(res.ldr?.[i] || 0),
+        nim: Number(res.nim?.[i] || 0),
+        casa: Number(res.casa?.[i] || 0),
+        npl: Number(res.npl?.[i] || 0),
+        llr: Number(res.llr?.[i] || 0),
+        customer_deposits_growth_yoy: Number(res.customer_deposits_growth_yoy?.[i] || 0),
+        loans_to_customers_gross_growth_yoy: Number(res.loans_to_customers_gross_growth_yoy?.[i] || 0),
+        loan_loss_reserve_ratio: Number(res.loan_loss_reserve_ratio?.[i] || 0),
+      });
+    }
+
+    return items;
+  },
+
+  /** Asset composition breakdown (Cash, Inventory, Receivables, Fixed Assets) */
+  async getAssetComposition(
+    symbol: string,
+    companyType = "SX",
+    year?: number,
+    quarter?: number
+  ): Promise<MiQuantAssetComposition | null> {
+    let y = year;
+    let q = quarter;
+
+    if (!y || !q) {
+      const periods = await fetchWithCache<Array<{ year: number; quarter: number }>>(
+        `${MIQUANT_BASE_URL}/finance/asset-composition-years-quarters?symbol=${encodeURIComponent(
+          symbol.toUpperCase()
+        )}&company_type=${companyType}`,
+        600
+      );
+      if (Array.isArray(periods) && periods.length > 0) {
+        const sorted = periods
+          .filter((p) => p.quarter <= 4)
+          .sort((a, b) => (b.year !== a.year ? b.year - a.year : b.quarter - a.quarter));
+        y = sorted[0]?.year || 2024;
+        q = sorted[0]?.quarter || 4;
+      } else {
+        y = 2024;
+        q = 4;
+      }
+    }
+
+    const res = await fetchWithCache<{
+      total_assets?: number[];
+      cash?: number[];
+      short_term_receivables?: number[];
+      total_inventories?: number[];
+      fixed_assets?: number[];
+      remaining?: number[];
+    }>(
+      `${MIQUANT_BASE_URL}/finance/asset-composition?symbol=${encodeURIComponent(
+        symbol.toUpperCase()
+      )}&year=${y}&quarter=${q}&company_type=${companyType}`,
+      300
+    );
+
+    if (!res || !Array.isArray(res.total_assets) || res.total_assets.length === 0) {
+      return null;
+    }
+
+    return {
+      totalAssets: Number(res.total_assets[0] || 0),
+      cash: Number(res.cash?.[0] || 0),
+      receivables: Number(res.short_term_receivables?.[0] || 0),
+      inventory: Number(res.total_inventories?.[0] || 0),
+      fixedAssets: Number(res.fixed_assets?.[0] || 0),
+      remaining: Number(res.remaining?.[0] || 0),
+      year: y,
+      quarter: q,
+    };
   },
 };

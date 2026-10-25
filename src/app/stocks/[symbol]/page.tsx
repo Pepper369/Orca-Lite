@@ -71,6 +71,21 @@ const StockQuantFlowValuationWidget = dynamic(
   }
 );
 
+const DeepFinancialsPanel = dynamic(
+  () =>
+    import("@/components/stocks/deep-financials-panel").then(
+      (m) => m.DeepFinancialsPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Phân tích chuyên sâu BCTC">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
@@ -470,14 +485,19 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       >
         <div className="stock-section-heading" id="sec-quant-title">
           <div>
-            <p className="stock-section-kicker">MiQuant Quantitative · Net Flow · Fair Value</p>
-            <h2>Dải định giá AI & Dòng tiền tích lũy lũy kế</h2>
+            <p className="stock-section-kicker">MiQuant Quantitative · Net Flow · Fair Value · Banking & Assets</p>
+            <h2>Dải định giá AI, Dòng tiền tích lũy & Phân rã BCTC</h2>
           </div>
           <span className="stock-section-index">03</span>
         </div>
-        <ErrorBoundary name="quant-flow" resetKey={detail.symbol}>
-          <StockQuantFlowValuationWidget symbol={detail.symbol} />
-        </ErrorBoundary>
+        <div className="space-y-4">
+          <ErrorBoundary name="quant-flow" resetKey={detail.symbol}>
+            <StockQuantFlowValuationWidget symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="deep-financials" resetKey={detail.symbol}>
+            <DeepFinancialsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+        </div>
       </section>
 
       <section
