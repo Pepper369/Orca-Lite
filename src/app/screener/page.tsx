@@ -10,6 +10,7 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "stocks"
+  | "ma-cross"
   | "sector-flow"
   | "four-m"
   | "canslim"
@@ -25,6 +26,7 @@ type Universe =
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
+  { id: "ma-cross", label: "Đường MA (Golden/Death Cross) 📈" },
   { id: "sector-flow", label: "Dòng tiền ngành 🌊" },
   { id: "four-m", label: "Bộ lọc 4M 💎" },
   { id: "canslim", label: "CANSLIM" },
@@ -100,6 +102,10 @@ const SectorFlowScreener = dynamic(
   () => import("@/components/sector-flow-screener").then((m) => m.SectorFlowScreener),
   { ssr: false, loading: PanelFallback },
 );
+const MaScreener = dynamic(
+  () => import("@/components/ma-screener").then((m) => m.MaScreener),
+  { ssr: false, loading: PanelFallback },
+);
 
 function SoftPanel({
   name,
@@ -135,6 +141,9 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "ma-cross":
+      body = <MaScreener defaultSector={sector} />;
+      break;
     case "sector-flow":
       body = <SectorFlowScreener />;
       break;
@@ -198,7 +207,8 @@ function ScreenerInner() {
                   onClick={() => setUniverse(tab.id)}
                   onMouseEnter={() => {
                     // P5-A: warm screener API on tab hover
-                    if (tab.id === "fundamental") prefetchApi("/api/v1/screener/fundamental", 12_000);
+                    if (tab.id === "ma-cross") prefetchApi("/api/v1/screener/ma-cross", 10_000);
+                    else if (tab.id === "fundamental") prefetchApi("/api/v1/screener/fundamental", 12_000);
                     else if (tab.id === "valuation") prefetchApi("/api/v1/screener/valuation", 12_000);
                     else if (tab.id === "crypto") prefetchApi("/api/v1/crypto/markets?limit=120", 8_000);
                   }}
