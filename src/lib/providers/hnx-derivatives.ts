@@ -329,7 +329,190 @@ export async function fetchExternalDerivativeQuote(symbol: string): Promise<Deri
 }
 
 /**
- * Best-effort quote: SSI DER → external URL → VNDirect Dchart / Yahoo → null.
+ * Entrade DNSE public derivative feed (Zero-Key).
+ * Hỗ trợ VN30F1M, VN30F2M, VN30F1Q, VN30F2Q.
+ */
+export async function fetchEntradeDerivativeQuote(symbol: string): Promise<DerivativeQuote | null> {
+  const sym = symbol.toUpperCase();
+  if (sym.includes("=F")) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fromSec = nowSec - 86_400 * 5;
+  const url = `https://services.entrade.com.vn/chart-api/v2/ohlcs/derivative?symbol=${encodeURIComponent(sym)}&resolution=1&from=${fromSec}&to=${nowSec}`;
+
+  try {
+    const res = await httpJson<{
+      t?: number[];
+      c?: number[];
+      o?: number[];
+      h?: number[];
+      l?: number[];
+      v?: number[];
+    }>(url, {
+      provider: "entrade-derivatives",
+      timeoutMs: 6_000,
+      retries: 1,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    if (res.ok && res.data && Array.isArray(res.data.t) && res.data.t.length) {
+      const { t, c, o, h, l, v } = res.data;
+      const len = t.length;
+      const last = Number(c?.[len - 1]) || 0;
+      if (last > 0) {
+        const first = Number(o?.[0]) || last;
+        const prevClose = Number(c?.[0]) || first;
+        const high = Math.max(...(h ?? [last]));
+        const low = Math.min(...(l ?? [last]));
+        const volume = (v ?? []).reduce((acc, val) => acc + (Number(val) || 0), 0);
+        const change = Math.round((last - prevClose) * 10) / 10;
+        const changePercent = prevClose > 0 ? Math.round(((last - prevClose) / prevClose) * 10000) / 100 : 0;
+        const updatedAt = new Date(t[len - 1] * 1000).toISOString();
+
+        return {
+          symbol: sym,
+          last,
+          change,
+          changePercent,
+          open: Number(o?.[len - 1]) || first,
+          high,
+          low,
+          volume,
+          openInterest: null,
+          settlement: last,
+          mark: last,
+          ceiling: Math.round(prevClose * 1.07 * 10) / 10,
+          floor: Math.round(prevClose * 0.93 * 10) / 10,
+          reference: prevClose,
+          updatedAt,
+          source: "entrade-public",
+        };
+      }
+    }
+  } catch {
+    /* fallback */
+  }
+
+  // Fallback sang resolution 1D
+  try {
+    const dayUrl = `https://services.entrade.com.vn/chart-api/v2/ohlcs/derivative?symbol=${encodeURIComponent(sym)}&resolution=1D&from=${nowSec - 86_400 * 30}&to=${nowSec}`;
+    const dayRes = await httpJson<{
+      t?: number[];
+      c?: number[];
+      o?: number[];
+      h?: number[];
+      l?: number[];
+      v?: number[];
+    }>(dayUrl, {
+      provider: "entrade-derivatives",
+      timeoutMs: 6_000,
+      retries: 1,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0",
+      },
+    });
+
+    if (dayRes.ok && dayRes.data && Array.isArray(dayRes.data.t) && dayRes.data.t.length) {
+      const { t, c, o, h, l, v } = dayRes.data;
+      const len = t.length;
+      const last = Number(c?.[len - 1]) || 0;
+      const prevClose = len >= 2 ? Number(c?.[len - 2]) || last : last;
+      const change = Math.round((last - prevClose) * 10) / 10;
+      const changePercent = prevClose > 0 ? Math.round(((last - prevClose) / prevClose) * 10000) / 100 : 0;
+
+      return {
+        symbol: sym,
+        last,
+        change,
+        changePercent,
+        open: Number(o?.[len - 1]) || last,
+        high: Number(h?.[len - 1]) || last,
+        low: Number(l?.[len - 1]) || last,
+        volume: Number(v?.[len - 1]) || 0,
+        openInterest: null,
+        settlement: last,
+        mark: last,
+        ceiling: Math.round(prevClose * 1.07 * 10) / 10,
+        floor: Math.round(prevClose * 0.93 * 10) / 10,
+        reference: prevClose,
+        updatedAt: new Date(t[len - 1] * 1000).toISOString(),
+        source: "entrade-public-1d",
+      };
+    }
+  } catch {
+    /* continue */
+  }
+
+  return null;
+}
+
+export async function fetchEntradeDerivativeOhlcv(
+  symbol: string,
+  days = 60
+): Promise<OhlcvBar[]> {
+  const sym = symbol.toUpperCase();
+  if (sym.includes("=F")) return [];
+
+  const limit = Math.min(Math.max(days, 5), 250);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const fromSec = nowSec - limit * 86_400 * 2;
+  const url = `https://services.entrade.com.vn/chart-api/v2/ohlcs/derivative?symbol=${encodeURIComponent(sym)}&resolution=1D&from=${fromSec}&to=${nowSec}`;
+
+  try {
+    const res = await httpJson<{
+      t?: number[];
+      c?: number[];
+      o?: number[];
+      h?: number[];
+      l?: number[];
+      v?: number[];
+    }>(url, {
+      provider: "entrade-derivatives",
+      timeoutMs: 8_000,
+      retries: 2,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0",
+      },
+    });
+
+    if (!res.ok || !res.data || !Array.isArray(res.data.t) || !res.data.t.length) {
+      return [];
+    }
+
+    const { t, c, o, h, l, v } = res.data;
+    const bars: OhlcvBar[] = [];
+    for (let i = 0; i < t.length; i++) {
+      const time = t[i] * 1000;
+      const close = c?.[i];
+      const open = o?.[i] ?? close;
+      const high = h?.[i] ?? close;
+      const low = l?.[i] ?? close;
+      const volume = v?.[i] ?? 0;
+      if (time > 0 && close != null && close > 0) {
+        bars.push({
+          time,
+          open: Number(open),
+          high: Number(high),
+          low: Number(low),
+          close: Number(close),
+          volume: Number(volume),
+        });
+      }
+    }
+    bars.sort((a, b) => a.time - b.time);
+    return bars.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Best-effort quote: SSI DER → external URL → Entrade Zero-key Public → VNDirect Dchart / Yahoo → null.
  */
 export async function getDerivativeMarketQuote(symbol: string): Promise<DerivativeQuote | null> {
   const sym = symbol.toUpperCase();
@@ -346,6 +529,12 @@ export async function getDerivativeMarketQuote(symbol: string): Promise<Derivati
     /* continue */
   }
   try {
+    const ent = await fetchEntradeDerivativeQuote(sym);
+    if (ent) return ent;
+  } catch {
+    /* continue */
+  }
+  try {
     const vnd = await fetchVndirectDerivativeQuote(sym);
     if (vnd) return vnd;
   } catch {
@@ -353,6 +542,7 @@ export async function getDerivativeMarketQuote(symbol: string): Promise<Derivati
   }
   return null;
 }
+
 
 export async function getDerivativeMarketQuotes(
   symbols: string[],
@@ -482,11 +672,19 @@ export async function fetchDerivativeOhlcv(
   }
 
   try {
+    const entBars = await fetchEntradeDerivativeOhlcv(sym, limit);
+    if (entBars.length) return entBars;
+  } catch {
+    /* continue */
+  }
+
+  try {
     const vndBars = await fetchVndirectDerivativeOhlcv(sym, limit);
     if (vndBars.length) return vndBars;
   } catch {
     /* continue */
   }
+
 
   if (sym.includes("=F")) {
     try {

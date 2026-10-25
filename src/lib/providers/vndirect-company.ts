@@ -420,3 +420,146 @@ export async function getVndOutstandingShares(
     source: snap.source,
   };
 }
+
+export interface VndComprehensiveRatios {
+  symbol: string;
+  reportDate: string | null;
+  // Valuation Multiples
+  pe: number | null;
+  pb: number | null;
+  ps: number | null;
+  evEbitda: number | null;
+  eps: number | null;
+  bvps: number | null;
+  roe: number | null;
+  roa: number | null;
+  dividendYield: number | null;
+  marketCap: number | null;
+  // 52-Week Range
+  high52w: number | null;
+  low52w: number | null;
+  pctFromHigh52w: number | null;
+  pctFromLow52w: number | null;
+  // Ownership Structure
+  freeFloatPct: number | null;
+  internalOwnershipPct: number | null;
+  stateOwnershipPct: number | null;
+  // Historical Averages
+  peAvg3y: number | null;
+  pbAvg6m: number | null;
+  pbAvg3y: number | null;
+  divYield1m: number | null;
+  // Risk & Liquidity
+  beta: number | null;
+  avgVol20d: number | null;
+  avgVal20d: number | null;
+  // Multi-Timeframe Price Changes (in %)
+  priceChg1m: number | null;
+  priceChg3m: number | null;
+  priceChg6m: number | null;
+  priceChg1y: number | null;
+  priceChg3y: number | null;
+  priceChg5y: number | null;
+  // Shares
+  totalShares: number | null;
+  outstandingShares: number | null;
+  listedShares: number | null;
+  source: string;
+}
+
+/**
+ * Kho 166 chỉ số tài chính tính sẵn chuyên sâu từ VNDirect v4 ratios.
+ */
+export async function getVndComprehensiveRatios(symbol: string): Promise<VndComprehensiveRatios | null> {
+  const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!sym) return null;
+
+  try {
+    const payload = (
+      await vndirectJson<{ data?: Record<string, unknown>[] }>(
+        `/v4/ratios?q=code:${encodeURIComponent(sym)}&size=80&sort=reportDate:desc`,
+        {
+          provider: VND,
+          timeoutMs: 8_000,
+          retries: 1,
+          accept: (val) => Array.isArray(val.data) && val.data.length > 0,
+        },
+      )
+    ).data;
+
+    const rows = payload.data ?? [];
+    if (!rows.length) return null;
+
+    const n = (v: unknown) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : null;
+    };
+
+    let reportDate: string | null = null;
+    const rMap = new Map<string, number>();
+
+    for (const r of rows) {
+      const code = String(r.ratioCode ?? "").toUpperCase();
+      const val = n(r.value);
+      if (val != null && !rMap.has(code)) {
+        rMap.set(code, val);
+      }
+      if (!reportDate && typeof r.reportDate === "string") {
+        reportDate = r.reportDate;
+      }
+    }
+
+    const pct = (val: number | undefined) => {
+      if (val == null) return null;
+      return Math.round(val * 10000) / 100; // 0.4831 -> 48.31%
+    };
+
+    return {
+      symbol: sym,
+      reportDate,
+      pe: rMap.get("PRICE_TO_EARNINGS") ?? null,
+      pb: rMap.get("PRICE_TO_BOOK") ?? null,
+      ps: rMap.get("PRICE_TO_SALES") ?? null,
+      evEbitda: rMap.get("EV_EBITDA") ?? null,
+      eps: rMap.get("EPS") ?? null,
+      bvps: rMap.get("BVPS_CR") ?? rMap.get("BVPS") ?? null,
+      roe: rMap.get("ROE") ? Math.round((rMap.get("ROE")! > 1 ? rMap.get("ROE")! : rMap.get("ROE")! * 100) * 100) / 100 : null,
+      roa: rMap.get("ROA") ? Math.round((rMap.get("ROA")! > 1 ? rMap.get("ROA")! : rMap.get("ROA")! * 100) * 100) / 100 : null,
+      dividendYield: pct(rMap.get("DIVIDEND_YIELD")),
+      marketCap: rMap.get("MARKETCAP") ?? null,
+
+      high52w: rMap.get("PRICE_HIGHEST_CR_52W") ?? null,
+      low52w: rMap.get("PRICE_LOWEST_CR_52W") ?? null,
+      pctFromHigh52w: pct(rMap.get("PRICE_CHG_PCT_CR_HH52W")),
+      pctFromLow52w: pct(rMap.get("PRICE_CHG_PCT_CR_LL52W")),
+
+      freeFloatPct: pct(rMap.get("FREEFLOAT")),
+      internalOwnershipPct: pct(rMap.get("TOTAL_INTERNAL_OWNERSHIP")),
+      stateOwnershipPct: pct(rMap.get("STATE_OWNERSHIP")),
+
+      peAvg3y: rMap.get("PRICE_TO_EARNINGS_AVG_CR_3Y") ? Math.round(rMap.get("PRICE_TO_EARNINGS_AVG_CR_3Y")! * 100) / 100 : null,
+      pbAvg6m: rMap.get("PRICE_TO_BOOK_AVG_CR_6M") ? Math.round(rMap.get("PRICE_TO_BOOK_AVG_CR_6M")! * 100) / 100 : null,
+      pbAvg3y: rMap.get("PRICE_TO_BOOK_AVG_CR_3Y") ? Math.round(rMap.get("PRICE_TO_BOOK_AVG_CR_3Y")! * 100) / 100 : null,
+      divYield1m: pct(rMap.get("DIVIDEND_YIELD_AVG_CR_1M")),
+
+      beta: rMap.get("BETA") ? Math.round(rMap.get("BETA")! * 100) / 100 : null,
+      avgVol20d: rMap.get("NMVOLUME_AVG_CR_20D") ?? null,
+      avgVal20d: rMap.get("NMVALUE_AVG_CR_20D") ?? null,
+
+      priceChg1m: pct(rMap.get("PRICE_CHG_PCT_CR_1M")),
+      priceChg3m: pct(rMap.get("PRICE_CHG_PCT_CR_3M")),
+      priceChg6m: pct(rMap.get("PRICE_CHG_PCT_CR_6M")),
+      priceChg1y: pct(rMap.get("PRICE_CHG_PCT_CR_1Y")),
+      priceChg3y: pct(rMap.get("PRICE_CHG_PCT_CR_3Y")),
+      priceChg5y: pct(rMap.get("PRICE_CHG_PCT_CR_5Y")),
+
+      totalShares: rMap.get("TOTAL_SHARES") ?? null,
+      outstandingShares: rMap.get("OUTSTANDING_SHARES") ?? null,
+      listedShares: rMap.get("LISTED_SHARES") ?? null,
+      source: "vndirect-ratios-v4",
+    };
+  } catch {
+    return null;
+  }
+}
+

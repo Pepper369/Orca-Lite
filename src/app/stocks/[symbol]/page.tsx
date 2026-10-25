@@ -116,6 +116,22 @@ const AnalyticReportsPanel = dynamic(
   }
 );
 
+const ComprehensiveRatiosPanel = dynamic(
+  () =>
+    import("@/components/stocks/comprehensive-ratios-panel").then(
+      (m) => m.ComprehensiveRatiosPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Chỉ số tài chính chuyên sâu & Định giá 3 năm">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
+
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
@@ -527,6 +543,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           </ErrorBoundary>
           <ErrorBoundary name="deep-financials" resetKey={detail.symbol}>
             <DeepFinancialsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="comprehensive-ratios" resetKey={detail.symbol}>
+            <ComprehensiveRatiosPanel symbol={detail.symbol} />
           </ErrorBoundary>
           <ErrorBoundary name="shareholders" resetKey={detail.symbol}>
             <ShareholdersPanel symbol={detail.symbol} />
