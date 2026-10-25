@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, use, type ReactNode } from "react";
 import { prefetchApi, useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import { AddToWatchlist } from "@/components/watchlist-button";
@@ -16,7 +16,8 @@ export default function StockSymbolLayout({
   children: ReactNode;
   params: Promise<{ symbol: string }>;
 }) {
-  const [symbol, setSymbol] = useState("");
+  const resolvedParams = use(params);
+  const symbol = resolvedParams.symbol.toUpperCase();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
   const [liveTick, setLiveTick] = useState<{
@@ -26,10 +27,6 @@ export default function StockSymbolLayout({
     low?: number | null;
     ts: number;
   } | null>(null);
-
-  useEffect(() => {
-    params.then((p) => setSymbol(p.symbol.toUpperCase()));
-  }, [params]);
 
   // Realtime live tick polling from VNDirect/VPS provider
   useEffect(() => {

@@ -120,6 +120,8 @@ export interface VpsForeignFlow {
   netVolume: number | null;
   netValue: number | null;
   foreignRoom: number | null;
+  buyRatioPct: number;
+  rightInfos: Array<{ contentVi: string; contentEn?: string }>;
   updatedAt: string;
 }
 
@@ -127,7 +129,7 @@ export interface VpsForeignFlow {
 export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow | null> {
   const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!sym) return null;
-  const res = await httpJson<VpsRow[]>(`${BASE}/getliststockdata/${sym}`, {
+  const res = await httpJson<Array<VpsRow & { rightInfos?: Array<{ contentVi: string; contentEn?: string }> }>>(`${BASE}/getliststockdata/${sym}`, {
     provider: "vps",
     timeoutMs: 4_500,
     retries: 1,
@@ -151,6 +153,10 @@ export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow 
   const netVol = buyVol != null && sellVol != null ? buyVol - sellVol : null;
   const netVal = buyVal != null && sellVal != null ? buyVal - sellVal : null;
 
+  const totalVol = (buyVol ?? 0) + (sellVol ?? 0);
+  const buyRatioPct = totalVol > 0 ? Math.round(((buyVol ?? 0) / totalVol) * 10000) / 100 : 50;
+  const rightInfos = Array.isArray(r.rightInfos) ? r.rightInfos : [];
+
   return {
     symbol: sym,
     buyVolume: buyVol,
@@ -160,6 +166,9 @@ export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow 
     netVolume: netVol,
     netValue: netVal,
     foreignRoom: room,
+    buyRatioPct,
+    rightInfos,
     updatedAt: new Date().toISOString(),
   };
 }
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState, useRef } from "react";
+import { memo, useEffect, useMemo, useState, useRef, use } from "react";
 import dynamic from "next/dynamic";
 import { useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
@@ -116,6 +116,31 @@ const AnalyticReportsPanel = dynamic(
   }
 );
 
+const SignedDisclosuresPanel = dynamic(
+  () =>
+    import("@/components/stocks/signed-disclosures-panel").then(
+      (m) => m.SignedDisclosuresPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Văn bản BCTC & Công văn ký số HOSE/HNX">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
+const ForeignPressureGauge = dynamic(
+  () =>
+    import("@/components/stocks/foreign-pressure-gauge").then(
+      (m) => m.ForeignPressureGauge
+    ),
+  {
+    ssr: false,
+  }
+);
+
 const ComprehensiveRatiosPanel = dynamic(
   () =>
     import("@/components/stocks/comprehensive-ratios-panel").then(
@@ -131,13 +156,43 @@ const ComprehensiveRatiosPanel = dynamic(
   }
 );
 
+const InsiderTradingPanel = dynamic(
+  () =>
+    import("@/components/stocks/insider-trading-panel").then(
+      (m) => m.InsiderTradingPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Giao dịch người nội bộ & Ban lãnh đạo">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
+const BusinessGoalsPanel = dynamic(
+  () =>
+    import("@/components/stocks/business-goals-panel").then(
+      (m) => m.BusinessGoalsPanel
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Tiến độ thực hiện kế hoạch ĐHĐCĐ">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
 
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
   { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
   { id: "sec-quant", label: "Định lượng, BCTC & Cổ đông" },
   { id: "sec-audit", label: "AI Quick Audit" },
-  { id: "sec-deep", label: "Báo cáo phân tích & Tin tức" },
+  { id: "sec-deep", label: "Báo cáo phân tích & Công văn ký số" },
 ] as const;
 
 
@@ -300,13 +355,10 @@ const MetricChip = memo(function MetricChip({
 });
 
 export default function StockDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
-  const [symbol, setSymbol] = useState("");
+  const resolvedParams = use(params);
+  const symbol = resolvedParams.symbol.toUpperCase();
   const [activeSection, setActiveSection] = useState<string>(SECTION_NAV[0].id);
   const navRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    params.then((p) => setSymbol(p.symbol.toUpperCase()));
-  }, [params]);
 
   const { res, data, meta, isLoading, isValidating, mutate } = useApi<VnStockDetail>(
     symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}` : null,
@@ -477,10 +529,15 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       <section id="sec-chart" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
-            <p className="stock-section-kicker">Depth · Chart · Breadth</p>
-            <h2>Sổ lệnh · Biểu đồ · Độ rộng</h2>
+            <p className="stock-section-kicker">Depth · Chart · Breadth · VPS Live Flow</p>
+            <h2>Sổ lệnh · Biểu đồ · Dòng tiền ngoại & Độ rộng</h2>
           </div>
           <span className="stock-section-index">01</span>
+        </div>
+        <div className="mb-3">
+          <ErrorBoundary name="foreign-gauge" resetKey={detail.symbol}>
+            <ForeignPressureGauge symbol={detail.symbol} />
+          </ErrorBoundary>
         </div>
         <div className="stock-chart-trio-grid">
           <div className="stock-side-depth">
@@ -550,6 +607,12 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           <ErrorBoundary name="shareholders" resetKey={detail.symbol}>
             <ShareholdersPanel symbol={detail.symbol} />
           </ErrorBoundary>
+          <ErrorBoundary name="insider-trading" resetKey={detail.symbol}>
+            <InsiderTradingPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="business-goals" resetKey={detail.symbol}>
+            <BusinessGoalsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
         </div>
       </section>
 
@@ -574,14 +637,17 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       <section id="sec-deep" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
-            <p className="stock-section-kicker">VNDirect Research & News</p>
-            <h2>Báo cáo phân tích, Tin tức & Cảm xúc thị trường</h2>
+            <p className="stock-section-kicker">VNDirect Research & Official HOSE/HNX Disclosures</p>
+            <h2>Báo cáo phân tích, Văn bản ký số & Tin tức thị trường</h2>
           </div>
           <span className="stock-section-index">05</span>
         </div>
         <div className="space-y-4">
           <ErrorBoundary name="analytic-reports" resetKey={detail.symbol}>
             <AnalyticReportsPanel symbol={detail.symbol} />
+          </ErrorBoundary>
+          <ErrorBoundary name="signed-disclosures" resetKey={detail.symbol}>
+            <SignedDisclosuresPanel symbol={detail.symbol} />
           </ErrorBoundary>
           <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
             <StockNewsSentiment symbol={detail.symbol} />

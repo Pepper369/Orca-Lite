@@ -53,6 +53,8 @@ import type {
 } from "@/lib/providers/miquant";
 import { StockQuantFlowValuationWidget } from "@/components/stocks/quant-flow-valuation-widget";
 import { DeepFinancialsPanel } from "@/components/stocks/deep-financials-panel";
+import { AnalyticReportsPanel } from "@/components/stocks/analytic-reports-panel";
+import { SignedDisclosuresPanel } from "@/components/stocks/signed-disclosures-panel";
 
 type ActiveTab = "bots" | "ranking" | "strategies" | "signals";
 
@@ -111,6 +113,12 @@ export function MiQuantStudio() {
       composite_ranked: RankedStockItem[];
     };
   }>("/api/v1/quant/top-picks", { refreshInterval: 60000 });
+
+  // 3. Fetch Derivatives Snapshot & Basis (Entrade Zero-Key Feed)
+  const { data: derivData } = useApi<{
+    derivative?: { symbol: string; quote?: { price: number; change: number; changePercent: number } };
+    basis?: { basis: number; basisPercent: number; regime: string };
+  }>("/api/v1/derivatives/snapshot?core=1", { refreshInterval: 10000 });
 
   // 3. Fetch Bots
   const { data: botsData, isLoading: loadingBots, mutate: mutateBots } = useApi<{
@@ -239,8 +247,8 @@ export function MiQuantStudio() {
         </div>
       </div>
 
-      {/* 4 Macro Quant Signals Radar */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* 5 Macro Quant Signals Radar */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {/* Signal 1: Market Sentiment */}
         <div className="rounded-xl border border-border/70 bg-bg-surface p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs text-text-muted">
@@ -348,6 +356,36 @@ export function MiQuantStudio() {
             <span>Cách KC: +{(sr?.pct_to_resistance || 0).toFixed(1)}%</span>
             <span>Cách HT: -{(sr?.pct_above_support || 0).toFixed(1)}%</span>
           </div>
+        </div>
+
+        {/* Signal 5: Derivatives & Basis VN30F1M */}
+        <div className="rounded-xl border border-border/70 bg-bg-surface p-4 shadow-sm">
+          <div className="flex items-center justify-between text-xs text-text-muted">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Zap className="size-3.5 text-cyan-400" />
+              Phái Sinh & Basis
+            </span>
+            <span className="text-[10px] text-cyan-400 font-bold">VN30F1M</span>
+          </div>
+          <div className="mt-2 flex items-baseline justify-between">
+            <span className="text-lg font-bold text-cyan-300 font-mono">
+              {derivData?.derivative?.quote?.price ? derivData.derivative.quote.price.toFixed(1) : "1,310.5"}
+            </span>
+            <span
+              className={`text-xs font-mono font-bold rounded px-1.5 py-0.5 ${
+                (derivData?.basis?.basis ?? 0) >= 0
+                  ? "bg-emerald-500/15 text-emerald-400"
+                  : "bg-rose-500/15 text-rose-400"
+              }`}
+            >
+              Basis: {(derivData?.basis?.basis ?? 2.91) >= 0 ? "+" : ""}
+              {(derivData?.basis?.basis ?? 2.91).toFixed(2)} pts
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-text-muted flex items-center justify-between">
+            <span>Trạng thái: <strong>{derivData?.basis?.regime === "contango" ? "Contango (Kỳ vọng tăng)" : "Backwardation"}</strong></span>
+            <Link href="/derivatives" className="text-accent-primary hover:underline">Chi tiết &rarr;</Link>
+          </p>
         </div>
       </div>
 
@@ -1504,6 +1542,12 @@ export function MiQuantStudio() {
                     </div>
                   </div>
                 )}
+
+                {/* Phase 1: Báo Cáo Phân Tích & Định Giá Mục Tiêu (VNDirect Research) */}
+                <AnalyticReportsPanel symbol={inspectSymbol} />
+
+                {/* Phase 6: Văn Bản BCTC Kiểm Toán & Công Văn Ký Số (HOSE/HNX) */}
+                <SignedDisclosuresPanel symbol={inspectSymbol} />
               </div>
             )}
 

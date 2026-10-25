@@ -190,3 +190,101 @@ export async function getVndCompanyNews(symbol: string, size = 20): Promise<News
   return out;
 }
 
+export interface DisclosureAttachment {
+  name: string;
+  url: string;
+  sourceUrl?: string | null;
+}
+
+export interface SignedDisclosureDocument {
+  id: string;
+  symbol: string;
+  title: string;
+  date: string | null;
+  time: string | null;
+  source: string;
+  type: string;
+  newsUrl: string;
+  attachments: DisclosureAttachment[];
+}
+
+/**
+ * Lấy văn bản BCTC kiểm toán, công văn giải trình và nghị quyết HĐQT ký số chính thức (HOSE/HNX).
+ */
+export async function getVndSignedDisclosures(symbol: string, size = 25): Promise<SignedDisclosureDocument[]> {
+  const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!sym) return [];
+  const n = Math.max(1, Math.min(50, Math.floor(size)));
+
+  // Gọi song song BCTC (financialstatement) và Công bố thông tin (disclosure)
+  const [resFs, resDisc] = await Promise.allSettled([
+    vndirectJson<{ data?: Row[] }>(
+      `/v4/news?q=tagCodes:${sym}~newsType:financialstatement&sort=newsDate:desc~newsTime:desc&size=${Math.round(n / 2)}`,
+      { provider: VND_NEWS, timeoutMs: 7_000, retries: 1, accept: (v) => Array.isArray(v?.data) }
+    ),
+    vndirectJson<{ data?: Row[] }>(
+      `/v4/news?q=tagCodes:${sym}~newsGroup:disclosure&sort=newsDate:desc~newsTime:desc&size=${n}`,
+      { provider: VND_NEWS, timeoutMs: 7_000, retries: 1, accept: (v) => Array.isArray(v?.data) }
+    ),
+  ]);
+
+  const rawRows: Row[] = [];
+  if (resFs.status === "fulfilled" && Array.isArray(resFs.value.data.data)) {
+    rawRows.push(...resFs.value.data.data);
+  }
+  if (resDisc.status === "fulfilled" && Array.isArray(resDisc.value.data.data)) {
+    rawRows.push(...resDisc.value.data.data);
+  }
+
+  const seenIds = new Set<string>();
+  const out: SignedDisclosureDocument[] = [];
+
+  for (const row of rawRows) {
+    const title = str(row.newsTitle) ?? str(row.title) ?? str(row.headline);
+    if (!title) continue;
+    const id = str(row.newsId) ?? str(row.id) ?? createHash("sha1").update(`${sym}|${title}`).digest("hex").slice(0, 16);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const attachments: DisclosureAttachment[] = [];
+    if (Array.isArray(row.attachments)) {
+      for (const att of row.attachments) {
+        if (!att || typeof att !== "object") continue;
+        const u = str((att as any).url) ?? str((att as any).sourceUrl);
+        const name = str((att as any).name) ?? "Tài liệu đính kèm";
+        if (u) {
+          attachments.push({
+            name,
+            url: u,
+            sourceUrl: str((att as any).sourceUrl),
+          });
+        }
+      }
+    }
+
+    const rawUrl = str(row.newsSourceLink) ?? str(row.newsUrl) ?? str(row.url) ?? str(row.link);
+    const newsUrl = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : dstockNewsUrl(sym);
+
+    out.push({
+      id: `vnd-disc-${id}`,
+      symbol: sym,
+      title,
+      date: str(row.newsDate) ?? str(row.date) ?? null,
+      time: str(row.newsTime) ?? str(row.time) ?? null,
+      source: str(row.newsSource) ?? str(row.source) ?? "HOSE/HNX",
+      type: str(row.newsType) ?? "disclosure",
+      newsUrl,
+      attachments,
+    });
+  }
+
+  // Sắp xếp theo ngày giảm dần
+  out.sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : 0;
+    const db = b.date ? new Date(b.date).getTime() : 0;
+    return db - da;
+  });
+
+  return out.slice(0, n);
+}
+

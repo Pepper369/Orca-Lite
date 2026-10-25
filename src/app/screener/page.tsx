@@ -9,10 +9,12 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
+  | "multi-source"
   | "stocks"
   | "miquant-quant"
   | "ma-cross"
   | "sector-flow"
+  | "rrg-rotation"
   | "four-m"
   | "canslim"
   | "crypto"
@@ -26,6 +28,8 @@ type Universe =
   | "alpha-beta";
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
+  { id: "multi-source", label: "Đa Nguồn Pro (Research · Vietcap · VPS) 🔥" },
+  { id: "rrg-rotation", label: "Vòng xoay RRG Ngành 🌀" },
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
   { id: "miquant-quant", label: "MiQuant AI Bot & Quant 🤖⚡" },
   { id: "ma-cross", label: "Đường MA (Golden/Death Cross) 📈" },
@@ -46,12 +50,20 @@ const UNIVERSE_TABS: { id: Universe; label: string }[] = [
 function parseUniverse(raw: string | null): Universe {
   const allowed = new Set(UNIVERSE_TABS.map((t) => t.id));
   if (raw && allowed.has(raw as Universe)) return raw as Universe;
-  return "stocks";
+  return "multi-source";
 }
 
 const PanelFallback = () => <Loading rows={6} />;
 
 /** Lazy panels — one broken module cannot take down the whole /screener route. */
+const MultiSourceScreener = dynamic(
+  () => import("@/components/multi-source-screener").then((m) => m.MultiSourceScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const RrgChart = dynamic(
+  () => import("@/components/rrg-chart").then((m) => m.RrgChart),
+  { ssr: false, loading: PanelFallback },
+);
 const MiQuantStudio = dynamic(
   () => import("@/components/miquant-quant-studio").then((m) => m.MiQuantStudio),
   { ssr: false, loading: PanelFallback },
@@ -147,6 +159,9 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "multi-source":
+      body = <MultiSourceScreener />;
+      break;
     case "miquant-quant":
       body = <MiQuantStudio />;
       break;
@@ -155,6 +170,9 @@ function ScreenerInner() {
       break;
     case "sector-flow":
       body = <SectorFlowScreener />;
+      break;
+    case "rrg-rotation":
+      body = <RrgChart />;
       break;
     case "four-m":
       body = <FourMScreener defaultSector={sector} />;
