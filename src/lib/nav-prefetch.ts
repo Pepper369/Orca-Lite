@@ -20,7 +20,7 @@ export function prefetchRouteApis(href: string): void {
     apis.push("/api/v1/commodities");
   } else if (path === "/screener" || path.startsWith("/screener")) {
     apis.push(
-      "/api/v1/stocks?symbols=VCB,BID,CTG,TCB,MBB,VPB,ACB,STB,HDB,VIB,LPB,SHB,FPT,HPG,VNM,VIC,VHM,VRE,NVL,PDR,GAS,PLX,MSN,MWG,SSI,VND,HCM,VCI,SHS,BSR,POW,REE,KDH,DXG,DCM,DPM,DGC,VHC,SAB,PNJ,GMD",
+      "/api/v1/stocks/screener?sort=marketCap&order=desc&limit=150",
       "/api/v1/screener/fundamental",
       "/api/v1/screener/valuation",
       "/api/v1/screener/canslim",
