@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { clientCacheGet, clientCacheSet } from "@/lib/client-cache";
 import { DerivativeScalpPanel } from "@/components/derivatives/derivative-scalp-panel";
 import { ContractCalculator } from "@/components/derivatives/contract-calculator";
+import { DerivativesBasisWidget } from "@/components/derivatives-basis-widget";
 import { OrcaChart } from "@/components/orca-chart";
 import {
   ArrowDownRight,
@@ -400,6 +401,11 @@ export function DerivativesDashboard() {
           </div>
         )}
       </div>
+
+      {/* Live Arbitrage & Basis Intelligence (Phase 7) */}
+      {category === "VN_FUTURES" && (
+        <DerivativesBasisWidget symbol={selectedContract?.symbol ?? "VN30F1M"} />
+      )}
 
       {/* 4. BIỂU ĐỒ NẾN KỸ THUẬT REALTIME CHO HỢP ĐỒNG ĐANG CHỌN (Interactive Candlestick Chart) */}
       <Panel

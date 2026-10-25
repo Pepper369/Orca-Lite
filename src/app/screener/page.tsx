@@ -25,10 +25,12 @@ type Universe =
   | "fundamental"
   | "candlestick"
   | "divergence"
+  | "macro-radar"
   | "alpha-beta";
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "multi-source", label: "Đa Nguồn Pro (Research · Vietcap · VPS) 🔥" },
+  { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế 🌐" },
   { id: "rrg-rotation", label: "Vòng xoay RRG Ngành 🌀" },
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
   { id: "miquant-quant", label: "MiQuant AI Bot & Quant 🤖⚡" },
@@ -128,6 +130,10 @@ const ScreenerBacktestModal = dynamic(
   () => import("@/components/screener-backtest-modal").then((m) => m.ScreenerBacktestModal),
   { ssr: false }
 );
+const MacroRadarCard = dynamic(
+  () => import("@/components/macro-radar-card").then((m) => m.MacroRadarCard),
+  { ssr: false, loading: PanelFallback }
+);
 
 function SoftPanel({
   name,
@@ -166,6 +172,9 @@ function ScreenerInner() {
   switch (universe) {
     case "multi-source":
       body = <MultiSourceScreener />;
+      break;
+    case "macro-radar":
+      body = <MacroRadarCard />;
       break;
     case "miquant-quant":
       body = <MiQuantStudio />;

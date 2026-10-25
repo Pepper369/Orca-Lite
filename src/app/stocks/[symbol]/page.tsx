@@ -201,6 +201,21 @@ const DividendIntelligencePanel = dynamic(
   }
 );
 
+const ConsensusUpsideCard = dynamic(
+  () =>
+    import("@/components/stocks/consensus-upside-card").then(
+      (m) => m.ConsensusUpsideCard
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Định giá Mục tiêu Đồng thuận">
+        <Loading rows={3} />
+      </Panel>
+    ),
+  }
+);
+
 
 const SECTION_NAV = [
   { id: "sec-chart", label: "Biểu đồ" },
@@ -661,6 +676,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           <span className="stock-section-index">05</span>
         </div>
         <div className="space-y-4">
+          <ErrorBoundary name="consensus-upside" resetKey={detail.symbol}>
+            <ConsensusUpsideCard symbol={detail.symbol} />
+          </ErrorBoundary>
           <ErrorBoundary name="analytic-reports" resetKey={detail.symbol}>
             <AnalyticReportsPanel symbol={detail.symbol} />
           </ErrorBoundary>
