@@ -54,6 +54,7 @@ export async function GET(req: Request) {
     minQualityScore: num(url.searchParams.get("minQualityScore")),
     minRevenueYoy: num(url.searchParams.get("minRevenueYoy")),
     minNiYoy: num(url.searchParams.get("minNiYoy")),
+    maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order") === "asc" ? "asc" : "desc") as "asc" | "desc",
     limit: num(url.searchParams.get("limit")) ?? 50,

@@ -63,10 +63,36 @@ export function Field({
   );
 }
 
-type ViewTab = "overview" | "valuation" | "profitability" | "health";
+type ViewTab = "overview" | "technical" | "valuation" | "profitability" | "health";
+
+export function MaSignalBadge({ signal }: { signal: string | null | undefined }) {
+  if (signal === "GOLDEN_CROSS") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-400 whitespace-nowrap">
+        <span>🌟</span> Giao cắt Vàng
+      </span>
+    );
+  }
+  if (signal === "BULLISH_ALIGN") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
+        <span>🚀</span> Trật tự tăng
+      </span>
+    );
+  }
+  if (signal === "DEATH_CROSS") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-rose-400 whitespace-nowrap">
+        <span>⚠️</span> Cắt Tử thần
+      </span>
+    );
+  }
+  return <span className="text-[10px] text-text-muted">—</span>;
+}
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "ma_cross", label: "Giao cắt MA", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Golden Cross & Trật tự MA tăng" },
   { id: "canslim", label: "CANSLIM", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Tăng trưởng cao & ROE > 14%" },
   { id: "dividend", label: "Cổ tức cao", icon: <DollarSign className="size-3.5 text-emerald-400" />, desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
   { id: "growth", label: "Siêu tăng trưởng", icon: <Zap className="size-3.5 text-amber-400" />, desc: "LNST / Doanh thu tăng > 20%" },
@@ -84,6 +110,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
   const [q, setQ] = useState("");
   const [exchange, setExchange] = useState("ALL");
   const [sector, setSector] = useState(defaultSector ?? "");
+  const [maSignal, setMaSignal] = useState("ALL");
   const [minChg, setMinChg] = useState("");
   const [maxChg, setMaxChg] = useState("");
   const [minVol, setMinVol] = useState("");
@@ -106,6 +133,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
     exchange: "ALL",
     sector: defaultSector ?? "",
     q: "",
+    maSignal: "ALL",
     minChg: "",
     maxChg: "",
     minVol: "",
@@ -126,6 +154,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
     if (applied.exchange && applied.exchange !== "ALL") p.set("exchange", applied.exchange);
     if (applied.sector) p.set("sector", applied.sector);
     if (applied.q) p.set("q", applied.q);
+    if (applied.maSignal && applied.maSignal !== "ALL") p.set("maSignal", applied.maSignal);
     if (applied.minChg) p.set("minChg", applied.minChg);
     if (applied.maxChg) p.set("maxChg", applied.maxChg);
     if (applied.minVol) p.set("minVol", String(Number(applied.minVol) * 1_000_000));
@@ -158,6 +187,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
       exchange,
       sector,
       q,
+      maSignal,
       minChg,
       maxChg,
       minVol,
@@ -176,6 +206,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
     exchange,
     sector,
     q,
+    maSignal,
     minChg,
     maxChg,
     minVol,
@@ -195,6 +226,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
     setExchange("ALL");
     setSector("");
     setQ("");
+    setMaSignal("ALL");
     setMinChg("");
     setMaxChg("");
     setMinVol("");
@@ -211,6 +243,7 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
       exchange: "ALL",
       sector: "",
       q: "",
+      maSignal: "ALL",
       minChg: "",
       maxChg: "",
       minVol: "",
@@ -457,7 +490,20 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
 
         {/* Collapsible Advanced Filters */}
         {showAdvanced && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5 border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200">
+            <label>
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Tín hiệu MA</span>
+              <select
+                value={maSignal}
+                onChange={(e) => setMaSignal(e.target.value)}
+                className="input !w-full !py-1.5 text-[12px]"
+              >
+                <option value="ALL">Tất cả tín hiệu MA</option>
+                <option value="GOLDEN_CROSS">🌟 Giao cắt Vàng (Golden)</option>
+                <option value="BULLISH_ALIGN">🚀 Kênh tăng (Trật tự MA)</option>
+                <option value="DEATH_CROSS">⚠️ Cắt Tử thần (Death Cross)</option>
+              </select>
+            </label>
             <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
             <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
             <Field label="ROE tối thiểu (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
@@ -480,6 +526,18 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
               }`}
             >
               Tổng quan
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewTab("technical")}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "technical"
+                  ? "bg-panel-3 text-emerald-400 font-semibold"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <TrendingUp className="size-3 text-emerald-400" />
+              Kỹ thuật & MA
             </button>
             <button
               type="button"
@@ -564,6 +622,55 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
                     >
                       Vốn hóa (tỷ) {sortKey === "marketCap" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                    <th className="py-2.5 text-center font-medium">Tín hiệu MA</th>
+                    <th
+                      onClick={() => handleSort("compositeScore")}
+                      className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Điểm Orca {sortKey === "compositeScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                  </>
+                )}
+
+                {viewTab === "technical" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("changePercent")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("ma10")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      MA10 {sortKey === "ma10" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("ma20")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      MA20 {sortKey === "ma20" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("ma50")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      MA50 {sortKey === "ma50" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("volRatio20")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Vol/MA20
+                    </th>
+                    <th className="py-2.5 text-center font-medium">Tín hiệu MA</th>
                     <th
                       onClick={() => handleSort("compositeScore")}
                       className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
@@ -726,6 +833,54 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
                         <td className="num py-2.5 text-right font-medium text-text-secondary">
                           {row.marketCap != null ? fmtNum(row.marketCap, 0) : "—"}
                         </td>
+                        <td className="py-2.5 text-center">
+                          <MaSignalBadge signal={row.maSignal} />
+                        </td>
+                        <td className="num py-2.5 pr-3.5 text-right">
+                          <span
+                            className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
+                              row.compositeScore >= 75
+                                ? "bg-emerald-500/15 text-emerald-400"
+                                : row.compositeScore >= 50
+                                ? "bg-accent-primary/15 text-accent-primary"
+                                : "bg-amber-500/15 text-amber-400"
+                            }`}
+                          >
+                            {row.compositeScore}
+                          </span>
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "technical" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="num py-2.5 text-right text-text-primary">
+                          {row.ma10 != null ? fmtNum(row.ma10, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-primary">
+                          {row.ma20 != null ? fmtNum(row.ma20, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.ma50 != null ? fmtNum(row.ma50, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.volRatio20 != null ? (
+                            <span className={row.volRatio20 >= 1.3 ? "text-emerald-400 font-bold" : "text-text-muted"}>
+                              {row.volRatio20}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <MaSignalBadge signal={row.maSignal} />
+                        </td>
                         <td className="num py-2.5 pr-3.5 text-right">
                           <span
                             className={`inline-block rounded px-2 py-0.5 text-[11px] font-bold ${
@@ -823,11 +978,16 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
               className="flex items-center justify-between px-3.5 py-3 hover:bg-panel-2"
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[13px] font-bold text-accent-primary">{row.symbol}</span>
-                  <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
-                    {row.exchange}
-                  </span>
+                  {row.exchange && (
+                    <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
+                      {row.exchange}
+                    </span>
+                  )}
+                  {row.maSignal && row.maSignal !== "NEUTRAL" && (
+                    <MaSignalBadge signal={row.maSignal} />
+                  )}
                 </div>
                 <div className="truncate text-[11px] text-text-muted">{row.name}</div>
                 <div className="mt-1 flex items-center gap-2 text-[10px] text-text-secondary">

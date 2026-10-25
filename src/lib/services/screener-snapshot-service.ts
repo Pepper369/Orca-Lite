@@ -11,7 +11,10 @@ import { VN100 } from "../vn/vn100";
 import { mapPool } from "../financial/snapshots";
 import type { Meta } from "../types";
 
-export type ScreenerPreset = "all" | "canslim" | "dividend" | "growth" | "value" | "breakout";
+import { batchVnOhlcv } from "./ohlcv-batch";
+import { sma } from "../engines/oscillators";
+
+export type ScreenerPreset = "all" | "canslim" | "dividend" | "growth" | "value" | "breakout" | "ma_cross";
 
 export type ScreenerStockItem = {
   symbol: string;
@@ -39,6 +42,12 @@ export type ScreenerStockItem = {
   fcfTtm: number | null;
   qualityScore: number | null; // 0-100
   healthScore: number | null; // 0-100
+  // MA Technical Momentum
+  ma10: number | null;
+  ma20: number | null;
+  ma50: number | null;
+  maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL";
+  volRatio20: number | null;
   presetsPassed: ScreenerPreset[];
   compositeScore: number; // 0-100
 };
@@ -70,6 +79,7 @@ export type ScreenerFilterParams = {
   minQualityScore?: number;
   minRevenueYoy?: number;
   minNiYoy?: number;
+  maSignal?: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL" | string;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -100,6 +110,79 @@ function getScreenerUniverse(): string[] {
   for (const s of VN100) set.add(s.toUpperCase());
   for (const s of VN_SECURITIES) set.add(s.symbol.toUpperCase());
   return Array.from(set);
+}
+
+function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPrice: number | null) {
+  if (!bars || bars.length < 15) {
+    return {
+      ma10: null,
+      ma20: null,
+      ma50: null,
+      volRatio20: null,
+      maSignal: "NEUTRAL" as const,
+    };
+  }
+  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
+  if (closes.length < 15) {
+    return { ma10: null, ma20: null, ma50: null, volRatio20: null, maSignal: "NEUTRAL" as const };
+  }
+  const len = closes.length;
+  const sma10Series = sma(closes, 10);
+  const sma20Series = sma(closes, 20);
+  const sma50Series = sma(closes, 50);
+
+  const ma10 = sma10Series[len - 1] ?? null;
+  const ma20 = sma20Series[len - 1] ?? null;
+  const ma50 = sma50Series[len - 1] ?? null;
+
+  const prevMa10 = len >= 2 ? sma10Series[len - 2] : null;
+  const prevMa20 = len >= 2 ? sma20Series[len - 2] : null;
+  const prevMa50 = len >= 2 ? sma50Series[len - 2] : null;
+
+  // Vol ratio 20
+  const vols = bars.map((b) => b.volume).filter((v) => Number.isFinite(v) && v > 0);
+  let volRatio20: number | null = null;
+  if (vols.length >= 20) {
+    const avgVol = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const lastVol = vols[vols.length - 1];
+    if (avgVol > 0 && lastVol > 0) {
+      volRatio20 = Number((lastVol / avgVol).toFixed(2));
+    }
+  }
+
+  const p = currentPrice ?? closes[len - 1];
+
+  let maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL" = "NEUTRAL";
+
+  // 1. Golden Cross: MA10 cắt lên MA20 hoặc MA20 cắt lên MA50
+  const isCrossUp20_50 =
+    prevMa20 != null && prevMa50 != null && ma20 != null && ma50 != null && prevMa20 <= prevMa50 && ma20 > ma50;
+  const isCrossUp10_20 =
+    prevMa10 != null && prevMa20 != null && ma10 != null && ma20 != null && prevMa10 <= prevMa20 && ma10 > ma20;
+
+  // 2. Death Cross: MA20 cắt xuống MA50
+  const isCrossDown20_50 =
+    prevMa20 != null && prevMa50 != null && ma20 != null && ma50 != null && prevMa20 >= prevMa50 && ma20 < ma50;
+
+  // 3. Bullish Alignment: Giá > MA10 >= MA20 > MA50
+  const isAlignedBull =
+    ma10 != null && ma20 != null && p > ma10 && ma10 >= ma20 && (ma50 == null || ma20 > ma50);
+
+  if (isCrossUp20_50 || isCrossUp10_20) {
+    maSignal = "GOLDEN_CROSS";
+  } else if (isAlignedBull) {
+    maSignal = "BULLISH_ALIGN";
+  } else if (isCrossDown20_50 || (ma20 != null && ma50 != null && p < ma20 && ma20 < ma50)) {
+    maSignal = "DEATH_CROSS";
+  }
+
+  return {
+    ma10: ma10 ? Number(ma10.toFixed(2)) : null,
+    ma20: ma20 ? Number(ma20.toFixed(2)) : null,
+    ma50: ma50 ? Number(ma50.toFixed(2)) : null,
+    volRatio20,
+    maSignal,
+  };
 }
 
 function calculateCompositeScore(
@@ -149,6 +232,7 @@ function detectPresets(item: {
   pb: number | null;
   netMargin: number | null;
   volume: number | null;
+  maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL";
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -188,6 +272,14 @@ function detectPresets(item: {
   const volActive = item.volume != null && item.volume >= 100_000;
   if (chgStrong && volActive) {
     passes.push("breakout");
+  }
+
+  // 6. MA Crossover Strategy (Golden Cross / Bullish Alignment)
+  const isMaBullish = item.maSignal === "GOLDEN_CROSS" || item.maSignal === "BULLISH_ALIGN";
+  const volValid = item.volume != null && item.volume >= 80_000;
+  const priceValid = item.price != null && item.price >= 8;
+  if (isMaBullish && volValid && priceValid) {
+    passes.push("ma_cross");
   }
 
   return passes;
@@ -275,7 +367,16 @@ export async function getMasterScreenerSnapshot(): Promise<{
         },
       );
 
-      // 4. Assemble merged items with 3-tier failover
+      // 3b. Batch OHLCV for technical Moving Average analysis (MA10, MA20, MA50)
+      const ohlcvMap = await batchVnOhlcv(symbols, {
+        bars: 65,
+        concurrency: 4,
+        perSymbolMs: 800,
+        deadlineMs: 3_500,
+        resilient: false,
+      }).catch(() => new Map());
+
+      // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
 
       for (const sym of symbols) {
@@ -335,6 +436,9 @@ export async function getMasterScreenerSnapshot(): Promise<{
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
+        const ohlcvBars = ohlcvMap.get(sym)?.bars ?? [];
+        const maFeatures = analyzeMaFeatures(ohlcvBars, price);
+
         const presetsPassed = detectPresets({
           roe,
           revenueYoyPct,
@@ -347,6 +451,7 @@ export async function getMasterScreenerSnapshot(): Promise<{
           pb,
           netMargin,
           volume,
+          maSignal: maFeatures.maSignal,
         });
 
         items.push({
@@ -375,6 +480,11 @@ export async function getMasterScreenerSnapshot(): Promise<{
           fcfTtm,
           qualityScore,
           healthScore,
+          ma10: maFeatures.ma10,
+          ma20: maFeatures.ma20,
+          ma50: maFeatures.ma50,
+          maSignal: maFeatures.maSignal,
+          volRatio20: maFeatures.volRatio20,
           presetsPassed,
           compositeScore,
         });
@@ -440,6 +550,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     growth: 0,
     value: 0,
     breakout: 0,
+    ma_cross: 0,
   };
 
   const sectorSet = new Set<string>();
@@ -504,6 +615,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.minQualityScore != null) filtered = filtered.filter((x) => x.qualityScore != null && x.qualityScore >= params.minQualityScore!);
   if (params.minRevenueYoy != null) filtered = filtered.filter((x) => x.revenueYoyPct != null && x.revenueYoyPct >= params.minRevenueYoy!);
   if (params.minNiYoy != null) filtered = filtered.filter((x) => x.niYoyPct != null && x.niYoyPct >= params.minNiYoy!);
+
+  // Filter: MA Signal
+  if (params.maSignal && params.maSignal !== "ALL") {
+    filtered = filtered.filter((x) => x.maSignal === params.maSignal);
+  }
 
   // Sorting
   const sortKey = (params.sort ?? "marketCap") as keyof ScreenerStockItem;
