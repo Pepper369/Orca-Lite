@@ -1,14 +1,20 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, use, type ReactNode } from "react";
+import Link from "next/link";
 import { prefetchApi, useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import { AddToWatchlist } from "@/components/watchlist-button";
 import { QuickPaperTradeButton } from "@/components/portfolio/quick-paper-trade-modal";
 import { StockTabs } from "@/components/stocks/stock-tabs";
+import { StockFloatingDock } from "@/components/stocks/stock-floating-dock";
+import { StockDetailFooter } from "@/components/stocks/stock-detail-footer";
 import { Chg, fmtCompact, fmtNum, FreshnessDot, Loading, Panel } from "@/components/ui";
 import { getSecurity } from "@/lib/vn/master";
 import { BOOTSTRAP_VN30_QUOTES } from "@/lib/bootstrap-data";
+import { BarChart2, ChevronDown, ChevronUp, Layers } from "lucide-react";
+
+const VN30_QUICK_SWITCHER = ["HPG", "SSI", "VNM", "FPT", "MWG", "TCB", "MBB", "DGC", "VHM", "VIC"];
 
 export default function StockSymbolLayout({
   children,
@@ -21,6 +27,8 @@ export default function StockSymbolLayout({
   const symbol = resolvedParams.symbol.toUpperCase();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
+  const [showStatsWhenStuck, setShowStatsWhenStuck] = useState(false);
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
   const [liveTick, setLiveTick] = useState<{
     price: number;
     volume?: number | null;
@@ -171,6 +179,8 @@ export default function StockSymbolLayout({
   const floor = data?.profile?.floor || sec?.exchange || null;
   const name = data?.name || q?.name || bootQuote?.name || sec?.name || null;
 
+  const showStats = (!stuck && !isHeaderCompact) || (stuck && showStatsWhenStuck);
+
   return (
     <div className="stock-workspace stock-page-body">
       <div ref={sentinelRef} aria-hidden="true" className="stock-sticky-sentinel" />
@@ -181,7 +191,7 @@ export default function StockSymbolLayout({
               <div className="stock-hero-title-row">
                 <h1 className="stock-hero-symbol">{symbol}</h1>
                 {floor ? <span className="stock-floor-badge">{floor}</span> : null}
-                {name ? (
+                {name && !stuck ? (
                   <span className="stock-hero-name">{name}</span>
                 ) : null}
                 {liveTick ? (
@@ -198,6 +208,34 @@ export default function StockSymbolLayout({
                   floorPrice={q?.floorPrice}
                 />
                 <AddToWatchlist assetType="stock" symbol={symbol} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (stuck) {
+                      setShowStatsWhenStuck((prev) => !prev);
+                    } else {
+                      setIsHeaderCompact((prev) => !prev);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border-subtle bg-surface-base hover:bg-surface-elevated text-text-muted hover:text-text-primary text-[11px] font-medium transition-all shadow-sm"
+                  title={
+                    stuck
+                      ? (showStatsWhenStuck ? "Thu nhỏ 5 chỉ số" : "Xem thêm 5 chỉ số thống kê")
+                      : (isHeaderCompact ? "Mở rộng đầy đủ header" : "Thu gọn header để xem biểu đồ rộng hơn")
+                  }
+                >
+                  <BarChart2 className="h-3 w-3 text-accent-primary" />
+                  <span className="hidden sm:inline">
+                    {stuck
+                      ? (showStatsWhenStuck ? "Ẩn chỉ số" : "Thống kê")
+                      : (isHeaderCompact ? "Mở rộng" : "Thu gọn")}
+                  </span>
+                  {(stuck ? showStatsWhenStuck : !isHeaderCompact) ? (
+                    <ChevronUp className="h-3 w-3" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3" />
+                  )}
+                </button>
               </div>
 
               {q ? (
@@ -246,45 +284,47 @@ export default function StockSymbolLayout({
               )}
             </div>
 
-            <div className="stock-hero-stats">
-              <Stat label="Khối lượng" value={fmtCompact(q?.volume)} />
-              <Stat label="Giá trị" value={fmtCompact(q?.quoteVolume)} />
-              <Stat
-                label="CP lưu hành"
-                value={
-                  data?.sharesOutstanding != null ? fmtCompact(data.sharesOutstanding) : "—"
-                }
-              />
-              <Stat
-                label="NN ròng"
-                value={ff?.netVal != null ? fmtCompact(ff.netVal) : "—"}
-                tone={
-                  ff?.netVal != null ? (ff.netVal >= 0 ? "up" : "down") : undefined
-                }
-              />
-              <Stat
-                label="Cập nhật"
-                value={
-                  q?.updatedAt
-                    ? (() => {
-                        try {
-                          return new Date(q.updatedAt).toLocaleTimeString("vi-VN", {
-                            timeZone: "Asia/Ho_Chi_Minh",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          });
-                        } catch {
-                          return String(q.updatedAt).slice(11, 16) || "—";
-                        }
-                      })()
-                    : "—"
-                }
-              />
-            </div>
+            {showStats && (
+              <div className="stock-hero-stats animate-fade-in">
+                <Stat label="Khối lượng" value={fmtCompact(q?.volume)} />
+                <Stat label="Giá trị" value={fmtCompact(q?.quoteVolume)} />
+                <Stat
+                  label="CP lưu hành"
+                  value={
+                    data?.sharesOutstanding != null ? fmtCompact(data.sharesOutstanding) : "—"
+                  }
+                />
+                <Stat
+                  label="NN ròng"
+                  value={ff?.netVal != null ? fmtCompact(ff.netVal) : "—"}
+                  tone={
+                    ff?.netVal != null ? (ff.netVal >= 0 ? "up" : "down") : undefined
+                  }
+                />
+                <Stat
+                  label="Cập nhật"
+                  value={
+                    q?.updatedAt
+                      ? (() => {
+                          try {
+                            return new Date(q.updatedAt).toLocaleTimeString("vi-VN", {
+                              timeZone: "Asia/Ho_Chi_Minh",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            });
+                          } catch {
+                            return String(q.updatedAt).slice(11, 16) || "—";
+                          }
+                        })()
+                      : "—"
+                  }
+                />
+              </div>
+            )}
           </div>
 
-          {hasForeign && ff ? (
-            <div className="stock-meta-strip" aria-label="Dòng vốn nước ngoài">
+          {showStats && hasForeign && ff ? (
+            <div className="stock-meta-strip animate-fade-in" aria-label="Dòng vốn nước ngoài">
               <span className="stock-meta-chip">
                 <span className="stock-meta-chip-label">NN mua</span>
                 <span className="num stock-meta-chip-value text-up">
@@ -316,11 +356,47 @@ export default function StockSymbolLayout({
             </div>
           ) : null}
 
+          {/* Quick Switcher cho các mã cổ phiếu nổi bật */}
+          {!stuck && !isHeaderCompact && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-base/60 border-t border-border-subtle/40 overflow-x-auto text-[11px] scrollbar-none">
+              <span className="text-text-muted shrink-0 flex items-center gap-1 font-medium">
+                <Layers className="h-3 w-3 text-accent-primary" />
+                Mã hot:
+              </span>
+              {VN30_QUICK_SWITCHER.map((p) => (
+                <Link
+                  key={p}
+                  href={`/stocks/${p}`}
+                  className={`px-2 py-0.5 rounded font-mono font-medium transition-all shrink-0 ${
+                    p === symbol
+                      ? "bg-accent-primary/20 text-accent-primary font-bold border border-accent-primary/30"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-elevated"
+                  }`}
+                >
+                  {p}
+                </Link>
+              ))}
+            </div>
+          )}
+
           <StockTabs symbol={symbol} />
         </Panel>
       </div>
+
       {/* P6-A: children always mount — parallel section paint */}
       {children}
+
+      {/* Flexible Floating Action Dock */}
+      <StockFloatingDock
+        symbol={symbol}
+        price={q?.price}
+        changePercent={q?.changePercent}
+        ceilingPrice={q?.ceilingPrice}
+        floorPrice={q?.floorPrice}
+      />
+
+      {/* Comprehensive Stock Footer */}
+      <StockDetailFooter symbol={symbol} name={name} floor={floor} />
     </div>
   );
 }
