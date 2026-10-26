@@ -10,6 +10,7 @@ import { BacktestPanel } from "@/components/journal/backtest-panel";
 import { PriceAlertsPanel } from "@/components/journal/price-alerts-panel";
 import { SmartPortfolioJournal } from "@/components/portfolio/smart-portfolio-journal";
 import { PortfolioInsights } from "@/components/portfolio/portfolio-insights";
+import { PaperTradingBoard } from "@/components/portfolio/paper-trading-board";
 import {
   buildPortfolioSnapshot,
   collectPortfolioSymbols,
@@ -35,7 +36,7 @@ export default function SmartPortfolioPage() {
   const [trades, setTrades] = useState<PortfolioTrade[]>([]);
   const [watchlist, setWatchlist] = useState<PortfolioWatchItem[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "positions" | "watchlist" | "journal" | "alerts"
+    "overview" | "paper" | "positions" | "watchlist" | "journal" | "alerts"
   >("overview");
   const { data: crypto } = useApi<CryptoData>("/api/v1/crypto/markets?limit=300", { refreshInterval: 20_000 });
   const { data: forex } = useApi<ForexMarket>("/api/v1/forex/markets", { refreshInterval: 60_000 });
@@ -230,6 +231,7 @@ export default function SmartPortfolioPage() {
         {(
           [
             ["overview", "Tổng quan"],
+            ["paper", "Giao dịch mô phỏng (500M)"],
             ["positions", `Vị thế (${snapshot.positions.length})`],
             ["journal", `Nhật ký (${trades.length})`],
             ["alerts", "Cảnh báo giá"],
@@ -255,6 +257,7 @@ export default function SmartPortfolioPage() {
       {activeTab === "overview" && (
         <Overview snapshot={snapshot} trades={trades} watchlistCount={watchlist.length} />
       )}
+      {activeTab === "paper" && <PaperTradingBoard />}
       {activeTab === "positions" && <Positions snapshot={snapshot} />}
       {activeTab === "journal" && <JournalView trades={trades} setTrades={setTrades} />}
       {activeTab === "alerts" && <PriceAlertsPanel />}
