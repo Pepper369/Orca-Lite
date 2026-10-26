@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, X, ArrowUpRight, ArrowDownRight, CheckCircle2, AlertCircle, Wallet } from "lucide-react";
+import { Sparkles, X, CheckCircle2, AlertCircle, Wallet } from "lucide-react";
 import Link from "next/link";
 import {
   loadPaperAccount,
@@ -107,46 +107,46 @@ export function QuickPaperTradeButton({
         type="button"
         onClick={handleOpen}
         title="Đặt lệnh mô phỏng ảo 500M"
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold transition-all shadow-sm ${className}`}
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-accent-primary/30 bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary text-xs font-semibold transition-all shadow-sm ${className}`}
       >
         <Sparkles className="h-3.5 w-3.5" />
-        <span>Giao dịch ảo</span>
+        <span>Giao dịch ảo 500M</span>
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-2xl border border-border-default bg-surface-elevated p-5 shadow-2xl">
             {/* Header */}
-            <div className="flex items-center justify-between pb-3.5 border-b border-border/50 mb-4">
+            <div className="flex items-center justify-between pb-3.5 border-b border-border-subtle mb-4">
               <div className="flex items-center gap-2">
-                <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <h3 className="text-base font-bold text-foreground">
-                  Đặt Lệnh Ảo: <span className="font-mono text-emerald-400">{sym}</span>
+                <span className="flex h-2.5 w-2.5 rounded-full bg-accent-primary animate-pulse" />
+                <h3 className="text-sm font-bold text-text-primary">
+                  Lệnh Ảo 500M: <span className="font-mono text-accent-primary font-bold">{sym}</span>
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface-raised transition-all"
+                className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-base transition-all"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Tài sản & Sức mua */}
-            <div className="p-3 rounded-xl border border-border/60 bg-surface-raised/40 mb-4 flex items-center justify-between text-xs">
+            <div className="p-3 rounded-xl border border-border-subtle bg-surface-base mb-4 flex items-center justify-between text-xs">
               <div>
-                <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Wallet className="h-3 w-3 text-emerald-400" />
+                <div className="text-[11px] text-text-muted flex items-center gap-1">
+                  <Wallet className="h-3 w-3 text-accent-primary" />
                   Tiền mặt khả dụng:
                 </div>
-                <div className="font-mono font-bold text-foreground mt-0.5">
+                <div className="num font-bold text-text-primary mt-0.5">
                   {fmtVnd(account.availableCash)}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-[11px] text-muted-foreground">Đang giữ {sym}:</div>
-                <div className="font-mono font-semibold text-foreground mt-0.5">
+                <div className="text-[11px] text-text-muted">Đang giữ {sym}:</div>
+                <div className="num font-semibold text-text-primary mt-0.5">
                   {holding ? `${holding.shares.toLocaleString("vi-VN")} CP` : "0 CP"}
                 </div>
               </div>
@@ -162,8 +162,8 @@ export function QuickPaperTradeButton({
                 }}
                 className={`py-2 rounded-xl text-xs font-bold transition-all ${
                   side === "BUY"
-                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
-                    : "bg-surface-raised border border-border text-muted-foreground hover:text-foreground"
+                    ? "bg-positive text-surface-base font-extrabold shadow-sm"
+                    : "bg-surface-base border border-border-subtle text-text-muted hover:text-text-primary"
                 }`}
               >
                 MUA {sym}
@@ -177,8 +177,8 @@ export function QuickPaperTradeButton({
                 }}
                 className={`py-2 rounded-xl text-xs font-bold transition-all ${
                   side === "SELL"
-                    ? "bg-rose-500 text-white shadow-md shadow-rose-500/20"
-                    : "bg-surface-raised border border-border text-muted-foreground hover:text-foreground"
+                    ? "bg-negative text-white font-extrabold shadow-sm"
+                    : "bg-surface-base border border-border-subtle text-text-muted hover:text-text-primary"
                 }`}
               >
                 BÁN {sym}
@@ -187,18 +187,18 @@ export function QuickPaperTradeButton({
 
             {/* Giá thị trường info */}
             {normCurrentPrice > 0 && (
-              <div className="p-2.5 rounded-xl border border-border/50 bg-surface/40 mb-3 grid grid-cols-3 gap-2 text-center text-xs font-mono">
+              <div className="p-2.5 rounded-xl border border-border-subtle bg-surface-base mb-3 grid grid-cols-3 gap-2 text-center text-xs">
                 <div>
-                  <div className="text-[10px] text-muted-foreground font-sans">Giá khớp</div>
-                  <div className="font-bold text-emerald-400">{normCurrentPrice.toLocaleString("vi-VN")}</div>
+                  <div className="text-[10px] text-text-muted">Giá khớp</div>
+                  <div className="num font-bold text-positive">{normCurrentPrice.toLocaleString("vi-VN")}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-muted-foreground font-sans">Trần</div>
-                  <div className="font-semibold text-purple-400">{normCeiling?.toLocaleString("vi-VN")}</div>
+                  <div className="text-[10px] text-text-muted">Trần</div>
+                  <div className="num font-semibold text-purple-400">{normCeiling ? normCeiling.toLocaleString("vi-VN") : "—"}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-muted-foreground font-sans">Sàn</div>
-                  <div className="font-semibold text-cyan-400">{normFloor?.toLocaleString("vi-VN")}</div>
+                  <div className="text-[10px] text-text-muted">Sàn</div>
+                  <div className="num font-semibold text-cyan-400">{normFloor ? normFloor.toLocaleString("vi-VN") : "—"}</div>
                 </div>
               </div>
             )}
@@ -211,8 +211,8 @@ export function QuickPaperTradeButton({
                   onClick={() => setOrderType("MP")}
                   className={`py-1.5 px-3 rounded-lg border text-xs font-bold transition-all ${
                     orderType === "MP"
-                      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                      : "border-border/60 bg-surface-raised text-muted-foreground"
+                      ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
                   }`}
                 >
                   Lệnh Thị Trường (MP)
@@ -222,8 +222,8 @@ export function QuickPaperTradeButton({
                   onClick={() => setOrderType("LO")}
                   className={`py-1.5 px-3 rounded-lg border text-xs font-bold transition-all ${
                     orderType === "LO"
-                      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                      : "border-border/60 bg-surface-raised text-muted-foreground"
+                      ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
                   }`}
                 >
                   Lệnh Giới Hạn (LO)
@@ -232,23 +232,23 @@ export function QuickPaperTradeButton({
 
               {orderType === "LO" && (
                 <div>
-                  <label className="block text-[11px] text-muted-foreground mb-1">Mức giá đặt (VND):</label>
+                  <label className="block text-[11px] text-text-muted mb-1">Mức giá đặt (VND):</label>
                   <input
                     type="number"
                     step="100"
                     value={customPriceInput}
                     onChange={(e) => setCustomPriceInput(e.target.value)}
-                    className="w-full font-mono font-bold px-3 py-1.5 rounded-lg border border-border/80 bg-surface-raised text-foreground focus:outline-none focus:border-emerald-500 text-sm"
+                    className="w-full num font-bold px-3 py-1.5 rounded-lg border border-border-subtle bg-surface-base text-text-primary focus:outline-none focus:border-accent-primary text-sm"
                   />
                 </div>
               )}
 
               <div>
                 <div className="flex justify-between items-center mb-1 text-[11px]">
-                  <span className="text-muted-foreground">Khối lượng (Lô 100):</span>
+                  <span className="text-text-muted">Khối lượng (Lô 100):</span>
                   {side === "SELL" && (
-                    <span className="text-muted-foreground">
-                      Khả dụng: <span className="font-semibold text-foreground">{availableToSell.toLocaleString("vi-VN")} CP</span>
+                    <span className="text-text-muted">
+                      Khả dụng: <span className="num font-semibold text-text-primary">{availableToSell.toLocaleString("vi-VN")} CP</span>
                     </span>
                   )}
                 </div>
@@ -257,7 +257,7 @@ export function QuickPaperTradeButton({
                   step="100"
                   value={sharesInput}
                   onChange={(e) => setSharesInput(e.target.value)}
-                  className="w-full font-mono font-bold px-3 py-1.5 rounded-lg border border-border/80 bg-surface-raised text-foreground focus:outline-none focus:border-emerald-500 text-sm"
+                  className="w-full num font-bold px-3 py-1.5 rounded-lg border border-border-subtle bg-surface-base text-text-primary focus:outline-none focus:border-accent-primary text-sm"
                 />
                 <div className="flex gap-1.5 mt-1.5">
                   {[100, 500, 1000, 2000].map((q) => (
@@ -265,7 +265,7 @@ export function QuickPaperTradeButton({
                       key={q}
                       type="button"
                       onClick={() => setSharesInput(String(q))}
-                      className="px-2 py-0.5 rounded text-[11px] font-mono bg-surface-raised border border-border/50 text-muted-foreground hover:text-foreground"
+                      className="px-2 py-0.5 rounded text-[11px] num bg-surface-base border border-border-subtle text-text-muted hover:text-text-primary"
                     >
                       +{q}
                     </button>
@@ -274,7 +274,7 @@ export function QuickPaperTradeButton({
                     <button
                       type="button"
                       onClick={() => setSharesInput(String(availableToSell))}
-                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                      className="px-2 py-0.5 rounded text-[11px] font-semibold bg-negative/15 text-negative border border-negative/30 hover:bg-negative/25"
                     >
                       Bán hết
                     </button>
@@ -284,18 +284,18 @@ export function QuickPaperTradeButton({
             </div>
 
             {/* Tóm tắt tiền */}
-            <div className="p-3 rounded-xl border border-border/60 bg-surface/30 space-y-1 text-xs mb-4">
-              <div className="flex justify-between text-muted-foreground">
+            <div className="p-3 rounded-xl border border-border-subtle bg-surface-base space-y-1 text-xs mb-4">
+              <div className="flex justify-between text-text-muted">
                 <span>Ước tính giá trị:</span>
-                <span className="font-mono text-foreground font-semibold">{fmtVnd(grossVal)}</span>
+                <span className="num text-text-primary font-semibold">{fmtVnd(grossVal)}</span>
               </div>
-              <div className="flex justify-between text-muted-foreground text-[11px]">
-                <span>Phí (0.1%) + Thuế:</span>
-                <span className="font-mono text-foreground">{fmtVnd(fee + tax)}</span>
+              <div className="flex justify-between text-text-muted text-[11px]">
+                <span>Phí (0.1%) + Thuế (0.1% khi Bán):</span>
+                <span className="num text-text-primary">{fmtVnd(fee + tax)}</span>
               </div>
-              <div className="flex justify-between text-foreground font-bold pt-1 border-t border-border/40">
+              <div className="flex justify-between text-text-primary font-bold pt-1.5 border-t border-border-subtle">
                 <span>{side === "BUY" ? "Tổng tiền cần trả:" : "Tổng tiền thực nhận:"}</span>
-                <span className={`font-mono ${side === "BUY" ? "text-emerald-400" : "text-sky-400"}`}>
+                <span className={`num text-sm ${side === "BUY" ? "text-positive" : "text-accent-primary"}`}>
                   {fmtVnd(totalVal)}
                 </span>
               </div>
@@ -304,18 +304,18 @@ export function QuickPaperTradeButton({
             {/* Thông báo kết quả */}
             {notice && (
               <div
-                className={`p-3 rounded-xl text-xs flex items-start gap-2 mb-4 ${
+                className={`p-3 rounded-xl text-xs flex items-start gap-2 mb-4 border ${
                   notice.type === "success"
-                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
-                    : "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                    ? "bg-positive/10 border-positive/30 text-positive"
+                    : "bg-negative/10 border-negative/30 text-negative"
                 }`}
               >
                 {notice.type === "success" ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-positive mt-0.5" />
                 ) : (
-                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+                  <AlertCircle className="h-4 w-4 shrink-0 text-negative mt-0.5" />
                 )}
-                <span>{notice.message}</span>
+                <span className="leading-relaxed">{notice.message}</span>
               </div>
             )}
 
@@ -325,11 +325,11 @@ export function QuickPaperTradeButton({
                 type="button"
                 onClick={handleExecute}
                 disabled={sharesNum <= 0 || normCurrentPrice <= 0}
-                className={`w-full py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-white shadow-lg transition-all ${
+                className={`w-full py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm transition-all ${
                   side === "BUY"
-                    ? "bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20"
-                    : "bg-rose-500 hover:bg-rose-600 shadow-rose-500/20"
-                } disabled:opacity-50`}
+                    ? "bg-positive text-surface-base hover:opacity-95"
+                    : "bg-negative text-white hover:opacity-95"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 {side === "BUY" ? `XÁC NHẬN MUA ${sym}` : `XÁC NHẬN BÁN ${sym}`}
               </button>
@@ -338,9 +338,9 @@ export function QuickPaperTradeButton({
                 <Link
                   href="/portfolio"
                   onClick={() => setIsOpen(false)}
-                  className="text-[11px] text-emerald-400 hover:underline font-medium inline-flex items-center gap-1"
+                  className="text-[11px] text-accent-primary hover:underline font-medium inline-flex items-center gap-1"
                 >
-                  Xem toàn bộ danh mục & sổ lệnh mô phỏng 500M →
+                  Xem toàn bộ đấu trường & danh mục mô phỏng 500M →
                 </Link>
               </div>
             </div>

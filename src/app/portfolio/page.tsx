@@ -315,17 +315,17 @@ function Overview({
     <div className="grid gap-3 lg:grid-cols-2">
       <div className="space-y-3 lg:col-span-2">
         {/* Banner Mô Phỏng Giao Dịch 500M */}
-        <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/15 via-surface-base to-surface-raised p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+        <div className="rounded-xl border border-accent-primary/30 bg-gradient-to-r from-accent-primary/10 via-surface-base to-surface-elevated p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
-              <Sparkles className="h-5 w-5 text-emerald-400" />
+            <div className="h-10 w-10 rounded-xl bg-accent-primary/15 border border-accent-primary/30 flex items-center justify-center shrink-0">
+              <Sparkles className="h-5 w-5 text-accent-primary" />
             </div>
             <div>
-              <div className="text-sm font-bold text-foreground flex items-center gap-2">
+              <div className="text-sm font-bold text-text-primary flex items-center gap-2">
                 Đấu Trường Giao Dịch Mô Phỏng (Vốn Cấp 500 Triệu)
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">T+0 / T+2.5</span>
+                <Badge tone="accent" className="text-[10px]">T+0 / T+2.5</Badge>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-text-muted mt-0.5">
                 Thực hành đặt lệnh Mua/Bán MP & LO với dữ liệu giá thời gian thực, quản lý giá vốn và đo lường lãi/lỗ chuẩn sàn Việt Nam.
               </p>
             </div>
@@ -333,7 +333,7 @@ function Overview({
           <button
             type="button"
             onClick={onOpenPaperTrading}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white shrink-0 transition-all shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5"
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-accent-primary hover:bg-accent-primary/90 text-surface-base shrink-0 transition-all shadow-sm flex items-center justify-center gap-1.5"
           >
             <span>Vào sàn ảo ngay</span>
             <ArrowRight className="h-3.5 w-3.5" />

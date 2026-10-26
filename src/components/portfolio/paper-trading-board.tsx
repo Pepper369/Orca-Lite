@@ -21,6 +21,7 @@ import {
   Sparkles,
   Share2,
 } from "lucide-react";
+import { Badge, Chg, Panel, fmtNum } from "@/components/ui";
 import {
   loadPaperAccount,
   placePaperOrder,
@@ -168,7 +169,7 @@ export function PaperTradingBoard() {
       return;
     }
     if (sharesNum % 100 !== 0) {
-      setOrderNotice({ type: "error", message: "Khối lượng phải là bội số của 100." });
+      setOrderNotice({ type: "error", message: "Khối lượng phải là bội số của 100 (chuẩn sàn VN)." });
       return;
     }
     if (currentSymbolPrice <= 0) {
@@ -191,7 +192,6 @@ export function PaperTradingBoard() {
 
     if (res.success) {
       setOrderNotice({ type: "success", message: res.message });
-      // Clear hoặc giữ lại khối lượng
     } else {
       setOrderNotice({ type: "error", message: res.message });
     }
@@ -235,47 +235,40 @@ export function PaperTradingBoard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* 1. Header & KPI Ribbon: Tổng quan tài sản 500M */}
-      <div className="rounded-2xl border border-border/80 bg-gradient-to-br from-surface/90 via-surface/70 to-surface/40 p-5 md:p-6 shadow-xl backdrop-blur-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-border/50">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs uppercase tracking-wider font-semibold text-emerald-400">
-                Tài Khoản Giao Dịch Ảo (Mô Phỏng 500M)
-              </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-raised border border-border/60 text-muted-foreground font-mono">
-                {account.tPlusRule === "T0" ? "Chế độ T+0 (Lướt sóng)" : "Chế độ T+2.5 (Chuẩn sàn)"}
-              </span>
-            </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight flex items-baseline gap-2">
-              {fmtVnd(metrics.nav)}
-              <span
-                className={`text-sm md:text-base font-semibold ${
-                  metrics.totalPnl >= 0 ? "text-emerald-400" : "text-rose-400"
-                }`}
-              >
-                ({fmtPct(metrics.totalPnlPct)})
-              </span>
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Vốn khởi điểm: {fmtVnd(account.initialCash)} · Lợi nhuận ròng:{" "}
-              <span className={metrics.totalPnl >= 0 ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
-                {metrics.totalPnl >= 0 ? "+" : ""}
-                {fmtVnd(metrics.totalPnl)}
-              </span>
-            </p>
-          </div>
-
+      <Panel
+        pad={true}
+        className="border-border-subtle bg-surface-elevated"
+        title={
           <div className="flex flex-wrap items-center gap-2">
+            <span className="flex size-2 rounded-full bg-positive animate-pulse" />
+            <span className="text-[13px] font-semibold text-text-primary">
+              Tài Khoản Giao Dịch Ảo (Mô Phỏng 500M)
+            </span>
+            <Badge tone="accent">
+              {account.tPlusRule === "T0" ? "T+0 Lướt sóng" : "T+2.5 Chuẩn sàn"}
+            </Badge>
+          </div>
+        }
+        subtitle={
+          <span className="text-[11px] text-text-muted">
+            Vốn khởi điểm: <strong className="num text-text-primary">{fmtVnd(account.initialCash)}</strong> · Lợi nhuận ròng:{" "}
+            <span className={`num font-medium ${metrics.totalPnl >= 0 ? "text-positive" : "text-negative"}`}>
+              {metrics.totalPnl >= 0 ? "+" : ""}
+              {fmtVnd(metrics.totalPnl)}
+            </span>
+          </span>
+        }
+        right={
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => fetchQuotes()}
               disabled={isLoadingQuotes}
               title="Làm mới giá thị trường"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/80 bg-surface hover:bg-surface-raised text-xs font-medium text-foreground transition-all"
+              className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-surface-base px-2.5 py-1 text-[11px] font-medium text-text-primary hover:border-border-default transition"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingQuotes ? "animate-spin text-emerald-400" : ""}`} />
+              <RefreshCw className={`size-3 ${isLoadingQuotes ? "animate-spin text-accent-primary" : ""}`} />
               <span>Cập nhật giá</span>
             </button>
 
@@ -285,216 +278,229 @@ export function PaperTradingBoard() {
                 setTPlusRule(nextRule);
               }}
               title="Chuyển đổi quy tắc thanh toán T+0 / T+2.5"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/80 bg-surface hover:bg-surface-raised text-xs font-medium text-foreground transition-all"
+              className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-surface-base px-2.5 py-1 text-[11px] font-medium text-text-primary hover:border-border-default transition"
             >
-              <Clock className="h-3.5 w-3.5 text-amber-400" />
-              <span>Đổi sang {account.tPlusRule === "T0" ? "T+2.5" : "T+0"}</span>
+              <Clock className="size-3 text-warning" />
+              <span>{account.tPlusRule === "T0" ? "Đổi sang T+2.5" : "Đổi sang T+0"}</span>
             </button>
 
             <button
               onClick={() => setShowAddCashModal(true)}
               title="Bơm thêm vốn ảo"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-400 transition-all"
+              className="inline-flex items-center gap-1 rounded-md border border-positive/30 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive hover:bg-positive/20 transition"
             >
-              <PlusCircle className="h-3.5 w-3.5" />
+              <PlusCircle className="size-3" />
               <span>Nạp vốn</span>
             </button>
 
             <button
               onClick={handleSharePerformance}
               title="Chia sẻ thành tích danh mục"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-xs font-medium text-sky-400 transition-all"
+              className="inline-flex items-center gap-1 rounded-md border border-accent-primary/30 bg-accent-primary/10 px-2.5 py-1 text-[11px] font-medium text-accent-primary hover:bg-accent-primary/20 transition"
             >
-              <Share2 className="h-3.5 w-3.5" />
+              <Share2 className="size-3" />
               <span>Chia sẻ</span>
             </button>
 
             <button
               onClick={() => setShowResetConfirm(true)}
               title="Khôi phục tài khoản về 500 triệu ban đầu"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-xs font-medium text-rose-400 transition-all"
+              className="inline-flex items-center gap-1 rounded-md border border-negative/30 bg-negative/10 px-2.5 py-1 text-[11px] font-medium text-negative hover:bg-negative/20 transition"
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="size-3" />
               <span>Đặt lại 500M</span>
             </button>
+          </div>
+        }
+      >
+        {/* NAV Value display */}
+        <div className="mb-4">
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-bold tracking-tight num text-text-primary">
+              {fmtVnd(metrics.nav)}
+            </span>
+            <Chg value={metrics.totalPnlPct} className="text-[13px] sm:text-[14px]" />
           </div>
         </div>
 
         {/* 4 Cards Thống kê tài sản */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-5">
-          <div className="p-3.5 rounded-xl border border-border/60 bg-surface/40">
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
+            <div className="flex items-center justify-between text-[11px] text-text-muted mb-0.5">
               <span>Tiền mặt khả dụng</span>
-              <Wallet className="h-3.5 w-3.5 text-emerald-400" />
+              <Wallet className="size-3.5 text-positive" />
             </div>
-            <div className="text-base md:text-lg font-bold text-foreground">
+            <div className="num text-[14px] sm:text-[15px] font-semibold text-text-primary">
               {fmtVnd(account.availableCash)}
             </div>
             {account.lockedCash > 0 && (
-              <div className="text-[11px] text-amber-400 mt-0.5">
-                Khoá chờ mua: {fmtVnd(account.lockedCash)}
+              <div className="num text-[10px] text-warning mt-0.5">
+                Khoá chờ: {fmtVnd(account.lockedCash)}
               </div>
             )}
           </div>
 
-          <div className="p-3.5 rounded-xl border border-border/60 bg-surface/40">
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+          <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
+            <div className="flex items-center justify-between text-[11px] text-text-muted mb-0.5">
               <span>Giá trị cổ phiếu</span>
-              <Briefcase className="h-3.5 w-3.5 text-sky-400" />
+              <Briefcase className="size-3.5 text-accent-primary" />
             </div>
-            <div className="text-base md:text-lg font-bold text-foreground">
+            <div className="num text-[14px] sm:text-[15px] font-semibold text-text-primary">
               {fmtVnd(metrics.stockValue)}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">
-              Đang nắm: {metrics.holdings.length} mã CP
+            <div className="text-[10px] text-text-muted mt-0.5">
+              Đang nắm: <strong className="num text-text-primary">{metrics.holdings.length}</strong> mã CP
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-border/60 bg-surface/40">
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+          <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
+            <div className="flex items-center justify-between text-[11px] text-text-muted mb-0.5">
               <span>Lãi/Lỗ tạm tính (Holding)</span>
               {metrics.unrealizedPnl >= 0 ? (
-                <ArrowUpRight className="h-3.5 w-3.5 text-emerald-400" />
+                <ArrowUpRight className="size-3.5 text-positive" />
               ) : (
-                <ArrowDownRight className="h-3.5 w-3.5 text-rose-400" />
+                <ArrowDownRight className="size-3.5 text-negative" />
               )}
             </div>
             <div
-              className={`text-base md:text-lg font-bold ${
-                metrics.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+              className={`num text-[14px] sm:text-[15px] font-semibold ${
+                metrics.unrealizedPnl >= 0 ? "text-positive" : "text-negative"
               }`}
             >
               {metrics.unrealizedPnl >= 0 ? "+" : ""}
               {fmtVnd(metrics.unrealizedPnl)}
             </div>
-            <div
-              className={`text-[11px] font-semibold mt-0.5 ${
-                metrics.unrealizedPnlPct >= 0 ? "text-emerald-400" : "text-rose-400"
-              }`}
-            >
-              {fmtPct(metrics.unrealizedPnlPct)}
+            <div className="mt-0.5">
+              <Chg value={metrics.unrealizedPnlPct} className="text-[11px]" />
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-border/60 bg-surface/40">
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+          <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
+            <div className="flex items-center justify-between text-[11px] text-text-muted mb-0.5">
               <span>Lãi/Lỗ đã chốt & Winrate</span>
-              <History className="h-3.5 w-3.5 text-amber-400" />
+              <History className="size-3.5 text-warning" />
             </div>
             <div
-              className={`text-base md:text-lg font-bold ${
-                metrics.realizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+              className={`num text-[14px] sm:text-[15px] font-semibold ${
+                metrics.realizedPnl >= 0 ? "text-positive" : "text-negative"
               }`}
             >
               {metrics.realizedPnl >= 0 ? "+" : ""}
               {fmtVnd(metrics.realizedPnl)}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">
-              Thắng: {metrics.winTrades}/{metrics.totalTrades} ({metrics.winRate.toFixed(0)}%)
+            <div className="text-[10px] text-text-muted mt-0.5">
+              Thắng: <span className="num text-text-primary">{metrics.winTrades}/{metrics.totalTrades}</span> ({metrics.winRate.toFixed(0)}%)
             </div>
           </div>
         </div>
 
         {/* Thanh Phân Bổ Cấu Trúc Tài Sản */}
-        <div className="mt-4 pt-4 border-t border-border/40">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground mb-2 gap-1">
-            <span className="font-semibold text-foreground flex items-center gap-1.5">
-              <PieChart className="h-3.5 w-3.5 text-emerald-400" />
-              Cấu trúc phân bổ tài sản:
+        <div className="mt-3.5 pt-3 border-t border-border-subtle/60">
+          <div className="flex flex-wrap items-center justify-between text-[11px] text-text-muted mb-1.5 gap-1">
+            <span className="font-medium text-text-primary flex items-center gap-1">
+              <PieChart className="size-3 text-accent-primary" />
+              Phân bổ tài sản:
             </span>
-            <span>
-              Tiền mặt: <strong className="text-foreground">{cashPct.toFixed(1)}%</strong> · Cổ phiếu: <strong className="text-foreground">{stockPct.toFixed(1)}%</strong>
+            <span className="num">
+              Tiền mặt: <strong className="text-text-primary">{cashPct.toFixed(1)}%</strong> · Cổ phiếu: <strong className="text-text-primary">{stockPct.toFixed(1)}%</strong>
             </span>
           </div>
 
           {/* Stacked Progress Bar */}
-          <div className="h-2.5 w-full rounded-full bg-surface-raised overflow-hidden flex">
+          <div className="h-1.5 w-full rounded-full bg-surface-base overflow-hidden flex border border-border-subtle/50">
             <div
               style={{ width: `${cashPct}%` }}
               title={`Tiền mặt: ${fmtVnd(metrics.totalCash)} (${cashPct.toFixed(1)}%)`}
-              className="bg-emerald-500 h-full transition-all duration-500"
+              className="bg-accent-primary h-full transition-all duration-300"
             />
             {metrics.holdings.map((h, idx) => {
-              const colors = ["bg-sky-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-pink-500", "bg-cyan-500"];
+              const colors = ["bg-positive", "bg-warning", "bg-indigo-400", "bg-sky-400", "bg-purple-400", "bg-pink-400"];
               const c = colors[idx % colors.length];
               return (
                 <div
                   key={h.symbol}
                   style={{ width: `${h.weightPct}%` }}
                   title={`${h.symbol}: ${fmtVnd(h.marketValue)} (${h.weightPct.toFixed(1)}%)`}
-                  className={`${c} h-full transition-all duration-500 border-l border-surface/50`}
+                  className={`${c} h-full transition-all duration-300 border-l border-surface-base`}
                 />
               );
             })}
           </div>
 
           {/* Legend chips */}
-          <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
-            <span className="inline-flex items-center gap-1 text-muted-foreground">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              Tiền mặt: {cashPct.toFixed(1)}%
+          <div className="flex flex-wrap gap-2.5 mt-2 text-[10.5px]">
+            <span className="inline-flex items-center gap-1 text-text-muted">
+              <span className="size-1.5 rounded-full bg-accent-primary" />
+              Tiền mặt: <span className="num font-medium text-text-primary">{cashPct.toFixed(1)}%</span>
             </span>
             {metrics.holdings.slice(0, 6).map((h, idx) => {
-              const dotColors = ["bg-sky-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-pink-500", "bg-cyan-500"];
+              const dotColors = ["bg-positive", "bg-warning", "bg-indigo-400", "bg-sky-400", "bg-purple-400", "bg-pink-400"];
               return (
-                <span key={h.symbol} className="inline-flex items-center gap-1 text-muted-foreground font-mono">
-                  <span className={`h-2 w-2 rounded-full ${dotColors[idx % dotColors.length]}`} />
-                  {h.symbol}: {h.weightPct.toFixed(1)}%
+                <span key={h.symbol} className="inline-flex items-center gap-1 text-text-muted">
+                  <span className={`size-1.5 rounded-full ${dotColors[idx % dotColors.length]}`} />
+                  <strong className="num text-text-primary">{h.symbol}</strong>: <span className="num">{h.weightPct.toFixed(1)}%</span>
                 </span>
               );
             })}
           </div>
         </div>
-      </div>
+      </Panel>
 
-      {/* 2. Khung Đặt Lệnh & Bảng Giá Nhanh */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* 2. Khung Đặt Lệnh & Bảng Danh mục */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Phiếu đặt lệnh: 5 Cột trên Desktop */}
-        <div className="lg:col-span-5 rounded-2xl border border-border/80 bg-surface/80 p-5 shadow-lg backdrop-blur-sm">
-          <div className="flex items-center justify-between mb-4 pb-3 border-b border-border/50">
-            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-emerald-400" />
-              Phiếu Đặt Lệnh Mô Phỏng
-            </h2>
-            <div className="flex rounded-lg bg-surface-raised p-0.5 border border-border/60">
+        <Panel
+          pad={true}
+          className="lg:col-span-5 border-border-subtle bg-surface-elevated"
+          title={
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="size-4 text-accent-primary" />
+              <span className="text-[13px] font-semibold text-text-primary">Phiếu Đặt Lệnh</span>
+            </div>
+          }
+          right={
+            <div className="flex rounded-md bg-surface-base p-0.5 border border-border-subtle">
               <button
+                type="button"
                 onClick={() => setSide("BUY")}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition ${
                   side === "BUY"
-                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-positive/20 text-positive border border-positive/30 font-bold"
+                    : "text-text-muted hover:text-text-primary"
                 }`}
               >
                 MUA
               </button>
               <button
+                type="button"
                 onClick={() => setSide("SELL")}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
+                className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition ${
                   side === "SELL"
-                    ? "bg-rose-500 text-white shadow-md shadow-rose-500/20"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-negative/20 text-negative border border-negative/30 font-bold"
+                    : "text-text-muted hover:text-text-primary"
                 }`}
               >
                 BÁN
               </button>
             </div>
-          </div>
-
+          }
+        >
           {/* Quick Symbol Chips */}
-          <div className="mb-4">
-            <div className="text-[11px] text-muted-foreground mb-1.5">Mã phổ biến:</div>
-            <div className="flex flex-wrap gap-1.5">
+          <div className="mb-3">
+            <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1 font-medium">Mã gợi ý:</div>
+            <div className="flex flex-wrap gap-1">
               {POPULAR_SYMBOLS.map((s) => (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => {
                     setSymbol(s);
                     setOrderNotice(null);
                   }}
-                  className={`px-2 py-0.5 rounded text-xs font-mono font-bold transition-all ${
+                  className={`px-2 py-0.5 rounded text-[11px] num font-medium transition ${
                     symbol.toUpperCase() === s
-                      ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-300"
-                      : "bg-surface-raised border border-border/60 text-muted-foreground hover:text-foreground hover:border-border"
+                      ? "bg-accent-primary/15 border border-accent-primary/40 text-accent-primary"
+                      : "bg-surface-base border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-default"
                   }`}
                 >
                   {s}
@@ -503,78 +509,70 @@ export function PaperTradingBoard() {
             </div>
           </div>
 
-          {/* Mã cổ phiếu & Live Price Indicator */}
-          <div className="space-y-3.5">
+          {/* Form fields */}
+          <div className="space-y-3">
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
+              <label className="block text-[11px] text-text-muted mb-1 font-medium">
                 Mã chứng khoán:
               </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={symbol}
-                  onChange={(e) => {
-                    setSymbol(e.target.value.toUpperCase());
-                    setOrderNotice(null);
-                  }}
-                  placeholder="Nhập mã CP (VD: HPG, SSI...)"
-                  className="w-full uppercase font-mono font-bold tracking-wider px-3.5 py-2 rounded-xl border border-border/80 bg-surface-raised text-foreground focus:outline-none focus:border-emerald-500 text-sm"
-                />
-              </div>
+              <input
+                type="text"
+                value={symbol}
+                onChange={(e) => {
+                  setSymbol(e.target.value.toUpperCase());
+                  setOrderNotice(null);
+                }}
+                placeholder="Nhập mã (VD: HPG, SSI...)"
+                className="w-full uppercase num font-bold px-3 py-1.5 rounded-md border border-border-subtle bg-surface-base text-text-primary focus:outline-none focus:border-accent-primary text-[13px]"
+              />
 
-              {/* Thông tin giá tham chiếu, trần, sàn */}
+              {/* Live quote grid */}
               {currentSymbolPrice > 0 ? (
-                <div className="mt-2 p-2.5 rounded-lg border border-border/50 bg-surface/50 grid grid-cols-4 gap-2 text-center text-xs">
+                <div className="mt-1.5 p-2 rounded-md border border-border-subtle bg-surface-base/80 grid grid-cols-4 gap-1.5 text-center text-[11px]">
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Giá khớp</div>
-                    <div className="font-bold text-emerald-400 font-mono">
-                      {currentSymbolPrice.toLocaleString("vi-VN")}
+                    <div className="text-[10px] text-text-muted">Giá khớp</div>
+                    <div className="num font-bold text-accent-primary">
+                      {fmtNum(currentSymbolPrice, 0)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Thay đổi</div>
-                    <div
-                      className={`font-semibold font-mono ${
-                        (activeQuote?.changePercent ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}
-                    >
-                      {fmtPct(activeQuote?.changePercent)}
+                    <div className="text-[10px] text-text-muted">Thay đổi</div>
+                    <Chg value={activeQuote?.changePercent} className="text-[11px]" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-text-muted">Trần (+7%)</div>
+                    <div className="num font-medium text-purple-400">
+                      {fmtNum(currentCeiling, 0)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Trần (+7%)</div>
-                    <div className="font-semibold text-purple-400 font-mono">
-                      {currentCeiling?.toLocaleString("vi-VN")}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-muted-foreground">Sàn (-7%)</div>
-                    <div className="font-semibold text-cyan-400 font-mono">
-                      {currentFloor?.toLocaleString("vi-VN")}
+                    <div className="text-[10px] text-text-muted">Sàn (-7%)</div>
+                    <div className="num font-medium text-cyan-400">
+                      {fmtNum(currentFloor, 0)}
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="mt-2 text-[11px] text-amber-400 flex items-center gap-1.5">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  Đang tải giá thị trường mã {symbol}...
+                <div className="mt-1.5 text-[11px] text-warning flex items-center gap-1">
+                  <AlertCircle className="size-3" />
+                  Đang đồng bộ giá mã {symbol}...
                 </div>
               )}
             </div>
 
             {/* Loại lệnh: MP vs LO */}
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
+              <label className="block text-[11px] text-text-muted mb-1 font-medium">
                 Loại lệnh:
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
                   onClick={() => setOrderType("MP")}
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                  className={`py-1.5 px-2 rounded-md border text-[11px] font-semibold transition ${
                     orderType === "MP"
-                      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                      : "border-border/60 bg-surface-raised text-muted-foreground hover:text-foreground"
+                      ? "border-accent-primary/40 bg-accent-primary/10 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
                   }`}
                 >
                   Lệnh Thị Trường (MP)
@@ -587,10 +585,10 @@ export function PaperTradingBoard() {
                       setCustomPriceInput(String(currentSymbolPrice));
                     }
                   }}
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                  className={`py-1.5 px-2 rounded-md border text-[11px] font-semibold transition ${
                     orderType === "LO"
-                      ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-400"
-                      : "border-border/60 bg-surface-raised text-muted-foreground hover:text-foreground"
+                      ? "border-accent-primary/40 bg-accent-primary/10 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
                   }`}
                 >
                   Lệnh Giới Hạn (LO)
@@ -598,10 +596,10 @@ export function PaperTradingBoard() {
               </div>
             </div>
 
-            {/* Giá đặt (chỉ hiện khi chọn LO) */}
+            {/* Giá LO */}
             {orderType === "LO" && (
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                <label className="block text-[11px] text-text-muted mb-1 font-medium">
                   Mức giá đặt (VND):
                 </label>
                 <input
@@ -610,23 +608,18 @@ export function PaperTradingBoard() {
                   value={customPriceInput}
                   onChange={(e) => setCustomPriceInput(e.target.value)}
                   placeholder="Nhập giá LO (VD: 20950)"
-                  className="w-full font-mono font-bold px-3.5 py-2 rounded-xl border border-border/80 bg-surface-raised text-foreground focus:outline-none focus:border-emerald-500 text-sm"
+                  className="w-full num font-bold px-3 py-1.5 rounded-md border border-border-subtle bg-surface-base text-text-primary focus:outline-none focus:border-accent-primary text-[13px]"
                 />
               </div>
             )}
 
-            {/* Khối lượng cổ phiếu */}
+            {/* Khối lượng */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Khối lượng (Lô 100):
-                </label>
+              <div className="flex items-center justify-between mb-1 text-[11px]">
+                <label className="text-text-muted font-medium">Khối lượng (Lô 100):</label>
                 {side === "SELL" && account.holdings[symbol] && (
-                  <span className="text-[11px] text-muted-foreground">
-                    Khả dụng bán:{" "}
-                    <span className="font-semibold text-foreground">
-                      {account.holdings[symbol].availableShares.toLocaleString("vi-VN")} CP
-                    </span>
+                  <span className="text-text-muted">
+                    Khả dụng: <strong className="num text-text-primary">{fmtNum(account.holdings[symbol].availableShares, 0)}</strong> CP
                   </span>
                 )}
               </div>
@@ -635,20 +628,20 @@ export function PaperTradingBoard() {
                 step="100"
                 value={sharesInput}
                 onChange={(e) => setSharesInput(e.target.value)}
-                placeholder="Số lượng (bội số 100)"
-                className="w-full font-mono font-bold px-3.5 py-2 rounded-xl border border-border/80 bg-surface-raised text-foreground focus:outline-none focus:border-emerald-500 text-sm"
+                placeholder="Khối lượng (100, 500, 1000...)"
+                className="w-full num font-bold px-3 py-1.5 rounded-md border border-border-subtle bg-surface-base text-text-primary focus:outline-none focus:border-accent-primary text-[13px]"
               />
 
-              {/* Nút chọn nhanh khối lượng */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
+              {/* Quick Qty buttons */}
+              <div className="flex flex-wrap gap-1 mt-1.5">
                 {[100, 500, 1000, 2000, 5000].map((qty) => (
                   <button
                     key={qty}
                     type="button"
                     onClick={() => setSharesInput(String(qty))}
-                    className="px-2 py-1 rounded-md text-[11px] font-mono bg-surface-raised border border-border/50 text-muted-foreground hover:text-foreground transition-all"
+                    className="px-2 py-0.5 rounded text-[10.5px] num bg-surface-base border border-border-subtle text-text-muted hover:text-text-primary transition"
                   >
-                    +{qty.toLocaleString("vi-VN")}
+                    +{qty}
                   </button>
                 ))}
                 {side === "BUY" && currentSymbolPrice > 0 && (
@@ -658,16 +651,16 @@ export function PaperTradingBoard() {
                       const maxAffordable = Math.floor(account.availableCash / (currentSymbolPrice * 1.001 * 100)) * 100;
                       if (maxAffordable > 0) setSharesInput(String(maxAffordable));
                     }}
-                    className="px-2 py-1 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    className="px-2 py-0.5 rounded text-[10.5px] font-semibold bg-accent-primary/10 text-accent-primary border border-accent-primary/30"
                   >
-                    Tối đa (100%)
+                    Tối đa
                   </button>
                 )}
                 {side === "SELL" && account.holdings[symbol] && (
                   <button
                     type="button"
                     onClick={() => setSharesInput(String(account.holdings[symbol].availableShares))}
-                    className="px-2 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                    className="px-2 py-0.5 rounded text-[10.5px] font-semibold bg-negative/10 text-negative border border-negative/30"
                   >
                     Bán hết
                   </button>
@@ -675,176 +668,163 @@ export function PaperTradingBoard() {
               </div>
             </div>
 
-            {/* Chi tiết tính toán lệnh */}
-            <div className="p-3 rounded-xl border border-border/60 bg-surface/30 space-y-1.5 text-xs">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Giá trị lệnh dự tính:</span>
-                <span className="font-mono text-foreground font-semibold">
-                  {fmtVnd(estimatedGross)}
-                </span>
+            {/* Chi tiết chi phí */}
+            <div className="p-2.5 rounded-md border border-border-subtle bg-surface-base/60 space-y-1 text-[11px]">
+              <div className="flex justify-between text-text-muted">
+                <span>Giá trị lệnh:</span>
+                <span className="num font-semibold text-text-primary">{fmtVnd(estimatedGross)}</span>
               </div>
-              <div className="flex justify-between text-muted-foreground text-[11px]">
+              <div className="flex justify-between text-text-muted text-[10.5px]">
                 <span>Phí giao dịch (0.1%):</span>
-                <span className="font-mono text-foreground">
-                  {fmtVnd(estimatedFee)}
-                </span>
+                <span className="num text-text-primary">{fmtVnd(estimatedFee)}</span>
               </div>
               {side === "SELL" && (
-                <div className="flex justify-between text-muted-foreground text-[11px]">
+                <div className="flex justify-between text-text-muted text-[10.5px]">
                   <span>Thuế TNCN bán (0.1%):</span>
-                  <span className="font-mono text-foreground">
-                    {fmtVnd(estimatedTax)}
-                  </span>
+                  <span className="num text-text-primary">{fmtVnd(estimatedTax)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-foreground font-bold pt-1.5 border-t border-border/40 text-sm">
+              <div className="flex justify-between text-text-primary font-semibold pt-1 border-t border-border-subtle/50 text-[12px]">
                 <span>{side === "BUY" ? "Tổng tiền cần trả:" : "Tổng tiền thực nhận:"}</span>
-                <span className={`font-mono ${side === "BUY" ? "text-emerald-400" : "text-sky-400"}`}>
+                <span className={`num font-bold ${side === "BUY" ? "text-positive" : "text-accent-primary"}`}>
                   {fmtVnd(estimatedTotal)}
                 </span>
               </div>
             </div>
 
-            {/* Thông báo kết quả lệnh */}
+            {/* Thông báo kết quả */}
             {orderNotice && (
               <div
-                className={`p-3 rounded-xl text-xs flex items-start gap-2 ${
+                className={`p-2.5 rounded-md text-[11px] flex items-start gap-1.5 ${
                   orderNotice.type === "success"
-                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
-                    : "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+                    ? "bg-positive/10 border border-positive/30 text-positive"
+                    : "bg-negative/10 border border-negative/30 text-negative"
                 }`}
               >
                 {orderNotice.type === "success" ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="size-3.5 shrink-0 text-positive mt-0.5" />
                 ) : (
-                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+                  <AlertCircle className="size-3.5 shrink-0 text-negative mt-0.5" />
                 )}
                 <span>{orderNotice.message}</span>
               </div>
             )}
 
-            {/* Nút hành động MUA / BÁN */}
+            {/* Nút Thực hiện lệnh */}
             <button
               type="button"
               onClick={handlePlaceOrder}
               disabled={sharesNum <= 0 || currentSymbolPrice <= 0}
-              className={`w-full py-3 rounded-xl text-sm font-bold tracking-wide uppercase shadow-lg transition-all flex items-center justify-center gap-2 ${
+              className={`w-full py-2 rounded-md text-[12px] font-bold tracking-wide uppercase transition ${
                 side === "BUY"
-                  ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20 active:scale-[0.99]"
-                  : "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20 active:scale-[0.99]"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  ? "bg-positive text-surface-base hover:bg-positive/90 active:scale-[0.99]"
+                  : "bg-negative text-white hover:bg-negative/90 active:scale-[0.99]"
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
-              {side === "BUY" ? "XÁC NHẬN MUA CỔ PHIẾU" : "XÁC NHẬN BÁN CỔ PHIẾU"}
+              {side === "BUY" ? "Xác Nhận Mua Cổ Phiếu" : "Xác Nhận Bán Cổ Phiếu"}
             </button>
           </div>
-        </div>
+        </Panel>
 
         {/* Bảng Danh mục & Sổ lệnh: 7 Cột trên Desktop */}
-        <div className="lg:col-span-7 rounded-2xl border border-border/80 bg-surface/80 p-5 shadow-lg backdrop-blur-sm flex flex-col">
-          {/* Subtabs điều hướng */}
-          <div className="flex items-center gap-2 pb-4 mb-4 border-b border-border/50">
-            <button
-              onClick={() => setActiveBottomTab("holdings")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeBottomTab === "holdings"
-                  ? "bg-surface-raised border border-border text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Briefcase className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Danh Mục Nắm Giữ ({metrics.holdings.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveBottomTab("orders")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeBottomTab === "orders"
-                  ? "bg-surface-raised border border-border text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Clock className="h-3.5 w-3.5 text-amber-400" />
-              <span>
-                Sổ Lệnh ({account.orders.filter((o) => o.status === "PENDING").length} chờ)
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveBottomTab("history")}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                activeBottomTab === "history"
-                  ? "bg-surface-raised border border-border text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <History className="h-3.5 w-3.5 text-sky-400" />
-              <span>Nhật Ký Khớp Lệnh ({account.history.length})</span>
-            </button>
-          </div>
-
+        <Panel
+          pad={true}
+          className="lg:col-span-7 border-border-subtle bg-surface-elevated flex flex-col"
+          title={
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveBottomTab("holdings")}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                  activeBottomTab === "holdings"
+                    ? "bg-surface-base text-accent-primary font-bold border border-border-subtle"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                Danh mục ({metrics.holdings.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveBottomTab("orders")}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                  activeBottomTab === "orders"
+                    ? "bg-surface-base text-accent-primary font-bold border border-border-subtle"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                Sổ lệnh ({account.orders.filter((o) => o.status === "PENDING").length} chờ)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveBottomTab("history")}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition ${
+                  activeBottomTab === "history"
+                    ? "bg-surface-base text-accent-primary font-bold border border-border-subtle"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                Nhật ký khớp ({account.history.length})
+              </button>
+            </div>
+          }
+        >
           {/* TAB 1: DANH MỤC NẮM GIỮ */}
           {activeBottomTab === "holdings" && (
             <div className="flex-1 overflow-x-auto">
               {metrics.holdings.length === 0 ? (
-                <div className="py-16 text-center text-muted-foreground">
-                  <Briefcase className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-                  <p className="text-sm font-medium">Danh mục cổ phiếu đang trống.</p>
-                  <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                    Hãy sử dụng Phiếu Đặt Lệnh bên cạnh để mua thử các cổ phiếu tiêu biểu như HPG, SSI, VNM với số vốn 500 triệu.
+                <div className="py-12 text-center text-text-muted">
+                  <Briefcase className="size-8 mx-auto text-text-muted/40 mb-1.5" />
+                  <p className="text-[12px] font-medium text-text-primary">Danh mục cổ phiếu đang trống</p>
+                  <p className="text-[11px] text-text-muted mt-0.5 max-w-xs mx-auto">
+                    Đặt lệnh Mua thử các mã tiêu biểu như HPG, SSI, VNM với số vốn được cấp 500 triệu.
                   </p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[540px] text-left text-[11.5px]">
                     <thead>
-                      <tr className="border-b border-border/50 text-[11px] text-muted-foreground">
-                        <th className="pb-2.5 font-medium">Mã CP</th>
-                        <th className="pb-2.5 font-medium text-right">Khối lượng</th>
-                        <th className="pb-2.5 font-medium text-right">Giá vốn</th>
-                        <th className="pb-2.5 font-medium text-right">Giá hiện tại</th>
-                        <th className="pb-2.5 font-medium text-right">Tổng giá trị</th>
-                        <th className="pb-2.5 font-medium text-right">Lãi / Lỗ</th>
-                        <th className="pb-2.5 font-medium text-right">Tỷ trọng</th>
-                        <th className="pb-2.5 font-medium text-center">Thao tác</th>
+                      <tr className="border-b border-border-subtle text-[10px] uppercase text-text-muted">
+                        <th className="pb-1.5 font-medium">Mã</th>
+                        <th className="pb-1.5 font-medium text-right">Khối lượng</th>
+                        <th className="pb-1.5 font-medium text-right">Giá vốn</th>
+                        <th className="pb-1.5 font-medium text-right">Giá HT</th>
+                        <th className="pb-1.5 font-medium text-right">Giá trị</th>
+                        <th className="pb-1.5 font-medium text-right">uPnL</th>
+                        <th className="pb-1.5 font-medium text-right">Tỷ trọng</th>
+                        <th className="pb-1.5 font-medium text-center">Thao tác</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/30">
+                    <tbody className="divide-y divide-border-subtle/50">
                       {metrics.holdings.map((h) => {
                         const isProfitable = h.unrealizedPnl >= 0;
                         return (
-                          <tr key={h.symbol} className="hover:bg-surface-raised/40 transition-colors">
-                            <td className="py-3 font-mono font-bold text-foreground">
+                          <tr key={h.symbol} className="hover:bg-surface-base/50 transition">
+                            <td className="py-2.5 font-bold num text-text-primary">
                               {h.symbol}
                             </td>
-                            <td className="py-3 font-mono text-right text-foreground">
-                              <div>{h.shares.toLocaleString("vi-VN")}</div>
+                            <td className="py-2.5 num text-right text-text-primary">
+                              <div>{fmtNum(h.shares, 0)}</div>
                               {account.tPlusRule === "T2_5" && h.availableShares < h.shares && (
-                                <div className="text-[10px] text-amber-400">
-                                  Khả dụng: {h.availableShares.toLocaleString("vi-VN")}
+                                <div className="text-[9.5px] text-warning">
+                                  Khả dụng: {fmtNum(h.availableShares, 0)}
                                 </div>
                               )}
                             </td>
-                            <td className="py-3 font-mono text-right text-muted-foreground">
-                              {h.avgCost.toLocaleString("vi-VN")}
+                            <td className="py-2.5 num text-right text-text-muted">
+                              {fmtNum(h.avgCost, 0)}
                             </td>
-                            <td className="py-3 font-mono text-right font-semibold text-foreground">
-                              {h.currentPrice.toLocaleString("vi-VN")}
+                            <td className="py-2.5 num text-right font-medium text-text-primary">
+                              {fmtNum(h.currentPrice, 0)}
                               {h.changePercent != null && (
-                                <div
-                                  className={`text-[10px] ${
-                                    h.changePercent >= 0 ? "text-emerald-400" : "text-rose-400"
-                                  }`}
-                                >
-                                  {fmtPct(h.changePercent)}
-                                </div>
+                                <Chg value={h.changePercent} className="block text-[10px]" />
                               )}
                             </td>
-                            <td className="py-3 font-mono text-right font-medium text-foreground">
+                            <td className="py-2.5 num text-right font-medium text-text-primary">
                               {fmtVnd(h.marketValue)}
                             </td>
                             <td
-                              className={`py-3 font-mono text-right font-bold ${
-                                isProfitable ? "text-emerald-400" : "text-rose-400"
+                              className={`py-2.5 num text-right font-bold ${
+                                isProfitable ? "text-positive" : "text-negative"
                               }`}
                             >
                               <div>
@@ -855,14 +835,14 @@ export function PaperTradingBoard() {
                                 {fmtPct(h.unrealizedPnlPct)}
                               </div>
                             </td>
-                            <td className="py-3 font-mono text-right text-muted-foreground">
+                            <td className="py-2.5 num text-right text-text-muted">
                               {h.weightPct.toFixed(1)}%
                             </td>
-                            <td className="py-3 text-center">
+                            <td className="py-2.5 text-center">
                               <button
                                 onClick={() => handleQuickSell(h.symbol, h.availableShares)}
                                 title="Bán mã này"
-                                className="px-2.5 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] font-semibold border border-rose-500/20 transition-all"
+                                className="px-2 py-0.5 rounded bg-negative/10 hover:bg-negative/20 text-negative text-[10.5px] font-semibold border border-negative/25 transition"
                               >
                                 Bán
                               </button>
@@ -881,75 +861,69 @@ export function PaperTradingBoard() {
           {activeBottomTab === "orders" && (
             <div className="flex-1 overflow-x-auto">
               {account.orders.length === 0 ? (
-                <div className="py-16 text-center text-muted-foreground">
-                  <Clock className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-                  <p className="text-sm font-medium">Chưa có lệnh nào được đặt.</p>
+                <div className="py-12 text-center text-text-muted">
+                  <Clock className="size-8 mx-auto text-text-muted/40 mb-1.5" />
+                  <p className="text-[12px] font-medium text-text-primary">Chưa có lệnh nào được đặt</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[500px] text-left text-[11.5px]">
                     <thead>
-                      <tr className="border-b border-border/50 text-[11px] text-muted-foreground">
-                        <th className="pb-2.5 font-medium">Thời gian</th>
-                        <th className="pb-2.5 font-medium">Lệnh</th>
-                        <th className="pb-2.5 font-medium">Mã</th>
-                        <th className="pb-2.5 font-medium text-right">Khối lượng</th>
-                        <th className="pb-2.5 font-medium text-right">Giá</th>
-                        <th className="pb-2.5 font-medium text-right">Giá trị</th>
-                        <th className="pb-2.5 font-medium text-center">Trạng thái</th>
-                        <th className="pb-2.5 font-medium text-center">Huỷ</th>
+                      <tr className="border-b border-border-subtle text-[10px] uppercase text-text-muted">
+                        <th className="pb-1.5 font-medium">Thời gian</th>
+                        <th className="pb-1.5 font-medium">Lệnh</th>
+                        <th className="pb-1.5 font-medium">Mã</th>
+                        <th className="pb-1.5 font-medium text-right">Khối lượng</th>
+                        <th className="pb-1.5 font-medium text-right">Giá</th>
+                        <th className="pb-1.5 font-medium text-right">Giá trị</th>
+                        <th className="pb-1.5 font-medium text-center">Trạng thái</th>
+                        <th className="pb-1.5 font-medium text-center">Huỷ</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/30">
+                    <tbody className="divide-y divide-border-subtle/50">
                       {account.orders.map((o) => (
-                        <tr key={o.id} className="hover:bg-surface-raised/40 transition-colors">
-                          <td className="py-2.5 text-muted-foreground font-mono text-[11px]">
+                        <tr key={o.id} className="hover:bg-surface-base/50 transition">
+                          <td className="py-2 text-text-muted num text-[10.5px]">
                             {new Date(o.placedAt).toLocaleTimeString("vi-VN", {
                               hour: "2-digit",
                               minute: "2-digit",
                               second: "2-digit",
                             })}
                           </td>
-                          <td className="py-2.5 font-bold">
+                          <td className="py-2 font-bold">
                             <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              className={`px-1 py-0.5 rounded text-[9.5px] ${
                                 o.side === "BUY"
-                                  ? "bg-emerald-500/20 text-emerald-400"
-                                  : "bg-rose-500/20 text-rose-400"
+                                  ? "bg-positive/15 text-positive"
+                                  : "bg-negative/15 text-negative"
                               }`}
                             >
                               {o.side === "BUY" ? "MUA" : "BÁN"} {o.orderType}
                             </span>
                           </td>
-                          <td className="py-2.5 font-mono font-bold text-foreground">{o.symbol}</td>
-                          <td className="py-2.5 font-mono text-right">{o.shares.toLocaleString("vi-VN")}</td>
-                          <td className="py-2.5 font-mono text-right">{o.price.toLocaleString("vi-VN")}</td>
-                          <td className="py-2.5 font-mono text-right text-muted-foreground">
+                          <td className="py-2 num font-bold text-text-primary">{o.symbol}</td>
+                          <td className="py-2 num text-right">{fmtNum(o.shares, 0)}</td>
+                          <td className="py-2 num text-right">{fmtNum(o.price, 0)}</td>
+                          <td className="py-2 num text-right text-text-muted">
                             {fmtVnd(o.grossValue)}
                           </td>
-                          <td className="py-2.5 text-center">
+                          <td className="py-2 text-center">
                             {o.status === "FILLED" && (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
-                                Đã khớp
-                              </span>
+                              <Badge tone="up">Khớp</Badge>
                             )}
                             {o.status === "PENDING" && (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/10 text-amber-400 font-semibold border border-amber-500/20">
-                                Chờ khớp
-                              </span>
+                              <Badge tone="warn">Chờ khớp</Badge>
                             )}
                             {o.status === "CANCELLED" && (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-surface-raised text-muted-foreground border border-border/50">
-                                Đã huỷ
-                              </span>
+                              <Badge tone="neutral">Đã huỷ</Badge>
                             )}
                           </td>
-                          <td className="py-2.5 text-center">
+                          <td className="py-2 text-center">
                             {o.status === "PENDING" && (
                               <button
                                 onClick={() => handleCancelOrder(o.id)}
                                 title="Huỷ lệnh chờ khớp"
-                                className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-semibold border border-rose-500/20"
+                                className="px-1.5 py-0.5 rounded bg-negative/10 hover:bg-negative/20 text-negative text-[10px] font-semibold border border-negative/25"
                               >
                                 Huỷ
                               </button>
@@ -968,28 +942,28 @@ export function PaperTradingBoard() {
           {activeBottomTab === "history" && (
             <div className="flex-1 overflow-x-auto">
               {account.history.length === 0 ? (
-                <div className="py-16 text-center text-muted-foreground">
-                  <History className="h-10 w-10 mx-auto text-muted-foreground/30 mb-2" />
-                  <p className="text-sm font-medium">Chưa có giao dịch nào hoàn tất.</p>
+                <div className="py-12 text-center text-text-muted">
+                  <History className="size-8 mx-auto text-text-muted/40 mb-1.5" />
+                  <p className="text-[12px] font-medium text-text-primary">Chưa có giao dịch nào hoàn tất</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[500px] text-left text-[11.5px]">
                     <thead>
-                      <tr className="border-b border-border/50 text-[11px] text-muted-foreground">
-                        <th className="pb-2.5 font-medium">Thời gian</th>
-                        <th className="pb-2.5 font-medium">Mã</th>
-                        <th className="pb-2.5 font-medium">Loại</th>
-                        <th className="pb-2.5 font-medium text-right">Khối lượng</th>
-                        <th className="pb-2.5 font-medium text-right">Giá khớp</th>
-                        <th className="pb-2.5 font-medium text-right">Tổng tiền</th>
-                        <th className="pb-2.5 font-medium text-right">Lãi/Lỗ chốt</th>
+                      <tr className="border-b border-border-subtle text-[10px] uppercase text-text-muted">
+                        <th className="pb-1.5 font-medium">Thời gian</th>
+                        <th className="pb-1.5 font-medium">Mã</th>
+                        <th className="pb-1.5 font-medium">Loại</th>
+                        <th className="pb-1.5 font-medium text-right">Khối lượng</th>
+                        <th className="pb-1.5 font-medium text-right">Giá khớp</th>
+                        <th className="pb-1.5 font-medium text-right">Tổng tiền</th>
+                        <th className="pb-1.5 font-medium text-right">Lãi/Lỗ chốt</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/30">
+                    <tbody className="divide-y divide-border-subtle/50">
                       {account.history.map((t) => (
-                        <tr key={t.id} className="hover:bg-surface-raised/40 transition-colors">
-                          <td className="py-2.5 text-muted-foreground font-mono text-[11px]">
+                        <tr key={t.id} className="hover:bg-surface-base/50 transition">
+                          <td className="py-2 text-text-muted num text-[10.5px]">
                             {new Date(t.executedAt).toLocaleString("vi-VN", {
                               day: "2-digit",
                               month: "2-digit",
@@ -997,28 +971,28 @@ export function PaperTradingBoard() {
                               minute: "2-digit",
                             })}
                           </td>
-                          <td className="py-2.5 font-mono font-bold text-foreground">{t.symbol}</td>
-                          <td className="py-2.5 font-bold">
+                          <td className="py-2 num font-bold text-text-primary">{t.symbol}</td>
+                          <td className="py-2 font-bold">
                             <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              className={`px-1 py-0.5 rounded text-[9.5px] ${
                                 t.side === "BUY"
-                                  ? "bg-emerald-500/20 text-emerald-400"
-                                  : "bg-rose-500/20 text-rose-400"
+                                  ? "bg-positive/15 text-positive"
+                                  : "bg-negative/15 text-negative"
                               }`}
                             >
                               {t.side === "BUY" ? "MUA" : "BÁN"}
                             </span>
                           </td>
-                          <td className="py-2.5 font-mono text-right">{t.shares.toLocaleString("vi-VN")}</td>
-                          <td className="py-2.5 font-mono text-right">{t.price.toLocaleString("vi-VN")}</td>
-                          <td className="py-2.5 font-mono text-right text-foreground font-medium">
+                          <td className="py-2 num text-right">{fmtNum(t.shares, 0)}</td>
+                          <td className="py-2 num text-right">{fmtNum(t.price, 0)}</td>
+                          <td className="py-2 num text-right text-text-primary font-medium">
                             {fmtVnd(t.netValue)}
                           </td>
-                          <td className="py-2.5 font-mono text-right">
+                          <td className="py-2 num text-right">
                             {t.realizedPnl != null ? (
                               <span
-                                className={`font-bold ${
-                                  t.realizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                                className={`font-semibold ${
+                                  t.realizedPnl >= 0 ? "text-positive" : "text-negative"
                                 }`}
                               >
                                 {t.realizedPnl >= 0 ? "+" : ""}
@@ -1030,7 +1004,7 @@ export function PaperTradingBoard() {
                                 )}
                               </span>
                             ) : (
-                              <span className="text-muted-foreground">—</span>
+                              <span className="text-text-muted">—</span>
                             )}
                           </td>
                         </tr>
@@ -1041,25 +1015,25 @@ export function PaperTradingBoard() {
               )}
             </div>
           )}
-        </div>
+        </Panel>
       </div>
 
       {/* Modal Xác nhận Reset 500M */}
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
-              <RefreshCw className="h-5 w-5 text-rose-400" />
+          <div className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-elevated p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-1.5 flex items-center gap-1.5">
+              <RefreshCw className="size-4 text-negative" />
               Đặt lại tài khoản về 500 triệu?
             </h3>
-            <p className="text-xs text-muted-foreground mb-5 leading-relaxed">
-              Hành động này sẽ xoá toàn bộ danh mục cổ phiếu hiện có, sổ lệnh và lịch sử giao dịch mô phỏng, sau đó cấp lại 500.000.000 VNĐ tiền mặt để bạn bắt đầu lại từ đầu.
+            <p className="text-[11px] text-text-muted mb-4 leading-relaxed">
+              Hành động này sẽ xoá toàn bộ danh mục cổ phiếu, sổ lệnh và lịch sử giao dịch mô phỏng, sau đó cấp lại 500.000.000 VNĐ tiền mặt để bạn bắt đầu lại từ đầu.
             </p>
-            <div className="flex justify-end gap-2.5">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowResetConfirm(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-raised border border-border text-foreground hover:bg-surface-raised/80 transition-all"
+                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
               >
                 Đóng
               </button>
@@ -1070,7 +1044,7 @@ export function PaperTradingBoard() {
                   setShowResetConfirm(false);
                   setOrderNotice({ type: "success", message: "Đã khôi phục tài khoản về 500 triệu đồng ban đầu." });
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-500 hover:bg-rose-600 text-white transition-all shadow-md shadow-rose-500/20"
+                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-negative text-white hover:bg-negative/90 transition shadow-sm"
               >
                 Xác nhận đặt lại
               </button>
@@ -1082,35 +1056,35 @@ export function PaperTradingBoard() {
       {/* Modal Bơm thêm vốn */}
       {showAddCashModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-foreground mb-2 flex items-center gap-2">
-              <PlusCircle className="h-5 w-5 text-emerald-400" />
+          <div className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-elevated p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-1.5 flex items-center gap-1.5">
+              <PlusCircle className="size-4 text-positive" />
               Nạp thêm vốn ảo
             </h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              Chọn mức vốn bạn muốn bổ sung vào tiền mặt khả dụng để thử nghiệm quy mô danh mục lớn hơn:
+            <p className="text-[11px] text-text-muted mb-3">
+              Chọn mức vốn bạn muốn bổ sung vào tiền mặt khả dụng:
             </p>
-            <div className="grid grid-cols-3 gap-2 mb-5">
+            <div className="grid grid-cols-3 gap-1.5 mb-4">
               {[50_000_000, 100_000_000, 500_000_000].map((amt) => (
                 <button
                   key={amt}
                   type="button"
                   onClick={() => setAddCashAmount(amt)}
-                  className={`p-3 rounded-xl border text-xs font-bold font-mono transition-all ${
+                  className={`p-2 rounded-md border text-[11px] font-semibold num transition ${
                     addCashAmount === amt
-                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-300 shadow-sm"
-                      : "border-border/60 bg-surface-raised text-muted-foreground hover:text-foreground"
+                      ? "border-accent-primary bg-accent-primary/15 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
                   }`}
                 >
                   +{amt >= 100_000_000 ? `${amt / 1_000_000} Triệu` : `${amt / 1_000_000} Tr`}
                 </button>
               ))}
             </div>
-            <div className="flex justify-end gap-2.5">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowAddCashModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-raised border border-border text-foreground hover:bg-surface-raised/80 transition-all"
+                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
               >
                 Đóng
               </button>
@@ -1124,7 +1098,7 @@ export function PaperTradingBoard() {
                     message: `Đã nạp thêm ${fmtVnd(addCashAmount)} vào tài khoản thành công!`,
                   });
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition-all shadow-md shadow-emerald-500/20"
+                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-positive text-surface-base hover:bg-positive/90 transition shadow-sm"
               >
                 Nạp ngay
               </button>
