@@ -24,20 +24,38 @@ async function soft<T>(p: Promise<T>, ms: number): Promise<T | null> {
   }
 }
 
-export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await ctx.params;
   const sym = (symbol ?? "").trim().toUpperCase();
   if (!sym || !/^[A-Z0-9]{3,12}$/.test(sym)) {
     return unavailable("financial-reports", "Mã cổ phiếu không hợp lệ");
   }
 
+  const url = new URL(req.url);
+  const forceFresh =
+    url.searchParams.get("refresh") === "1" ||
+    url.searchParams.get("fresh") === "true" ||
+    url.searchParams.get("force") === "1";
+
   try {
     const { fetchVndirectFinancials, periodsToLegacyRows } = await import(
       "@/lib/financial/vndirect-fs"
     );
+    const { getLatestSignedBctcDisclosure } = await import(
+      "@/lib/financial/official/discovery"
+    );
+
+    // Song song: lấy disclosure mới nhất từ Sở GDCK để đính kèm thông báo BCTC mới
+    const disclosurePromise = soft(getLatestSignedBctcDisclosure(sym), 2_500);
 
     // Stage 1 — VNDirect direct (usually <3s)
-    const direct = await soft(fetchVndirectFinancials(sym, { limitPeriods: 12 }), 8_000);
+    const direct = await soft(
+      fetchVndirectFinancials(sym, { limitPeriods: 12, forceFresh }),
+      8_000,
+    );
+
+    const latestDisclosure = await disclosurePromise;
+
     if (direct?.periods?.length) {
       const legacy = periodsToLegacyRows(direct.periods, sym);
       const has =
@@ -45,7 +63,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
       if (has) {
         // Optional enrich via package engine if still within budget
         const pack = await soft(
-          import("@/lib/financial/service").then((m) => m.getFinancialsForSymbol(sym)),
+          import("@/lib/financial/service").then((m) =>
+            m.getFinancialsForSymbol(sym, { forceFresh }),
+          ),
           6_000,
         );
         if (
@@ -57,11 +77,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
               symbol: sym,
               financials: pack.financials,
               health: pack.health,
-              packageMeta: pack.packageMeta,
+              packageMeta: {
+                ...pack.packageMeta,
+                latestDisclosure,
+              },
               growth: pack.growth,
               ttm: pack.ttm,
               quality: pack.quality,
               notes: pack.notes,
+              latestDisclosure,
               purpose: "reports-page",
             },
             pack.meta,
@@ -84,6 +108,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
               reportTypeLabel:
                 direct.periods[0]?.periodType === "year" ? "Báo cáo năm" : "Báo cáo quý",
               statementScope: "legacy-direct",
+              latestDisclosure,
               sourceUrls: {
                 balance: `https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${sym}`,
                 income: `https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${sym}`,
@@ -94,6 +119,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
             ttm: null,
             quality: null,
             notes: ["P7 fast-path VNDirect public"],
+            latestDisclosure,
             purpose: "reports-page",
           },
           {

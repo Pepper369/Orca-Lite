@@ -1,5 +1,6 @@
 import "server-only";
 import { fetchVndirectFinancials } from "./vndirect-fs";
+import { fetchVietcapFinancials } from "./vietcap-fs";
 import { fetchVnstockFinancials } from "./vnstock-provider";
 import { getFinancialPackage } from "./service";
 import type { NormalizedPeriod } from "./types";
@@ -10,7 +11,14 @@ export type FsPack = {
   sources: string[];
 };
 
-/** Parallel public BCTC race — richest period set wins. */
+function periodScore(p: NormalizedPeriod | undefined): number {
+  if (!p) return 0;
+  const y = p.year ?? 0;
+  const q = p.quarter ?? 4;
+  return y * 10 + q;
+}
+
+/** Parallel public BCTC race — newest fiscal period wins, ties broken by richest period set. */
 export async function fetchFinancialStatementsMulti(symbol: string): Promise<FsPack | null> {
   type Pack = { periods: NormalizedPeriod[]; latencyMs: number; source: string };
   const jobs: Promise<Pack | null>[] = [
@@ -25,6 +33,23 @@ export async function fetchFinancialStatementsMulti(symbol: string): Promise<FsP
             periods: primary.periods,
             latencyMs: primary.latencyMs ?? 0,
             source: primary.periods[0]?.source ?? "vndirect-fs",
+          };
+      } catch {
+        /* */
+      }
+      return null;
+    })(),
+    (async () => {
+      try {
+        const vc = await Promise.race([
+          fetchVietcapFinancials(symbol, { limitPeriods: 16 }),
+          new Promise<null>((r) => setTimeout(() => r(null), 10_000)),
+        ]);
+        if (vc?.periods?.length)
+          return {
+            periods: vc.periods,
+            latencyMs: vc.latencyMs ?? 0,
+            source: vc.periods[0]?.source ?? "vietcap-fs",
           };
       } catch {
         /* */
@@ -70,7 +95,17 @@ export async function fetchFinancialStatementsMulti(symbol: string): Promise<FsP
   const settled = await Promise.all(jobs);
   const ok = settled.filter((x): x is Pack => Boolean(x?.periods?.length));
   if (!ok.length) return null;
-  ok.sort((a, b) => b.periods.length - a.periods.length);
+
+  // Sắp xếp ưu tiên:
+  // 1. Kỳ báo cáo mới nhất (ví dụ Q3/2026 > Q2/2026)
+  // 2. Độ dài lịch sử dữ liệu (nhiều quý hơn)
+  ok.sort((a, b) => {
+    const scoreA = periodScore(a.periods[0]);
+    const scoreB = periodScore(b.periods[0]);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    return b.periods.length - a.periods.length;
+  });
+
   const best = ok[0]!;
   return {
     periods: best.periods,
@@ -78,3 +113,4 @@ export async function fetchFinancialStatementsMulti(symbol: string): Promise<FsP
     sources: ok.map((x) => x.source),
   };
 }
+

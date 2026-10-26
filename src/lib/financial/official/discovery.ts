@@ -71,6 +71,106 @@ async function discoverFromFsMeta(symbol: string): Promise<{ filings: OfficialFi
   return { filings, ok: filings.length > 0 };
 }
 
+interface FinfoNewsAttachment {
+  name?: string;
+  url?: string;
+  sourceUrl?: string;
+}
+
+interface FinfoNewsRow {
+  newsId?: string;
+  newsTitle?: string;
+  newsDate?: string;
+  newsTime?: string;
+  newsSource?: string;
+  newsUrl?: string;
+  dstockUrl?: string;
+  attachments?: FinfoNewsAttachment[];
+}
+
+export async function getLatestSignedBctcDisclosure(symbol: string): Promise<{
+  title: string;
+  date: string;
+  time?: string;
+  source: string;
+  newsUrl?: string;
+  dstockUrl?: string;
+  pdfUrl?: string;
+  pdfName?: string;
+} | null> {
+  const sym = symbol.toUpperCase().trim();
+  try {
+    const path = `/v4/news?q=newsType:financialstatement~tagCodes:${sym}&sort=newsDate:desc~newsTime:desc&size=1`;
+    const res = await httpJson<{ data?: FinfoNewsRow[] }>(`${BASE}${path}`, {
+      provider: "vndirect-bctc-news",
+      timeoutMs: 4_000,
+      retries: 0,
+    });
+    const first = res.data?.data?.[0];
+    if (!first?.newsTitle) return null;
+    const att = first.attachments?.[0];
+    return {
+      title: first.newsTitle,
+      date: first.newsDate ?? "",
+      time: first.newsTime,
+      source: first.newsSource ?? "HOSE/HNX",
+      newsUrl: first.newsUrl,
+      dstockUrl: first.dstockUrl,
+      pdfUrl: att?.url ?? att?.sourceUrl,
+      pdfName: att?.name,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function discoverFromFinfoNews(symbol: string): Promise<{ filings: OfficialFiling[]; ok: boolean }> {
+  const sym = symbol.toUpperCase().trim();
+  try {
+    const path = `/v4/news?q=newsType:financialstatement~tagCodes:${sym}&sort=newsDate:desc~newsTime:desc&size=10`;
+    const res = await httpJson<{ data?: FinfoNewsRow[] }>(`${BASE}${path}`, {
+      provider: "vndirect-bctc-news",
+      timeoutMs: 7_000,
+      retries: 1,
+    });
+    if (!res.ok || !res.data?.data?.length) return { filings: [], ok: false };
+
+    const filings: OfficialFiling[] = [];
+    let idx = 0;
+    for (const item of res.data.data) {
+      const title = item.newsTitle ?? "Báo cáo tài chính";
+      const cls = classifyFiling({ title });
+      const pubDate = item.newsDate ?? null;
+      const att = item.attachments?.[0];
+      const docUrl = att?.url ?? att?.sourceUrl ?? item.newsUrl ?? null;
+      const fid = filingId(sym, "vndirect_bctc_news", pubDate, cls.kind, idx++);
+
+      filings.push({
+        id: fid,
+        ticker: sym,
+        kind: cls.kind === "unknown" ? "disclosure_other" : cls.kind,
+        title,
+        period: periodLabelFromFiscal(pubDate, cls.periodType),
+        periodType: cls.periodType,
+        fiscalDate: null,
+        filingDate: pubDate,
+        disclosureDate: pubDate,
+        statementScope: cls.statementScope,
+        auditStatus: cls.auditStatus,
+        sourceChannel: "hose_disclosure",
+        sourceUrl: item.dstockUrl ?? item.newsUrl ?? `${BASE}${path}`,
+        documentUrl: docUrl,
+        mimeType: docUrl?.endsWith(".pdf") ? "application/pdf" : null,
+        confidence: 0.95,
+        rawNote: `Công bố chính thức từ ${item.newsSource ?? "Sở GDCK"}${item.newsTime ? ` lúc ${item.newsTime}` : ""}${att?.name ? ` (File: ${att.name})` : ""}`,
+      });
+    }
+    return { filings, ok: filings.length > 0 };
+  } catch {
+    return { filings: [], ok: false };
+  }
+}
+
 async function discoverFromEvents(symbol: string): Promise<{ filings: OfficialFiling[]; ok: boolean }> {
   const sym = symbol.toUpperCase();
   const res = await httpJson<{ data?: Record<string, unknown>[] }>(
@@ -231,11 +331,15 @@ export async function discoverOfficialFilings(symbol: string): Promise<FilingDis
   channelsAttempted.push(...portals.channels.filter((c) => c !== "ssc_ids"));
   all.push(...portals.filings);
 
-  // 3) Structured metadata
+  // 3) Structured metadata & Real-time Signed Disclosures (HOSE/HNX)
+  channelsAttempted.push("hose_disclosure");
+  const news = await discoverFromFinfoNews(sym);
+  all.push(...news.filings);
+
   channelsAttempted.push("vndirect_fs_meta");
   const fs = await discoverFromFsMeta(sym);
   all.push(...fs.filings);
-  if (!fs.ok) notes.push("Không phát hiện kỳ BCTC từ metadata VNDirect.");
+  if (!fs.ok && !news.ok) notes.push("Không phát hiện kỳ BCTC từ metadata VNDirect.");
 
   channelsAttempted.push("vndirect_events");
   const ev = await discoverFromEvents(sym);

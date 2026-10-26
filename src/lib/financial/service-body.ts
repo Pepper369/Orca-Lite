@@ -125,7 +125,10 @@ function runQualityGate(
   return quality;
 }
 
-export async function getFinancialPackageCore(symbol: string): Promise<{
+export async function getFinancialPackageCore(
+  symbol: string,
+  opts?: { forceFresh?: boolean },
+): Promise<{
   pkg: FinancialPackage;
   health: FinancialHealthResult;
   quality: FinancialQualityResult | null;
@@ -139,9 +142,23 @@ export async function getFinancialPackageCore(symbol: string): Promise<{
     return null;
   });
 
-  const cachedRes = await cached(`fin:pkg:${sym}:router:v5:${metricProfile}`, {
-    ttlMs: 6 * 3_600_000,
-    staleMs: 90 * 24 * 3_600_000,
+  const { getSscCalendar } = await import("./official/ssc-calendar");
+  const cal = getSscCalendar();
+  const cacheKey = `fin:pkg:${sym}:router:v6:${metricProfile}`;
+
+  if (opts?.forceFresh) {
+    const { invalidate } = await import("../cache");
+    await invalidate(cacheKey).catch(() => undefined);
+  }
+
+  // Dynamic TTL theo SSC calendar: 30 phút trong mùa công bố, 4 giờ ngoài mùa
+  const ttlMs = cal.shouldAggressiveFetch ? 30 * 60_000 : 4 * 3_600_000;
+  const staleMs = cal.shouldAggressiveFetch ? 3 * 3_600_000 : 14 * 24 * 3_600_000;
+
+  const cachedRes = await cached(cacheKey, {
+    ttlMs,
+    staleMs,
+    softSwr: !cal.shouldAggressiveFetch,
     producer: async () => {
       const routed = await runSourceRouter(sym, listFinancialProviders(), { limitPeriods: 12 });
       if (!routed) throw new Error(`financial sources unavailable: ${sym}`);

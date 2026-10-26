@@ -16,12 +16,75 @@ export const maxDuration = 30;
 
 const BUDGET_MS = 25_000;
 
-type Phase = "bctc" | "ohlcv" | "canslim" | "auto";
+type Phase = "bctc" | "ohlcv" | "canslim" | "detect" | "auto";
 
 function parsePhase(raw: string | null): Phase {
   const p = (raw ?? "auto").toLowerCase();
-  if (p === "bctc" || p === "ohlcv" || p === "canslim") return p;
+  if (p === "bctc" || p === "ohlcv" || p === "canslim" || p === "detect") return p;
   return "auto";
+}
+
+async function detectAndPrewarmNewBctcFilings(limit = 25): Promise<{
+  detected: number;
+  filings: Array<{ code: string; title: string; date: string; time?: string }>;
+  invalidated: string[];
+}> {
+  try {
+    const url =
+      "https://api-finfo.vndirect.com.vn/v4/news?q=newsType:financialstatement&sort=newsDate:desc~newsTime:desc&size=30";
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0",
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { detected: 0, filings: [], invalidated: [] };
+    const json = (await res.json()) as {
+      data?: Array<{ tagCodes?: string; newsTitle?: string; newsDate?: string; newsTime?: string }>;
+    };
+    const rows = json.data ?? [];
+    const valid = rows.filter((r) => r.tagCodes && /^[A-Z0-9]{3,8}$/.test(r.tagCodes.trim()));
+
+    const uniqueSymbols = [
+      ...new Set(valid.map((r) => r.tagCodes!.trim().toUpperCase())),
+    ].slice(0, limit);
+    const { invalidate } = await import("@/lib/cache");
+    const invalidated: string[] = [];
+
+    for (const sym of uniqueSymbols) {
+      await Promise.allSettled([
+        invalidate(`vnd-fs:periods:${sym}:v6:12`),
+        invalidate(`vnd-fs:periods:${sym}:v7:12`),
+        invalidate(`fin:pkg:${sym}:router:v5:standard`),
+        invalidate(`fin:pkg:${sym}:router:v5:bank`),
+        invalidate(`fin:pkg:${sym}:router:v5:securities`),
+        invalidate(`fin:pkg:${sym}:router:v6:standard`),
+        invalidate(`fin:pkg:${sym}:router:v6:bank`),
+        invalidate(`fin:pkg:${sym}:router:v6:securities`),
+      ]);
+      invalidated.push(sym);
+    }
+
+    // Warm fresh BCTC
+    const { fetchFinancialStatementsMulti } = await import("@/lib/financial/fs-multi");
+    await Promise.allSettled(
+      uniqueSymbols.slice(0, 8).map((sym) => fetchFinancialStatementsMulti(sym)),
+    );
+
+    return {
+      detected: valid.length,
+      filings: valid.slice(0, 10).map((r) => ({
+        code: r.tagCodes!.trim().toUpperCase(),
+        title: r.newsTitle ?? "",
+        date: r.newsDate ?? "",
+        time: r.newsTime,
+      })),
+      invalidated,
+    };
+  } catch {
+    return { detected: 0, filings: [], invalidated: [] };
+  }
 }
 
 /**
@@ -77,7 +140,25 @@ export async function GET(req: Request) {
   try {
     const out: Record<string, unknown> = { ok: true, phase, durationMs: 0 };
 
+    if (phase === "detect") {
+      const det = await detectAndPrewarmNewBctcFilings(30);
+      out.detection = det;
+      out.durationMs = Date.now() - t0;
+      out.note = `BCTC detector: tìm thấy ${det.detected} công bố BCTC mới, đã huỷ cache & pre-warm ${det.invalidated.length} mã.`;
+      return ok(out);
+    }
+
     if (phase === "bctc" || phase === "auto") {
+      // Khi quét lát đầu tiên (offset=0), chạy BCTC detector để cập nhật ngay các DN vừa nộp hôm nay
+      if (offset === 0) {
+        try {
+          const det = await detectAndPrewarmNewBctcFilings(15);
+          out.detectedNewFilings = det;
+        } catch {
+          /* non-blocking */
+        }
+      }
+
       const slice = fullUniverse.slice(offset, offset + limit);
       if (!slice.length) {
         return ok({

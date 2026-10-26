@@ -6,7 +6,10 @@ import type { Meta } from "../types";
 import { getFinancialPackageCore } from "./service-body";
 
 /** Request-scoped singleflight + TTL cache inside core */
-export async function getFinancialPackage(symbol: string): Promise<{
+export async function getFinancialPackage(
+  symbol: string,
+  opts?: { forceFresh?: boolean },
+): Promise<{
   pkg: FinancialPackage;
   health: FinancialHealthResult;
   quality: FinancialQualityResult | null;
@@ -16,12 +19,15 @@ export async function getFinancialPackage(symbol: string): Promise<{
   const sym = symbol.toUpperCase();
   return coalesce(
     `financial:package:${sym}`,
-    () => getFinancialPackageCore(sym),
-    { sourceIds: ["vndirect-fs"] },
+    () => getFinancialPackageCore(sym, opts),
+    { sourceIds: ["vndirect-fs", "vietcap-fs"] },
   );
 }
 
-export async function getFinancialsForSymbol(symbol: string): Promise<{
+export async function getFinancialsForSymbol(
+  symbol: string,
+  opts?: { forceFresh?: boolean },
+): Promise<{
   financials: {
     income: Record<string, unknown>[] | null;
     balance: Record<string, unknown>[] | null;
@@ -36,7 +42,7 @@ export async function getFinancialsForSymbol(symbol: string): Promise<{
   meta: Meta;
   notes: string[];
 } | null> {
-  const r = await getFinancialPackage(symbol);
+  const r = await getFinancialPackage(symbol, opts);
   if (!r) return null;
   const has = r.pkg.income.length + r.pkg.balance.length + r.pkg.cashflow.length > 0;
   const notes: string[] = [];

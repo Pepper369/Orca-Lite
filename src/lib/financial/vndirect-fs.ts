@@ -395,10 +395,42 @@ async function fetchStatementPage(
   return rows;
 }
 
-/** Fast VNDirect FS — parallel quarter+annual, long cache. */
+/**
+ * Fast probe (<350ms): kiểm tra kỳ BCTC quý mới nhất từ upstream finfo.
+ * Dùng để phát hiện ngay lập tức khi doanh nghiệp vừa nộp BCTC mới để cập nhật không độ trễ.
+ */
+export async function probeLatestVndirectPeriod(
+  symbol: string,
+): Promise<{ fiscalDate: string; yearReport: number; lengthReport: number } | null> {
+  const sym = symbol.toUpperCase().trim();
+  try {
+    const q = `code:${sym}~reportType:QUARTER`;
+    const path = `/v4/financial_statements?q=${encodeURIComponent(q)}&size=1&sort=${encodeURIComponent("fiscalDate:desc")}`;
+    const res = await vndirectJson<{ data?: Array<{ fiscalDate?: string; yearReport?: number; lengthReport?: number }> }>(path, {
+      provider: VND,
+      timeoutMs: 3_000,
+      retries: 0,
+      headers: DSTOCK_HEADERS,
+      accept: (payload) => Array.isArray(payload.data) && payload.data.length > 0,
+    });
+    const first = res.data.data?.[0];
+    if (first?.fiscalDate) {
+      return {
+        fiscalDate: first.fiscalDate,
+        yearReport: Number(first.yearReport) || 0,
+        lengthReport: Number(first.lengthReport) || 0,
+      };
+    }
+  } catch {
+    /* */
+  }
+  return null;
+}
+
+/** Fast VNDirect FS — adaptive SSC calendar TTL, dynamic refresh, Vietcap fallback. */
 export async function fetchVndirectFinancials(
   symbol: string,
-  opts?: { limitPeriods?: number },
+  opts?: { limitPeriods?: number; forceFresh?: boolean },
 ): Promise<{ periods: NormalizedPeriod[]; latencyMs: number; profile: MetricProfile } | null> {
   const sym = symbol.toUpperCase();
   const profile = metricProfileForSymbol(sym);
@@ -406,13 +438,27 @@ export async function fetchVndirectFinancials(
   const t0 = performance.now();
 
   try {
-    const { cached } = await import("../cache");
+    const { cached, invalidate } = await import("../cache");
+    const { getSscCalendar } = await import("./official/ssc-calendar");
+    const cal = getSscCalendar();
+
+    const cacheKey = `vnd-fs:periods:${sym}:v7:${limit}`;
+
+    if (opts?.forceFresh) {
+      await invalidate(cacheKey).catch(() => undefined);
+    }
+
+    // Dynamic TTL: Trong mùa công bố BCTC (SSC disclosure window), hạ TTL xuống 15 phút
+    // để doanh nghiệp vừa nộp là hệ thống cập nhật ngay. Ngoài mùa giữ 2 giờ (thay vì 12 giờ).
+    const ttlMs = cal.shouldAggressiveFetch ? 15 * 60_000 : 2 * 3_600_000;
+    const staleMs = cal.shouldAggressiveFetch ? 60 * 60_000 : 7 * 24 * 3_600_000;
+
     const hit = await cached<{ periods: NormalizedPeriod[]; profile: MetricProfile }>(
-      `vnd-fs:periods:${sym}:v6:${limit}`,
+      cacheKey,
       {
-        ttlMs: 12 * 3_600_000,
-        staleMs: 21 * 24 * 3_600_000,
-        softSwr: true,
+        ttlMs,
+        staleMs,
+        softSwr: !cal.shouldAggressiveFetch,
         producer: async () => {
           const inner = await fetchVndirectFinancialsUncached(sym, profile, limit);
           if (!inner?.periods.length) throw new Error(`vndirect-fs: no usable periods for ${sym}`);
