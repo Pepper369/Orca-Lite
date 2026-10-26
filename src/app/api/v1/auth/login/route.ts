@@ -16,6 +16,7 @@ export async function POST(req: Request) {
     const email = body?.email?.trim().toLowerCase();
     const password = body?.password ?? "";
     if (!email || !isValidEmail(email) || !password) return badRequest("Thông tin đăng nhập không hợp lệ");
+    if (password.length > 128) return badRequest("Mật khẩu không hợp lệ");
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user || !verifyPassword(password, user.passwordHash)) {
       if (user) await db.insert(auditLogs).values({ userId: user.id, action: "login_failed" }).catch(() => {});

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { badRequest, fail, ok } from "@/lib/envelope";
+import { getSessionUser } from "@/lib/auth";
 import {
   initSheetsSchema,
   isSheetsConfigured,
@@ -23,6 +24,11 @@ export async function GET(req: NextRequest) {
 
     if (action === "status") {
       return ok(sheetsStatus());
+    }
+
+    const session = await getSessionUser();
+    if (!session) {
+      return fail("UNAUTHORIZED", "Vui lòng đăng nhập để thao tác Google Sheets", 401);
     }
 
     if (!isSheetsConfigured()) {
@@ -55,6 +61,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSessionUser();
+    if (!session) {
+      return fail("UNAUTHORIZED", "Vui lòng đăng nhập để cập nhật dữ liệu Google Sheets", 401);
+    }
+
     if (!isSheetsConfigured()) {
       return fail("SHEETS_NOT_CONFIGURED", "Google Sheets env missing", 503);
     }

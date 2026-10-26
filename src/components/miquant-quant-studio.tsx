@@ -56,6 +56,21 @@ import { DeepFinancialsPanel } from "@/components/stocks/deep-financials-panel";
 import { AnalyticReportsPanel } from "@/components/stocks/analytic-reports-panel";
 import { SignedDisclosuresPanel } from "@/components/stocks/signed-disclosures-panel";
 
+function renderFormattedText(text: string) {
+  if (!text) return null;
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return (
+    <span>
+      {parts.map((part, index) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={index}>{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      })}
+    </span>
+  );
+}
+
 type ActiveTab = "bots" | "ranking" | "strategies" | "signals";
 
 export function OQuantStudio() {
@@ -1483,7 +1498,7 @@ export function OQuantStudio() {
                           key={i}
                           className="rounded-xl border border-emerald-500/20 bg-emerald-950/10 p-3 text-xs leading-relaxed text-text-secondary"
                         >
-                          <div dangerouslySetInnerHTML={{ __html: c.description.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                          <div>{renderFormattedText(c.description)}</div>
                           {c.sites && c.sites.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2 pt-1 border-t border-emerald-500/10">
                               {c.sites.flatMap((s) => (s.articles || []).map((art) => ({ ...art, domain: s.domain }))).slice(0, 2).map((a, idx) => (
@@ -1521,7 +1536,7 @@ export function OQuantStudio() {
                           key={i}
                           className="rounded-xl border border-rose-500/20 bg-rose-950/10 p-3 text-xs leading-relaxed text-text-secondary"
                         >
-                          <div dangerouslySetInnerHTML={{ __html: r.description.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                          <div>{renderFormattedText(r.description)}</div>
                         </div>
                       ))
                     ) : (

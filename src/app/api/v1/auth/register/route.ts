@@ -18,6 +18,7 @@ export async function POST(req: Request) {
     const name = body?.name?.trim().slice(0, 80) || null;
     if (!email || !isValidEmail(email)) return badRequest("Email không hợp lệ");
     if (password.length < 8) return badRequest("Mật khẩu tối thiểu 8 ký tự");
+    if (password.length > 128) return badRequest("Mật khẩu không được vượt quá 128 ký tự");
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
     if (existing.length) return fail("EMAIL_EXISTS", "Email đã được đăng ký", 409);
     const [user] = await db.insert(users).values({ email, passwordHash: hashPassword(password), name }).returning({ id: users.id });

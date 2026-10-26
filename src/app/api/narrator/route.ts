@@ -1,11 +1,15 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "narrator", binding: "RL_AI", limit: 10, windowSec: 60 });
+  if (limited) return limited;
+
   try {
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {

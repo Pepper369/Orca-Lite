@@ -1,5 +1,6 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -417,6 +418,9 @@ Cậu có thể hỏi sâu hơn về bất kỳ chủ đề nào (chia lương, 
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "ask_orca", binding: "RL_AI", limit: 15, windowSec: 60 });
+  if (limited) return limited;
+
   try {
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {

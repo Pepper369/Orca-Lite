@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getGlobalDiscordWebhook, postGlobalDiscord } from "@/lib/services/discord-notify";
+import { rateLimit } from "@/lib/rate-limit";
+import { getSessionUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,6 +36,55 @@ function isDiscordUrl(url: string): boolean {
 
 function looksLikeTelegramToken(s: string): boolean {
   return /^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(s.trim());
+}
+
+/** Chặn SSRF: cấm toàn bộ IP cục bộ, dải mạng riêng tư và metadata service */
+function isSafeWebhookUrl(rawUrl: string): { ok: boolean; reason?: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: "URL không đúng định dạng" };
+  }
+
+  if (parsed.protocol !== "https:" && (process.env.NODE_ENV === "production" || parsed.protocol !== "http:")) {
+    return { ok: false, reason: "Webhook bắt buộc phải sử dụng giao thức HTTPS" };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+
+  // Chặn localhost, loopback, cloud metadata
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "metadata.google.internal" ||
+    host.endsWith(".internal") ||
+    host.endsWith(".local") ||
+    host.endsWith(".localhost")
+  ) {
+    return { ok: false, reason: "Địa chỉ đích bị từ chối (SSRF Protection)" };
+  }
+
+  // Chặn dải IP IPv4 Private & Link-local
+  const parts = host.split(".").map(Number);
+  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
+    const [o1, o2] = parts;
+    if (
+      o1 === 10 || // 10.0.0.0/8
+      o1 === 127 || // 127.0.0.0/8
+      o1 === 0 || // 0.0.0.0/8
+      (o1 === 172 && o2 >= 16 && o2 <= 31) || // 172.16.0.0/12
+      (o1 === 192 && o2 === 168) || // 192.168.0.0/16
+      (o1 === 169 && o2 === 254) || // 169.254.0.0/16
+      (o1 === 100 && o2 >= 64 && o2 <= 127) // 100.64.0.0/10
+    ) {
+      return { ok: false, reason: "Dải IP nội bộ/riêng tư bị chặn vì lý do an toàn" };
+    }
+  }
+
+  return { ok: true };
 }
 
 function discordPayload(b: Body) {
@@ -97,6 +148,18 @@ function genericPayload(b: Body) {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await rateLimit(req, { name: "alert_webhook", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+
+  const session = await getSessionUser();
+  const authHeader = req.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET?.trim();
+  const isCronAuthorized = cronSecret && authHeader?.startsWith("Bearer ") && authHeader.slice(7).trim() === cronSecret;
+
+  if (!session && !isCronAuthorized) {
+    return fail("UNAUTHORIZED", "Vui lòng đăng nhập để gửi thông báo webhook", 401);
+  }
+
   try {
     const b = (await req.json()) as Body;
     const globalUrl = getGlobalDiscordWebhook();
@@ -162,14 +225,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return badRequest("invalid url");
-    }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-      return badRequest("url must be http(s)");
+    // SSRF Safe Check
+    const safeCheck = isSafeWebhookUrl(url);
+    if (!safeCheck.ok) {
+      return badRequest(safeCheck.reason ?? "URL không an toàn (SSRF Blocked)");
     }
 
     const payload =
