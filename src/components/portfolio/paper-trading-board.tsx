@@ -19,6 +19,7 @@ import {
   Briefcase,
   Layers,
   Sparkles,
+  Share2,
 } from "lucide-react";
 import {
   loadPaperAccount,
@@ -206,6 +207,23 @@ export function PaperTradingBoard() {
     window.scrollTo({ top: 300, behavior: "smooth" });
   };
 
+  const cashPct = metrics.nav > 0 ? (metrics.totalCash / metrics.nav) * 100 : 100;
+  const stockPct = metrics.nav > 0 ? (metrics.stockValue / metrics.nav) * 100 : 0;
+
+  const handleSharePerformance = () => {
+    const text = `🌊 Orca-Lite Paper Trading (500M)
+• NAV: ${fmtVnd(metrics.nav)} (${fmtPct(metrics.totalPnlPct)})
+• Tiền mặt: ${fmtVnd(account.availableCash)}
+• Cổ phiếu: ${fmtVnd(metrics.stockValue)} (${metrics.holdings.length} mã)
+• Lãi/lỗ tạm tính: ${metrics.unrealizedPnl >= 0 ? "+" : ""}${fmtVnd(metrics.unrealizedPnl)}
+• Lãi đã chốt: ${metrics.realizedPnl >= 0 ? "+" : ""}${fmtVnd(metrics.realizedPnl)} (Winrate: ${metrics.winRate.toFixed(0)}%)
+👉 Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setOrderNotice({ type: "success", message: "Đã sao chép tóm tắt thành tích danh mục vào Clipboard!" });
+    }
+  };
+
   // Huỷ lệnh LO chờ khớp
   const handleCancelOrder = (id: string) => {
     const res = cancelPaperOrder(id);
@@ -280,6 +298,15 @@ export function PaperTradingBoard() {
             >
               <PlusCircle className="h-3.5 w-3.5" />
               <span>Nạp vốn</span>
+            </button>
+
+            <button
+              onClick={handleSharePerformance}
+              title="Chia sẻ thành tích danh mục"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-xs font-medium text-sky-400 transition-all"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span>Chia sẻ</span>
             </button>
 
             <button
@@ -365,6 +392,57 @@ export function PaperTradingBoard() {
             <div className="text-[11px] text-muted-foreground mt-0.5">
               Thắng: {metrics.winTrades}/{metrics.totalTrades} ({metrics.winRate.toFixed(0)}%)
             </div>
+          </div>
+        </div>
+
+        {/* Thanh Phân Bổ Cấu Trúc Tài Sản */}
+        <div className="mt-4 pt-4 border-t border-border/40">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground mb-2 gap-1">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              <PieChart className="h-3.5 w-3.5 text-emerald-400" />
+              Cấu trúc phân bổ tài sản:
+            </span>
+            <span>
+              Tiền mặt: <strong className="text-foreground">{cashPct.toFixed(1)}%</strong> · Cổ phiếu: <strong className="text-foreground">{stockPct.toFixed(1)}%</strong>
+            </span>
+          </div>
+
+          {/* Stacked Progress Bar */}
+          <div className="h-2.5 w-full rounded-full bg-surface-raised overflow-hidden flex">
+            <div
+              style={{ width: `${cashPct}%` }}
+              title={`Tiền mặt: ${fmtVnd(metrics.totalCash)} (${cashPct.toFixed(1)}%)`}
+              className="bg-emerald-500 h-full transition-all duration-500"
+            />
+            {metrics.holdings.map((h, idx) => {
+              const colors = ["bg-sky-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-pink-500", "bg-cyan-500"];
+              const c = colors[idx % colors.length];
+              return (
+                <div
+                  key={h.symbol}
+                  style={{ width: `${h.weightPct}%` }}
+                  title={`${h.symbol}: ${fmtVnd(h.marketValue)} (${h.weightPct.toFixed(1)}%)`}
+                  className={`${c} h-full transition-all duration-500 border-l border-surface/50`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Legend chips */}
+          <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
+            <span className="inline-flex items-center gap-1 text-muted-foreground">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Tiền mặt: {cashPct.toFixed(1)}%
+            </span>
+            {metrics.holdings.slice(0, 6).map((h, idx) => {
+              const dotColors = ["bg-sky-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-pink-500", "bg-cyan-500"];
+              return (
+                <span key={h.symbol} className="inline-flex items-center gap-1 text-muted-foreground font-mono">
+                  <span className={`h-2 w-2 rounded-full ${dotColors[idx % dotColors.length]}`} />
+                  {h.symbol}: {h.weightPct.toFixed(1)}%
+                </span>
+              );
+            })}
           </div>
         </div>
       </div>

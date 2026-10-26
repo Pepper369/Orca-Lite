@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState, use, type ReactNode } from 
 import { prefetchApi, useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import { AddToWatchlist } from "@/components/watchlist-button";
+import { QuickPaperTradeButton } from "@/components/portfolio/quick-paper-trade-modal";
 import { StockTabs } from "@/components/stocks/stock-tabs";
 import { Chg, fmtCompact, fmtNum, FreshnessDot, Loading, Panel } from "@/components/ui";
 import { getSecurity } from "@/lib/vn/master";
@@ -190,6 +191,12 @@ export default function StockSymbolLayout({
                   </span>
                 ) : null}
                 <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />
+                <QuickPaperTradeButton
+                  symbol={symbol}
+                  currentPrice={q?.price}
+                  ceilingPrice={q?.ceilingPrice}
+                  floorPrice={q?.floorPrice}
+                />
                 <AddToWatchlist assetType="stock" symbol={symbol} />
               </div>
 
