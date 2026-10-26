@@ -11,6 +11,7 @@ import { prefetchApi } from "@/lib/hooks";
 type Universe =
   | "multi-source"
   | "stocks"
+  | "oquant-quant"
   | "miquant-quant"
   | "ma-cross"
   | "sector-flow"
@@ -29,11 +30,11 @@ type Universe =
   | "alpha-beta";
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
-  { id: "multi-source", label: "Đa Nguồn Pro (Research · Vietcap · VPS) 🔥" },
+  { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine) 🔥" },
   { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế 🌐" },
   { id: "rrg-rotation", label: "Vòng xoay RRG Ngành 🌀" },
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
-  { id: "miquant-quant", label: "MiQuant AI Bot & Quant 🤖⚡" },
+  { id: "oquant-quant", label: "OQuant AI Bot & Quant 🤖⚡" },
   { id: "ma-cross", label: "Đường MA (Golden/Death Cross) 📈" },
   { id: "sector-flow", label: "Dòng tiền ngành 🌊" },
   { id: "four-m", label: "Bộ lọc 4M 💎" },
@@ -66,8 +67,8 @@ const RrgChart = dynamic(
   () => import("@/components/rrg-chart").then((m) => m.RrgChart),
   { ssr: false, loading: PanelFallback },
 );
-const MiQuantStudio = dynamic(
-  () => import("@/components/miquant-quant-studio").then((m) => m.MiQuantStudio),
+const OQuantStudio = dynamic(
+  () => import("@/components/oquant-quant-studio").then((m) => m.OQuantStudio),
   { ssr: false, loading: PanelFallback },
 );
 const VnScreener = dynamic(
@@ -176,8 +177,9 @@ function ScreenerInner() {
     case "macro-radar":
       body = <MacroRadarCard />;
       break;
+    case "oquant-quant":
     case "miquant-quant":
-      body = <MiQuantStudio />;
+      body = <OQuantStudio />;
       break;
     case "ma-cross":
       body = <MaScreener defaultSector={sector} />;
@@ -244,7 +246,7 @@ function ScreenerInner() {
               onClick={() => setShowBacktest(true)}
               className="self-start sm:self-auto px-3.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
             >
-              <span>⚡</span> Backtest Mô Phỏng (MiQuant)
+              <span>⚡</span> Backtest Mô Phỏng (OQuant)
             </button>
           </div>
           <div className="seg-scroll mt-3">

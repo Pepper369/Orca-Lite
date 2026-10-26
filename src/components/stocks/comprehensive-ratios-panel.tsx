@@ -66,7 +66,7 @@ export const ComprehensiveRatiosPanel = memo(function ComprehensiveRatiosPanel({
       <Panel title={title}>
         <EmptyState
           title={`Chưa có dữ liệu chỉ số cho ${symbol}`}
-          description="Chưa nạp được kho chỉ số tài chính tính sẵn từ VNDirect cho mã này."
+          description="Chưa nạp được kho chỉ số tài chính tính sẵn từ Orca Financial Engine cho mã này."
         />
       </Panel>
     );

@@ -55,7 +55,7 @@ export function FourMScreener({ defaultSector }: { defaultSector: string | null 
     <div className="space-y-4">
       {/* Filter Header Panel */}
       <Panel
-        title="Bộ lọc 4M Kungfu (Phil Town — Rule #1)"
+        title="Bộ lọc 4M Orca (Phil Town — Rule #1)"
         right={
           <div className="flex items-center gap-2">
             {isValidating && <span className="text-[10px] text-ink-3">Đang quét...</span>}

@@ -149,7 +149,7 @@ export default function HeatmapPage() {
 
       <p className="px-1 text-[11.5px] leading-snug text-text-muted">
         {tab === "vn"
-          ? "Ô lớn = thanh khoản cao (KL × giá) · Màu = % phiên · Chạm để mở mã · VNDirect/SSI"
+          ? "Ô lớn = thanh khoản cao (KL × giá) · Màu = % phiên · Chạm để mở mã · Orca Market Stream"
           : "Ô lớn = volume 24h · Màu = % 24h · Binance realtime"}
       </p>
 
@@ -160,7 +160,7 @@ export default function HeatmapPage() {
           title={tab === "vn" ? "Chưa có bảng giá chứng khoán VN" : "Binance không khả dụng"}
           note={
             tab === "vn"
-              ? "Kiểm tra VNDirect/SSI hoặc /api/v1/stocks?board=full."
+              ? "Kiểm tra Orca Market Stream hoặc /api/v1/stocks?board=full."
               : "Kiểm tra /api/v1/crypto/markets."
           }
           meta={activeMeta}

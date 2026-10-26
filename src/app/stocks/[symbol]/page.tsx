@@ -559,7 +559,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       <section id="sec-chart" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
-            <p className="stock-section-kicker">Depth · Chart · Breadth · VPS Live Flow</p>
+            <p className="stock-section-kicker">Depth · Chart · Breadth · Orca Live Flow</p>
             <h2>Sổ lệnh · Biểu đồ · Dòng tiền ngoại & Độ rộng</h2>
           </div>
           <span className="stock-section-index">01</span>
@@ -619,7 +619,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       >
         <div className="stock-section-heading" id="sec-quant-title">
           <div>
-            <p className="stock-section-kicker">MiQuant Quantitative · Vietcap IQ · Fair Value · Banking & Shareholders</p>
+            <p className="stock-section-kicker">OQuant Quantitative · Orca IQ · Fair Value · Banking & Shareholders</p>
             <h2>Dải định giá AI, Dòng tiền, Phân rã BCTC & Sổ cổ đông</h2>
           </div>
           <span className="stock-section-index">03</span>
@@ -657,7 +657,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       >
         <div className="stock-section-heading" id="sec-audit-title">
           <div>
-            <p className="stock-section-kicker">Gemini 2.0 Flash · 4M Phil Town · TCBS</p>
+            <p className="stock-section-kicker">AI Valuation · 4M Phil Town · Orca Health</p>
             <h2>AI Quick Audit BCTC & Định giá 1-Click</h2>
           </div>
           <span className="stock-section-index">04</span>
@@ -670,7 +670,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       <section id="sec-deep" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
         <div className="stock-section-heading">
           <div>
-            <p className="stock-section-kicker">VNDirect Research & Official HOSE/HNX Disclosures</p>
+            <p className="stock-section-kicker">Orca Research & Official HOSE/HNX Disclosures</p>
             <h2>Báo cáo phân tích, Văn bản ký số & Tin tức thị trường</h2>
           </div>
           <span className="stock-section-index">05</span>

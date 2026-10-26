@@ -173,7 +173,7 @@ function printCompanyReport(report: CompanyAnalysisReport) {
 
     <div class="assump">
       <b>Assumptions & data traceability</b>
-      <p>Nguồn: VNDirect (profile, BCTC, ratios, dchart) · pipeline ORCA quant · tạo lúc ${esc(when)}.</p>
+      <p>Nguồn: Orca Financial Engine (profile, BCTC, ratios, dchart) · pipeline ORCA quant · tạo lúc ${esc(when)}.</p>
       <div class="foot">ORCA Financial — Generated from verified market data · không phải khuyến nghị đầu tư</div>
     </div>
   </div>

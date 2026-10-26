@@ -866,7 +866,7 @@ export const MiQuantEngine = {
         author_philosophy: "Richard Wyckoff & Smart Money Flow",
         tagline: "Theo dấu dòng tiền tổ chức: Khối ngoại & Tự doanh mua ròng liên tục ở chân sóng",
         description:
-          "Sử dụng dữ liệu độc quyền từ MiQuant Flow để bắt kịp hành vi gom ròng của các quỹ ngoại và tổ chức tự doanh lớn trước khi giá bứt phá.",
+          "Sử dụng dữ liệu độc quyền từ OQuant Flow để bắt kịp hành vi gom ròng của các quỹ ngoại và tổ chức tự doanh lớn trước khi giá bứt phá.",
         cagr_est: 26.8,
         win_rate_est: 78.5,
         rebalance: "Weekly (1 tuần)",
@@ -923,7 +923,7 @@ export const MiQuantEngine = {
         author_philosophy: "Bank Financial Analysis",
         tagline: "Chỉ số vàng ngân hàng: NIM cao, CASA top đầu, nợ xấu thấp và bao phủ dự phòng dày",
         description:
-          "Bóc tách sâu chỉ số tài chính ngân hàng MiQuant Bank Ratios: Lựa chọn các ngân hàng có hiệu quả huy động vốn rẻ nhất và chất lượng tài sản sạch nhất.",
+          "Bóc tách sâu chỉ số tài chính ngân hàng OQuant Bank Ratios: Lựa chọn các ngân hàng có hiệu quả huy động vốn rẻ nhất và chất lượng tài sản sạch nhất.",
         cagr_est: 27.0,
         win_rate_est: 76.0,
         rebalance: "Quarterly (Hàng quý)",
@@ -938,3 +938,6 @@ export const MiQuantEngine = {
     ];
   },
 };
+
+export const OQuantEngine = MiQuantEngine;
+

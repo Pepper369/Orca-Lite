@@ -43,7 +43,7 @@ export function OrderBookPanel({ symbol, compact = false }: { symbol: string; co
   const [live, setLive] = useState<VnOrderBook | null>(null);
   const [sseState, setSseState] = useState<"connecting" | "open" | "error" | "off">("off");
   
-  // TCBS-style interactive controls: Mode (3-levels vs Full) & Trade Filter (all, buy, sell, big/whale)
+  // Orca interactive controls: Mode (3-levels vs Full) & Trade Filter (all, buy, sell, big/whale)
   const [viewMode, setViewMode] = useState<"l3" | "full">("l3");
   const [tradeFilter, setTradeFilter] = useState<"all" | "buy" | "sell" | "whale">("all");
 
@@ -244,7 +244,7 @@ export function OrderBookPanel({ symbol, compact = false }: { symbol: string; co
 
   return (
     <div className={`grid gap-3.5 ${compact ? "" : "xl:grid-cols-2"}`}>
-      {/* ----------------- PANEL 1: SỔ LỆNH 3 CẤP (TCBS DEPTH OF MARKET) ----------------- */}
+      {/* ----------------- PANEL 1: SỔ LỆNH 3 CẤP (ORCA DEPTH OF MARKET) ----------------- */}
       <Panel
         title={
           <div className="flex flex-wrap items-center gap-2">

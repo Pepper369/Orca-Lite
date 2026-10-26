@@ -57,7 +57,7 @@ export async function getStockAnalyticReports(
       hasData: res.value.reports.length > 0,
       cached: res.cached,
       stale: res.stale,
-      note: `Báo cáo phân tích định giá ${sym} từ VNDirect Research.`,
+      note: `Báo cáo phân tích định giá ${sym} từ khối phân tích Orca Research.`,
       slas: { liveSlaMs: -1, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
     });
 

@@ -514,3 +514,6 @@ export const MiQuantProvider = {
     };
   },
 };
+
+export const OQuantProvider = MiQuantProvider;
+

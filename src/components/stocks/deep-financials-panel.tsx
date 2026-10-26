@@ -84,7 +84,7 @@ export function DeepFinancialsPanel({ symbol }: { symbol: string }) {
             </h3>
           </div>
           <span className="text-xs text-text-muted">
-            Mô hình định lượng MiQuant Banking Benchmark
+            Mô hình định lượng OQuant Banking Benchmark
           </span>
         </div>
 

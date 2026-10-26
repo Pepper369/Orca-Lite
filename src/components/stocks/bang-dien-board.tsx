@@ -369,7 +369,7 @@ export function BangDienBoard({ quotes, indices }: { quotes: Quote[]; indices: I
   if (!quotes.length) {
     return (
       <p className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-4 text-center text-[12px] text-amber-100/90">
-        Bảng điện đang kết nối lại nguồn giá (VNDirect / VPS / public). Dữ liệu sẽ hiện lại tự động.
+        Bảng điện đang kết nối lại nguồn giá Orca Data Stream. Dữ liệu sẽ hiện lại tự động.
       </p>
     );
   }

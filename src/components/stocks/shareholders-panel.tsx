@@ -75,7 +75,7 @@ export const ShareholdersPanel = memo(function ShareholdersPanel({ symbol }: { s
       <Panel title={title}>
         <EmptyState
           title={`Chưa có dữ liệu sổ cổ đông cho ${symbol}`}
-          description="Chưa có dữ liệu danh bạ sở hữu từ Vietcap IQ Insight cho mã này."
+          description="Chưa có dữ liệu danh bạ sở hữu từ Orca IQ Insight cho mã này."
         />
       </Panel>
     );

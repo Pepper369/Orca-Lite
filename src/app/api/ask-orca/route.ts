@@ -85,7 +85,7 @@ function generateAdaptiveAnswer(q: string, facts?: SnapshotFacts): string {
 
   if (isScreenerQuery) {
     if (query.includes("cổ tức") || query.includes("dividend") || query.includes("lãi suất")) {
-      return `Chào cậu nhen! 🐳 Bé Orca đã kết nối dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ VNDirect & Simplize để hỗ trợ cậu đây:
+      return `Chào cậu nhen! 🐳 Bé Orca đã kết nối dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ Orca Analytics & Dividend Intelligence để hỗ trợ cậu đây:
 
 💰 **CHIẾN LƯỢC ĐẦU TƯ CỔ TỨC TIỀN MẶT BỀN VỮNG (THAY THẾ LÃI SUẤT TIỀN GỬI 5.0%):**
 • **VNM (Vinamilk):** Tỷ suất cổ tức 5.8% - 6.5%/năm, chi trả tiền mặt đều đặn 3.500 - 4.000đ/cp trong suốt 5 năm qua. Phù hợp nắm giữ phòng thủ.
@@ -109,7 +109,7 @@ function generateAdaptiveAnswer(q: string, facts?: SnapshotFacts): string {
 • **TCB / MBB:** Định giá P/B < 1.2 trong khi ROE > 18-20%, tín hiệu Golden Cross EMA20 cắt lên EMA50 xác nhận đà hồi phục.
 
 📊 **CÔNG CỤ KIỂM NGHIỆM CHIẾN LƯỢC (BACKTEST SIMULATOR):**
-Cậu có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"⚡ Backtest Mô Phỏng (MiQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động nhé! 🚀`;
+Cậu có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"⚡ Backtest Mô Phỏng (OQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động nhé! 🚀`;
     }
 
     return `Bé Orca chào cậu nhen! 🐳 Cậu đang muốn tìm kiếm cơ hội đầu tư trên thị trường chứng khoán Việt Nam đúng không nè?
@@ -120,7 +120,7 @@ Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nh
 2. 🚀 **Tăng trưởng & Vượt đỉnh (CANSLIM / Breakout):** Lọc các mã có RSI > 52, nến ngày vượt đỉnh 20 phiên kèm Volume đột biến gấp 1.3x - 1.5x (FPT, SSI, MWG, DGC).
 3. 📉 **Giá trị chiết khấu sâu (Value Dip-Buying):** P/E < 12, P/B hấp dẫn và ROE > 15% đang có dấu hiệu đảo chiều dòng tiền (TCB, ACB, HPG).
 
-👉 Cậu hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, MiQuant Quant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng** nhé! Cậu muốn bé giải thích thêm về mã cổ phiếu cụ thể nào không? ✨`;
+👉 Cậu hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, OQuant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng** nhé! Cậu muốn bé giải thích thêm về mã cổ phiếu cụ thể nào không? ✨`;
   }
 
   // 1. Phân bổ lương 50/30/20 & Biến thể linh hoạt cho hoàn cảnh thực tế
@@ -464,7 +464,7 @@ TRI THỨC & NGUYÊN TẮC LINH HOẠT (QUAN TRỌNG):
   + Tiền thưởng/thu nhập bất ngờ: Chia 3 ngăn (Gia cố đệm an toàn/dập nợ, Tích sản sinh lời, Tự thưởng xứng đáng không tội lỗi).
   + Mua trả góp: Tổng nghĩa vụ nợ không vượt quá 20–25% lương net. Đề xuất tăng tỷ lệ trả trước (down payment) nếu cần.
   + Đầu tư/Tiết kiệm/Vàng: Thế kiềng 3 chân tùy theo khẩu vị rủi ro.
-  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "⚡ Backtest Mô Phỏng (MiQuant)" trên trang /screener.
+  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "⚡ Backtest Mô Phỏng (OQuant)" trên trang /screener.
 
 BỐI CẢNH SỔ TÀI CHÍNH THỰC TẾ:
 - Kỳ ghi chép: ${facts.period || "Hiện tại"}

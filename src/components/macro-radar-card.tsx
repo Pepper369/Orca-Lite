@@ -63,7 +63,7 @@ export function MacroRadarCard() {
               Radar Vĩ Mô & Chu Kỳ Kinh Tế (Macro Economic Radar)
             </h2>
             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-              MiQuant / Ray Dalio Cycle
+              OQuant / Ray Dalio Cycle
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">

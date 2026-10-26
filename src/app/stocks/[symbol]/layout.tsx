@@ -186,7 +186,7 @@ export default function StockSymbolLayout({
                 {liveTick ? (
                   <span className="inline-flex items-center gap-1 rounded bg-positive/10 px-1.5 py-0.5 text-[9px] font-semibold text-positive border border-positive/25 shadow-sm">
                     <span className="size-1.5 rounded-full bg-positive animate-pulse" />
-                    VNDIRECT LIVE
+                    ORCA LIVE
                   </span>
                 ) : null}
                 <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />

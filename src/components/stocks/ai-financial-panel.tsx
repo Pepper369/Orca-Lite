@@ -150,7 +150,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
           )}
         </div>
       }
-      subtitle="Tổng hợp định lượng 4M Phil Town (KFSP) + 5 Trụ cột Sức khỏe BCTC (TCBS) & Thẩm định 1-click bởi Gemini 2.0 Flash."
+      subtitle="Tổng hợp định lượng 4M Phil Town (Orca 4M) + 5 Trụ cột Sức khỏe BCTC (Orca Health) & Thẩm định 1-click bởi Gemini 2.0 Flash."
       right={
         <div className="flex flex-wrap items-center gap-1.5">
           <button
@@ -177,7 +177,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
       {!data && !fc && !err && !loading && !loadingFc && (
         <EmptyState
           title={`Sẵn sàng Quick Audit cho ${symbol}`}
-          description="Bấm '⚡ 1-Click AI Quick Audit' để mô hình quét toàn bộ BCTC (KQKD, CĐKT, LCTT), tính điểm 4M Phil Town, đánh giá 5 trụ cột TCBS và đề xuất định giá an toàn."
+          description="Bấm '⚡ 1-Click AI Quick Audit' để mô hình quét toàn bộ BCTC (KQKD, CĐKT, LCTT), tính điểm 4M Phil Town, đánh giá 5 trụ cột Orca Health và đề xuất định giá an toàn."
         />
       )}
 
@@ -216,7 +216,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
                     </Badge>
                   </div>
                   <div className="mt-0.5 text-[11px] text-text-muted truncate">
-                    TCBS Health: <strong className="text-text-primary">{tcbs?.overall ?? 75}/100</strong>
+                    Orca Health: <strong className="text-text-primary">{tcbs?.overall ?? 75}/100</strong>
                     {data.latencyMs ? ` · ${data.latencyMs}ms` : ""}
                   </div>
                 </div>
@@ -290,7 +290,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
               }`}
             >
               <Activity className="h-3.5 w-3.5" />
-              Sức khỏe TCBS 5 Trụ cột ({tcbs?.overall ?? "—"}/100)
+              Sức khỏe Orca Health 5 Trụ cột ({tcbs?.overall ?? "—"}/100)
             </button>
             {fc && (
               <button
@@ -531,7 +531,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
                 <div className="rounded-xl border border-border-subtle bg-surface-card p-3">
                   <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-down">
                     <AlertTriangle className="h-3.5 w-3.5" />
-                    Cờ cảnh báo rủi ro BCTC ghi nhận bởi TCBS Engine
+                    Cờ cảnh báo rủi ro BCTC ghi nhận bởi Orca Health Engine
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {tcbs.riskFlags.map((flag, idx) => (

@@ -28,7 +28,7 @@ export function ConsensusUpsideCard({ symbol }: { symbol: string }) {
   if (loading) {
     return (
       <div className="rounded-2xl border border-border bg-card p-5 animate-pulse text-xs text-muted-foreground text-center">
-        Đang tổng hợp định giá mục tiêu từ các công ty chứng khoán (VNDirect, Vietcap, SSI)...
+        Đang tổng hợp định giá mục tiêu đồng thuận từ các công ty chứng khoán & Orca Consensus Engine...
       </div>
     );
   }

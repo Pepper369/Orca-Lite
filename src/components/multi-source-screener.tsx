@@ -103,7 +103,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>Khuyến Nghị Mua (VNDirect)</span>
+            <span>Khuyến Nghị Mua (Orca Research)</span>
             <Award className="size-4 text-emerald-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
@@ -114,7 +114,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
 
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>Ngoại Gom Ròng Realtime (VPS)</span>
+            <span>Ngoại Gom Ròng Realtime (Orca Flow)</span>
             <Globe className="size-4 text-purple-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
@@ -140,7 +140,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
             <Users2 className="size-4 text-amber-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-xl font-bold text-amber-400">Vietcap IQ</span>
+            <span className="text-xl font-bold text-amber-400">Orca IQ</span>
             <span className="text-xs text-text-muted">chuẩn hóa 100%</span>
           </div>
         </div>
@@ -151,7 +151,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         title={
           <div className="flex items-center gap-2">
             <Layers className="size-4 text-accent-primary" />
-            <span>Bộ Lọc Đa Nguồn Pro (VNDirect + Vietcap + VPS + Finfo)</span>
+            <span>Bộ Lọc Đa Nguồn Pro (Orca Multi-Source Engine)</span>
             <span className="rounded bg-accent-primary/15 px-2 py-0.5 text-[11px] font-semibold text-accent-primary">
               {filtered.length} mã thỏa điều kiện
             </span>
@@ -278,7 +278,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                     }}
                   >
                     <div className="flex items-center gap-1">
-                      <span>Ngoại Live (VPS)</span>
+                      <span>Ngoại Live (Orca Flow)</span>
                       <ArrowUpDown className="size-3" />
                     </div>
                   </th>

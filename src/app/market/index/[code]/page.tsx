@@ -179,7 +179,7 @@ export default function IndexDetailPage({ params }: { params: Promise<{ code: st
 
         <Panel className="col-span-12" pad={false} title="Cổ phiếu tác động chỉ số">
           {data.contributors.positive.length + data.contributors.negative.length === 0 ? (
-            <div className="p-4"><Unavailable title="Chưa có dữ liệu cấu phần" note="Cần dữ liệu giá cấu phần từ VNDirect." /></div>
+            <div className="p-4"><Unavailable title="Chưa có dữ liệu cấu phần" note="Cần dữ liệu giá cấu phần từ Orca Data Engine." /></div>
           ) : (
             <div className="grid gap-3 p-3 md:grid-cols-2">
               {([["Đóng góp tích cực", data.contributors.positive, "up"], ["Đóng góp tiêu cực", data.contributors.negative, "down"]] as const).map(([title, rows, tone]) => (

@@ -63,7 +63,7 @@ export const AnalyticReportsPanel = memo(function AnalyticReportsPanel({ symbol 
       <Panel title={title}>
         <EmptyState
           title={`Chưa có báo cáo phân tích cho ${symbol}`}
-          description="Chưa có báo cáo định giá hoặc bản tin Earnings Flash từ khối phân tích VNDirect Research cho mã này."
+          description="Chưa có báo cáo định giá hoặc bản tin Earnings Flash từ khối phân tích Orca Research cho mã này."
         />
       </Panel>
     );
@@ -87,7 +87,7 @@ export const AnalyticReportsPanel = memo(function AnalyticReportsPanel({ symbol 
             </div>
           </div>
           <div className="text-right text-[11px] text-text-muted">
-            Nguồn: Khối Phân Tích VNDirect Research · {reports.length} báo cáo
+            Nguồn: Khối Phân Tích Orca Research · {reports.length} báo cáo
           </div>
         </div>
       )}

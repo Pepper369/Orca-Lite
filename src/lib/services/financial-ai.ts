@@ -323,7 +323,7 @@ function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialA
 
   lines.push(`**${ctx.symbol} — 1-Click AI Quick Audit BCTC & Định giá 4M**`);
   lines.push(
-    `Thẩm định 4M Phil Town: **${fourM.totalScore}/100 (${fourM.gradeVi})** · Sức khỏe TCBS: **${overall != null ? Math.round(overall) : "n/a"}/100**` +
+    `Thẩm định 4M Phil Town: **${fourM.totalScore}/100 (${fourM.gradeVi})** · Sức khỏe Orca Health: **${overall != null ? Math.round(overall) : "n/a"}/100**` +
       (h?.industry ? ` · Ngành: ${h.industry.labelVi}` : "") +
       (ctx.financialMeta.latestPeriod ? ` · Kỳ: ${ctx.financialMeta.latestPeriod}` : ""),
   );
@@ -332,7 +332,7 @@ function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialA
   );
   if (tcbs) {
     lines.push(
-      `TCBS 5 Trụ cột — Sinh lời: ${tcbs.profitability ?? "n/a"}, Thanh khoản: ${tcbs.liquidity ?? "n/a"}, Đòn bẩy: ${tcbs.leverage ?? "n/a"}, Dòng tiền: ${tcbs.cashflow ?? "n/a"}, Hiệu quả: ${tcbs.efficiency ?? "n/a"}.`,
+      `Orca Health 5 Trụ cột — Sinh lời: ${tcbs.profitability ?? "n/a"}, Thanh khoản: ${tcbs.liquidity ?? "n/a"}, Đòn bẩy: ${tcbs.leverage ?? "n/a"}, Dòng tiền: ${tcbs.cashflow ?? "n/a"}, Hiệu quả: ${tcbs.efficiency ?? "n/a"}.`,
     );
   }
   lines.push(
@@ -437,7 +437,7 @@ const SYS_ANALYSIS =
   `Bạn là Giám đốc Phân tích Tài chính & Thẩm định Cổ phiếu Cao cấp tại Việt Nam trên nền tảng ORCA Finance.
 Bạn phân tích BCTC 1-click dựa trên sự kết hợp độc đáo giữa:
 1) Mô hình 4M Phil Town (Meaning - Ý nghĩa ngành nghề, Moat - Con hào kinh tế ROE & biên gộp, Management - Đòn bẩy nợ & quản trị, Margin of Safety - Biên an toàn định giá).
-2) Mô hình Đánh giá Sức khỏe Tài chính 5 Trụ cột TCBS (Sinh lời, Thanh khoản, Đòn bẩy nợ, Dòng tiền OCF/FCF, Hiệu quả kinh doanh).
+2) Mô hình Đánh giá Sức khỏe Tài chính 5 Trụ cột Orca Health (Sinh lời, Thanh khoản, Đòn bẩy nợ, Dòng tiền OCF/FCF, Hiệu quả kinh doanh).
 3) Đọc sâu cấu trúc biểu đồ BCTC (chartSeries): Đối chiếu DT thuần vs LNST, biên gộp/ròng nở hay co, dòng tiền kinh doanh CFO có đi cùng LNST không.
 
 Nguồn DUY NHẤT: JSON CONTEXT (BCTC + chartSeries + health + fourM + ngành). Không bịa số liệu, không bịa kỳ kế toán.

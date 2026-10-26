@@ -197,14 +197,14 @@ export default function StockFinancialsPage({ params }: { params: Promise<{ symb
     }
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === "string" && error.trim()) return error;
-    return "Nguồn báo cáo đang gián đoạn. Thử lại sau hoặc mở link DStock bên dưới.";
+    return "Nguồn báo cáo đang gián đoạn. Thử lại sau hoặc đối chiếu nguồn bên dưới.";
   })();
 
   if (isLoading && !data) {
     return (
       <div className="stock-workspace space-y-3">
         <Loading rows={6} label="Đang tải BCTC (tối đa ~18 giây)…" />
-        <Panel title="Nguồn đối chiếu (VNDIRECT DStock)">
+        <Panel title="Nguồn đối chiếu BCTC">
           <ul className="space-y-1.5 text-[12px]">
             <li>
               <a className="text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${symbol}`} target="_blank" rel="noopener noreferrer">
@@ -230,7 +230,7 @@ export default function StockFinancialsPage({ params }: { params: Promise<{ symb
           message={failNote || "Không thể kết nối hoặc dữ liệu BCTC từ nhà cung cấp đang tạm dừng."}
           onRetry={() => void mutate()}
         />
-        <Panel title="Nguồn đối chiếu (VNDIRECT DStock)">
+        <Panel title="Nguồn đối chiếu BCTC">
           <ul className="space-y-1.5 text-[12px]">
             <li>
               <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${symbol}`} target="_blank" rel="noopener noreferrer">
@@ -339,7 +339,7 @@ export default function StockFinancialsPage({ params }: { params: Promise<{ symb
               className="inline-flex items-center gap-1 rounded bg-accent/10 px-2 py-0.5 text-[10.5px] font-medium text-accent hover:bg-accent/20"
             >
               <ExternalLink className="size-3" />
-              Xem nguồn gốc trên DStock VNDirect ↗
+              Xem nguồn gốc đối chiếu BCTC ↗
             </a>
           )}
         </div>
@@ -480,7 +480,7 @@ export default function StockFinancialsPage({ params }: { params: Promise<{ symb
         </div>
       </Panel>
 
-      <Panel title="Nguồn đối chiếu (VNDIRECT DStock)">
+      <Panel title="Nguồn đối chiếu BCTC">
         <ul className="space-y-1.5 text-[12px]">
           <li>
             <span className="text-ink-3">Bảng cân đối kế toán: </span>

@@ -58,7 +58,7 @@ import { SignedDisclosuresPanel } from "@/components/stocks/signed-disclosures-p
 
 type ActiveTab = "bots" | "ranking" | "strategies" | "signals";
 
-export function MiQuantStudio() {
+export function OQuantStudio() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("bots");
   const [selectedBotId, setSelectedBotId] = useState<string>("bot_breakout_momentum");
   const [capitalInput, setCapitalInput] = useState<number>(100000000);
@@ -224,17 +224,17 @@ export function MiQuantStudio() {
                 <Bot className="size-4" />
               </span>
               <span className="text-xs font-semibold uppercase tracking-wider text-blue-400">
-                MiQuant Reverse-Engineered Studio
+                Orca Quant (OQuant) Studio
               </span>
               <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400 border border-emerald-500/20">
                 Live Data Feeds
               </span>
             </div>
             <h1 className="text-xl font-bold tracking-tight text-text-primary sm:text-2xl">
-              MiQuant AI Quant Studio & Bot Trading
+              OQuant AI Quant Studio & Bot Trading
             </h1>
             <p className="text-xs text-text-muted sm:text-sm">
-              Hệ thống xếp hạng đa nhân tố (Multi-Factor AI Ranking), 4 Bot tự động phân bổ vốn và Radar 4 tín hiệu vĩ mô thời gian thực.
+              Hệ thống xếp hạng đa nhân tố (Multi-Factor AI Ranking), 4 Bot tự động phân bổ vốn và Radar 5 tín hiệu vĩ mô thời gian thực độc quyền từ Orca Quant.
             </p>
           </div>
           <button
@@ -965,7 +965,7 @@ export function MiQuantStudio() {
               </p>
             </div>
             <span className="text-xs text-text-muted">
-              Cập nhật từ mô hình MiQuant Platform
+              Cập nhật từ mô hình OQuant Platform
             </span>
           </div>
 
@@ -1347,7 +1347,7 @@ export function MiQuantStudio() {
                     Cổ Phiếu Đạt Chuẩn Thời Gian Thực ({selectedStrategy.stocks.length} mã)
                   </h4>
                   <span className="text-[10px] text-text-muted font-mono">
-                    Cập nhật thời gian thực từ MiQuant Data Engine
+                    Cập nhật thời gian thực từ OQuant Data Engine
                   </span>
                 </div>
 
@@ -1449,7 +1449,7 @@ export function MiQuantStudio() {
               <div className="flex items-center gap-2">
                 <span className="text-lg font-bold text-accent-primary">{inspectSymbol}</span>
                 <span className="text-xs text-text-muted">
-                  AI Fundamental Catalysts & Risk Radar (MiQuant Engine)
+                  AI Fundamental Catalysts & Risk Radar (OQuant Engine)
                 </span>
               </div>
               <button
@@ -1543,7 +1543,7 @@ export function MiQuantStudio() {
                   </div>
                 )}
 
-                {/* Phase 1: Báo Cáo Phân Tích & Định Giá Mục Tiêu (VNDirect Research) */}
+                {/* Phase 1: Báo Cáo Phân Tích & Định Giá Mục Tiêu (Orca Research) */}
                 <AnalyticReportsPanel symbol={inspectSymbol} />
 
                 {/* Phase 6: Văn Bản BCTC Kiểm Toán & Công Văn Ký Số (HOSE/HNX) */}
@@ -1565,3 +1565,5 @@ export function MiQuantStudio() {
     </div>
   );
 }
+
+export const MiQuantStudio = OQuantStudio;

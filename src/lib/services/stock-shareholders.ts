@@ -80,7 +80,7 @@ export async function getStockShareholders(
       hasData: res.value.shareholders.length > 0,
       cached: res.cached,
       stale: res.stale,
-      note: `Sổ cổ đông chi tiết ${sym} từ Vietcap IQ Insight.`,
+      note: `Sổ cổ đông chi tiết ${sym} từ Orca IQ Insight.`,
       slas: { liveSlaMs: -1, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
     });
 

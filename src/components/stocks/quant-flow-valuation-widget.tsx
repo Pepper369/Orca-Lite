@@ -91,7 +91,7 @@ export function StockQuantFlowValuationWidget({ symbol }: { symbol: string }) {
   if (isLoading) {
     return (
       <div className="rounded-2xl border border-border bg-bg-surface p-5">
-        <Loading rows={4} label="Đang tải dữ liệu Định lượng & Dòng tiền MiQuant..." />
+        <Loading rows={4} label="Đang tải dữ liệu Định lượng & Dòng tiền OQuant..." />
       </div>
     );
   }
@@ -111,7 +111,7 @@ export function StockQuantFlowValuationWidget({ symbol }: { symbol: string }) {
               <Sparkles className="size-3.5" />
             </span>
             <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
-              MiQuant Quantitative & Valuation Engine
+              OQuant Quantitative & Valuation Engine
             </span>
             <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
               Giai đoạn 1: Live Feed
@@ -147,7 +147,7 @@ export function StockQuantFlowValuationWidget({ symbol }: { symbol: string }) {
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-400">
                 <ShieldCheck className="size-4" />
-                Định Giá AI MiQuant
+                Định Giá AI OQuant
               </span>
               <span
                 className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${

@@ -137,7 +137,7 @@ export async function getMultiSourceScreenerData(): Promise<{
     hasData: res.value.length > 0,
     cached: res.cached,
     stale: res.stale,
-    note: "Dữ liệu sàng lọc đa nguồn: VNDirect Research + Vietcap IQ + VPS Live Flow + Finfo Ratios.",
+    note: "Dữ liệu sàng lọc đa nguồn chuẩn hóa bởi Orca Multi-Source Composite Engine.",
     slas: { liveSlaMs: 5_000, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
   });
 

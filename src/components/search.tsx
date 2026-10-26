@@ -107,7 +107,7 @@ export function GlobalSearch() {
         all.unshift({
           key: `vn-direct-${needle}`,
           label: needle,
-          sub: "Mở trang cổ phiếu (lookup VNDirect)",
+          sub: "Mở trang phân tích cổ phiếu",
           href: `/stocks/${needle}`,
           icon: <CandlestickChart className="size-3.5" />,
           rank: 99,

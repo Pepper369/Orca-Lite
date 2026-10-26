@@ -81,7 +81,7 @@ export async function getStockNews(
       degraded: res.value.errors.length > 0,
       cached: res.cached,
       stale: res.stale,
-      note: `Tin doanh nghiệp ${sym} — nguồn chính VNDirect DStock (tin-tuc-ma), bổ sung RSS.`,
+      note: `Tin doanh nghiệp ${sym} được tổng hợp bởi Orca Newsroom.`,
       slas: { liveSlaMs: -1, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
     });
     return { data: res.value, meta };

@@ -228,7 +228,7 @@ export function ValuationPanel({
               const upPct = tp != null && currentPrice > 0 ? ((tp - currentPrice) / currentPrice) * 100 : null;
               return (
                 <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-line/60 bg-bg-2/60 px-2 py-1 text-[11px]">
-                  <span className="text-ink-3">Mục tiêu CTCK (Vietcap):</span>
+                  <span className="text-ink-3">Mục tiêu Định giá (Orca IQ):</span>
                   {tp != null && (
                     <span className="num font-semibold text-ink">{fmtPrice(tp)}</span>
                   )}

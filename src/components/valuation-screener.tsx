@@ -194,7 +194,7 @@ export function ValuationScreener({ defaultSector }: { defaultSector: string | n
     <div className="space-y-3">
       <Panel title="Định giá P · P/E, P/B, PEG, FCF yield">
         <p className="mb-3 max-w-5xl text-[12px] leading-relaxed text-text-muted">
-          Bội số từ VNDirect ratios, bổ sung PEG và FCF yield từ báo cáo tài chính (BCTC snapshot). Bội số thấp không
+          Bội số từ Orca Financial ratios, bổ sung PEG và FCF yield từ báo cáo tài chính (BCTC snapshot). Bội số thấp không
           đồng nghĩa rẻ — đối chiếu tăng trưởng LN, chất lượng dòng tiền và nợ.
         </p>
 

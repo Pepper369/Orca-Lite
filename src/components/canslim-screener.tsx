@@ -183,7 +183,7 @@ export function CanslimScreener({ defaultSector }: { defaultSector: string | nul
     <div className="space-y-3">
       <Panel title="Bộ lọc CAN SLIM — growth leaders VN">
         <p className="mb-3 text-[12px] leading-relaxed text-text-muted">
-          Pipeline: BCTC (C/A) · VNDirect ratios/ROE · OHLCV (N/S/L) · NN 5 phiên (I) · VNINDEX MA50+3M (M). Heuristic
+          Pipeline: BCTC (C/A) · Orca Financial ratios/ROE · OHLCV (N/S/L) · NN 5 phiên (I) · VNINDEX MA50+3M (M). Heuristic
           nghiên cứu — không phải tín hiệu mua bán.
         </p>
 

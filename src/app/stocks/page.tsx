@@ -165,7 +165,7 @@ export default function VnMarketCenterPage() {
           note={
             res && !res.success
               ? res.error.message
-              : "Nguồn VNDirect/VNStock tạm không phản hồi — đang thử lại. Kiểm tra /system nếu kéo dài."
+              : "Nguồn dữ liệu Orca tạm không phản hồi — đang thử lại. Kiểm tra /system nếu kéo dài."
           }
         />
       ) : (

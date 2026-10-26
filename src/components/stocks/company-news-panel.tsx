@@ -13,7 +13,7 @@ const fmt = (iso: string | null) => {
     : "—";
 };
 
-/** Tin doanh nghiệp theo mã — VNDirect DStock (tin-tuc-ma) + RSS bổ sung. */
+/** Tin doanh nghiệp theo mã — Orca Newsroom + RSS bổ sung. */
 export const CompanyNewsPanel = memo(function CompanyNewsPanel({ symbol }: { symbol: string }) {
   const { data, isLoading } = useApi<StockNewsResult>(symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}/news?limit=15` : null, {
     refreshInterval: 180_000,
@@ -36,7 +36,7 @@ export const CompanyNewsPanel = memo(function CompanyNewsPanel({ symbol }: { sym
       <Panel title={title}>
         <EmptyState
           title={`Chưa có tin tức cho ${symbol}`}
-          description="Chưa có tin tức niêm yết mới nhất hoặc thông cáo từ DStock VNDirect cho mã này."
+          description="Chưa có tin tức niêm yết mới nhất hoặc thông cáo từ Orca Newsroom cho mã này."
         />
       </Panel>
     );
