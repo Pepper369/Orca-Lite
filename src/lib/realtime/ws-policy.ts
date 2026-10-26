@@ -16,11 +16,16 @@ export function isRealtimeWsDisabled(envKey: WsDisableEnv): boolean {
   const raw = process.env[envKey]?.trim().toLowerCase();
   if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") return true;
   if (raw === "false" || raw === "0" || raw === "no" || raw === "off") return false;
-  // Unset → disable on Cloudflare Workers serverless only
-  return process.env.CLOUDFLARE_WORKERS === "1";
+  // Unset → disable on serverless runtimes (Vercel, Cloudflare Workers, Lambda)
+  return isServerlessRuntime();
 }
 
-/** True when running inside Cloudflare Workers (or similar) serverless. */
+/** True when running inside Vercel, Cloudflare Workers, AWS Lambda (or similar) serverless. */
 export function isServerlessRuntime(): boolean {
-  return process.env.CLOUDFLARE_WORKERS === "1" || process.env.AWS_LAMBDA_FUNCTION_NAME != null;
+  return (
+    process.env.VERCEL === "1" ||
+    process.env.CLOUDFLARE_WORKERS === "1" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME != null ||
+    process.env.NEXT_RUNTIME === "edge"
+  );
 }

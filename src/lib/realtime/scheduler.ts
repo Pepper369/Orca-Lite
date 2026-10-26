@@ -27,12 +27,14 @@ class Scheduler {
 
   start() {
     if (this.timer) return;
-    // Workers: isolate memory + setInterval are unreliable. External cron
-    // (cron-job.org → /api/v1/cron/reports) owns the schedule.
-    const isWorkers =
+    // Serverless (Vercel, Workers, Lambda): isolate memory + setInterval are unreliable/waste CPU.
+    // External cron (cron-job.org → /api/v1/cron/reports) owns the schedule.
+    const isServerless =
+      process.env.VERCEL === "1" ||
       process.env.CLOUDFLARE_WORKERS === "1" ||
-      process.env.NEXT_RUNTIME === "edge";
-    if (isWorkers) {
+      process.env.NEXT_RUNTIME === "edge" ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME != null;
+    if (isServerless) {
       // One opportunistic tick if invoked from a report API path; no interval.
       void this.tick();
       return;

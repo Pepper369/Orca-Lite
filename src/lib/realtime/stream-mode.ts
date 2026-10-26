@@ -11,10 +11,13 @@ export function prefersJsonPoll(req: Request): boolean {
   if (req.headers.get("x-orca-realtime") === "poll") return true;
   const url = new URL(req.url);
   if (url.searchParams.get("mode") === "poll") return true;
-  // Workers: force poll unless client explicitly asks for SSE
-  const isWorkers =
-    process.env.CLOUDFLARE_WORKERS === "1" || process.env.NEXT_RUNTIME === "edge";
-  if (isWorkers && !accept.includes("text/event-stream")) return true;
+  // Serverless (Vercel, Workers): force poll unless client explicitly asks for SSE
+  const isServerless =
+    process.env.VERCEL === "1" ||
+    process.env.CLOUDFLARE_WORKERS === "1" ||
+    process.env.NEXT_RUNTIME === "edge" ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME != null;
+  if (isServerless && !accept.includes("text/event-stream")) return true;
   return false;
 }
 

@@ -1,6 +1,7 @@
 import "server-only";
 import { eventBus } from "../events";
 import { getBiquotePublicQuotes, type BiquoteTick } from "../providers/forex";
+import { isServerlessRuntime } from "./ws-policy";
 
 /**
  * Shared Biquote public tick cache + poll loop (Workers-safe REST poll).
@@ -120,11 +121,10 @@ async function pollOnce(): Promise<void> {
 function ensureLoop(): void {
   if (pollTimer) return;
   if (
-    process.env.CLOUDFLARE_WORKERS === "1" ||
-    process.env.NEXT_RUNTIME === "edge" ||
+    isServerlessRuntime() ||
     process.env.BIQUOTE_POLL_DISABLED === "true"
   ) {
-    // Cloudflare Workers limit subrequests and CPU; avoid persistent setInterval in isolate
+    // Serverless (Vercel, Cloudflare Workers, Lambda): avoid persistent setInterval in serverless functions
     void pollOnce();
     return;
   }

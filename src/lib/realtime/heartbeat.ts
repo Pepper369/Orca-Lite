@@ -30,8 +30,15 @@ class Heartbeat {
   start() {
     if (this.timer) return;
     if (process.env.ORCA_HEARTBEAT_DISABLED === "true") return;
-    // Workers: không có tiến trình sống lâu — dùng cron ngoài.
-    if (process.env.CLOUDFLARE_WORKERS === "1" || process.env.NEXT_RUNTIME === "edge") return;
+    // Serverless (Vercel, Workers, Lambda): không có tiến trình sống lâu — dùng cron ngoài.
+    if (
+      process.env.VERCEL === "1" ||
+      process.env.CLOUDFLARE_WORKERS === "1" ||
+      process.env.NEXT_RUNTIME === "edge" ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME != null
+    ) {
+      return;
+    }
     try {
       ensureSessionPollerStarted();
     } catch {

@@ -332,11 +332,13 @@ export async function invalidate(key: string): Promise<void> {
   }
 }
 
-const isWorkersRuntime =
+const isServerlessRuntime =
+  process.env.VERCEL === "1" ||
   process.env.CLOUDFLARE_WORKERS === "1" ||
   process.env.NEXT_RUNTIME === "edge" ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME != null ||
   typeof (globalThis as { WebSocketPair?: unknown }).WebSocketPair !== "undefined";
-if (typeof setInterval !== "undefined" && !isWorkersRuntime) {
+if (typeof setInterval !== "undefined" && !isServerlessRuntime) {
   const t = setInterval(() => {
     const now = Date.now();
     for (const [k, e] of mem) if (now > e.staleUntil) mem.delete(k);
