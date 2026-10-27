@@ -2,6 +2,7 @@ import { db, databaseConfigured } from "@/db";
 import { watchlists, watchlistItems } from "@/db/schema";
 import { fail, ok, badRequest } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { eq, asc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,10 @@ export interface WatchItemPayload {
 /**
  * Lấy danh sách watchlist của người dùng đã đăng nhập từ database.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = await rateLimit(req, { name: "watchlist_get", binding: "RL_AUTH", limit: 60, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ watchlist", 401);
   if (!databaseConfigured()) {
@@ -60,6 +64,9 @@ export async function GET() {
  * Đồng bộ danh sách watchlist của người dùng đã đăng nhập vào database.
  */
 export async function PUT(req: Request) {
+  const limited = await rateLimit(req, { name: "watchlist_put", binding: "RL_AUTH", limit: 30, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ watchlist", 401);
   if (!databaseConfigured()) {

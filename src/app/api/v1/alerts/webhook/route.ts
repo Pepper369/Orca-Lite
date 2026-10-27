@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import crypto from "crypto";
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getGlobalDiscordWebhook, postGlobalDiscord } from "@/lib/services/discord-notify";
 import { rateLimit } from "@/lib/rate-limit";
@@ -6,6 +7,11 @@ import { getSessionUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest();
+function safeEqual(a: string, b: string): boolean {
+  return crypto.timingSafeEqual(sha256(a), sha256(b));
+}
 
 type Body = {
   url?: string;
@@ -38,7 +44,7 @@ function looksLikeTelegramToken(s: string): boolean {
   return /^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(s.trim());
 }
 
-/** Chặn SSRF: cấm toàn bộ IP cục bộ, dải mạng riêng tư và metadata service */
+/** Chặn SSRF: cấm toàn bộ IP cục bộ, dải mạng riêng tư, metadata service và redirect bypass */
 function isSafeWebhookUrl(rawUrl: string): { ok: boolean; reason?: string } {
   let parsed: URL;
   try {
@@ -51,6 +57,16 @@ function isSafeWebhookUrl(rawUrl: string): { ok: boolean; reason?: string } {
     return { ok: false, reason: "Webhook bắt buộc phải sử dụng giao thức HTTPS" };
   }
 
+  // Chặn thông tin đăng nhập nhúng
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "URL không được chứa credentials" };
+  }
+
+  // Chặn các cổng dịch vụ nội bộ
+  if (parsed.port && parsed.port !== "443" && (process.env.NODE_ENV === "production" || parsed.port !== "80")) {
+    return { ok: false, reason: "Cổng mạng không được phép vì lý do an toàn" };
+  }
+
   const host = parsed.hostname.toLowerCase();
 
   // Chặn localhost, loopback, cloud metadata
@@ -59,16 +75,22 @@ function isSafeWebhookUrl(rawUrl: string): { ok: boolean; reason?: string } {
     host === "127.0.0.1" ||
     host === "0.0.0.0" ||
     host === "::1" ||
+    host === "[::1]" ||
     host === "metadata.google.internal" ||
     host.endsWith(".internal") ||
     host.endsWith(".local") ||
-    host.endsWith(".localhost")
+    host.endsWith(".localhost") ||
+    host.startsWith("fe80:") ||
+    host.startsWith("fc") ||
+    host.startsWith("fd") ||
+    host.includes("::ffff:")
   ) {
     return { ok: false, reason: "Địa chỉ đích bị từ chối (SSRF Protection)" };
   }
 
   // Chặn dải IP IPv4 Private & Link-local
-  const parts = host.split(".").map(Number);
+  const cleanHost = host.replace(/^\[|\]$/g, "");
+  const parts = cleanHost.split(".").map(Number);
   if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
     const [o1, o2] = parts;
     if (
@@ -154,7 +176,8 @@ export async function POST(req: NextRequest) {
   const session = await getSessionUser();
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET?.trim();
-  const isCronAuthorized = cronSecret && authHeader?.startsWith("Bearer ") && authHeader.slice(7).trim() === cronSecret;
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const isCronAuthorized = Boolean(cronSecret && bearer && safeEqual(bearer, cronSecret));
 
   if (!session && !isCronAuthorized) {
     return fail("UNAUTHORIZED", "Vui lòng đăng nhập để gửi thông báo webhook", 401);
@@ -197,6 +220,7 @@ export async function POST(req: NextRequest) {
           parse_mode: "HTML",
           disable_web_page_preview: true,
         }),
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       const text = await upstream.text().catch(() => "");
@@ -248,6 +272,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      redirect: "error",
       signal: AbortSignal.timeout(10_000),
     });
 

@@ -16,12 +16,17 @@ export function middleware(req: NextRequest) {
     const isExempt = CSRF_EXEMPT_PATHS.some((p) => pathname.startsWith(p));
     if (!isExempt) {
       const origin = req.headers.get("origin");
-      const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+      const referer = req.headers.get("referer");
+      const host = req.headers.get("host") || req.nextUrl.host;
+      const fwdHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
 
-      if (origin && host) {
+      const isHostMatch = (targetHost: string) =>
+        targetHost === host || (fwdHost ? targetHost === fwdHost : false);
+
+      if (origin) {
         try {
           const originHost = new URL(origin).host;
-          if (originHost !== host) {
+          if (!isHostMatch(originHost)) {
             return new NextResponse(
               JSON.stringify({
                 success: false,
@@ -51,6 +56,39 @@ export function middleware(req: NextRequest) {
             },
           );
         }
+      } else if (referer) {
+        try {
+          const refererHost = new URL(referer).host;
+          if (!isHostMatch(refererHost)) {
+            return new NextResponse(
+              JSON.stringify({
+                success: false,
+                error: {
+                  code: "CROSS_ORIGIN_FORBIDDEN",
+                  message: "Yêu cầu từ trang giới thiệu khác nguồn (Cross-Origin Referer) bị từ chối.",
+                },
+              }),
+              {
+                status: 403,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+        } catch {
+          return new NextResponse(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: "INVALID_REFERER",
+                message: "Header Referer không hợp lệ.",
+              },
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
       }
     }
   }
@@ -61,6 +99,8 @@ export function middleware(req: NextRequest) {
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  response.headers.set("Cross-Origin-Resource-Policy", "same-origin");
 
   return response;
 }

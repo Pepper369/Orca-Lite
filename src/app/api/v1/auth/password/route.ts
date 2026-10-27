@@ -1,14 +1,18 @@
 import { db } from "@/db";
-import { users, auditLogs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { users, sessions, auditLogs } from "@/db/schema";
+import { and, eq, ne } from "drizzle-orm";
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser, hashPassword, verifyPassword } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Change password — verifies current hash, writes new scrypt hash, audits. */
+/** Change password — verifies current hash, writes new scrypt hash, revokes other sessions, audits. */
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "password_change", binding: "RL_AUTH", limit: 5, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
 
@@ -18,6 +22,7 @@ export async function POST(req: Request) {
 
   if (!current) return badRequest("Vui lòng nhập mật khẩu hiện tại");
   if (next.length < 8) return badRequest("Mật khẩu mới tối thiểu 8 ký tự");
+  if (next.length > 128) return badRequest("Mật khẩu không được vượt quá 128 ký tự");
   if (next === current) return badRequest("Mật khẩu mới phải khác mật khẩu hiện tại");
 
   const [user] = await db.select().from(users).where(eq(users.id, session.id)).limit(1);
@@ -29,6 +34,15 @@ export async function POST(req: Request) {
   }
 
   await db.update(users).set({ passwordHash: hashPassword(next) }).where(eq(users.id, session.id));
+
+  // Thu hồi toàn bộ phiên đăng nhập khác của người dùng để bảo vệ tài khoản
+  if (session.sessionId) {
+    await db
+      .delete(sessions)
+      .where(and(eq(sessions.userId, session.id), ne(sessions.id, session.sessionId)))
+      .catch(() => {});
+  }
+
   await db.insert(auditLogs).values({ userId: session.id, action: "password_change" }).catch(() => {});
   return ok({ changed: true }, { source: "orca-auth" });
 }

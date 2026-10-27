@@ -2,7 +2,8 @@ import { db } from "@/db";
 import { sessions, auditLogs } from "@/db/schema";
 import { and, eq, gt } from "drizzle-orm";
 import { badRequest, fail, ok } from "@/lib/envelope";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, clearSessionCookie } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,11 +28,20 @@ export async function GET() {
 
 /** Revoke a session by id. */
 export async function DELETE(req: Request) {
+  const limited = await rateLimit(req, { name: "session_revoke", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const body = (await req.json().catch(() => null)) as { id?: string } | null;
   if (!body?.id) return badRequest("Thiếu session id");
   await db.delete(sessions).where(and(eq(sessions.id, body.id), eq(sessions.userId, session.id))).catch(() => {});
   await db.insert(auditLogs).values({ userId: session.id, action: "session_revoke", meta: { id: body.id } }).catch(() => {});
-  return ok({ revoked: true, current: body.id === session.sessionId }, { source: "orca-auth" });
+
+  const isCurrent = body.id === session.sessionId;
+  if (isCurrent) {
+    await clearSessionCookie();
+  }
+
+  return ok({ revoked: true, current: isCurrent }, { source: "orca-auth" });
 }

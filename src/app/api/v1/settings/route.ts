@@ -1,13 +1,18 @@
 import { db } from "@/db";
 import { userPreferences } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { fail, ok, badRequest } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** Persistent user settings — synced from the client settings store. */
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = await rateLimit(req, { name: "settings_get", binding: "RL_AUTH", limit: 60, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ settings", 401);
   const [row] = await db.select().from(userPreferences).where(eq(userPreferences.userId, session.id)).limit(1);
@@ -19,9 +24,10 @@ export async function GET() {
   );
 }
 
-import { eq } from "drizzle-orm";
-
 export async function PUT(req: Request) {
+  const limited = await rateLimit(req, { name: "settings_put", binding: "RL_AUTH", limit: 30, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ settings", 401);
   const body = (await req.json().catch(() => null)) as { settings?: unknown } | null;

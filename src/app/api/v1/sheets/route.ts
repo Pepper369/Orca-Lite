@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { badRequest, fail, ok } from "@/lib/envelope";
-import { getSessionUser } from "@/lib/auth";
+import { requireInternalSession } from "@/lib/internal-api-auth";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   initSheetsSchema,
   isSheetsConfigured,
@@ -26,10 +27,11 @@ export async function GET(req: NextRequest) {
       return ok(sheetsStatus());
     }
 
-    const session = await getSessionUser();
-    if (!session) {
-      return fail("UNAUTHORIZED", "Vui lòng đăng nhập để thao tác Google Sheets", 401);
-    }
+    const limited = await rateLimit(req, { name: "sheets_get", binding: "RL_AUTH", limit: 30, windowSec: 60 });
+    if (limited) return limited;
+
+    const authError = await requireInternalSession();
+    if (authError) return authError;
 
     if (!isSheetsConfigured()) {
       return fail(
@@ -60,11 +62,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await rateLimit(req, { name: "sheets_post", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+
   try {
-    const session = await getSessionUser();
-    if (!session) {
-      return fail("UNAUTHORIZED", "Vui lòng đăng nhập để cập nhật dữ liệu Google Sheets", 401);
-    }
+    const authError = await requireInternalSession();
+    if (authError) return authError;
 
     if (!isSheetsConfigured()) {
       return fail("SHEETS_NOT_CONFIGURED", "Google Sheets env missing", 503);

@@ -3,12 +3,16 @@ import { users, auditLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** Update profile fields (display name). */
 export async function PATCH(req: Request) {
+  const limited = await rateLimit(req, { name: "profile_update", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+
   const session = await getSessionUser();
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const body = (await req.json().catch(() => null)) as { name?: string } | null;
