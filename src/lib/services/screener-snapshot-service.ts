@@ -12,9 +12,20 @@ import { mapPool } from "../financial/snapshots";
 import type { Meta } from "../types";
 
 import { batchVnOhlcv } from "./ohlcv-batch";
-import { sma } from "../engines/oscillators";
+import { sma, adx, ttmSqueeze, superTrend } from "../engines/oscillators";
+import { detectChartPatterns } from "../engines/chart-patterns";
 
-export type ScreenerPreset = "all" | "canslim" | "dividend" | "growth" | "value" | "breakout" | "ma_cross";
+export type ScreenerPreset =
+  | "all"
+  | "confluence"
+  | "vcp"
+  | "ttm_squeeze"
+  | "canslim"
+  | "dividend"
+  | "growth"
+  | "value"
+  | "breakout"
+  | "ma_cross";
 
 export type ScreenerStockItem = {
   symbol: string;
@@ -48,6 +59,13 @@ export type ScreenerStockItem = {
   ma50: number | null;
   maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL";
   volRatio20: number | null;
+  // Advanced Indicators & Patterns
+  adx14: number | null;
+  squeezeState: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  superTrendDir: "up" | "down" | null;
+  chartPattern: string | null;
+  confluenceScore: number; // 0-100
+  confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
   presetsPassed: ScreenerPreset[];
   compositeScore: number; // 0-100
 };
@@ -185,6 +203,103 @@ function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPri
   };
 }
 
+function analyzeTechFeatures(
+  bars: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[],
+  currentPrice: number | null,
+  compositeScore: number,
+) {
+  const maRes = analyzeMaFeatures(bars, currentPrice);
+  if (!bars || bars.length < 15) {
+    return {
+      ...maRes,
+      adx14: null,
+      squeezeState: null,
+      superTrendDir: null,
+      chartPattern: null,
+      confluenceScore: compositeScore,
+      confluenceBadge: "NONE" as const,
+    };
+  }
+
+  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
+  const highs = bars.map((b) => b.high ?? b.close).filter((h) => Number.isFinite(h) && h > 0);
+  const lows = bars.map((b) => b.low ?? b.close).filter((l) => Number.isFinite(l) && l > 0);
+  const n = closes.length;
+
+  let lastAdx: number | null = null;
+  let plusDi: number | null = null;
+  let minusDi: number | null = null;
+  if (n >= 28) {
+    const adxData = adx(highs, lows, closes, 14);
+    lastAdx = adxData.adx[n - 1] ?? null;
+    plusDi = adxData.plusDi[n - 1] ?? null;
+    minusDi = adxData.minusDi[n - 1] ?? null;
+  }
+
+  let sqState: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" = "squeeze_off";
+  if (n >= 38) {
+    const sqData = ttmSqueeze(highs, lows, closes, 20, 2, 20, 1.5);
+    sqState = sqData.state;
+  }
+
+  let stDir: "up" | "down" | null = null;
+  if (n >= 15) {
+    const stData = superTrend(highs, lows, closes, 10, 3);
+    stDir = stData.direction[n - 1] ?? null;
+  }
+
+  const ohlcvBars = bars.map((b, idx) => ({
+    time: b.time ?? idx,
+    open: b.open ?? b.close,
+    high: b.high ?? b.close,
+    low: b.low ?? b.close,
+    close: b.close,
+    volume: b.volume ?? 0,
+  }));
+  const chartPatterns = detectChartPatterns(ohlcvBars);
+  const topPattern = chartPatterns[0] ?? null;
+
+  // 1. Trend Pillar (max 25)
+  let trendScore = 0;
+  if (maRes.maSignal === "GOLDEN_CROSS" || maRes.maSignal === "BULLISH_ALIGN") trendScore += 14;
+  else if (currentPrice && maRes.ma20 && currentPrice > maRes.ma20) trendScore += 7;
+  if (lastAdx != null && lastAdx >= 25 && plusDi != null && minusDi != null && plusDi > minusDi) trendScore += 6;
+  if (stDir === "up") trendScore += 5;
+
+  // 2. Pattern & VSA Pillar (max 25)
+  let patternScore = 0;
+  if (topPattern && topPattern.type === "bullish") {
+    patternScore = Math.min(25, Math.round(topPattern.score * 0.26));
+  }
+
+  // 3. Volume & Momentum Squeeze Pillar (max 25)
+  let momScore = 0;
+  if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.2) momScore += 10;
+  else if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.0) momScore += 5;
+  if (sqState === "fired_bull") momScore += 15;
+  else if (sqState === "squeeze_on") momScore += 10;
+
+  // 4. Fundamental Pillar (max 25)
+  const fundScore = Math.min(25, Math.round(compositeScore * 0.25));
+
+  const confluenceScore = Math.min(100, Math.max(5, trendScore + patternScore + momScore + fundScore));
+
+  let confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" = "NONE";
+  if (confluenceScore >= 78) confluenceBadge = "SUPER_SETUP";
+  else if (confluenceScore >= 65) confluenceBadge = "POTENTIAL_BREAKOUT";
+  else if (confluenceScore >= 50) confluenceBadge = "WATCH";
+
+  return {
+    ...maRes,
+    adx14: lastAdx != null ? Number(lastAdx.toFixed(1)) : null,
+    squeezeState: sqState,
+    superTrendDir: stDir,
+    chartPattern: topPattern ? `${topPattern.nameVi}` : null,
+    confluenceScore,
+    confluenceBadge,
+  };
+}
+
 function calculateCompositeScore(
   quality: number | null,
   roe: number | null,
@@ -233,6 +348,9 @@ function detectPresets(item: {
   netMargin: number | null;
   volume: number | null;
   maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL";
+  chartPattern?: string | null;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  confluenceScore: number;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -280,6 +398,28 @@ function detectPresets(item: {
   const priceValid = item.price != null && item.price >= 8;
   if (isMaBullish && volValid && priceValid) {
     passes.push("ma_cross");
+  }
+
+  // 7. Confluence (Siêu hội tụ >= 65)
+  if (item.confluenceScore >= 65) {
+    passes.push("confluence");
+  }
+
+  // 8. VCP & Classic Patterns
+  if (
+    item.chartPattern &&
+    (item.chartPattern.includes("VCP") ||
+      item.chartPattern.includes("Cốc") ||
+      item.chartPattern.includes("đáy") ||
+      item.chartPattern.includes("Cờ") ||
+      item.chartPattern.includes("Pocket"))
+  ) {
+    passes.push("vcp");
+  }
+
+  // 9. TTM Squeeze
+  if (item.squeezeState === "squeeze_on" || item.squeezeState === "fired_bull") {
+    passes.push("ttm_squeeze");
   }
 
   return passes;
@@ -495,7 +635,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
         const ohlcvBars = ohlcvMap.get(sym)?.bars ?? [];
-        const maFeatures = analyzeMaFeatures(ohlcvBars, price);
+        const techFeatures = analyzeTechFeatures(ohlcvBars, price, compositeScore);
 
         const presetsPassed = detectPresets({
           roe,
@@ -509,7 +649,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           pb,
           netMargin,
           volume,
-          maSignal: maFeatures.maSignal,
+          maSignal: techFeatures.maSignal,
+          chartPattern: techFeatures.chartPattern,
+          squeezeState: techFeatures.squeezeState,
+          confluenceScore: techFeatures.confluenceScore,
         });
 
         items.push({
@@ -538,11 +681,17 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           fcfTtm,
           qualityScore,
           healthScore,
-          ma10: maFeatures.ma10,
-          ma20: maFeatures.ma20,
-          ma50: maFeatures.ma50,
-          maSignal: maFeatures.maSignal,
-          volRatio20: maFeatures.volRatio20,
+          ma10: techFeatures.ma10,
+          ma20: techFeatures.ma20,
+          ma50: techFeatures.ma50,
+          maSignal: techFeatures.maSignal,
+          volRatio20: techFeatures.volRatio20,
+          adx14: techFeatures.adx14,
+          squeezeState: techFeatures.squeezeState,
+          superTrendDir: techFeatures.superTrendDir,
+          chartPattern: techFeatures.chartPattern,
+          confluenceScore: techFeatures.confluenceScore,
+          confluenceBadge: techFeatures.confluenceBadge,
           presetsPassed,
           compositeScore,
         });
@@ -612,6 +761,9 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
 
   const presetsCount: Record<ScreenerPreset, number> = {
     all: allItems.length,
+    confluence: 0,
+    vcp: 0,
+    ttm_squeeze: 0,
     canslim: 0,
     dividend: 0,
     growth: 0,

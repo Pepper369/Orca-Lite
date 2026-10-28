@@ -233,6 +233,23 @@ export interface TechnicalSnapshot {
   tradeSignal?: TradeSignal | null;
   candlePatterns?: CandlePattern[];
   candleClusters?: unknown[];
+  chartPatterns?: import("./engines/chart-patterns").DetectedChartPattern[];
+  adx?: {
+    adx14: number | null;
+    plusDi: number | null;
+    minusDi: number | null;
+    trendStrength: "strong" | "weak" | "absent";
+  } | null;
+  keltner?: { upper: number | null; mid: number | null; lower: number | null } | null;
+  ttmSqueeze?: {
+    squeezeOn: boolean;
+    momentum: number | null;
+    state: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear";
+  } | null;
+  superTrend?: {
+    value: number | null;
+    direction: "up" | "down" | null;
+  } | null;
   alphaBeta?: unknown;
   dataQuality?: {
     bars?: number;

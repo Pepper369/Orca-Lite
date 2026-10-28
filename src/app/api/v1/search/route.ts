@@ -27,6 +27,6 @@ export async function GET(req: Request) {
     );
   } catch (e) {
     console.error("[search]", e);
-    return fail("SEARCH_ERROR", e instanceof Error ? e.message : "failed", 500);
+    return fail("SEARCH_ERROR", "Đã xảy ra lỗi khi tìm kiếm mã cổ phiếu.", 500);
   }
 }

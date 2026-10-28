@@ -10,6 +10,7 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "multi-source"
+  | "confluence"
   | "stocks"
   | "oquant-quant"
   | "miquant-quant"
@@ -31,6 +32,7 @@ type Universe =
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine) 🔥" },
+  { id: "confluence", label: "Siêu Hội Tụ (Orca Confluence Pro) 🌟" },
   { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế 🌐" },
   { id: "rrg-rotation", label: "Vòng xoay RRG Ngành 🌀" },
   { id: "stocks", label: "Cổ phiếu VN ⭐" },
@@ -173,6 +175,9 @@ function ScreenerInner() {
   switch (universe) {
     case "multi-source":
       body = <MultiSourceScreener />;
+      break;
+    case "confluence":
+      body = <VnScreener defaultSector={sector} defaultPreset="confluence" defaultView="confluence" />;
       break;
     case "macro-radar":
       body = <MacroRadarCard />;

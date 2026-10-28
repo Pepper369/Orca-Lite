@@ -4,14 +4,38 @@ import { computeTradeSignal, type TradeSignal } from "./engines/trade-signal";
 import { buildStockTradePlan } from "./engines/stock-trade-plan";
 import { detectDivergences, divergenceSummaryLine } from "./engines/divergence";
 import { analyzeMoneyFlow } from "./engines/money-flow";
-import { sma, ema, rsi, macd } from "./engines/oscillators";
+import {
+  sma,
+  ema,
+  rsi,
+  macd,
+  stochastic,
+  adx,
+  keltner,
+  ttmSqueeze,
+  superTrend,
+  atrSeries,
+} from "./engines/oscillators";
+import { detectChartPatterns, type DetectedChartPattern } from "./engines/chart-patterns";
 
 /**
  * Technical analysis engine — deterministic quantitative computations.
  * tradeSignal = MUA / BÁN / QUAN SÁT + confidence (+ Entry/SL/TP plan).
  */
 
-export { sma, ema, rsi, macd, stochastic } from "./engines/oscillators";
+export {
+  sma,
+  ema,
+  rsi,
+  macd,
+  stochastic,
+  adx,
+  keltner,
+  ttmSqueeze,
+  superTrend,
+  atrSeries,
+} from "./engines/oscillators";
+export { detectChartPatterns, type DetectedChartPattern } from "./engines/chart-patterns";
 
 export function bollinger(
   values: number[],
@@ -201,7 +225,10 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
   if (bars.length < 30) return null;
 
   const closes = bars.map((b) => b.close);
-  const last = closes[closes.length - 1]!;
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const n = closes.length;
+  const last = closes[n - 1]!;
   const rsiSeries = rsi(closes, 14);
   const rsi14 = rsiSeries[rsiSeries.length - 1] ?? null;
   const macdFull = macd(closes);
@@ -232,6 +259,40 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
   const sr = supportResistance(bars);
   const high52w = Math.max(...closes.slice(-252));
   const low52w = Math.min(...closes.slice(-252));
+
+  // Advanced Oscillators & Indicators (ADX, Keltner, TTM Squeeze, SuperTrend)
+  const adxData = adx(highs, lows, closes, 14);
+  const lastAdx = adxData.adx[n - 1] ?? null;
+  const lastPlusDi = adxData.plusDi[n - 1] ?? null;
+  const lastMinusDi = adxData.minusDi[n - 1] ?? null;
+  const adxSnap = {
+    adx14: lastAdx != null ? Math.round(lastAdx * 10) / 10 : null,
+    plusDi: lastPlusDi != null ? Math.round(lastPlusDi * 10) / 10 : null,
+    minusDi: lastMinusDi != null ? Math.round(lastMinusDi * 10) / 10 : null,
+    trendStrength: (lastAdx != null && lastAdx >= 25 ? "strong" : lastAdx != null && lastAdx >= 20 ? "weak" : "absent") as "strong" | "weak" | "absent",
+  };
+
+  const kcData = keltner(highs, lows, closes, 20, 1.5);
+  const keltnerSnap = {
+    upper: kcData.upper[n - 1] ?? null,
+    mid: kcData.mid[n - 1] ?? null,
+    lower: kcData.lower[n - 1] ?? null,
+  };
+
+  const sqData = ttmSqueeze(highs, lows, closes, 20, 2, 20, 1.5);
+  const squeezeSnap = {
+    squeezeOn: sqData.squeezeOn[n - 1] ?? false,
+    momentum: sqData.momentum[n - 1] ?? null,
+    state: sqData.state,
+  };
+
+  const stData = superTrend(highs, lows, closes, 10, 3);
+  const superTrendSnap = {
+    value: stData.superTrend[n - 1] ?? null,
+    direction: stData.direction[n - 1] ?? null,
+  };
+
+  const chartPatterns = detectChartPatterns(bars);
 
   let score = 0;
   if (sma20 != null && last > sma20) score += 15;
@@ -290,6 +351,21 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
     signals.push(divergenceSummaryLine(d));
   }
 
+  // Signals from advanced indicators & chart patterns
+  if (squeezeSnap.state === "fired_bull") signals.push("TTM Squeeze nổ tăng (Breakout)");
+  else if (squeezeSnap.state === "fired_bear") signals.push("TTM Squeeze nổ giảm");
+  else if (squeezeSnap.squeezeOn) signals.push("TTM Squeeze đang nén chặt biên độ");
+
+  if (lastAdx != null && lastAdx >= 25) {
+    signals.push(`ADX ${lastAdx.toFixed(0)} xác nhận xu hướng ${lastPlusDi != null && lastMinusDi != null && lastPlusDi > lastMinusDi ? "tăng" : "giảm"} mạnh`);
+  }
+  if (superTrendSnap.direction === "up") signals.push("SuperTrend báo mua");
+  else if (superTrendSnap.direction === "down") signals.push("SuperTrend báo bán");
+
+  for (const cp of chartPatterns.slice(0, 2)) {
+    signals.push(`${cp.nameVi} (${cp.score}đ, độ tin cậy ${cp.reliability})`);
+  }
+
   const latestBarTime = bars[bars.length - 1]!.time;
   const ageMs = Math.max(0, Date.now() - latestBarTime);
 
@@ -331,6 +407,12 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
     volumeConfirmed,
     bbPosition,
     flowPressure,
+    adx14: lastAdx,
+    plusDi: lastPlusDi,
+    minusDi: lastMinusDi,
+    squeezeState: squeezeSnap.state,
+    superTrendDir: superTrendSnap.direction,
+    chartPatterns,
   });
 
   let plan = null as ReturnType<typeof buildStockTradePlan>;
@@ -357,6 +439,11 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
     sma: { sma20, sma50, sma200 },
     ema: { ema12: emaArr(12), ema26: emaArr(26) },
     bollinger: bb,
+    keltner: keltnerSnap,
+    adx: adxSnap,
+    ttmSqueeze: squeezeSnap,
+    superTrend: superTrendSnap,
+    chartPatterns,
     atr14,
     moneyFlow: flow,
     moneyFlowAnalysis,

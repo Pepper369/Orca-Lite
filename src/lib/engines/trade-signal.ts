@@ -37,6 +37,12 @@ export interface TechSnapshot {
   bbPosition?: -1 | 0 | 1 | null;
   /** Áp lực dòng tiền */
   flowPressure?: "positive" | "negative" | "neutral" | null;
+  adx14?: number | null;
+  plusDi?: number | null;
+  minusDi?: number | null;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  superTrendDir?: "up" | "down" | null;
+  chartPatterns?: import("./chart-patterns").DetectedChartPattern[] | null;
 }
 
 /** Ngưỡng cân bằng: đủ nhạy để bắt setup, vẫn lọc nhiễu */
@@ -241,10 +247,58 @@ export function techBiasFromSnapshot(t: TechSnapshot): { bias: number; reasons: 
     bias -= 6;
   }
 
+  // ADX trend strength & direction confirmation
+  if (t.adx14 != null && Number.isFinite(t.adx14)) {
+    if (t.adx14 >= 25 && t.plusDi != null && t.minusDi != null) {
+      if (t.plusDi > t.minusDi) {
+        bias += 8;
+        reasons.push(`ADX ${t.adx14.toFixed(0)} trend tăng`);
+      } else if (t.minusDi > t.plusDi) {
+        bias -= 8;
+        reasons.push(`ADX ${t.adx14.toFixed(0)} trend giảm`);
+      }
+    }
+  }
+
+  // TTM Squeeze firing
+  if (t.squeezeState === "fired_bull") {
+    bias += 10;
+    reasons.push("TTM Squeeze nổ tăng");
+  } else if (t.squeezeState === "fired_bear") {
+    bias -= 10;
+    reasons.push("TTM Squeeze nổ giảm");
+  } else if (t.squeezeState === "squeeze_on") {
+    reasons.push("TTM Squeeze đang nén");
+  }
+
+  // SuperTrend dynamic trailing confirmation
+  if (t.superTrendDir === "up") {
+    bias += 6;
+    reasons.push("SuperTrend báo tăng");
+  } else if (t.superTrendDir === "down") {
+    bias -= 6;
+    reasons.push("SuperTrend báo giảm");
+  }
+
+  // Multi-bar chart patterns & VSA confluence
+  if (t.chartPatterns && t.chartPatterns.length > 0) {
+    const top = t.chartPatterns[0]!;
+    if (top.type === "bullish") {
+      const weight = top.reliability === "very_high" ? 14 : 10;
+      bias += weight;
+      reasons.push(`${top.nameVi} (${top.score}đ)`);
+    } else if (top.type === "bearish") {
+      const weight = top.reliability === "very_high" ? 14 : 10;
+      bias -= weight;
+      reasons.push(`${top.nameVi} (${top.score}đ)`);
+    }
+  }
+
   return { bias: Math.max(-100, Math.min(100, bias)), reasons };
 }
 
 function isSideways(t: TechSnapshot): boolean {
+  if (t.adx14 != null && t.adx14 < 20) return true; // ADX < 20 indicates chop/ranging market
   return t.trendLabel === "sideways" || (t.trendScore != null && Math.abs(t.trendScore) < 15);
 }
 
@@ -294,7 +348,11 @@ export function computeTradeSignal(
   if (hasVol) confidence = Math.min(96, confidence + 6);
   else confidence = Math.min(confidence, 72);
 
-  if (candle.qualityCount === 0) confidence = Math.min(confidence, 50);
+  if (tech.chartPatterns && tech.chartPatterns.length > 0 && tech.chartPatterns[0]!.score >= 75) {
+    confidence = Math.min(96, confidence + 8);
+  }
+
+  if (candle.qualityCount === 0 && (!tech.chartPatterns || tech.chartPatterns.length === 0)) confidence = Math.min(confidence, 50);
   if (candle.qualityCount >= 2 && sameDir) confidence = Math.min(96, confidence + 6);
 
   if (tech.rsi14 != null) {

@@ -63,7 +63,73 @@ export function Field({
   );
 }
 
-type ViewTab = "overview" | "technical" | "valuation" | "profitability" | "health";
+type ViewTab = "overview" | "confluence" | "technical" | "valuation" | "profitability" | "health";
+
+export function ConfluenceBadge({
+  badge,
+  score,
+}: {
+  badge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" | string | null | undefined;
+  score?: number | null;
+}) {
+  if (badge === "SUPER_SETUP") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-400 whitespace-nowrap shadow-sm">
+        <span>🌟</span> SIÊU SETUP {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  if (badge === "POTENTIAL_BREAKOUT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-accent-primary/20 border border-accent-primary/40 px-2 py-0.5 text-[10px] font-bold text-accent-primary whitespace-nowrap">
+        <span>🚀</span> CHỜ NỔ {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  if (badge === "WATCH") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 whitespace-nowrap">
+        <span>👀</span> Theo dõi {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  return <span className="text-[10px] text-text-muted">{score ? `${score}đ` : "—"}</span>;
+}
+
+export function SqueezeBadge({ state }: { state: string | null | undefined }) {
+  if (state === "fired_bull") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
+        <span>🚀</span> Nổ tăng
+      </span>
+    );
+  }
+  if (state === "fired_bear") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold text-rose-400 whitespace-nowrap">
+        <span>⚠️</span> Nổ giảm
+      </span>
+    );
+  }
+  if (state === "squeeze_on") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-purple-500/20 border border-purple-500/40 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 whitespace-nowrap animate-pulse">
+        <span>🌀</span> Đang nén
+      </span>
+    );
+  }
+  return <span className="text-[10px] text-text-muted">—</span>;
+}
+
+export function SuperTrendBadge({ dir }: { dir: "up" | "down" | null | undefined }) {
+  if (dir === "up") {
+    return <span className="text-[11px] font-bold text-emerald-400">▲ Tăng</span>;
+  }
+  if (dir === "down") {
+    return <span className="text-[11px] font-semibold text-rose-400">▼ Giảm</span>;
+  }
+  return <span className="text-[10px] text-text-muted">—</span>;
+}
 
 export function MaSignalBadge({ signal }: { signal: string | null | undefined }) {
   if (signal === "GOLDEN_CROSS") {
@@ -92,6 +158,9 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "confluence", label: "Siêu Hội Tụ 🌟", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
+  { id: "vcp", label: "Mẫu hình VCP / Cốc", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
+  { id: "ttm_squeeze", label: "Nén Squeeze 🌀", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
   { id: "ma_cross", label: "Giao cắt MA", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Golden Cross & Trật tự MA tăng" },
   { id: "canslim", label: "CANSLIM", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Tăng trưởng cao & ROE > 14%" },
   { id: "dividend", label: "Cổ tức cao", icon: <DollarSign className="size-3.5 text-emerald-400" />, desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
@@ -100,10 +169,18 @@ const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; d
   { id: "breakout", label: "Bứt phá vol", icon: <CheckCircle2 className="size-3.5 text-purple-400" />, desc: "Giá tăng > 2% kèm vol lớn" },
 ];
 
-export function VnScreener({ defaultSector }: { defaultSector: string | null }) {
+export function VnScreener({
+  defaultSector,
+  defaultPreset = "all",
+  defaultView = "overview",
+}: {
+  defaultSector: string | null;
+  defaultPreset?: ScreenerPreset;
+  defaultView?: ViewTab;
+}) {
   // Preset & Tab state
-  const [preset, setPreset] = useState<ScreenerPreset>("all");
-  const [viewTab, setViewTab] = useState<ViewTab>("overview");
+  const [preset, setPreset] = useState<ScreenerPreset>(defaultPreset);
+  const [viewTab, setViewTab] = useState<ViewTab>(defaultView);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Search & Filter state
@@ -529,6 +606,18 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
             </button>
             <button
               type="button"
+              onClick={() => setViewTab("confluence")}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "confluence"
+                  ? "bg-panel-3 text-amber-400 font-semibold"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Sparkles className="size-3 text-amber-400" />
+              Siêu Hội Tụ & Mẫu hình 🔥
+            </button>
+            <button
+              type="button"
               onClick={() => setViewTab("technical")}
               className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
                 viewTab === "technical"
@@ -629,6 +718,39 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
                     >
                       Điểm Orca {sortKey === "compositeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                  </>
+                )}
+
+                {viewTab === "confluence" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("changePercent")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("adx14")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ADX(14)
+                    </th>
+                    <th className="py-2.5 text-center font-medium">Nén Squeeze</th>
+                    <th className="py-2.5 text-center font-medium">SuperTrend</th>
+                    <th className="py-2.5 text-left font-medium">Mẫu hình & VSA</th>
+                    <th
+                      onClick={() => handleSort("confluenceScore")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Điểm Hội Tụ {sortKey === "confluenceScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 pr-3.5 text-right font-medium">Đánh giá</th>
                   </>
                 )}
 
@@ -848,6 +970,47 @@ export function VnScreener({ defaultSector }: { defaultSector: string | null }) 
                           >
                             {row.compositeScore}
                           </span>
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "confluence" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="num py-2.5 text-right text-text-primary">
+                          {row.adx14 != null ? (
+                            <span className={row.adx14 >= 25 ? "text-amber-400 font-bold" : "text-text-muted"}>
+                              {row.adx14}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SqueezeBadge state={row.squeezeState} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SuperTrendBadge dir={row.superTrendDir} />
+                        </td>
+                        <td className="py-2.5 text-left">
+                          {row.chartPattern ? (
+                            <span className="inline-block rounded bg-accent-primary/10 border border-accent-primary/20 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
+                              {row.chartPattern}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-accent-primary">
+                          {row.confluenceScore}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-right">
+                          <ConfluenceBadge badge={row.confluenceBadge} />
                         </td>
                       </>
                     )}

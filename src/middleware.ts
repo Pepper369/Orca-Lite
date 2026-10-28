@@ -18,10 +18,20 @@ export function middleware(req: NextRequest) {
       const origin = req.headers.get("origin");
       const referer = req.headers.get("referer");
       const host = req.headers.get("host") || req.nextUrl.host;
-      const fwdHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+
+      // Allowlist of trusted server hosts: never trust unverified x-forwarded-host blindly
+      const allowedHosts = new Set<string>();
+      if (host) allowedHosts.add(host.toLowerCase());
+      if (req.nextUrl.host) allowedHosts.add(req.nextUrl.host.toLowerCase());
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+      if (siteUrl) {
+        try {
+          allowedHosts.add(new URL(siteUrl).host.toLowerCase());
+        } catch {}
+      }
 
       const isHostMatch = (targetHost: string) =>
-        targetHost === host || (fwdHost ? targetHost === fwdHost : false);
+        allowedHosts.has(targetHost.toLowerCase());
 
       if (origin) {
         try {
