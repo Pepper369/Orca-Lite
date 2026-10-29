@@ -131,6 +131,16 @@ const SignedDisclosuresPanel = dynamic(
   }
 );
 
+const ActiveFlowCard = dynamic(
+  () =>
+    import("@/components/stocks/active-flow-card").then(
+      (m) => m.ActiveFlowCard
+    ),
+  {
+    ssr: false,
+  }
+);
+
 const ForeignPressureGauge = dynamic(
   () =>
     import("@/components/stocks/foreign-pressure-gauge").then(
@@ -564,7 +574,10 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           </div>
           <span className="stock-section-index">01</span>
         </div>
-        <div className="mb-3">
+        <div className="mb-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <ErrorBoundary name="active-flow" resetKey={detail.symbol}>
+            <ActiveFlowCard symbol={detail.symbol} />
+          </ErrorBoundary>
           <ErrorBoundary name="foreign-gauge" resetKey={detail.symbol}>
             <ForeignPressureGauge symbol={detail.symbol} />
           </ErrorBoundary>
