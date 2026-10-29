@@ -79,32 +79,36 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
 
   // Load custom settings from LocalStorage
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.customIncome != null) setCustomIncome(parsed.customIncome);
-        if (parsed.customExpenses != null) setCustomExpenses(parsed.customExpenses);
-        if (parsed.customCash != null) setCustomCash(parsed.customCash);
-        if (parsed.customInvested != null) setCustomInvested(parsed.customInvested);
-        if (parsed.customAge != null) setCustomAge(parsed.customAge);
-        if (parsed.customCagr != null) setCustomCagr(parsed.customCagr);
-        if (parsed.jarsRatios != null) setJarsRatios(parsed.jarsRatios);
-        if (parsed.customSubs != null && Array.isArray(parsed.customSubs)) setCustomSubs(parsed.customSubs);
-        if (parsed.useCustomAmounts != null) setUseCustomAmounts(parsed.useCustomAmounts);
+    void Promise.resolve().then(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.customIncome != null) setCustomIncome(parsed.customIncome);
+          if (parsed.customExpenses != null) setCustomExpenses(parsed.customExpenses);
+          if (parsed.customCash != null) setCustomCash(parsed.customCash);
+          if (parsed.customInvested != null) setCustomInvested(parsed.customInvested);
+          if (parsed.customAge != null) setCustomAge(parsed.customAge);
+          if (parsed.customCagr != null) setCustomCagr(parsed.customCagr);
+          if (parsed.jarsRatios != null) setJarsRatios(parsed.jarsRatios);
+          if (parsed.customSubs != null && Array.isArray(parsed.customSubs)) setCustomSubs(parsed.customSubs);
+          if (parsed.useCustomAmounts != null) setUseCustomAmounts(parsed.useCustomAmounts);
+        }
+      } catch {
+        /* ignore storage load error */
       }
-    } catch {
-      /* ignore storage load error */
-    }
+    });
   }, []);
 
   // Đồng bộ khi snapshot thay đổi nếu người dùng đang dùng chế độ Sổ sách
   useEffect(() => {
     if (!useCustomAmounts) {
-      setCustomIncome(snapIncome);
-      setCustomExpenses(snapExpenses);
-      setCustomCash(snapCash);
-      setCustomInvested(snapInvested);
+      void Promise.resolve().then(() => {
+        setCustomIncome(snapIncome);
+        setCustomExpenses(snapExpenses);
+        setCustomCash(snapCash);
+        setCustomInvested(snapInvested);
+      });
     }
   }, [snapIncome, snapExpenses, snapCash, snapInvested, useCustomAmounts]);
 

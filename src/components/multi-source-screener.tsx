@@ -42,7 +42,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const [sortBy, setSortBy] = useState<"upside" | "foreign" | "inst" | "symbol">("upside");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const items = data ?? [];
+  const items = useMemo(() => data ?? [], [data]);
 
   const filtered = useMemo(() => {
     return items.filter((item) => {

@@ -157,7 +157,7 @@ export function OQuantStudio() {
     };
   }>(inspectSymbol ? `/api/v1/stocks/${inspectSymbol}/catalyst-risk` : null);
 
-  const bots = botsData?.data || [];
+  const bots = useMemo(() => botsData?.data || [], [botsData?.data]);
   const selectedBot = useMemo(
     () => bots.find((b) => b.id === selectedBotId) || bots[0],
     [bots, selectedBotId]
@@ -191,7 +191,7 @@ export function OQuantStudio() {
     return list;
   }, [selectedBot, candidateSearch, candidateFilter, targetHoldingSymbols]);
 
-  const strategies = strategiesData?.data || [];
+  const strategies = useMemo(() => strategiesData?.data || [], [strategiesData?.data]);
   const selectedStrategy = useMemo(
     () => strategies.find((s) => s.id === selectedStrategyId) || strategies[0],
     [strategies, selectedStrategyId]

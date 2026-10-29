@@ -35,7 +35,7 @@ export const SignedDisclosuresPanel = memo(function SignedDisclosuresPanel({
     symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}/disclosures?limit=30` : null
   );
 
-  const docs = data?.documents ?? [];
+  const docs = useMemo(() => data?.documents ?? [], [data?.documents]);
 
   const filteredDocs = useMemo(() => {
     if (tab === "all") return docs;

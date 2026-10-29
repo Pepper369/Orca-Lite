@@ -137,7 +137,7 @@ export function PaperTradingBoard() {
 
   // Polling giá mỗi 8 giây
   useEffect(() => {
-    fetchQuotes();
+    void Promise.resolve().then(fetchQuotes);
     const interval = setInterval(fetchQuotes, 8_000);
     return () => clearInterval(interval);
   }, [fetchQuotes]);

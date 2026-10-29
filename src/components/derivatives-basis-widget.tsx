@@ -24,9 +24,10 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
   };
 
   useEffect(() => {
-    fetchBasis();
+    void Promise.resolve().then(fetchBasis);
     const interval = setInterval(fetchBasis, 15000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
   if (loading && !data) {

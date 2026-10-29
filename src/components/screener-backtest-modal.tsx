@@ -48,8 +48,9 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
 
   useEffect(() => {
     if (isOpen && !data && !loading) {
-      runSimulation();
+      void Promise.resolve().then(() => runSimulation());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   if (!isOpen) return null;

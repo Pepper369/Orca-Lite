@@ -17,15 +17,10 @@ export function TradingViewAdvancedChartContainer({
   timeframe = "1d",
   height = 540,
 }: Props) {
-  const [currentSymbol, setCurrentSymbol] = useState(symbol);
   const [currentTimeframe, setCurrentTimeframe] = useState(timeframe);
   const [mode, setMode] = useState<"lightweight" | "embed">("lightweight");
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Sync internal state if prop changes
-  useEffect(() => {
-    setCurrentSymbol(symbol);
-  }, [symbol]);
+  const currentSymbol = symbol;
 
   return (
     <div className="flex flex-col rounded-xl border border-border-subtle bg-background-secondary overflow-hidden shadow-sm">

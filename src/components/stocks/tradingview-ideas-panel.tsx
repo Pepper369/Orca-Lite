@@ -13,7 +13,9 @@ export function TradingViewIdeasPanel({ symbol }: Props) {
 
   useEffect(() => {
     let unmounted = false;
-    setLoading(true);
+    void Promise.resolve().then(() => {
+      if (!unmounted) setLoading(true);
+    });
 
     fetch(`/api/v1/stocks/${encodeURIComponent(symbol)}/tradingview-ideas`)
       .then((r) => r.json())

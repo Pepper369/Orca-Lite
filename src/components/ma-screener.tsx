@@ -87,14 +87,13 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
     timeoutMs: 12_000,
   });
 
-  const allRows = data?.rows ?? [];
-
   // Filter local search
   const filteredRows = useMemo(() => {
-    if (!search.trim()) return allRows;
+    const rows = data?.rows ?? [];
+    if (!search.trim()) return rows;
     const q = search.trim().toUpperCase();
-    return allRows.filter((r) => r.symbol.includes(q) || (r.name && r.name.toUpperCase().includes(q)));
-  }, [allRows, search]);
+    return rows.filter((r) => r.symbol.includes(q) || (r.name && r.name.toUpperCase().includes(q)));
+  }, [data?.rows, search]);
 
   return (
     <div className="space-y-3">

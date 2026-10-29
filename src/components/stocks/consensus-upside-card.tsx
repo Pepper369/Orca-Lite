@@ -9,7 +9,7 @@ export function ConsensusUpsideCard({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     if (!symbol) return;
-    setLoading(true);
+    void Promise.resolve().then(() => setLoading(true));
     fetch(`/api/v1/stocks/${symbol}/consensus`)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status);

@@ -89,7 +89,9 @@ export function TechnicalGaugeCard({ symbol }: Props) {
 
   useEffect(() => {
     let unmounted = false;
-    setLoading(true);
+    void Promise.resolve().then(() => {
+      if (!unmounted) setLoading(true);
+    });
 
     fetch(`/api/v1/stocks/${encodeURIComponent(symbol)}/technical-gauge`)
       .then((r) => r.json())
