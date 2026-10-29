@@ -387,3 +387,4 @@ export const ActiveFlowCard = memo(function ActiveFlowCard({ symbol }: { symbol:
     </div>
   );
 });
+

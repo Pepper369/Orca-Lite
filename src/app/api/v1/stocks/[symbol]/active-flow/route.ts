@@ -40,3 +40,4 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
     { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30" },
   );
 }
+
