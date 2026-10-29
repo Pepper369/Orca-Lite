@@ -68,6 +68,12 @@
   - Phân tích đồng thuận giá mục tiêu của các công ty chứng khoán (Brokerage Consensus Upside).
 
 ### 2. Định lượng & Bộ lọc Cổ phiếu (Quant & Screeners)
+- **TradingView Advanced Charts & UDF Engine:**
+  - Triển khai đầy đủ giao thức **TradingView UDF API** (`/config`, `/time`, `/symbols`, `/history`, `/search`, `/marks`).
+  - **Pine Script v5 Interpreter Engine:** Thực thi các chỉ báo kỹ thuật tùy biến (Golden Cross, SuperTrend, RSI) từ cú pháp Pine Script trực tiếp lên chuỗi nến OHLCV.
+  - **Đồng hồ Đo lường Kỹ thuật (Technical Analysis Gauge):** Thuật toán tổng hợp 26 chỉ báo (11 bộ dao động + 15 đường MA) đánh giá áp lực Mua/Bán chuẩn TradingView.
+  - **TradingView Vietnam Scanner:** Kết nối dữ liệu quét siêu tốc cho 1,700+ mã cổ phiếu Việt Nam.
+  - **Ý tưởng Cộng đồng TradingView (Community Ideas):** Tổng hợp nhận định kỹ thuật, xu hướng Bullish/Bearish từ cộng đồng trader quốc tế & Việt Nam.
 - **Super Confluence Screener:** Thuật toán chấm điểm hội tụ 4 trụ cột độc quyền:
   1. *Trend Pillar (25%):* MA Alignment, ADX 14 xác nhận xu hướng, SuperTrend.
   2. *Chart Pattern & VSA Pillar (25%):* Nhận diện tự động VCP (Volatility Contraction Pattern), Cup & Handle, Double Bottom, Bull Flag, Shakeout, No Supply, Pocket Pivot.
