@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const botId = String(body.botId || "bot_breakout_momentum");
     const capital = Number(body.capital || 100000000); // Default 100M VND
+    const allocationMode = body.allocationMode || "EQUAL_WEIGHT";
 
     if (isNaN(capital) || capital <= 0) {
       return NextResponse.json(
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const plan = await MiQuantEngine.calculateRebalancePlan(botId, capital);
+    const plan = await MiQuantEngine.calculateRebalancePlan(botId, capital, allocationMode);
     return NextResponse.json({
       success: true,
       data: plan,

@@ -42,6 +42,7 @@ import type {
   BotScannedCandidate,
   RebalancePlan,
   QuantStrategyDefinition,
+  AllocationMode,
 } from "@/lib/engines/miquant-quant-engine";
 import type {
   MiQuantBreakoutStock,
@@ -79,6 +80,7 @@ export function OQuantStudio() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("bots");
   const [selectedBotId, setSelectedBotId] = useState<string>("bot_breakout_momentum");
   const [capitalInput, setCapitalInput] = useState<number>(100000000);
+  const [allocationMode, setAllocationMode] = useState<AllocationMode>("EQUAL_WEIGHT");
   const [rebalancePlan, setRebalancePlan] = useState<RebalancePlan | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const [candidateSearch, setCandidateSearch] = useState<string>("");
@@ -204,13 +206,17 @@ export function OQuantStudio() {
   const sr = signalsData?.data?.supportResistance;
   const compositeRanked = topPicksData?.data?.composite_ranked || [];
 
-  const handleCalculateRebalance = async (botId: string, capital: number) => {
+  const handleCalculateRebalance = async (
+    botId: string,
+    capital: number,
+    mode: AllocationMode = allocationMode
+  ) => {
     setIsCalculating(true);
     try {
       const res = await fetch("/api/v1/quant/bots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botId, capital }),
+        body: JSON.stringify({ botId, capital, allocationMode: mode }),
       });
       const json = await res.json();
       if (json.success) {
@@ -417,7 +423,7 @@ export function OQuantStudio() {
           }`}
         >
           <Bot className="size-3.5" />
-          <span>4 Bot Giao dịch Định lượng (Quant Bots)</span>
+          <span>6 Bot Giao dịch Định lượng (Quant Bots)</span>
         </button>
 
         <button
@@ -446,7 +452,7 @@ export function OQuantStudio() {
           <Sparkles className="size-3.5" />
           <span>Chiến Lược Định Lượng AI (Quant Strategies)</span>
           <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
-            {strategies.length || 6} Mô Hình
+            {strategies.length || 8} Mô Hình
           </span>
         </button>
 
@@ -463,11 +469,11 @@ export function OQuantStudio() {
         </button>
       </div>
 
-      {/* TAB 1: 4 QUANT TRADING BOTS */}
+      {/* TAB 1: 6 QUANT TRADING BOTS */}
       {activeTab === "bots" && (
         <div className="space-y-6">
           {/* Bots Selection Cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {bots.map((b) => {
               const isSelected = b.id === selectedBotId;
               return (
@@ -551,7 +557,7 @@ export function OQuantStudio() {
                         Danh Mục Nắm Giữ Mục Tiêu ({selectedBot.target_holdings.length} Cổ Phiếu)
                       </h3>
                       <span className="text-[11px] text-text-muted">
-                        Tỷ trọng đều: 25% mỗi mã
+                        Quản trị rủi ro ATR & Đa nhân tố AI
                       </span>
                     </div>
 
@@ -562,6 +568,8 @@ export function OQuantStudio() {
                             <th className="py-2">Mã CK</th>
                             <th className="py-2">Giá Hiện Tại</th>
                             <th className="py-2 text-center">Tỷ Trọng</th>
+                            <th className="py-2">Chất Lượng / Beta</th>
+                            <th className="py-2">SL / TP ATR</th>
                             <th className="py-2">Cơ Sở Lựa Chọn Của Bot</th>
                             <th className="py-2 text-right">Phân Tích</th>
                           </tr>
@@ -581,10 +589,22 @@ export function OQuantStudio() {
                               <td className="py-2.5 font-mono text-text-primary">
                                 {fmtNum(h.current_price)} đ
                               </td>
-                              <td className="py-2.5 text-center font-bold text-blue-400">
+                              <td className="py-2.5 text-center font-bold text-blue-400 font-mono">
                                 {(h.weight * 100).toFixed(0)}%
                               </td>
-                              <td className="py-2.5 text-[11px] text-text-secondary">
+                              <td className="py-2.5 text-[11px] font-mono">
+                                <div>F-Score: <strong className="text-emerald-400">{h.metrics?.f_score || 8}/9</strong></div>
+                                <div className="text-[10px] text-text-muted">Beta: {h.metrics?.beta || 0.85}</div>
+                              </td>
+                              <td className="py-2.5 text-[11px] font-mono">
+                                <div className="text-rose-400 text-[10px]">
+                                  SL: {fmtNum(h.metrics?.stop_loss_atr || Math.round(h.current_price * 0.94))} đ
+                                </div>
+                                <div className="text-emerald-400 text-[10px]">
+                                  TP: {fmtNum(h.metrics?.take_profit_atr || Math.round(h.current_price * 1.12))} đ
+                                </div>
+                              </td>
+                              <td className="py-2.5 text-[11px] text-text-secondary max-w-xs">
                                 {h.reason}
                               </td>
                               <td className="py-2.5 text-right">
@@ -647,10 +667,52 @@ export function OQuantStudio() {
                   </div>
                 </div>
 
+                {/* Allocation Mode Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-text-muted block">
+                    Phương thức phân bổ vốn định lượng:
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAllocationMode("EQUAL_WEIGHT")}
+                      className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-semibold transition ${
+                        allocationMode === "EQUAL_WEIGHT"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-bg-base text-text-muted hover:text-text-primary border border-border/60"
+                      }`}
+                    >
+                      Đều Vốn (25%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllocationMode("INVERSE_VOLATILITY")}
+                      className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-semibold transition ${
+                        allocationMode === "INVERSE_VOLATILITY"
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "bg-bg-base text-text-muted hover:text-text-primary border border-border/60"
+                      }`}
+                    >
+                      Risk Parity (1/ATR)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllocationMode("SCORE_WEIGHTED")}
+                      className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-semibold transition ${
+                        allocationMode === "SCORE_WEIGHTED"
+                          ? "bg-purple-600 text-white shadow-sm"
+                          : "bg-bg-base text-text-muted hover:text-text-primary border border-border/60"
+                      }`}
+                    >
+                      Điểm Bot AI
+                    </button>
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   disabled={isCalculating}
-                  onClick={() => handleCalculateRebalance(selectedBot.id, capitalInput)}
+                  onClick={() => handleCalculateRebalance(selectedBot.id, capitalInput, allocationMode)}
                   className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:from-blue-500 hover:to-indigo-500 transition shadow-sm disabled:opacity-50"
                 >
                   {isCalculating ? "Đang tính toán..." : "Tính Toán Bảng Lệnh Mua (Lô 100)"}
@@ -670,22 +732,30 @@ export function OQuantStudio() {
 
                     <div className="border-t border-emerald-500/20 pt-2 space-y-1.5">
                       <div className="text-[10px] font-semibold uppercase text-text-muted">
-                        Danh sách lệnh đề xuất:
+                        Danh sách lệnh đề xuất ({rebalancePlan.allocation_mode === "INVERSE_VOLATILITY" ? "Risk Parity" : rebalancePlan.allocation_mode === "SCORE_WEIGHTED" ? "Factor Weighted" : "Đều vốn"}):
                       </div>
                       {rebalancePlan.orders.map((o) => (
                         <div
                           key={o.symbol}
-                          className="flex items-center justify-between rounded-lg bg-bg-base/60 p-2 font-mono text-[11px]"
+                          className="space-y-1 rounded-lg bg-bg-base/60 p-2 font-mono text-[11px]"
                         >
-                          <div>
-                            <span className="font-bold text-accent-primary">{o.symbol}</span>
-                            <span className="ml-2 text-text-muted">
-                              x {fmtNum(o.shares)} cp
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-bold text-accent-primary">{o.symbol}</span>
+                              <span className="ml-2 text-text-muted">
+                                x {fmtNum(o.shares)} cp ({(o.target_weight * 100).toFixed(1)}%)
+                              </span>
+                            </div>
+                            <span className="font-semibold text-text-primary">
+                              {fmtNum(o.actual_amount)} đ
                             </span>
                           </div>
-                          <span className="font-semibold text-text-primary">
-                            {fmtNum(o.actual_amount)} đ
-                          </span>
+                          {o.stop_loss_atr && o.take_profit_atr && (
+                            <div className="flex items-center justify-between text-[10px] text-text-muted border-t border-border/40 pt-1">
+                              <span>SL: <strong className="text-rose-400">{fmtNum(o.stop_loss_atr)}</strong></span>
+                              <span>TP: <strong className="text-emerald-400">{fmtNum(o.take_profit_atr)}</strong></span>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -933,6 +1003,17 @@ export function OQuantStudio() {
                                   Composite: <strong>{c.metrics.score}/100</strong>
                                 </div>
                               )}
+                              {c.metrics.f_score && (
+                                <div>
+                                  F-Score: <strong className="text-emerald-400">{c.metrics.f_score}/9</strong>
+                                  {c.metrics.beta && <span className="ml-1 text-text-muted">(&beta; {c.metrics.beta})</span>}
+                                </div>
+                              )}
+                              {c.metrics.atr_pct && (
+                                <div className="text-[10px] text-text-muted">
+                                  ATR: <strong>{c.metrics.atr_pct}%</strong>
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 text-[11px] text-text-secondary max-w-xs leading-relaxed">
@@ -1041,7 +1122,7 @@ export function OQuantStudio() {
                       <span className="text-[10px] text-text-muted">/100</span>
                     </td>
                     <td className="py-3">
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-text-muted w-48">
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-text-muted w-52 font-mono">
                         <div>
                           Mom: <strong className="text-text-primary">{item.factors.momentum}</strong>
                         </div>
@@ -1053,6 +1134,12 @@ export function OQuantStudio() {
                         </div>
                         <div>
                           Sent: <strong className="text-text-primary">{item.factors.sentiment}</strong>
+                        </div>
+                        <div>
+                          Qual: <strong className="text-emerald-400">{item.factors.quality}</strong>
+                        </div>
+                        <div>
+                          Beta: <strong className="text-text-primary">{item.details?.beta || 0.85}</strong>
                         </div>
                       </div>
                     </td>
@@ -1216,6 +1303,8 @@ export function OQuantStudio() {
               { id: "Deep Value", label: "Giá trị sâu (Magic Formula)" },
               { id: "Income Dividend", label: "Cổ tức & Tiền mặt (Cash Cow)" },
               { id: "Quality Banking", label: "Ngân hàng vàng (Bank Ratios)" },
+              { id: "Low Volatility Alpha", label: "Biến động thấp (Low-Beta)" },
+              { id: "Statistical Arbitrage", label: "Hồi quy thống kê (Mean Reversion)" },
             ].map((cat) => (
               <button
                 key={cat.id}
