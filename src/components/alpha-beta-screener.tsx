@@ -304,7 +304,7 @@ export function AlphaBetaScreener({ defaultSector }: { defaultSector: string | n
                   <td className="px-2 py-2 num">{r.betaAdj != null ? r.betaAdj.toFixed(2) : "—"}</td>
                   <td className="px-2 py-2 num">
                     {r.r2 != null ? `${(r.r2 * 100).toFixed(0)}%` : "—"}
-                    {!r.reliable ? <span className="ml-1 text-[9px] text-text-muted">⚠</span> : null}
+                    {!r.reliable ? <span className="ml-1 text-[9px] text-text-muted">(!)</span> : null}
                   </td>
                   <td className="px-2 py-2">
                     <Badge tone={profileTone(r.profile)}>{r.profileVi}</Badge>

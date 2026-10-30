@@ -448,7 +448,7 @@ export function composeMorningFramework(
     paragraphs: sanitizeParas([
       "Economic calendar (ForexFactory) và lịch GDKHQ/ĐHCĐ/BCTC VN chưa nối connector đầy đủ — block đánh dấu UNAVAILABLE.",
       "Hành động thủ công trước ATO: kiểm tra lịch công bố BCTC · đáo hạn VN30F · cơ cấu ETF (VNM, FTSE, Fubon, DCVFM).",
-      "Khi connector LIVE: giờ VN · sự kiện · forecast · previous · ★ nếu lịch sử biến động chỉ số >1%.",
+      "Khi connector LIVE: giờ VN · sự kiện · forecast · previous · đánh dấu nếu lịch sử biến động chỉ số >1%.",
     ]),
   });
 

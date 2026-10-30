@@ -58,7 +58,6 @@ export function MacroRadarCard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">🌐</span>
             <h2 className="text-base font-bold text-foreground">
               Radar Vĩ Mô & Chu Kỳ Kinh Tế (Macro Economic Radar)
             </h2>
@@ -177,7 +176,7 @@ export function MacroRadarCard() {
             <div className="space-y-3 text-xs">
               <div>
                 <div className="flex items-center gap-1.5 text-emerald-400 font-semibold mb-1.5">
-                  <span>🚀</span> Ngành Dẫn Sóng Hưởng Lợi (Leading Sectors):
+                  Ngành Dẫn Sóng Hưởng Lợi (Leading Sectors):
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {data.leadingSectors.map((sec, idx) => (
@@ -193,7 +192,7 @@ export function MacroRadarCard() {
 
               <div className="pt-2">
                 <div className="flex items-center gap-1.5 text-rose-400 font-semibold mb-1.5">
-                  <span>🛡️</span> Ngành Kém Hưởng Lợi / Cần Thận Trọng (Lagging Sectors):
+                  Ngành Kém Hưởng Lợi / Cần Thận Trọng (Lagging Sectors):
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {data.laggingSectors.map((sec, idx) => (

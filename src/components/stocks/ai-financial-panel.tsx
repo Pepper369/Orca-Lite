@@ -160,7 +160,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
             className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-accent-primary to-accent-primary/80 px-3 py-1.5 text-[11.5px] font-semibold text-white shadow-sm hover:opacity-95 active:scale-95 disabled:opacity-50 transition-all"
           >
             <Sparkles className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            {loading ? "Đang thẩm định…" : data ? "Thẩm định lại" : "⚡ 1-Click AI Quick Audit"}
+            {loading ? "Đang thẩm định…" : data ? "Thẩm định lại" : "1-Click AI Quick Audit"}
           </button>
           <button
             type="button"
@@ -177,7 +177,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
       {!data && !fc && !err && !loading && !loadingFc && (
         <EmptyState
           title={`Sẵn sàng Quick Audit cho ${symbol}`}
-          description="Bấm '⚡ 1-Click AI Quick Audit' để mô hình quét toàn bộ BCTC (KQKD, CĐKT, LCTT), tính điểm 4M Phil Town, đánh giá 5 trụ cột Orca Health và đề xuất định giá an toàn."
+          description="Bấm '1-Click AI Quick Audit' để mô hình quét toàn bộ BCTC (KQKD, CĐKT, LCTT), tính điểm 4M Phil Town, đánh giá 5 trụ cột Orca Health và đề xuất định giá an toàn."
         />
       )}
 
@@ -539,7 +539,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
                         key={idx}
                         className="rounded-md border border-down/30 bg-down/10 px-2 py-1 text-[11px] font-medium text-down"
                       >
-                        ⚠️ {flag}
+                        {flag}
                       </span>
                     ))}
                   </div>

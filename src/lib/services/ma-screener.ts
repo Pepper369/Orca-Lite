@@ -222,19 +222,19 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   };
 
   const signals: string[] = [];
-  if (ma50CrossUpMa200) signals.push("Golden Cross Dài Hạn (MA50 cắt lên MA200) 🌟");
-  if (ma20CrossUpMa50) signals.push("Golden Cross Trung Hạn (MA20 cắt lên MA50) ⚡");
-  if (ma20CrossUpMa100) signals.push("MA20 cắt lên MA100 🚀");
-  if (ma10CrossUpMa50) signals.push("MA10 bứt phá cắt lên MA50 📈");
-  if (ma10CrossUpMa20) signals.push("MA10 cắt lên MA20 (Nhịp tăng ngắn) 🟢");
-  if (bullishAlignment) signals.push("Trật tự xu hướng tăng hoàn hảo (Bullish Ribbon) ✨");
-  if (volumeSurge) signals.push(`Thanh khoản đột biến (${volRatio20}x TB20) 💥`);
-  if (maSqueeze) signals.push("MA nén chặt chuẩn bị nổ biên độ 🎯");
+  if (ma50CrossUpMa200) signals.push("Golden Cross Dài Hạn (MA50 cắt lên MA200)");
+  if (ma20CrossUpMa50) signals.push("Golden Cross Trung Hạn (MA20 cắt lên MA50)");
+  if (ma20CrossUpMa100) signals.push("MA20 cắt lên MA100");
+  if (ma10CrossUpMa50) signals.push("MA10 bứt phá cắt lên MA50");
+  if (ma10CrossUpMa20) signals.push("MA10 cắt lên MA20 (Nhịp tăng ngắn)");
+  if (bullishAlignment) signals.push("Trật tự xu hướng tăng hoàn hảo (Bullish Ribbon)");
+  if (volumeSurge) signals.push(`Thanh khoản đột biến (${volRatio20}x TB20)`);
+  if (maSqueeze) signals.push("MA nén chặt chuẩn bị mở rộng biên độ");
 
-  if (ma50CrossDownMa200) signals.push("Death Cross Dài Hạn (MA50 cắt xuống MA200) ☠️");
-  if (ma20CrossDownMa50) signals.push("Death Cross Trung Hạn (MA20 cắt xuống MA50) ⚠️");
-  if (ma10CrossDownMa50) signals.push("MA10 gãy cắt xuống MA50 🔴");
-  if (bearishAlignment) signals.push("Trật tự xu hướng giảm (Bearish Alignment) 📉");
+  if (ma50CrossDownMa200) signals.push("Death Cross Dài Hạn (MA50 cắt xuống MA200)");
+  if (ma20CrossDownMa50) signals.push("Death Cross Trung Hạn (MA20 cắt xuống MA50)");
+  if (ma10CrossDownMa50) signals.push("MA10 gãy cắt xuống MA50");
+  if (bearishAlignment) signals.push("Trật tự xu hướng giảm (Bearish Alignment)");
 
   // Determine Overall Regime
   let regime: MaRegime = "NEUTRAL";
@@ -242,22 +242,22 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
 
   if (ma50CrossUpMa200 || ma20CrossUpMa50 || ma20CrossUpMa100) {
     regime = "GOLDEN_CROSS";
-    regimeLabel = "Giao cắt Vàng (Golden Cross) 🌟";
+    regimeLabel = "Giao cắt Vàng (Golden Cross)";
   } else if (bullishAlignment) {
     regime = "BULLISH_ALIGNMENT";
-    regimeLabel = "Trật tự xu hướng tăng 🚀";
+    regimeLabel = "Trật tự xu hướng tăng";
   } else if (ma10CrossUpMa20 || ma10CrossUpMa50) {
     regime = "BULLISH_MOMENTUM";
-    regimeLabel = "Đà tăng ngắn hạn 📈";
+    regimeLabel = "Đà tăng ngắn hạn";
   } else if (maSqueeze) {
     regime = "MA_SQUEEZE";
-    regimeLabel = "Nén chặt chờ bùng nổ 🎯";
+    regimeLabel = "Nén chặt chuẩn bị bùng nổ";
   } else if (ma50CrossDownMa200 || ma20CrossDownMa50) {
     regime = "DEATH_CROSS";
-    regimeLabel = "Giao cắt Tử thần ⚠️";
+    regimeLabel = "Giao cắt Tử thần (Death Cross)";
   } else if (bearishAlignment) {
     regime = "BEARISH_ALIGNMENT";
-    regimeLabel = "Kênh giảm điểm 🔴";
+    regimeLabel = "Kênh giảm điểm";
   }
 
   // Calculate Bull Score (0 - 100)

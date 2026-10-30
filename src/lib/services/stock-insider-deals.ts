@@ -142,10 +142,10 @@ export async function getStockInsiderDeals(
       let signalVi = "Giao dịch cân bằng / ít biến động lớn";
       if (buyCount > sellCount && buyCount >= 2) {
         signal = "NET_ACCUMULATION";
-        signalVi = "Lãnh đạo & Người nội bộ đang Mua ròng tích lũy 🟢";
+        signalVi = "Lãnh đạo & Người nội bộ đang Mua ròng tích lũy";
       } else if (sellCount > buyCount && sellCount >= 2) {
         signal = "NET_DISTRIBUTION";
-        signalVi = "Người nội bộ có động thái Bán ròng chốt lời 🔴";
+        signalVi = "Người nội bộ có động thái Bán ròng";
       }
 
       return {

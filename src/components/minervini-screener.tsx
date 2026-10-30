@@ -99,7 +99,7 @@ function CritDots({ row }: { row: MinerviniScreenRow }) {
   return (
     <div
       className="flex flex-wrap gap-0.5"
-      title={keys.map((k) => `${CRITERION_LABELS_VI[k] ?? k}: ${row.criteria[k] ? "✓" : "✗"}`).join("\n")}
+      title={keys.map((k) => `${CRITERION_LABELS_VI[k] ?? k}: ${row.criteria[k] ? "Đạt" : "Không đạt"}`).join("\n")}
     >
       {keys.map((k) => (
         <span

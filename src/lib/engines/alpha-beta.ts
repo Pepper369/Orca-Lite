@@ -252,7 +252,7 @@ function buildSummary(s: Omit<AlphaBetaSnapshot, "summary">): string {
   parts.push(`β=${s.beta.toFixed(2)} (adj ${s.betaAdj?.toFixed(2) ?? "—"})`);
   if (s.r2 != null) parts.push(`R²=${(s.r2 * 100).toFixed(0)}%`);
   parts.push(s.profileVi);
-  if (s.quality.flags.length) parts.push(`⚠ ${s.quality.flags.join(", ")}`);
+  if (s.quality.flags.length) parts.push(`(!) ${s.quality.flags.join(", ")}`);
   return parts.join(" · ");
 }
 

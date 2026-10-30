@@ -86,42 +86,40 @@ function generateAdaptiveAnswer(q: string, facts?: SnapshotFacts): string {
 
   if (isScreenerQuery) {
     if (query.includes("cổ tức") || query.includes("dividend") || query.includes("lãi suất")) {
-      return `Chào cậu nhen! 🐳 Bé Orca đã kết nối dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ Orca Analytics & Dividend Intelligence để hỗ trợ cậu đây:
+      return `Chào bạn! Dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ Orca Analytics cung cấp thông tin như sau:
 
-💰 **CHIẾN LƯỢC ĐẦU TƯ CỔ TỨC TIỀN MẶT BỀN VỮNG (THAY THẾ LÃI SUẤT TIỀN GỬI 5.0%):**
+**CHIẾN LƯỢC ĐẦU TƯ CỔ TỨC TIỀN MẶT BỀN VỮNG (THAY THẾ LÃI SUẤT TIỀN GỬI 5.0%):**
 • **VNM (Vinamilk):** Tỷ suất cổ tức 5.8% - 6.5%/năm, chi trả tiền mặt đều đặn 3.500 - 4.000đ/cp trong suốt 5 năm qua. Phù hợp nắm giữ phòng thủ.
 • **MBB / ACB:** Kết hợp cổ tức tiền mặt 5% kèm cổ tức cổ phiếu 15-20% hàng năm, tăng trưởng EPS bền vững >15%/năm.
 • **VEA (VEAM):** Tỷ suất cổ tức tiền mặt cao hàng đầu sàn chứng khoán (8.5% - 11%/năm) nhờ dòng tiền từ liên doanh Honda, Toyota, Ford.
 • **FPT:** Tỷ lệ cổ tức tiền mặt 2.000đ/cp + 15% cổ phiếu đều như vắt chanh hơn 10 năm, tổng tỷ suất sinh lời vượt trội (CAGR >25%/năm).
 
-💡 **LỜI KHUYÊN TỪ BÉ ORCA:**
+**LỜI KHUYÊN TỪ ORCA:**
 1. Hãy so sánh **Dividend Yield** của cổ phiếu với lãi suất gửi tiết kiệm 12 tháng (hiện quanh mức ~5.0%/năm).
 2. Kiểm tra xem doanh nghiệp có trả cổ tức từ lợi nhuận kinh doanh cốt lõi (Payout Ratio an toàn < 70-80%) hay không tại trang chi tiết mã CP trên Orca-Lite.
-3. Cậu có thể mở tab **"Phân tích Cổ tức & Tỷ suất sinh lời"** ngay trong trang chi tiết mã cổ phiếu để xem lịch sử 5 năm và lịch chốt quyền sắp tới nhé! 💖`;
+3. Bạn có thể mở tab **"Phân tích Cổ tức & Tỷ suất sinh lời"** ngay trong trang chi tiết mã cổ phiếu để xem lịch sử 5 năm và lịch chốt quyền sắp tới.`;
     }
 
     if (query.includes("breakout") || query.includes("vượt đỉnh") || query.includes("dòng tiền") || query.includes("canslim")) {
-      return `Chào cậu nhen! 🐳 Hệ thống Quét Định lượng (Orca Multi-Source Screener) đang ghi nhận các tín hiệu kỹ thuật rất đáng chú ý:
+      return `Chào bạn! Hệ thống Quét Định lượng (Orca Multi-Source Screener) đang ghi nhận các tín hiệu kỹ thuật đáng chú ý:
 
-⚡ **DANH SÁCH MÃ THEO TIÊU CHÍ ĐỘT PHÁ NỀN GIÁ & MOMENTUM:**
+**DANH SÁCH MÃ THEO TIÊU CHÍ ĐỘT PHÁ NỀN GIÁ & MOMENTUM:**
 • **FPT:** Xu hướng tăng trưởng dài hạn, RSI duy trì trên 55, EMA20 nằm trên EMA50, nền tảng tăng trưởng công nghệ AI vững chắc.
 • **SSI / VCI:** Nhóm chứng khoán dẫn dắt dòng tiền thị trường khi thanh khoản sàn HOSE vượt ngưỡng trung bình 20 phiên.
 • **HPG:** Nền giá tích lũy vùng đáy chu kỳ hoàn tất, dòng tiền tổ chức và khối ngoại quay lại mua ròng mạnh mẽ.
 • **TCB / MBB:** Định giá P/B < 1.2 trong khi ROE > 18-20%, tín hiệu Golden Cross EMA20 cắt lên EMA50 xác nhận đà hồi phục.
 
-📊 **CÔNG CỤ KIỂM NGHIỆM CHIẾN LƯỢC (BACKTEST SIMULATOR):**
-Cậu có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"⚡ Backtest Mô Phỏng (OQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động nhé! 🚀`;
+**CÔNG CỤ KIỂM NGHIỆM CHIẾN LƯỢC (BACKTEST SIMULATOR):**
+Bạn có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"Backtest Mô Phỏng (OQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động.`;
     }
 
-    return `Bé Orca chào cậu nhen! 🐳 Cậu đang muốn tìm kiếm cơ hội đầu tư trên thị trường chứng khoán Việt Nam đúng không nè?
+    return `Chào bạn! Dưới đây là 3 nhóm phong cách đầu tư được tối ưu nhất trên Orca-Lite hiện nay:
 
-Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nhất trên Orca-Lite hiện nay:
+1. **Cổ tức tiền mặt phòng thủ:** Tìm các mã có Dividend Yield > 6% (cao hơn gửi ngân hàng), lịch sử trả tiền mặt 5 năm liên tiếp (VNM, VEA, MBB, DPM).
+2. **Tăng trưởng & Vượt đỉnh (CANSLIM / Breakout):** Lọc các mã có RSI > 52, nến ngày vượt đỉnh 20 phiên kèm Volume đột biến gấp 1.3x - 1.5x (FPT, SSI, MWG, DGC).
+3. **Giá trị chiết khấu sâu (Value Dip-Buying):** P/E < 12, P/B hấp dẫn và ROE > 15% đang có dấu hiệu đảo chiều dòng tiền (TCB, ACB, HPG).
 
-1. 💎 **Cổ tức tiền mặt phòng thủ:** Tìm các mã có Dividend Yield > 6% (cao hơn gửi ngân hàng), lịch sử trả tiền mặt 5 năm liên tiếp (VNM, VEA, MBB, DPM).
-2. 🚀 **Tăng trưởng & Vượt đỉnh (CANSLIM / Breakout):** Lọc các mã có RSI > 52, nến ngày vượt đỉnh 20 phiên kèm Volume đột biến gấp 1.3x - 1.5x (FPT, SSI, MWG, DGC).
-3. 📉 **Giá trị chiết khấu sâu (Value Dip-Buying):** P/E < 12, P/B hấp dẫn và ROE > 15% đang có dấu hiệu đảo chiều dòng tiền (TCB, ACB, HPG).
-
-👉 Cậu hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, OQuant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng** nhé! Cậu muốn bé giải thích thêm về mã cổ phiếu cụ thể nào không? ✨`;
+Bạn hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, OQuant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng**.`;
   }
 
   // 1. Phân bổ lương 50/30/20 & Biến thể linh hoạt cho hoàn cảnh thực tế
@@ -139,34 +137,34 @@ Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nh
       const wantAlt = Math.round(net * 0.25);
       const savAlt = Math.round(net * 0.15);
 
-      return `Chào cậu nhen! 🐳 Nhìn vào bảng sổ tài chính thực tế, Bé Orca nhận thấy tiền chi cố định của cậu (${formatVnd(fixed)}) đang chiếm ${(net > 0 ? Math.round((fixed / net) * 100) : 0)}% lương net (${formatVnd(net)}), tức cao hơn mức trần 50% chuẩn khoảng ${formatVnd(rentExcess)}. 
+      return `Chào bạn! Nhìn vào bảng số liệu tài chính thực tế, chi tiêu cố định của bạn (${formatVnd(fixed)}) đang chiếm ${(net > 0 ? Math.round((fixed / net) * 100) : 0)}% lương net (${formatVnd(net)}), tức cao hơn mức trần 50% chuẩn khoảng ${formatVnd(rentExcess)}. 
 
-Điều này rất phổ biến ở các đô thị lớn như ${location} do giá thuê nhà và sinh hoạt phí tăng cao. Vì vậy, thay vì ép bản thân vào chuẩn 50/30/20 cứng nhắc, Bé Orca đề xuất cho cậu 2 kịch bản phân bổ linh hoạt:
+Điều này rất phổ biến ở các đô thị lớn như ${location} do giá thuê nhà và sinh hoạt phí tăng cao. Vì vậy, thay vì ép bản thân vào chuẩn 50/30/20 cứng nhắc, ORCA đề xuất cho bạn 2 kịch bản phân bổ linh hoạt:
 
-📊 **KỊCH BẢN A: CÂN BẰNG THỰC TẾ (Công thức 60 / 25 / 15 — Khuyên dùng)**
-• 🏠 Thiết yếu (60%): **${formatVnd(needAlt)}** — Vừa vặn bao bọc khoản chi cố định ${formatVnd(fixed)} và ăn uống cơ bản mà không gây căng thẳng.
-• ☕ Chi tiêu linh hoạt (25%): **${formatVnd(wantAlt)}** — Dành cho giao lưu, cà phê, sở thích cá nhân và chăm sóc sức khỏe tinh thần.
-• 🐷 Tích lũy tự động (15%): **${formatVnd(savAlt)}** — Trích ngay ngày có lương vào tài khoản tiết kiệm online để tích lũy an toàn.
+**KỊCH BẢN A: CÂN BẰNG THỰC TẾ (Công thức 60 / 25 / 15 — Khuyên dùng)**
+• Thiết yếu (60%): **${formatVnd(needAlt)}** — Vừa vặn bao bọc khoản chi cố định ${formatVnd(fixed)} và ăn uống cơ bản mà không gây căng thẳng.
+• Chi tiêu linh hoạt (25%): **${formatVnd(wantAlt)}** — Dành cho giao lưu, cà phê, sở thích cá nhân và chăm sóc sức khỏe tinh thần.
+• Tích lũy tự động (15%): **${formatVnd(savAlt)}** — Trích ngay ngày có lương vào tài khoản tiết kiệm online để tích lũy an toàn.
 
-📈 **KỊCH BẢN B: TỐI ƯU CHUẨN (50 / 30 / 20 — Mục tiêu 3-6 tháng tới)**
-• 🏠 Thiết yếu (50%): **${formatVnd(needStandard)}** (Cần rà soát chuyển chỗ ở rẻ hơn hoặc tìm bạn share phòng để cắt giảm ${formatVnd(rentExcess)}).
-• ☕ Linh hoạt (30%): **${formatVnd(wantStandard)}**
-• 🐷 Tích lũy (20%): **${formatVnd(savStandard)}**
+**KỊCH BẢN B: TỐI ƯU CHUẨN (50 / 30 / 20 — Mục tiêu 3-6 tháng tới)**
+• Thiết yếu (50%): **${formatVnd(needStandard)}** (Cần rà soát chuyển chỗ ở hợp lý hơn hoặc tìm bạn share phòng để cắt giảm ${formatVnd(rentExcess)}).
+• Linh hoạt (30%): **${formatVnd(wantStandard)}**
+• Tích lũy (20%): **${formatVnd(savStandard)}**
 
-💡 **Gợi ý của Bé Orca:** Cậu hãy bắt đầu với Kịch bản A trước để dòng tiền không bị ngột ngạt, sau đó tìm cách tăng thu nhập hoặc tối ưu tiền thuê nhà để dần tiến về Kịch bản B nhé! Cậu thấy kịch bản nào thoải mái hơn với cậu? 💖`;
+**Gợi ý:** Bạn hãy bắt đầu với Kịch bản A trước để dòng tiền không bị ngột ngạt, sau đó tìm cách tăng thu nhập hoặc tối ưu tiền thuê nhà để dần tiến về Kịch bản B.`;
     }
 
-    return `Bé Orca tính bảng phân bổ 50/30/20 chi tiết dựa trên dòng tiền thật ${formatVnd(net)} của cậu nè: 🐳✨
+    return `Bảng phân bổ 50/30/20 chi tiết dựa trên dòng tiền thật ${formatVnd(net)} của bạn:
 
-📊 **BẢNG PHÂN BỔ 50/30/20 THEO LƯƠNG THỰC NHẬN:**
-• 🏠 **Thiết yếu (50%): ${formatVnd(needStandard)}**
-  Khoản chi cố định hiện tại của cậu (${formatVnd(fixed)}) đang kiểm soát cực tốt, nằm gọn dưới mức trần an toàn! Phần dư còn lại đủ thoải mái cho ăn uống sinh hoạt hàng ngày.
-• ☕ **Chi tiêu linh hoạt (30%): ${formatVnd(wantStandard)}**
-  Khoản này hoàn toàn là của cậu: học thêm kỹ năng mới, cà phê cùng bạn bè, tự thưởng mua sắm mà không hề có cảm giác tội lỗi (guilt-free spending)!
-• 🐷 **Tích lũy & Đầu tư (20%): ${formatVnd(savStandard)}**
-  Quy tắc vàng: Trích tự động số tiền này vào tài khoản dự phòng ngay trong ngày nhận thông báo lương về ví!
+**BẢNG PHÂN BỔ 50/30/20 THEO LƯƠNG THỰC NHẬN:**
+• **Thiết yếu (50%): ${formatVnd(needStandard)}**
+  Khoản chi cố định hiện tại của bạn (${formatVnd(fixed)}) đang kiểm soát tốt, nằm gọn dưới mức trần an toàn. Phần dư còn lại đủ thoải mái cho ăn uống sinh hoạt hàng ngày.
+• **Chi tiêu linh hoạt (30%): ${formatVnd(wantStandard)}**
+  Dành cho học thêm kỹ năng mới, cà phê cùng bạn bè, tự thưởng mua sắm có kiểm soát.
+• **Tích lũy & Đầu tư (20%): ${formatVnd(savStandard)}**
+  Quy tắc: Trích tự động số tiền này vào tài khoản dự phòng ngay trong ngày nhận lương.
 
-✨ **Mẹo nhỏ từ Bé Orca:** Nếu tháng nào có phát sinh tiệc tùng hay đám cưới nhiều, cậu có thể linh hoạt nhích tỷ lệ thành **55/25/20** để tinh thần luôn thoải mái nhen! 💖`;
+**Lưu ý:** Nếu tháng nào phát sinh sự kiện nhiều, bạn có thể linh hoạt nhích tỷ lệ thành **55/25/20** để cân bằng dòng tiền.`;
   }
 
   // 2. Quy tắc 6 chiếc lọ JARS & Phân chia tài khoản ngân hàng thông minh
@@ -178,39 +176,39 @@ Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nh
     const ffa = Math.round(net * 0.10);
     const give = Math.round(net * 0.05);
 
-    return `Bé Orca chia thu nhập ${formatVnd(net)} của cậu thành 6 chiếc lọ JARS theo tỷ lệ vàng chuẩn nè: 🐳✨
+    return `Thu nhập ${formatVnd(net)} của bạn được chia thành 6 chiếc lọ JARS theo tỷ lệ chuẩn như sau:
 
-🏺 **CHI TIẾT 6 CHIẾC LỌ TÀI CHÍNH:**
+**CHI TIẾT 6 CHIẾC LỌ TÀI CHÍNH:**
 1. **NEC - Thiết yếu (55%): ${formatVnd(nec)}**
-   (Chi cố định thực tế của cậu là ${formatVnd(fixed)} — ${fixed <= nec ? "Rất an toàn! ✨" : "Hơi sát trần, cần để ý hóa đơn sinh hoạt nhé ⚠️"}).
+   (Chi cố định thực tế của bạn là ${formatVnd(fixed)} — ${fixed <= nec ? "Nằm trong ngưỡng an toàn." : "Hơi sát trần, cần để ý hóa đơn sinh hoạt."}).
 2. **LTSS - Tiết kiệm dài hạn (10%): ${formatVnd(ltss)}**
    Dành cho các cột mốc lớn: mua xe, cưới hỏi, hoặc cọc nhà tương lai.
 3. **EDU - Giáo dục & Nâng cấp bản thân (10%): ${formatVnd(edu)}**
-   Đầu tư vào kỹ năng, mua sách, khóa học chuyên môn để gia tăng thu nhập vượt bậc.
+   Đầu tư vào kỹ năng, mua sách, khóa học chuyên môn để gia tăng thu nhập.
 4. **PLAY - Hưởng thụ cuộc sống (10%): ${formatVnd(play)}**
-   Tự do tiêu xài, du lịch xả stress, đi ăn nhà hàng yêu thích — bắt buộc phải tiêu hết lọ này mỗi tháng để tái tạo năng lượng!
+   Chi tiêu cá nhân, du lịch, giải trí để tái tạo sức lao động.
 5. **FFA - Tự do tài chính & Đầu tư (10%): ${formatVnd(ffa)}**
-   Mua chứng chỉ quỹ chỉ số, vàng tích sản hoặc cổ phiếu để tiền làm việc cho mình.
-6. **GIVE - Cho đi & Yêu thương (5%): ${formatVnd(give)}**
-   Quà biếu bố mẹ, thăm hỏi bạn bè, từ thiện hoặc quỹ đối ngoại.
+   Mua chứng chỉ quỹ chỉ số, vàng tích sản hoặc cổ phiếu để tiền sinh lời.
+6. **GIVE - Cho đi & Dự phòng hỗ trợ (5%): ${formatVnd(give)}**
+   Quà biếu người thân, thăm hỏi bạn bè, từ thiện hoặc quỹ đối ngoại.
 
-💡 **Cách thực chiến tại Việt Nam:** Cậu không cần giữ tiền mặt trong lọ thật đâu! Hãy mở các tính năng "Ví con / Hũ tiết kiệm" trên các app ngân hàng (Techcombank, Cake, Timo, VPBank...) để tự động chia tiền ngay khi nhận lương nhen! 💖`;
+**Cách thực hiện:** Bạn có thể mở tính năng "Ví con / Hũ tiết kiệm" trên các ứng dụng ngân hàng số để tự động phân bổ ngay khi nhận lương.`;
   }
 
   // 3. Xử lý khi lỡ tiêu lố / Thâm hụt ngân sách / Chữa cháy tài chính
   if (query.includes("tiêu lố") || query.includes("lỡ tiêu") || query.includes("hết tiền") || query.includes("thâm hụt") || query.includes("vượt ngân sách") || query.includes("cứu")) {
     const safeDaily = Math.round((net - fixed) / 30);
-    return `Đừng lo lắng hay tự trách bản thân nha cậu! Ai cũng có những tháng phát sinh ngoài ý muốn nè 🐳💖 Bé Orca hướng dẫn cậu kế hoạch "Cứu hộ dòng tiền" 3 bước cực kỳ êm ái:
+    return `Kế hoạch cứu hộ dòng tiền 14 ngày dành cho bạn:
 
-🛡️ **KẾ HOẠCH CỨU HỘ DÒNG TIỀN 14 NGÀY:**
-1. **Bật chế độ "Đóng băng mua sắm tùy hứng" (Freeze Spending):**
-   Trong 1–2 tuần tới, tạm hoãn mọi đơn hàng Shopee/Lazada, quần áo, phụ kiện chưa cấp bách. Áp dụng quy tắc "chờ 48 tiếng" trước khi quyết định quẹt thẻ.
+**KẾ HOẠCH CỨU HỘ DÒNG TIỀN 14 NGÀY:**
+1. **Bật chế độ Đóng băng mua sắm tùy hứng (Freeze Spending):**
+   Trong 1–2 tuần tới, tạm hoãn mọi đơn hàng thương mại điện tử, đồ dùng chưa cấp bách. Áp dụng quy tắc "chờ 48 tiếng" trước khi quyết định chi tiêu.
 2. **Kích hoạt ngân sách sinh tồn tối giản:**
-   Ưu tiên nấu ăn tại nhà hoặc chọn các quán ăn bình dân quen thuộc. Đặt hạn mức chi tiêu ăn uống mỗi ngày tối đa khoảng **${formatVnd(safeDaily > 0 ? safeDaily : 70000)}/ngày**.
+   Ưu tiên nấu ăn tại nhà. Đặt hạn mức chi tiêu ăn uống mỗi ngày tối đa khoảng **${formatVnd(safeDaily > 0 ? safeDaily : 70000)}/ngày**.
 3. **Tránh bẫy vay tín chấp hoặc ứng lương tính phí cao:**
-   Nếu thực sự cạn tiền mặt, chỉ trích một phần nhỏ từ Quỹ khẩn cấp (nếu có) để trang trải lương thực cơ bản, tuyệt đối không quẹt thẻ tín dụng rút tiền mặt với phí phạt cao nhé!
+   Nếu thực sự thiếu tiền mặt, chỉ trích một phần nhỏ từ Quỹ khẩn cấp (nếu có) để trang trải nhu yếu phẩm, tránh rút tiền mặt thẻ tín dụng vì lãi và phí phạt rất cao.
 
-🌱 Sang tháng mới, cậu cứ trích quỹ tiết kiệm tự động trước ngay ngày đầu tháng, phần còn lại tiêu sẽ không bao giờ sợ bị lố nữa nhen! Cậu muốn Bé Orca cùng rà soát lại khoản chi nào tuần này không? ✨`;
+Sang tháng mới, hãy trích quỹ tiết kiệm tự động trước ngay ngày đầu tháng để kiểm soát dòng tiền chi tiêu.`;
   }
 
   // 4. Tiền thưởng / Thu nhập bất ngờ (Windfall)
@@ -222,24 +220,22 @@ Bé Orca gợi ý cho cậu 3 nhóm phong cách đầu tư được tối ưu nh
 
     let priorityExplanation = "";
     if (emergencyMonths < 3.0) {
-      priorityExplanation = `Vì đệm an toàn hiện tại của cậu mới được ${emergencyMonths.toFixed(1)} tháng chi tiêu (dưới mức khuyến nghị 3 tháng), việc đổ ${formatVnd(emAlloc)} vào quỹ khẩn cấp sẽ giúp cậu ngủ ngon hơn mỗi đêm! 🛡️`;
+      priorityExplanation = `Vì đệm an toàn hiện tại mới được ${emergencyMonths.toFixed(1)} tháng chi tiêu (dưới mức khuyến nghị 3 tháng), việc bổ sung ${formatVnd(emAlloc)} vào quỹ khẩn cấp là ưu tiên hàng đầu.`;
     } else if (totalDebt > 0) {
-      priorityExplanation = `Cậu đang có khoản nợ ${formatVnd(totalDebt)}, nên dùng ${formatVnd(emAlloc)} để dập bớt nợ lãi cao nhất, giúp giải phóng áp lực tiền lãi mỗi tháng! 💡`;
+      priorityExplanation = `Bạn đang có khoản nợ ${formatVnd(totalDebt)}, nên dùng ${formatVnd(emAlloc)} để dập bớt nợ lãi cao nhất, giúp giải phóng áp lực tiền lãi mỗi tháng.`;
     } else {
-      priorityExplanation = `Quỹ khẩn cấp của cậu đã vững chãi (${emergencyMonths.toFixed(1)} tháng) và sạch nợ, cậu hoàn toàn có thể đẩy phần này vào danh mục đầu tư tích sản để tiền đẻ ra tiền nhanh hơn! 🚀`;
+      priorityExplanation = `Quỹ khẩn cấp đã vững vàng (${emergencyMonths.toFixed(1)} tháng) và sạch nợ, bạn có thể đẩy phần này vào danh mục đầu tư tích sản để tối ưu hóa lợi nhuận.`;
     }
 
-    return `Chúc mừng cậu nhận được khoản tiền **${formatVnd(bonus)}** nhen! 🎉 Bé Orca gợi ý công thức phân bổ 3 ngăn thông minh:
+    return `Đối với khoản tiền **${formatVnd(bonus)}**, công thức phân bổ 3 ngăn hợp lý như sau:
 
-🎯 **CƠ CẤU PHÂN BỔ ${formatVnd(bonus)}:**
-1. 🛡️ **50% (${formatVnd(emAlloc)}) — Gia cố phòng tuyến:**
+**CƠ CẤU PHÂN BỔ ${formatVnd(bonus)}:**
+1. **50% (${formatVnd(emAlloc)}) — Gia cố phòng tuyến:**
    ${priorityExplanation}
-2. 📈 **30% (${formatVnd(invAlloc)}) — Tích sản tăng trưởng:**
+2. **30% (${formatVnd(invAlloc)}) — Tích sản tăng trưởng:**
    Mua chứng chỉ quỹ chỉ số VN30, vàng nhẫn 9999 hoặc gửi tiết kiệm kỳ hạn 6–12 tháng để hưởng lãi kép.
-3. 💖 **20% (${formatVnd(joyAlloc)}) — Tự thưởng trọn vẹn (Guilt-free joy):**
-   Cậu đã làm việc rất chăm chỉ, hãy dùng trọn vẹn khoản này để mua món đồ cậu thích, đi ăn ngon hoặc du lịch mà không cần phải đắn đo suy nghĩ!
-
-Cậu thấy tỷ lệ này đã phù hợp với kế hoạch gần nhất của cậu chưa nè? 🐳✨`;
+3. **20% (${formatVnd(joyAlloc)}) — Thưởng cá nhân có kế hoạch:**
+   Sử dụng cho nhu cầu cá nhân, nâng cao chất lượng cuộc sống mà không ảnh hưởng đến dòng tiền chung.`;
   }
 
   // 5. Mua xe trả góp / Trả góp đồ công nghệ
@@ -249,21 +245,21 @@ Cậu thấy tỷ lệ này đã phù hợp với kế hoạch gần nhất củ
     const currentDebtMonthly = debts.reduce((sum, d) => sum + (d.minMonthlyPayment ?? 0), 0);
     const roomLeft = Math.max(0, maxSafeMonthlyPay - currentDebtMonthly);
 
-    return `Bé Orca giải bài toán trả góp dựa trên sức chịu tải dòng tiền thật của cậu nè: 🐳
+    return `Phân tích sức chịu tải nợ trả góp dựa trên dòng tiền của bạn:
 
-📊 **DÒNG TIỀN VÀ KHẢ NĂNG GÁNH NỢ CỦA CẬU:**
+**DÒNG TIỀN VÀ KHẢ NĂNG GÁNH NỢ:**
 • Thu nhập thực nhận: **${formatVnd(net)}/tháng**.
 • Chi cố định thiết yếu: **${formatVnd(fixed)}** (${(facts?.fixedCostRatio ?? 0).toFixed(0)}% thu nhập).
 • Các nghĩa vụ trả nợ hiện tại: **${formatVnd(currentDebtMonthly)}/tháng**.
 
-🛡️ **NGƯỠNG TRẢ GÓP AN TOÀN TUYỆT ĐỐI:**
+**NGƯỠNG TRẢ GÓP AN TOÀN:**
 Theo chuẩn quản trị rủi ro tài chính cá nhân, tổng tiền trả góp mọi khoản nợ mỗi tháng không nên vượt quá **20%–25%** lương net.
 • Mức trần trả góp an toàn tối đa: **${formatVnd(maxSafeMonthlyPay)}/tháng**.
-• Dư địa an toàn còn lại cho món đồ mới: khoảng **${formatVnd(roomLeft)}/tháng**.
+• Dư địa an toàn còn lại cho khoản mới: khoảng **${formatVnd(roomLeft)}/tháng**.
 
-💡 **LỰA CHỌN LINH HOẠT CHO CẬU:**
-1. **Nếu khoản trả góp < ${formatVnd(roomLeft)}/tháng:** Cậu có thể mua ngay mà không làm đảo lộn chi tiêu hàng ngày.
-2. **Nếu khoản trả góp vượt quá ${formatVnd(maxSafeMonthlyPay)}/tháng:** Rất rủi ro trong trường hợp công việc gián đoạn hoặc có phát sinh bất ngờ! Bé khuyên cậu nên hoãn 3–5 tháng, gom tiền trả trước (Down payment) tối thiểu 40–50% giá trị tài sản để hạ số tiền trả góp hàng tháng xuống mức an toàn nhé! 💪💖`;
+**LỰA CHỌN PHÙ HỢP:**
+1. **Nếu khoản trả góp < ${formatVnd(roomLeft)}/tháng:** Bạn có thể cân nhắc mà không làm đảo lộn chi tiêu hàng ngày.
+2. **Nếu khoản trả góp vượt quá ${formatVnd(maxSafeMonthlyPay)}/tháng:** Mức độ rủi ro cao nếu thu nhập biến động. Nên hoãn thêm thời gian, nâng tỷ lệ trả trước (Down payment) tối thiểu 40–50% giá trị tài sản để hạ số tiền trả góp hàng tháng xuống mức an toàn.`;
   }
 
   // 6. Tiết kiệm vs Vàng vs Chứng chỉ quỹ mở (Kiềng 3 chân)
@@ -275,51 +271,49 @@ Theo chuẩn quản trị rủi ro tài chính cá nhân, tổng tiền trả g�
       const bank = Math.round(idleCash * 0.60);
       const gold = Math.round(idleCash * 0.30);
       const fund = Math.round(idleCash * 0.10);
-      return `Bé Orca thiết kế kịch bản **Phòng thủ an toàn tối đa** cho ${formatVnd(idleCash)} của cậu nè: 🐳🛡️
+      return `Kịch bản **Phòng thủ an toàn tối đa** cho ${formatVnd(idleCash)} của bạn:
 
-🏦 **KỊCH BẢN PHÒNG THỦ & THANH KHOẢN CAO:**
-• 🏦 **60% (${formatVnd(bank)}) — Tiết kiệm ngân hàng linh hoạt:** Gửi kỳ hạn 6 tháng hoặc chia thành 2 sổ nhỏ để có thể rút 1 phần khi có việc gấp mà không mất lãi toàn bộ.
-• 🪙 **30% (${formatVnd(gold)}) — Vàng nhẫn tròn trơn 9999:** Mua từ các thương hiệu lớn (SJC, DOJI, PNJ, Bảo Tín) để làm tài sản trú ẩn và bảo toàn sức mua trước lạm phát.
-• 📊 **10% (${formatVnd(fund)}) — Quỹ mở trái phiếu / Cổ phiếu top VN30:** Bắt đầu làm quen với thị trường tài chính với rủi ro rất thấp.
+**KỊCH BẢN PHÒNG THỦ & THANH KHOẢN CAO:**
+• **60% (${formatVnd(bank)}) — Tiết kiệm ngân hàng linh hoạt:** Gửi kỳ hạn 6 tháng hoặc chia thành 2 sổ nhỏ để có thể rút 1 phần khi có việc gấp mà không mất lãi toàn bộ.
+• **30% (${formatVnd(gold)}) — Vàng nhẫn tròn trơn 9999:** Mua từ các thương hiệu lớn để làm tài sản trú ẩn và bảo toàn sức mua trước lạm phát.
+• **10% (${formatVnd(fund)}) — Quỹ mở trái phiếu / Cổ phiếu top VN30:** Làm quen với thị trường tài chính với mức biến động thấp.
 
-Cách phân bổ này giúp tâm lý cậu luôn an tâm tuyệt đối mà tiền vẫn sinh lãi đều đặn nhen! ✨`;
+Cách phân bổ này đảm bảo thanh khoản và giữ vốn an toàn.`;
     }
 
     const bank = Math.round(idleCash * 0.50);
     const gold = Math.round(idleCash * 0.30);
     const fund = Math.round(idleCash * 0.20);
-    return `Bé Orca gợi ý chiến lược phân bổ ${formatVnd(idleCash)} theo thế kiềng 3 chân cân bằng tối ưu tại Việt Nam nè: 🐳✨
+    return `Chiến lược phân bổ ${formatVnd(idleCash)} theo thế kiềng 3 chân cân bằng tại Việt Nam:
 
-🪙 **CHIẾN LƯỢC KIỀNG 3 CHÂN (Cân bằng Tăng trưởng & An toàn):**
-• 🏦 **50% (${formatVnd(bank)}) — Tiết kiệm ngân hàng:** Đảm bảo thanh khoản linh hoạt. Khi có cơ hội hoặc biến cố, cậu luôn có tiền mặt trong tay ngay lập tức.
-• 🪙 **30% (${formatVnd(gold)}) — Vàng nhẫn 9999:** Kênh phòng hộ lạm phát và rủi ro địa chính trị bền bỉ nhất lịch sử. Giữ tối thiểu từ 1–3 năm trở lên.
-• 📊 **20% (${formatVnd(fund)}) — Chứng chỉ quỹ mở (VN30 / Cổ phiếu tăng trưởng):** Tận dụng sức bật kinh tế Việt Nam với mức lợi nhuận kỳ vọng 10–14%/năm mà không cần canh bảng điện hàng ngày!
-
-Cậu thích trường phái an toàn giữ vốn hay muốn đẩy mạnh sinh lời hơn nè? Nói Bé Orca biết nha! 💖`;
+**CHIẾN LƯỢC KIỀNG 3 CHÂN (Cân bằng Tăng trưởng & An toàn):**
+• **50% (${formatVnd(bank)}) — Tiết kiệm ngân hàng:** Đảm bảo thanh khoản linh hoạt. Khi có cơ hội hoặc biến cố, bạn luôn có sẵn tiền mặt.
+• **30% (${formatVnd(gold)}) — Vàng nhẫn 9999:** Kênh phòng hộ lạm phát và rủi ro chu kỳ kinh tế, nắm giữ tối thiểu từ 1–3 năm.
+• **20% (${formatVnd(fund)}) — Chứng chỉ quỹ mở (VN30 / Cổ phiếu tăng trưởng):** Hưởng lợi từ sự phát triển kinh tế dài hạn với mức lợi nhuận kỳ vọng 10–14%/năm.`;
   }
 
   // 7. Quản trị nợ & Chiến lược dập nợ
   if (query.includes("nợ") || query.includes("trả nợ") || query.includes("vay") || query.includes("snowball") || query.includes("avalanche")) {
     if (debts.length === 0 && totalDebt <= 0) {
-      return `Thật tuyệt vời! Sổ tài chính của cậu hiện tại hoàn toàn sạch nợ nè! 🐳🎉 Cậu đang ở vị thế tài chính tự do và thoải mái hơn 70% mọi người rồi đó. Giờ là lúc tập trung gia cố quỹ khẩn cấp 3–6 tháng (${formatVnd(exp * 3)} – ${formatVnd(exp * 6)}) và đầu tư tích sản nhé! ✨`;
+      return `Hiện tại sổ tài chính của bạn hoàn toàn sạch nợ. Vị thế tài chính này rất thuận lợi để tập trung gia cố quỹ khẩn cấp 3–6 tháng (${formatVnd(exp * 3)} – ${formatVnd(exp * 6)}) và phân bổ tích sản dài hạn.`;
     }
 
     const debtItems = debts.length > 0 
       ? debts.map((d) => `• ${d.name || "Khoản vay"}: Dư nợ ${formatVnd(d.balance)}, Lãi suất ${(d.interestRate ?? 0)}%/năm (Trả tối thiểu: ${formatVnd(d.minMonthlyPayment)}/tháng)`).join("\n")
       : `• Tổng dư nợ đang theo dõi: ${formatVnd(totalDebt)}`;
 
-    return `Bé Orca cùng cậu lên kế hoạch dập dứt điểm khoản nợ ${formatVnd(totalDebt)} này nhé: 🐳💪
+    return `Kế hoạch xử lý khoản nợ ${formatVnd(totalDebt)}:
 
-📋 **HIỆN TRẠNG CÁC KHOẢN NỢ:**
+**HIỆN TRẠNG CÁC KHOẢN NỢ:**
 ${debtItems}
 
-🛡️ **SO SÁNH 2 CHIẾN THUẬT DẬP NỢ:**
-1. 🏔️ **Phương pháp Lở tuyết (Debt Avalanche — Tối ưu tài chính):**
-   Ưu tiên dồn toàn bộ tiền tiết kiệm hàng tháng (${formatVnd(savings)}) để trả thêm cho khoản nợ có **lãi suất cao nhất**. Duy trì trả tối thiểu các khoản còn lại. Đây là cách giúp cậu đỡ mất nhiều tiền lãi nhất!
-2. ⛄ **Phương pháp Tuyết lăn (Debt Snowball — Giải tỏa tâm lý):**
-   Nếu cậu cảm thấy áp lực và mệt mỏi, hãy dập dứt điểm khoản có **số dư nhỏ nhất trước**. Khi xóa sổ được một khoản nợ, não bộ sẽ tiết ra dopamine tạo động lực cực lớn để tiến lên!
+**SO SÁNH 2 CHIẾN THUẬT DẬP NỢ:**
+1. **Phương pháp Lở tuyết (Debt Avalanche — Tối ưu tài chính):**
+   Ưu tiên dồn toàn bộ tiền tiết kiệm hàng tháng (${formatVnd(savings)}) để trả thêm cho khoản nợ có **lãi suất cao nhất**. Duy trì trả tối thiểu các khoản còn lại. Đây là cách giảm thiểu tổng chi phí lãi vay nhiều nhất.
+2. **Phương pháp Tuyết lăn (Debt Snowball — Giải tỏa áp lực):**
+   Dập dứt điểm khoản có **số dư nhỏ nhất trước**. Khi tất toán được một khoản nợ, bạn sẽ giải phóng được một dòng thanh toán hàng tháng và tạo động lực hoàn tất các khoản tiếp theo.
 
-💡 **Nguyên tắc an toàn:** Luôn giữ lại ít nhất 1 tháng chi tiêu thiết yếu (~${formatVnd(fixed)}) trong tài khoản, đừng dốc cạn sạch tiền mặt kẻo có việc gấp lại phải đi vay mới nhé cậu! 💖`;
+**Nguyên tắc an toàn:** Luôn giữ lại ít nhất 1 tháng chi tiêu thiết yếu (~${formatVnd(fixed)}) trong tài khoản, tránh dốc cạn sạch tiền mặt gây rủi ro thanh khoản.`;
   }
 
   // 8. Quỹ khẩn cấp & Tấm khiên an toàn
@@ -328,63 +322,60 @@ ${debtItems}
     const target6m = Math.round(exp * 6);
     const currentEmergency = Math.round(emergencyMonths * exp);
 
-    return `Bé Orca đánh giá tấm khiên an toàn tài chính của cậu nè: 🐳🛡️
+    return `Đánh giá an toàn tài chính hiện tại:
 
-📊 **HIỆN TRẠNG QUỸ DỰ PHÒNG:**
+**HIỆN TRẠNG QUỸ DỰ PHÒNG:**
 • Quỹ khẩn cấp hiện tại: khoảng **${formatVnd(currentEmergency)}** (Tương đương **${emergencyMonths.toFixed(1)} tháng** chi tiêu sinh hoạt).
 • Mức trích tiết kiệm hàng tháng: **${formatVnd(savings)}** (${(facts?.savingsRate ?? 0).toFixed(0)}% thu nhập).
 
-🎯 **CÁC CỘT MỐC CHUẨN:**
-• Cột mốc 1 (Sàn tối thiểu 3 tháng): **${formatVnd(target3m)}**
-• Cột mốc 2 (Vững chắc 6 tháng): **${formatVnd(target6m)}**
+**CÁC CỘT MỐC CHUẨN:**
+• Cột mốc 1 (Mức sàn tối thiểu 3 tháng): **${formatVnd(target3m)}**
+• Cột mốc 2 (Mức vững chắc 6 tháng): **${formatVnd(target6m)}**
 
-💡 **ĐỊNH HƯỚNG CHO CẬU:**
+**ĐỊNH HƯỚNG:**
 ${emergencyMonths < 3.0
-  ? `Hiện tại quỹ của cậu (${emergencyMonths.toFixed(1)} tháng) còn hơi mỏng. Bé khuyên cậu tạm hoãn đầu tư chứng khoán mạo hiểm, tập trung trích tự động ${formatVnd(Math.round(net * 0.15))} – ${formatVnd(Math.round(net * 0.2))} mỗi tháng vào tài khoản tiết kiệm online cho tới khi cán mốc ${formatVnd(target3m)} nhé!`
-  : `Tuyệt vời quá! Đệm an toàn của cậu đã đạt ${emergencyMonths.toFixed(1)} tháng, vượt chuẩn an toàn đô thị. Cậu hoàn toàn tự tin phân bổ dòng tiền tiết kiệm hàng tháng vào các kênh đầu tư tích sản sinh lời dài hạn rồi đó! ✨`}💖`;
+  ? `Hiện tại quỹ dự phòng (${emergencyMonths.toFixed(1)} tháng) còn mỏng. Bạn nên ưu tiên trích tự động ${formatVnd(Math.round(net * 0.15))} – ${formatVnd(Math.round(net * 0.2))} mỗi tháng vào tài khoản tiết kiệm linh hoạt cho tới khi cán mốc ${formatVnd(target3m)}.`
+  : `Đệm an toàn đã đạt ${emergencyMonths.toFixed(1)} tháng, vượt chuẩn an toàn đô thị. Bạn có thể tự tin phân bổ dòng tiền tiết kiệm hàng tháng vào các kênh đầu tư tích sản dài hạn.`}`;
   }
 
   // 9. Cắt giảm chi phí không gây đau khổ / Lối sống tối giản thông minh
   if (query.includes("cắt giảm") || query.includes("tiết kiệm tiền") || query.includes("bớt chi") || query.includes("tối giản") || query.includes("tiêu ít")) {
-    return `Bé Orca chia sẻ phương pháp "Cắt cành to, giữ cành nhỏ" giúp cậu tối ưu chi tiêu mà tinh thần vẫn cực kỳ vui vẻ nè: 🐳✨
+    return `Phương pháp tối ưu chi tiêu tập trung vào các khoản chi lớn cố định:
 
-🌱 **NGUYÊN TẮC: ĐỪNG CẮT NIỀM VUI NHỎ, HÃY CẮT CHI PHÍ LỚN CỐ ĐỊNH**
-Nhiều người cố nhịn ly cà phê 30k hay bát phở sáng để rồi cảm thấy khổ sở và sau đó "tiêu trả thù" còn tốn hơn! Thay vào đó:
+**NGUYÊN TẮC: CẮT GIẢM CHI PHÍ LỚN CỐ ĐỊNH, KHÔNG BÓ BUỘC NHU CẦU CƠ BẢN**
+Việc cắt giảm quá mức các chi tiêu nhỏ hàng ngày thường gây áp lực tâm lý không bền vững. Thay vào đó:
 
 1. **Rà soát 3 khoản chi cố định lớn nhất:**
-   • Tiền thuê nhà & dịch vụ chung: Có thể đàm phán lại giá phòng, đổi gói internet/truyền hình phù hợp nhu cầu.
-   • Các gói đăng ký âm thầm (Subscriptions): Hủy các ứng dụng nghe nhạc, xem phim, hội viên gym không còn dùng tới.
-2. **Quy tắc 80/20 trong ăn uống:**
-   Nấu ăn ở nhà từ thứ 2 đến thứ 6, dành thứ 7 hoặc Chủ nhật để đi ăn nhà hàng cùng người thân/bạn bè. Vừa bảo vệ sức khỏe vừa tiết kiệm được 2–3 triệu/tháng!
-3. **Chờ 48 tiếng trước khi thanh toán giỏ hàng online:**
-   Cho món đồ vào giỏ và tắt app. Sau 2 ngày nếu cậu vẫn cảm thấy thực sự cần nó thì mới mua nhé!
-
-Cậu đang thấy khoản chi nào mỗi tháng làm cậu lăn tăn nhất? Nói Bé Orca cùng gỡ rối nha! 💖`;
+   • Tiền thuê nhà & dịch vụ chung: Cân nhắc tối ưu vị trí, gói internet, dịch vụ truyền hình phù hợp nhu cầu thực tế.
+   • Các gói đăng ký định kỳ (Subscriptions): Hủy các dịch vụ xem phim, phần mềm hoặc gói thành viên không còn sử dụng thường xuyên.
+2. **Quy tắc kiểm soát ăn uống:**
+   Chủ động nấu ăn các ngày trong tuần và dành ngân sách hợp lý cho các buổi gặp mặt cuối tuần.
+3. **Quy tắc chờ 48 tiếng cho mua sắm:**
+   Trước khi quyết định mua sắm đồ dùng không thiết yếu, hãy chờ 48 tiếng để đánh giá chính xác mức độ cần thiết.`;
   }
 
   // 10. Thuế TNCN & Lương Gross/Net
   if (query.includes("thuế") || query.includes("tncn") || query.includes("bảo hiểm") || query.includes("bhxh") || query.includes("gross")) {
     const depDeduction = dependents * 4_400_000;
-    return `Bé Orca giải thích cách tối ưu thuế TNCN và các khoản trích theo lương tại Việt Nam cho cậu nè: 🐳📑
+    return `Cơ cấu các khoản trích theo lương và thuế TNCN tại Việt Nam:
 
-📊 **CƠ CẤU TRÍCH TỪ LƯƠNG GROSS SANG NET:**
+**CƠ CẤU TRÍCH TỪ LƯƠNG GROSS SANG NET:**
 1. **Bảo hiểm bắt buộc (Tổng 10,5% lương đóng BH):**
    • BHXH: 8% (hưu trí, tử tuất, thai sản, ốm đau)
    • BHYT: 1,5%
    • BHTN: 1%
-2. **Mức giảm trừ gia cảnh hiện hành:**
-   • Bản thân người lao động: **11.000.000 ₫/tháng**.
-   • Người phụ thuộc đã đăng ký (${dependents} người): **${formatVnd(depDeduction)}/tháng** (4.400.000 ₫/người/tháng).
-3. **Biểu thuế lũy tiến từng phần:** Áp dụng trên phần thu nhập tính thuế sau khi đã trừ bảo hiểm và giảm trừ gia cảnh.
+2. **Mức giảm trừ gia cảnh:**
+   • Bản thân người nộp thuế: **11.000.000 ₫/tháng**.
+   • Người phụ thuộc (${dependents} người): **${formatVnd(depDeduction)}/tháng** (4.400.000 ₫/người/tháng).
+3. **Biểu thuế lũy tiến từng phần:** Áp dụng trên phần thu nhập tính thuế sau khi trừ bảo hiểm và các khoản giảm trừ gia cảnh.
 
-💡 **Mẹo tối ưu:** Đăng ký người phụ thuộc (bố mẹ hết tuổi lao động có thu nhập thấp, con nhỏ) đầy đủ với phòng nhân sự để giảm trừ tối đa số thuế phải khấu trừ hàng tháng nhé! 💖`;
+**Lưu ý:** Đăng ký người phụ thuộc đầy đủ để giảm trừ chính xác số thuế phải khấu trừ hàng tháng.`;
   }
 
   // 11. Mục tiêu tài chính cá nhân
   if (query.includes("mục tiêu") || query.includes("mua nhà") || query.includes("cưới") || query.includes("du lịch") || query.includes("laptop")) {
     if (goals.length === 0) {
-      return `Hiện tại trong sổ cậu chưa thiết lập mục tiêu cụ thể nào nè! 🐳 
-Việc có một mục tiêu rõ ràng (như Quỹ du lịch cuối năm, Mua xe mới, Cọc tiền nhà, Cưới hỏi...) sẽ giúp cậu có động lực tiết kiệm gấp đôi. Cậu muốn tích lũy cho mục tiêu nào trước, chia sẻ với Bé Orca để bé tính giúp số tiền cần trích mỗi tháng nhé! 🚀💖`;
+      return `Hiện tại sổ tài chính chưa thiết lập mục tiêu cụ thể nào. Việc xác định mục tiêu rõ ràng (quỹ du lịch, mua sắm tài sản, tích lũy mua nhà...) sẽ giúp bạn định lượng được số tiền cần tiết kiệm mỗi tháng để đạt kế hoạch đề ra.`;
     }
 
     const goalDetails = goals.map((g) => {
@@ -392,29 +383,28 @@ Việc có một mục tiêu rõ ràng (như Quỹ du lịch cuối năm, Mua xe
       return `• **${g.name}**: Đã tích lũy **${formatVnd(g.accumulatedAmount)}** / ${formatVnd(g.targetAmount)} (${pct}%) — Hạn chót: ${g.deadline || "Kế hoạch dài hạn"}`;
     }).join("\n");
 
-    return `Bé Orca tổng hợp tiến độ các mục tiêu cậu đang ấp ủ nè: 🐳✨
+    return `Tiến độ các mục tiêu tài chính hiện tại:
 
-🎯 **TIẾN ĐỘ TÍCH LŨY MỤC TIÊU:**
+**TIẾN ĐỘ TÍCH LŨY MỤC TIÊU:**
 ${goalDetails}
 
-💪 Cậu đang đi rất đúng hướng! Chỉ cần duy trì trích tiền tự động đều đặn mỗi kỳ lương là mọi ước mơ đều sẽ về đích trong tầm tay nhen! Cậu muốn tăng tốc mục tiêu nào trước không? 💖`;
+Việc duy trì trích tiền tự động đều đặn mỗi kỳ lương sẽ đảm bảo kế hoạch về đích đúng hạn.`;
   }
 
   // 12. Fallback linh hoạt thông minh theo bối cảnh đời thực
-  const statusEmoji = (facts?.healthScore ?? 75) >= 80 ? "🌟" : "💪";
-  return `Chào cậu nhen! 🐳 Bé Orca đã đọc kỹ câu hỏi của cậu cùng với bức tranh tài chính kỳ ${facts?.period || "này"} của cậu tại ${location}:
+  return `Chào bạn! Dưới đây là phân tích bức tranh tài chính kỳ ${facts?.period || "này"} tại ${location}:
 
-📊 **TỔNG QUAN VỊ THẾ TÀI CHÍNH CỦA CẬU:**
+**TỔNG QUAN VỊ THẾ TÀI CHÍNH:**
 • Thu nhập thực nhận: **${formatVnd(net)}/tháng**.
 • Chi phí sinh hoạt: **${formatVnd(exp)}** (Cố định chiếm ${(facts?.fixedCostRatio ?? 0).toFixed(0)}% lương).
 • Đệm an toàn dự phòng: **${emergencyMonths.toFixed(1)} tháng** chi tiêu.
-• Điểm sức khỏe tài chính: **${facts?.healthScore ?? 75}/100** ${statusEmoji} (${facts?.healthRating || "Ổn định"}).
+• Điểm sức khỏe tài chính: **${facts?.healthScore ?? 75}/100** (${facts?.healthRating || "Ổn định"}).
 
-💡 **GÓC NHÌN & ĐỀ XUẤT CỦA BÉ ORCA:**
-1. **Về câu hỏi của cậu:** Tùy thuộc vào ưu tiên hiện tại (${facts?.primaryPriority || "Cân bằng & Tích lũy"}), cậu có thể chọn cách tiếp cận an toàn từng bước hoặc tập trung tăng thu nhập để mở rộng dư địa chi tiêu.
-2. **Nguyên tắc cốt lõi:** Luôn giữ chi tiêu cố định dưới 55% thu nhập và bảo vệ đệm quỹ khẩn cấp 3 tháng trước khi phân bổ vào các kênh mạo hiểm.
+**ĐỀ XUẤT ĐỊNH HƯỚNG:**
+1. Tùy thuộc vào ưu tiên hiện tại (${facts?.primaryPriority || "Cân bằng & Tích lũy"}), bạn có thể lựa chọn kịch bản tối ưu chi tiêu hoặc tập trung nâng cao thu nhập để mở rộng thặng dư.
+2. Luôn giữ chi tiêu cố định dưới 55% thu nhập và bảo vệ đệm quỹ khẩn cấp 3 tháng trước khi phân bổ vào các kênh đầu tư rủi ro hơn.
 
-Cậu có thể hỏi sâu hơn về bất kỳ chủ đề nào (chia lương, phân bổ thưởng, tính mua trả góp, xử lý nợ hay mẹo tối ưu chi phí) — Bé Orca luôn ở đây đồng hành cùng cậu nhen! 💖✨`;
+Bạn có thể đặt câu hỏi về các chủ đề: cơ cấu phân bổ thu nhập, xử lý nợ vay, mua trả góp hoặc định hướng kênh tích sản.`;
 }
 
 export async function POST(req: Request) {
@@ -451,24 +441,24 @@ export async function POST(req: Request) {
     // Nếu có LLM cấu hình, gọi LLM gateway với Prompt đa kịch bản, tự nhiên, linh hoạt
     if (llmConfigured()) {
       try {
-        const systemPrompt = `Bạn là "Bé Orca 🐳" — Trợ lý AI Cố vấn Tài chính Cá nhân thông minh, thấu cảm và nhạy bén của hệ thống ORCA Financial.
-Bạn được huấn luyện dựa trên bộ tri thức quản trị tài chính thực tế tại Việt Nam (thu nhập, chi phí nhà trọ, sinh hoạt phí đô thị, thuế TNCN, BHXH, thói quen tiêu dùng, vàng nhẫn 9999, quỹ mở và lãi suất ngân hàng).
+        const systemPrompt = `Bạn là ORCA AI — Trợ lý Cố vấn Tài chính Cá nhân và Thị trường thông minh của hệ thống ORCA Financial.
+Bạn được huấn luyện dựa trên bộ tri thức quản trị tài chính thực tế tại Việt Nam (thu nhập, chi phí nhà trọ, sinh hoạt phí đô thị, thuế TNCN, BHXH, thói quen tiêu dùng, vàng nhẫn 9999, quỹ mở, lãi suất ngân hàng và dữ liệu chứng khoán).
 
 TÍNH CÁCH & PHONG CÁCH GIAO TIẾP:
-- Xưng hô ấm áp, đáng yêu: Tự xưng là "Bé Orca" hoặc "Bé", gọi người dùng là "cậu" hoặc "bạn". Sử dụng icon tinh tế (🐳, ✨, 💖, 💪, 🛡️).
+- Xưng hô chuyên nghiệp, gần gũi: Tự xưng là "ORCA" hoặc "tôi", gọi người dùng là "bạn". Tuyệt đối không dùng emoji, sticker hoặc biểu tượng trang trí cảm xúc. Trình bày rõ ràng, mạch lạc, trực diện theo chuẩn văn phong tài chính hiện đại.
 - Đồng cảm, không phán xét: Hiểu rằng tài chính cá nhân gắn liền với cảm xúc, hoàn cảnh sống thực tế và áp lực đời thường.
 - Sắc sảo, định lượng: Đưa ra các con số VND cụ thể dựa trên số liệu sổ tài chính thực tế dưới đây. Không đưa ra lời khuyên sáo rỗng hay đạo lý chung chung.
 
 TRI THỨC & NGUYÊN TẮC LINH HOẠT (QUAN TRỌNG):
-- KHÔNG BẮT BUỘC RẬP KHUÔN: Đừng biến mọi câu trả lời thành bảng 50/30/20 trừ khi người dùng hỏi cụ thể về chia lương. Hãy trả lời đúng trọng tâm câu hỏi của người dùng!
+- KHÔNG BẮT BUỘC RẬP KHUÔN: Đừng biến mọi câu trả lời thành bảng 50/30/20 trừ khi người dùng hỏi cụ thể về chia lương. Hãy trả lời đúng trọng tâm câu hỏi của người dùng.
 - TƯ DUY ĐA KỊCH BẢN (SCENARIO-BASED): Luôn đưa ra 2–3 phương án lựa chọn (VD: Kịch bản Thận trọng vs Kịch bản Cân bằng vs Kịch bản Tăng tốc) để người dùng chủ động chọn lối đi phù hợp với lối sống của họ.
 - BIẾN THỂ THỰC TẾ:
   + Nếu sống ở đô thị lớn (Hà Nội, TP.HCM) và tiền trọ/cố định cao (>50% lương), đề xuất công thức 60/25/15 thay vì ép 50/30/20.
   + Nếu người dùng lỡ tiêu lố hoặc căng thẳng tài chính: Đưa ra kế hoạch hạ nhiệt 14 ngày, đóng băng chi tiêu tùy ý mà không làm giảm nhu cầu cơ bản.
-  + Tiền thưởng/thu nhập bất ngờ: Chia 3 ngăn (Gia cố đệm an toàn/dập nợ, Tích sản sinh lời, Tự thưởng xứng đáng không tội lỗi).
+  + Tiền thưởng/thu nhập bất ngờ: Chia 3 ngăn (Gia cố đệm an toàn/dập nợ, Tích sản sinh lời, Nhu cầu cá nhân hợp lý).
   + Mua trả góp: Tổng nghĩa vụ nợ không vượt quá 20–25% lương net. Đề xuất tăng tỷ lệ trả trước (down payment) nếu cần.
   + Đầu tư/Tiết kiệm/Vàng: Thế kiềng 3 chân tùy theo khẩu vị rủi ro.
-  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "⚡ Backtest Mô Phỏng (OQuant)" trên trang /screener.
+  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "Backtest Mô Phỏng (OQuant)" trên trang /screener.
 
 BỐI CẢNH SỔ TÀI CHÍNH THỰC TẾ:
 - Kỳ ghi chép: ${facts.period || "Hiện tại"}
@@ -515,7 +505,7 @@ ${facts.goalsList && facts.goalsList.length > 0 ? `- Mục tiêu: ${JSON.stringi
   } catch (err) {
     console.error("[Ask Orca API Error]:", err);
     return ok({
-      answer: "Chào cậu nhen! Bé Orca đang bơi một vòng để tổng hợp dữ liệu, cậu kiểm tra lại kết nối và hỏi lại bé nha! 🐳✨",
+      answer: "Hệ thống đang kết nối dữ liệu tài chính, vui lòng kiểm tra lại đường truyền và thử lại sau ít giây.",
     });
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from "react";
+import { Zap, X } from "lucide-react";
 import type { ScreenerBacktestResult, StrategyType, BacktestTrade } from "@/lib/engines/screener-backtest-engine";
 function formatPercent(val: number): string {
   const sign = val > 0 ? "+" : "";
@@ -126,7 +127,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-surface/40">
           <div className="flex items-center gap-3">
             <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold">
-              ⚡
+              <Zap className="size-4" />
             </span>
             <div>
               <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -145,7 +146,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-surface/80 transition-colors"
             title="Đóng modal"
           >
-            ✕
+            <X className="size-4" />
           </button>
         </div>
 
@@ -231,7 +232,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
               disabled={loading}
               className="ml-auto px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-medium text-xs hover:bg-primary/90 transition-opacity disabled:opacity-50"
             >
-              {loading ? "Đang tính toán..." : "⚡ Chạy lại"}
+              {loading ? "Đang tính toán..." : "Chạy lại"}
             </button>
           </div>
 

@@ -1,22 +1,23 @@
 import React from 'react';
-import { Shield, Building2, Mail, Heart } from 'lucide-react';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { Shield, Building2, Mail } from 'lucide-react';
+import { OrcaMark } from '@/components/logo';
 
 export const Footer: React.FC = () => {
   return (
     <footer className="border-t border-[#1e346b] bg-[#070e20] text-slate-300 text-xs py-8 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto space-y-5">
-        {/* Cute Mascot Greeting in Footer */}
+        {/* Footer Top Banner */}
         <div className="p-4 bg-[#0c1630] border border-[#233a75] rounded-2xl flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <OrcaMascot mood="happy" size={50} />
+            <div className="shrink-0">
+              <OrcaMark size={32} />
+            </div>
             <div>
               <div className="text-white font-bold text-sm flex items-center gap-1.5">
-                <span>Orca Personal Finance · Bé Orca đồng hành cùng bạn</span>
-                <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
+                <span>Orca Personal Finance · Intelligent Financial Planning</span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Mỗi tháng một lần Monthly Check-in để cùng bé Orca nuôi heo đất và kiến tạo tự do tài chính nhé! 🐳✨
+                Thực hiện Monthly Check-in định kỳ để tối ưu dòng tiền và hướng tới tự do tài chính.
               </p>
             </div>
           </div>
@@ -44,10 +45,10 @@ export const Footer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2 text-[11px] text-slate-300 border-t border-[#142348]">
           <div>
             <div className="font-semibold text-white mb-1 flex items-center gap-1.5">
-              <span>🐳 ORCA FINANCIAL VIETNAM</span>
+              <span>ORCA FINANCIAL VIETNAM</span>
             </div>
             <p className="text-slate-400">
-              Bạn đồng hành tài chính thông minh và đáng yêu dành cho người dùng Việt Nam.
+              Hệ thống quản lý tài chính thông minh dành cho người dùng Việt Nam.
             </p>
           </div>
 
@@ -86,7 +87,7 @@ export const Footer: React.FC = () => {
             <span>·</span>
             <span>ZERO BANK ACCOUNT STORAGE</span>
             <span>·</span>
-            <span className="text-amber-300">BÉ ORCA 💖</span>
+            <span className="text-amber-300">ORCA FINANCE</span>
           </div>
         </div>
       </div>

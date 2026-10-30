@@ -462,7 +462,7 @@ export function OrderBookPanel({ symbol, compact = false }: { symbol: string; co
                 }`}
                 title={`Lọc các lệnh khối lượng lớn >= ${fmtVol(whaleThreshold)} cp`}
               >
-                Lệnh lớn 🦈
+                Lệnh lớn
               </button>
             </div>
           </div>
@@ -542,12 +542,12 @@ export function OrderBookPanel({ symbol, compact = false }: { symbol: string; co
                     {fmtTime(tr.time, tr.eventTime)}
                   </span>
                   
-                  {/* Volume with Whale / Shark icon */}
+                  {/* Volume with Whale / Shark indicator */}
                   <span className="text-right text-ink font-medium">
                     {fmtVol(tr.volume)}
                     {isWhale && (
-                      <span className="ml-1 text-[9px] text-warn font-sans font-bold" title="Lệnh lớn">
-                        ⚡
+                      <span className="ml-1 text-[9px] text-warn font-sans font-bold px-0.5 rounded bg-amber-500/10 border border-amber-500/20" title="Lệnh lớn">
+                        L
                       </span>
                     )}
                   </span>

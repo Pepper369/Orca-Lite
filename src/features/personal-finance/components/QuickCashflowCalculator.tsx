@@ -3,7 +3,7 @@ import { calculateTaxVn, TAX_PARAMS_2026 } from '../engines/taxVnEngine.ts';
 import { calculateCashflow } from '../engines/cashflowEngine.ts';
 import { formatVND, formatNumberVi } from '../utils/formatters.ts';
 import { ExpenseItem, MonthlySnapshot } from '../types/finance.ts';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 import {
   Calculator,
   PiggyBank,
@@ -132,25 +132,20 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
     ? 'caution'
     : 'calculating';
 
-  // Super cute voice from Bé Orca
-  const mascotBubble = cashflowResult.savingsRate >= 20
-    ? `Oa! Tháng này cậu để dành được tận ${cashflowResult.savingsRate}% lương (${formatVND(cashflowResult.monthlySavings)}) lận nè! Bé Orca vỗ tay khen cậu nhen! 🐳💖`
-    : cashflowResult.fixedCostRatio > 65
-    ? `Cậu ơi, Bé Orca thấy chi tiêu cố định hơi cao một xíu (${cashflowResult.fixedCostRatio}%). Mình cùng để ý nhẹ nhen~ ✨`
-    : `Bé Orca tính thử cho cậu rồi đó: Lương về ví sau thuế và bảo hiểm là ${formatVND(taxResult.netTakeHome)} nhen! Cậu xem có đúng chưa nè? 🐳`;
-
   return (
     <div className="bg-[#12224d] border border-[#2c4c96] p-5 sm:p-6 rounded-2xl shadow-xl space-y-6">
-      {/* Header with Adorable Bé Orca */}
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#243f7d]">
         <div className="flex items-center gap-4">
-          <OrcaMascot mood={mascotMood} size={82} bubbleText={mascotBubble} />
+          <div className="shrink-0">
+            <OrcaMark size={36} />
+          </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-white tracking-wide flex items-center gap-2">
-              <span>⚡ Bảng Tính Dòng Tiền & Thuế Cùng Bé Orca</span>
+              <span>Bảng Tính Dòng Tiền & Thuế TNCN 2026</span>
             </h2>
             <p className="text-xs text-sky-200 mt-1">
-              Cậu nhập lương và chi tiêu vào đây nhé, Bé Orca tính ngay tiền về ví và heo đất giúp cậu nè! 🐳
+              Nhập mức lương và các khoản chi tiêu để tính thuế, bảo hiểm và phân bổ dòng tiền thực nhận.
             </p>
           </div>
         </div>
@@ -169,7 +164,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
             className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-slate-950 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md hover:scale-105"
           >
             <Save className="w-4 h-4" />
-            <span>Lưu vào sổ kỳ {currentSnapshot.period} 🐳</span>
+            <span>Lưu vào sổ kỳ {currentSnapshot.period}</span>
           </button>
         </div>
       </div>
@@ -177,7 +172,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
       {appliedNotification && (
         <div className="p-3.5 bg-emerald-900/90 border border-emerald-400 text-emerald-100 text-xs font-medium rounded-xl flex items-center gap-2 shadow-lg animate-in fade-in">
           <CheckCircle2 className="w-5 h-5 text-emerald-300 shrink-0" />
-          <span>Bé Orca đã lưu số liệu mới vào sổ kỳ {currentSnapshot.period} cho cậu rồi nè! Mọi báo cáo đã tự động cập nhật nhé! ✨</span>
+          <span>Đã lưu số liệu mới vào sổ kỳ {currentSnapshot.period}. Mọi báo cáo đã tự động cập nhật.</span>
         </div>
       )}
 
@@ -189,8 +184,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
           <div className="bg-[#172a5a] border border-[#2b4b96] p-4 rounded-2xl space-y-3.5 shadow-sm">
             <div className="flex items-center justify-between pb-2 border-b border-[#243e7c]">
               <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                <span>💵</span>
-                <span>1. CÁC KHOẢN THU NHẬP CỦA CẬU</span>
+                <span>1. CÁC KHOẢN THU NHẬP</span>
               </span>
               <span className="text-xs font-mono text-slate-200">
                 Lương Gross: <strong className="text-amber-300 font-bold">{formatVND(taxResult.totalGrossIncome)}</strong>
@@ -256,7 +250,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-slate-200 block mb-1">Thưởng tháng / KPI 🎉</label>
+                <label className="text-xs font-medium text-slate-200 block mb-1">Thưởng tháng / KPI</label>
                 <input
                   type="number"
                   value={bonus}
@@ -266,7 +260,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-200 block mb-1">Thu nhập phụ / làm thêm 💼</label>
+                <label className="text-xs font-medium text-slate-200 block mb-1">Thu nhập phụ / làm thêm</label>
                 <input
                   type="number"
                   value={otherIncome}
@@ -314,7 +308,6 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
           <div className="bg-[#172a5a] border border-[#2b4b96] p-4 rounded-2xl space-y-3 shadow-sm">
             <div className="flex items-center justify-between pb-2 border-b border-[#243e7c]">
               <span className="text-xs font-bold text-sky-300 uppercase tracking-wider flex items-center gap-1.5">
-                <span>🛒</span>
                 <span>2. CÁC KHOẢN CHI TIÊU ({expenses.length} KHOẢN)</span>
               </span>
               <div className="flex items-center gap-2">
@@ -333,7 +326,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
 
             {expenses.length === 0 ? (
               <div className="py-6 px-4 text-center rounded-xl border border-dashed border-[#264182] bg-[#0c183b]/60 text-slate-300 text-xs">
-                Chưa có khoản chi tiêu nào. Bấm nút <strong className="text-amber-300">+ Thêm khoản</strong> ở trên để thêm chi phí thực tế của bạn nha! 🐳
+                Chưa có khoản chi tiêu nào. Bấm nút <strong className="text-amber-300">+ Thêm khoản</strong> ở trên để thêm chi phí thực tế của bạn.
               </div>
             ) : (
               <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
@@ -367,7 +360,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
                     }`}
                     title="Bấm để đổi thành Cố định (tiền nhà, hóa đơn) hoặc Biến đổi (ăn uống, mua sắm)"
                   >
-                    {exp.isFixed ? '📌 CỐ ĐỊNH' : '🌊 BIẾN ĐỔI'}
+                    {exp.isFixed ? 'CỐ ĐỊNH' : 'BIẾN ĐỔI'}
                   </button>
 
                   <div className="w-32 relative shrink-0">
@@ -404,10 +397,10 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
             <div className="flex items-center justify-between pb-2 border-b border-[#243e7c]">
               <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                BẢNG TÍNH THỰC NHẬN CỦA BÉ ORCA
+                BẢNG TÍNH THỰC NHẬN ORCA
               </span>
               <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-400/50 font-bold">
-                ✓ CHUẨN 2026
+                CHUẨN 2026
               </span>
             </div>
 
@@ -447,8 +440,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
               {/* Net Take-home box */}
               <div className="p-4 bg-gradient-to-r from-[#1c3674] to-[#254694] rounded-2xl border-2 border-amber-300/80 mt-2 shadow-inner">
                 <div className="text-[11px] text-amber-300 uppercase tracking-wider font-sans font-bold flex items-center justify-between">
-                  <span>TIỀN VỀ VÍ CỦA BẠN (NET TAKE-HOME):</span>
-                  <span>💵✨</span>
+                  <span>TIỀN VỀ VÍ (NET TAKE-HOME):</span>
                 </div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
                   {formatVND(taxResult.netTakeHome)}
@@ -481,7 +473,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-100 flex items-center gap-1.5 font-sans">
                     <PiggyBank className="w-4 h-4 text-emerald-300" />
-                    TIỀN BỎ ỐNG HEO THÁNG NÀY:
+                    TIỀN TÍCH LŨY THÁNG NÀY:
                   </span>
                   <span className={`text-lg font-bold ${cashflowResult.monthlySavings >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                     {cashflowResult.monthlySavings >= 0 ? '+' : ''}{formatVND(cashflowResult.monthlySavings)}
@@ -491,20 +483,20 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
                 <div className="flex items-center justify-between text-[11px] text-slate-300 mt-2 pt-2 border-t border-[#243e7c]">
                   <span>Tỷ lệ tiết kiệm đạt:</span>
                   <span className={`font-bold ${cashflowResult.savingsRate >= 20 ? 'text-emerald-300' : 'text-amber-300'}`}>
-                    {cashflowResult.savingsRate}% {cashflowResult.savingsRate >= 20 ? '🎉 (Đạt chuẩn &ge;20%)' : '(Chưa đạt 20%)'}
+                    {cashflowResult.savingsRate}% {cashflowResult.savingsRate >= 20 ? '(Đạt chuẩn &ge;20%)' : '(Chưa đạt 20%)'}
                   </span>
                 </div>
               </div>
 
-              {/* Friendly message from Bé Orca */}
+              {/* Recommendation message */}
               <div className="p-3 bg-[#0f1d44] border border-[#233f80] rounded-xl text-xs text-slate-200">
                 <div className="flex items-center gap-1.5 font-bold text-amber-300 mb-1">
-                  <span>🐳 Bé Orca mách nhỏ:</span>
+                  <span>Khuyến nghị tối ưu:</span>
                 </div>
                 <p className="text-slate-200 leading-relaxed font-sans text-[11px]">
                   {cashflowResult.fixedCostRatio <= 65
-                    ? 'Dòng tiền của cậu rất khỏe mạnh luôn nha! Cậu nhớ trích tiền bỏ heo đất trước khi mua sắm nhen!'
-                    : `Chi tiêu cố định đang chiếm ${cashflowResult.fixedCostRatio}% thu nhập. Cậu thử rà soát lại tiền thuê nhà hoặc các gói mạng xem tối ưu được xíu nào không nha~`}
+                    ? 'Dòng tiền ổn định và an toàn. Nên trích lập tích lũy đầu kỳ trước khi chi tiêu linh hoạt.'
+                    : `Chi tiêu cố định đang chiếm ${cashflowResult.fixedCostRatio}% thu nhập. Nên rà soát lại các hợp đồng thuê nhà hoặc dịch vụ định kỳ để giảm áp lực dòng tiền.`}
                 </p>
               </div>
             </div>
@@ -515,7 +507,7 @@ export const QuickCashflowCalculator: React.FC<QuickCashflowCalculatorProps> = (
               className="w-full py-3 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-slate-950 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-lg hover:scale-[1.01] flex items-center justify-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>CẬP NHẬT KẾT QUẢ VÀO SỔ CỦA BẠN 🐳✨</span>
+              <span>CẬP NHẬT KẾT QUẢ VÀO SỔ SÁCH</span>
             </button>
           </div>
         </div>

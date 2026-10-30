@@ -10,7 +10,7 @@ import {
   CheckCircle2,
   Calendar,
 } from 'lucide-react';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 
 interface ReportViewProps {
   currentSnapshot: MonthlySnapshot;
@@ -47,13 +47,15 @@ export const ReportView: React.FC<ReportViewProps> = ({ currentSnapshot, profile
       {/* Top action bar (hidden in print) */}
       <div className="no-print bg-[#0b1530] border border-[#20366c] p-4 rounded-2xl shadow-md flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <OrcaMascot mood="calculating" size={54} />
+          <div className="shrink-0">
+            <OrcaMark size={32} />
+          </div>
           <div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <span>📄 Báo Cáo Tài Chính Tháng {currentSnapshot.period} Cùng Bé Orca</span>
+              <span>Báo Cáo Tài Chính Tháng {currentSnapshot.period}</span>
             </h2>
             <p className="text-xs text-slate-300 mt-0.5">
-              Bản báo cáo tổng hợp chi tiết thu nhập, thuế 2026, dòng tiền và điểm sức khỏe của bạn! 🐳
+              Bản báo cáo tổng hợp chi tiết thu nhập, thuế 2026, dòng tiền và các chỉ số sức khỏe tài chính.
             </p>
           </div>
         </div>

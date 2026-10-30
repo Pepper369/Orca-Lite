@@ -55,16 +55,16 @@ export function analyzeSubscriptionsAndRunway(
   const detectedSubs: SubscriptionItem[] = [];
 
   const subKeywords = [
-    { key: 'netflix', name: 'Netflix Premium', cat: 'digital', icon: '🎬', isEssential: false },
-    { key: 'spotify', name: 'Spotify Music', cat: 'digital', icon: '🎵', isEssential: false },
-    { key: 'youtube', name: 'YouTube Premium', cat: 'digital', icon: '▶️', isEssential: false },
-    { key: 'icloud', name: 'Apple iCloud+', cat: 'digital', icon: '☁️', isEssential: true },
-    { key: 'google', name: 'Google One Drive', cat: 'digital', icon: '📁', isEssential: true },
-    { key: 'chatgpt', name: 'ChatGPT Plus AI', cat: 'productivity', icon: '🤖', isEssential: true },
-    { key: 'gym', name: 'Tập Gym / Fitness', cat: 'wellness', icon: '🏋️', isEssential: false },
-    { key: 'internet', name: 'Internet cáp quang', cat: 'living', icon: '🌐', isEssential: true },
-    { key: 'nhà', name: 'Tiền thuê nhà / Chung cư', cat: 'living', icon: '🏠', isEssential: true },
-    { key: 'điện', name: 'Tiền điện & Nước', cat: 'living', icon: '💡', isEssential: true },
+    { key: 'netflix', name: 'Netflix Premium', cat: 'digital', icon: '', isEssential: false },
+    { key: 'spotify', name: 'Spotify Music', cat: 'digital', icon: '', isEssential: false },
+    { key: 'youtube', name: 'YouTube Premium', cat: 'digital', icon: '', isEssential: false },
+    { key: 'icloud', name: 'Apple iCloud+', cat: 'digital', icon: '', isEssential: true },
+    { key: 'google', name: 'Google One Drive', cat: 'digital', icon: '', isEssential: true },
+    { key: 'chatgpt', name: 'ChatGPT Plus AI', cat: 'productivity', icon: '', isEssential: true },
+    { key: 'gym', name: 'Tập Gym / Fitness', cat: 'wellness', icon: '', isEssential: false },
+    { key: 'internet', name: 'Internet cáp quang', cat: 'living', icon: '', isEssential: true },
+    { key: 'nhà', name: 'Tiền thuê nhà / Chung cư', cat: 'living', icon: '', isEssential: true },
+    { key: 'điện', name: 'Tiền điện & Nước', cat: 'living', icon: '', isEssential: true },
   ];
 
   for (const exp of expenses) {
@@ -81,7 +81,7 @@ export function analyzeSubscriptionsAndRunway(
         autoRenew: true,
         isEssential: matched ? matched.isEssential : true,
         color: matched?.cat === 'digital' ? '#ec4899' : matched?.cat === 'productivity' ? '#818cf8' : '#38bdf8',
-        icon: matched ? matched.icon : '📋',
+        icon: '',
       });
     }
   }

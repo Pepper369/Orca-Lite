@@ -471,7 +471,7 @@ export async function runDivergenceAlerts(): Promise<{
               : d.oscillator === "stoch"
                 ? "Stoch"
                 : d.oscillator;
-      const volTag = d.volumeConfirmed ? " · vol✓" : "";
+      const volTag = d.volumeConfirmed ? " · vol xác nhận" : "";
 
       const sent = await postGlobalDiscord({
         title: `Phân kỳ · ${row.symbol}`,
@@ -490,7 +490,7 @@ export async function runDivergenceAlerts(): Promise<{
           {
             name: "Khối lượng",
             value: d.volumeConfirmed
-              ? `✓ ${d.volumeRatio != null ? d.volumeRatio.toFixed(2) + "×SMA" : ""}`
+              ? `Xác nhận ${d.volumeRatio != null ? d.volumeRatio.toFixed(2) + "×SMA" : ""}`.trim()
               : "—",
             inline: true,
           },

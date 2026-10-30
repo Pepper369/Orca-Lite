@@ -75,21 +75,21 @@ export function ConfluenceBadge({
   if (badge === "SUPER_SETUP") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-400 whitespace-nowrap shadow-sm">
-        <span>🌟</span> SIÊU SETUP {score ? `(${score}đ)` : ""}
+        SIÊU SETUP {score ? `(${score}đ)` : ""}
       </span>
     );
   }
   if (badge === "POTENTIAL_BREAKOUT") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-accent-primary/20 border border-accent-primary/40 px-2 py-0.5 text-[10px] font-bold text-accent-primary whitespace-nowrap">
-        <span>🚀</span> CHỜ NỔ {score ? `(${score}đ)` : ""}
+        CHỜ NỔ {score ? `(${score}đ)` : ""}
       </span>
     );
   }
   if (badge === "WATCH") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 whitespace-nowrap">
-        <span>👀</span> Theo dõi {score ? `(${score}đ)` : ""}
+        Theo dõi {score ? `(${score}đ)` : ""}
       </span>
     );
   }
@@ -100,21 +100,21 @@ export function SqueezeBadge({ state }: { state: string | null | undefined }) {
   if (state === "fired_bull") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
-        <span>🚀</span> Nổ tăng
+        Nổ tăng
       </span>
     );
   }
   if (state === "fired_bear") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold text-rose-400 whitespace-nowrap">
-        <span>⚠️</span> Nổ giảm
+        Nổ giảm
       </span>
     );
   }
   if (state === "squeeze_on") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-purple-500/20 border border-purple-500/40 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 whitespace-nowrap animate-pulse">
-        <span>🌀</span> Đang nén
+        Đang nén
       </span>
     );
   }
@@ -135,21 +135,21 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
   if (signal === "GOLDEN_CROSS") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-400 whitespace-nowrap">
-        <span>🌟</span> Giao cắt Vàng
+        Giao cắt Vàng
       </span>
     );
   }
   if (signal === "BULLISH_ALIGN") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
-        <span>🚀</span> Trật tự tăng
+        Trật tự tăng
       </span>
     );
   }
   if (signal === "DEATH_CROSS") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-rose-400 whitespace-nowrap">
-        <span>⚠️</span> Cắt Tử thần
+        Cắt Tử thần
       </span>
     );
   }
@@ -158,9 +158,9 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
-  { id: "confluence", label: "Siêu Hội Tụ 🌟", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
+  { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "vcp", label: "Mẫu hình VCP / Cốc", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
-  { id: "ttm_squeeze", label: "Nén Squeeze 🌀", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
+  { id: "ttm_squeeze", label: "Nén Squeeze", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
   { id: "ma_cross", label: "Giao cắt MA", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Golden Cross & Trật tự MA tăng" },
   { id: "canslim", label: "CANSLIM", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Tăng trưởng cao & ROE > 14%" },
   { id: "dividend", label: "Cổ tức cao", icon: <DollarSign className="size-3.5 text-emerald-400" />, desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
@@ -576,9 +576,9 @@ export function VnScreener({
                 className="input !w-full !py-1.5 text-[12px]"
               >
                 <option value="ALL">Tất cả tín hiệu MA</option>
-                <option value="GOLDEN_CROSS">🌟 Giao cắt Vàng (Golden)</option>
-                <option value="BULLISH_ALIGN">🚀 Kênh tăng (Trật tự MA)</option>
-                <option value="DEATH_CROSS">⚠️ Cắt Tử thần (Death Cross)</option>
+                <option value="GOLDEN_CROSS">Giao cắt Vàng (Golden)</option>
+                <option value="BULLISH_ALIGN">Kênh tăng (Trật tự MA)</option>
+                <option value="DEATH_CROSS">Cắt Tử thần (Death Cross)</option>
               </select>
             </label>
             <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
@@ -614,7 +614,7 @@ export function VnScreener({
               }`}
             >
               <Sparkles className="size-3 text-amber-400" />
-              Siêu Hội Tụ & Mẫu hình 🔥
+              Siêu Hội Tụ & Mẫu hình
             </button>
             <button
               type="button"

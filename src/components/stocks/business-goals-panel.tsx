@@ -70,7 +70,7 @@ export const BusinessGoalsPanel = memo(function BusinessGoalsPanel({ symbol }: {
                 : "bg-cyan-500/15 text-cyan-400"
             }`}
           >
-            {isExceeded ? "VƯỢT KẾ HOẠCH NĂM 🌟" : isBehind ? "CẦN TĂNG TỐC ⚠️" : "ĐẠT TIẾN ĐỘ ĐHCĐ 🟢"}
+            {isExceeded ? "VƯỢT KẾ HOẠCH NĂM" : isBehind ? "CẦN TĂNG TỐC" : "ĐẠT TIẾN ĐỘ ĐHCĐ"}
           </span>
         )
       }

@@ -73,17 +73,17 @@ Hub **không thay** cache TTL; nó bổ sung lớp “cùng turn không gọi l�
 
 ## Đã triển khai (4 bước)
 
-1. ✅ Bọc `answerQuestion` bằng `runInDataHub`.
-2. ✅ `getFinancialPackage` coalesce; valuation-peers → `hubVnQuotes`; snapshots kế thừa.
-3. ✅ `hubLoad` + typed getters: quote VN, crypto, forex, commodity, news, macro.
-4. ✅ `GET /api/v1/system/data-engine` → `catalogSummary()` + `hubStats()` + source health.
+1. [x] Bọc `answerQuestion` bằng `runInDataHub`.
+2. [x] `getFinancialPackage` coalesce; valuation-peers → `hubVnQuotes`; snapshots kế thừa.
+3. [x] `hubLoad` + typed getters: quote VN, crypto, forex, commodity, news, macro.
+4. [x] `GET /api/v1/system/data-engine` → `catalogSummary()` + `hubStats()` + source health.
 
 ## Đã wire module
 
-- ✅ `agent-context` / `buildVnStockFull` → hubFinancialPackage / hubVnQuotes / hubCryptoDetail / hubForexDetail / hubCommodityMarket
-- ✅ `agent-vn-stock` → hubVnQuotes / hubFinancialPackage / hubNews
-- ✅ fundamental / valuation / CANSLIM screeners → hubVnQuotes (+ snapshots hubFinancialPackage)
-- ✅ `financial/service` → coalesce wrapper
+- [x] `agent-context` / `buildVnStockFull` → hubFinancialPackage / hubVnQuotes / hubCryptoDetail / hubForexDetail / hubCommodityMarket
+- [x] `agent-vn-stock` → hubVnQuotes / hubFinancialPackage / hubNews
+- [x] fundamental / valuation / CANSLIM screeners → hubVnQuotes (+ snapshots hubFinancialPackage)
+- [x] `financial/service` → coalesce wrapper
 
 ## Việc tiếp theo (tuỳ chọn)
 

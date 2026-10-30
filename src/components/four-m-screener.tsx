@@ -95,21 +95,21 @@ export function FourMScreener({ defaultSector }: { defaultSector: string | null 
                 onClick={() => setGrade("diamond")}
                 className={`rounded px-2.5 py-1 transition-all ${grade === "diamond" ? "bg-sky-500/25 text-sky-400 font-bold" : "text-ink-3 hover:text-ink"}`}
               >
-                💎 Kim cương
+                Kim cương
               </button>
               <button
                 type="button"
                 onClick={() => setGrade("gold")}
                 className={`rounded px-2.5 py-1 transition-all ${grade === "gold" ? "bg-yellow-500/25 text-yellow-400 font-bold" : "text-ink-3 hover:text-ink"}`}
               >
-                🥇 Vàng
+                Vàng
               </button>
               <button
                 type="button"
                 onClick={() => setGrade("silver")}
                 className={`rounded px-2.5 py-1 transition-all ${grade === "silver" ? "bg-slate-400/25 text-slate-300 font-bold" : "text-ink-3 hover:text-ink"}`}
               >
-                🥈 Bạc
+                Bạc
               </button>
             </div>
           </div>

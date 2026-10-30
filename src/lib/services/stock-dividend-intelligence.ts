@@ -152,13 +152,13 @@ export async function getStockDividendIntelligence(
 
       if (dividendYieldPct >= 6.5) {
         assessment = "HIGH_YIELD";
-        assessmentVi = "Tỷ suất cổ tức tiền mặt HẤP DẪN — Vượt trội lãi suất tiền gửi ngân hàng 🌟";
+        assessmentVi = "Tỷ suất cổ tức tiền mặt HẤP DẪN — Vượt trội lãi suất tiền gửi ngân hàng";
       } else if (dividendYieldPct >= 4.0) {
         assessment = "MODERATE";
-        assessmentVi = "Cổ tức tiền mặt tương đương gửi tiết kiệm, có giá trị tích sản phòng thủ 🛡️";
+        assessmentVi = "Cổ tức tiền mặt tương đương gửi tiết kiệm, có giá trị tích sản phòng thủ";
       } else if (dividendYieldPct > 0) {
         assessment = "LOW";
-        assessmentVi = "Doanh nghiệp ưu tiên giữ lại lợi nhuận tái đầu tư tăng trưởng 🚀";
+        assessmentVi = "Doanh nghiệp ưu tiên giữ lại lợi nhuận tái đầu tư tăng trưởng";
       } else {
         assessment = "NO_DIVIDEND";
         assessmentVi = "Không phát sinh cổ tức tiền mặt trong 12 tháng qua";

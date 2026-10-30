@@ -1,4 +1,4 @@
-# Orca Financial Lite 🚀
+# Orca Financial Lite
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Pepper369/Orca-Lite/main/public/icon.png" alt="Orca Financial Logo" width="100" height="100" style="border-radius: 20%;" onerror="this.style.display='none'"/>
@@ -21,43 +21,43 @@
 
 ---
 
-## 📑 Mục lục
+## Mục lục
 
-1. [Giới thiệu](#-giới-thiệu)
-2. [Điểm nổi bật của bản Lite](#-điểm-nổi-bật-của-bản-lite)
-3. [Tính năng cốt lõi](#-tính-năng-cốt-lõi)
+1. [Giới thiệu](#giới-thiệu)
+2. [Điểm nổi bật của bản Lite](#điểm-nổi-bật-của-bản-lite)
+3. [Tính năng cốt lõi](#tính-năng-cốt-lõi)
    - [Thị trường Cổ phiếu Việt Nam (Equities)](#1-thị-trường-cổ-phiếu-việt-nam-equities)
    - [Định lượng & Bộ lọc Cổ phiếu (Quant & Screeners)](#2-định-lượng--bộ-lọc-cổ-phiếu-quant--screeners)
    - [Phái sinh, Ngoại hối & Hàng hóa (Multi-Asset)](#3-phái-sinh-ngoại-hối--hàng-hóa-multi-asset)
    - [Quản lý Tài chính Cá nhân (Personal Finance)](#4-quản-lý-tài-chính-cá-nhân-personal-finance)
    - [Trợ lý Trí tuệ Nhân tạo (Orca AI & Agents)](#5-trợ-lý-trí-tuệ-nhân-tạo-orca-ai--agents)
-4. [Kiến trúc Thư mục & Dự án](#-kiến-trúc-thư-mục--dự-án)
-5. [Hệ thống Dữ liệu & Nhà cung cấp](#-hệ-thống-dữ-liệu--nhà-cung-cấp)
-6. [Bảo mật & Khả năng Chống chịu (Resilience)](#-bảo-mật--khả-năng-chống-chịu-resilience)
-7. [Hướng dẫn Cài đặt & Khởi chạy (Quick Start)](#-hướng-dẫn-cài-đặt--khởi-chạy-quick-start)
-8. [Cấu hình Biến môi trường (.env)](#-cấu-hình-biến-môi-trường-env)
-9. [Build & Triển khai Production](#-build--triển-khai-production)
-10. [Giấy phép](#-giấy-phép)
+4. [Kiến trúc Thư mục & Dự án](#kiến-trúc-thư-mục--dự-án)
+5. [Hệ thống Dữ liệu & Nhà cung cấp](#hệ-thống-dữ-liệu--nhà-cung-cấp)
+6. [Bảo mật & Khả năng Chống chịu (Resilience)](#bảo-mật--khả-năng-chống-chịu-resilience)
+7. [Hướng dẫn Cài đặt & Khởi chạy (Quick Start)](#hướng-dẫn-cài-đặt--khởi-chạy-quick-start)
+8. [Cấu hình Biến môi trường (.env)](#cấu-hình-biến-môi-trường-env)
+9. [Build & Triển khai Production](#build--triển-khai-production)
+10. [Giấy phép](#giấy-phép)
 
 ---
 
-## 💡 Giới thiệu
+## Giới thiệu
 
 **Orca Financial Lite** là phiên bản kiến trúc siêu nhẹ, tối giản và hiệu năng cao của hệ sinh thái **Orca Financial Platform**. Hệ thống được xây dựng nhằm cung cấp giải pháp toàn diện cho nhà đầu tư cá nhân và tổ chức: từ theo dõi dữ liệu thị trường trực tiếp, phân tích kỹ thuật định lượng, nhận diện mô hình sóng - giá - khối lượng, lọc cổ phiếu đa tiêu chí, đến lập kế hoạch tài chính cá nhân độc lập và paper trading.
 
 ---
 
-## ✨ Điểm nổi bật của bản Lite
+## Điểm nổi bật của bản Lite
 
-- ⚡ **Siêu gọn nhẹ (-85% dung lượng):** Tinh giản toàn bộ các module cồng kềnh, tập trung vào web runtime Next.js 16 (App Router + Turbopack).
-- 🧠 **Google AI Studio Ready:** Tích hợp trực tiếp `GEMINI_API_KEY` (Gemini 2.0 Flash / Pro) với chi phí tối ưu, độ trễ cực thấp.
-- 🛡️ **Zero Database Friction:** Cơ chế Fallback thông minh: Tự động chạy với **In-Memory Mock / Public Data Feeds** khi chưa cấu hình PostgreSQL hoặc Redis, sẵn sàng khởi chạy ngay mà không phụ thuộc hạ tầng phức tạp.
-- 📈 **TradingView Lightweight Charts v5:** Hệ thống biểu đồ tài chính tương tác mượt mà, hỗ trợ đa khung thời gian và phân tích đa chỉ báo.
-- 🔒 **Enterprise-Grade Security:** Tích hợp lớp phòng thủ Anti-SSRF đa tầng (DNS resolution validation, private IP filter) cho webhooks và whitelist host header tại Middleware.
+- **Siêu gọn nhẹ (-85% dung lượng):** Tinh giản toàn bộ các module cồng kềnh, tập trung vào web runtime Next.js 16 (App Router + Turbopack).
+- **Google AI Studio Ready:** Tích hợp trực tiếp `GEMINI_API_KEY` (Gemini 2.0 Flash / Pro) với chi phí tối ưu, độ trễ cực thấp.
+- **Zero Database Friction:** Cơ chế Fallback thông minh: Tự động chạy với **In-Memory Mock / Public Data Feeds** khi chưa cấu hình PostgreSQL hoặc Redis, sẵn sàng khởi chạy ngay mà không phụ thuộc hạ tầng phức tạp.
+- **TradingView Lightweight Charts v5:** Hệ thống biểu đồ tài chính tương tác mượt mà, hỗ trợ đa khung thời gian và phân tích đa chỉ báo.
+- **Enterprise-Grade Security:** Tích hợp lớp phòng thủ Anti-SSRF đa tầng (DNS resolution validation, private IP filter) cho webhooks và whitelist host header tại Middleware.
 
 ---
 
-## 🎯 Tính năng cốt lõi
+## Tính năng cốt lõi
 
 ### 1. Thị trường Cổ phiếu Việt Nam (Equities)
 - **Bảng giá & Dữ liệu thời gian thực:** Kết nối các nguồn dữ liệu tài chính Việt Nam (SSI iBoard/FCData, VNDIRECT, Vietcap, VPS, CafeF, Vietnambiz).
@@ -114,7 +114,7 @@
 
 ---
 
-## 📂 Kiến trúc Thư mục & Dự án
+## Kiến trúc Thư mục & Dự án
 
 ```text
 Orca-Lite/
@@ -162,7 +162,7 @@ Orca-Lite/
 
 ---
 
-## 🌐 Hệ thống Dữ liệu & Nhà cung cấp
+## Hệ thống Dữ liệu & Nhà cung cấp
 
 Orca-Lite hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ liệu khác nhau:
 
@@ -178,7 +178,7 @@ Orca-Lite hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ li
 
 ---
 
-## 🛡️ Bảo mật & Khả năng Chống chịu (Resilience)
+## Bảo mật & Khả năng Chống chịu (Resilience)
 
 1. **Phòng thủ SSRF (Server-Side Request Forgery) tại Webhooks:**
    - Kiểm tra định dạng URL nguồn tin cậy (Discord, Slack).
@@ -192,7 +192,7 @@ Orca-Lite hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ li
 
 ---
 
-## 🚀 Hướng dẫn Cài đặt & Khởi chạy (Quick Start)
+## Hướng dẫn Cài đặt & Khởi chạy (Quick Start)
 
 ### Yêu cầu hệ thống
 - **Node.js**: Phiên bản `>= 20.9.0` (Khuyên dùng Node 20 LTS hoặc 22).
@@ -224,7 +224,7 @@ Mở trình duyệt tại: **[http://localhost:3000](http://localhost:3000)**
 
 ---
 
-## ⚙️ Cấu hình Biến môi trường (.env)
+## Cấu hình Biến môi trường (.env)
 
 Tất cả các biến đều có cơ chế fallback tự động. Bạn chỉ cần cấu hình những dịch vụ mình có nhu cầu:
 
@@ -252,7 +252,7 @@ CRON_SECRET=your-cron-secret-key            # Khóa bảo vệ các tác vụ n�
 
 ---
 
-## 📦 Build & Triển khai Production
+## Build & Triển khai Production
 
 Dự án được cấu hình `output: "standalone"` trong `next.config.ts`, tạo ra artifact tối ưu cho Docker, Google Cloud Run, Vercel hoặc VPS.
 
@@ -269,10 +269,10 @@ npm run start
 
 ---
 
-## 📄 Giấy phép
+## Giấy phép
 
 Dự án được phân phối dưới giấy phép **[MIT License](LICENSE)**. Toàn quyền sử dụng, chỉnh sửa và triển khai cho mục đích học tập hoặc thương mại.
 
 <p align="center">
-  Phát triển với sự đồng hành của <strong>Orca Financial Team</strong> 🐋
+  Phát triển với sự đồng hành của <strong>Orca Financial Team</strong>
 </p>

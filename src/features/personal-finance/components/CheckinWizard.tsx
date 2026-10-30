@@ -30,7 +30,7 @@ import {
   PiggyBank,
   Check,
 } from 'lucide-react';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 
 interface CheckinWizardProps {
   currentPeriod: string;
@@ -303,21 +303,23 @@ export const CheckinWizard: React.FC<CheckinWizardProps> = ({
 
   return (
     <div className="bg-[#0b1530] border border-[#20366c] p-5 sm:p-6 rounded-2xl shadow-xl space-y-6">
-      {/* Wizard Header Bar with Mascot */}
+      {/* Wizard Header Bar */}
       <div className="flex flex-wrap items-center justify-between pb-4 border-b border-[#182852] gap-4">
         <div className="flex items-center gap-3.5">
-          <OrcaMascot mood="saving" size={56} />
+          <div className="shrink-0">
+            <OrcaMark size={32} />
+          </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <span>📝 Monthly Check-in Kỳ {selectedPeriod}</span>
+                <span>Monthly Check-in Kỳ {selectedPeriod}</span>
               </h2>
               <span className="bg-amber-950/60 text-amber-300 border border-amber-700/60 text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold">
                 ~5 PHÚT
               </span>
             </div>
             <p className="text-xs text-slate-300 mt-0.5">
-              Cùng bé Orca đi qua 5 bước nhỏ: Thu nhập & Thuế, Chi tiêu, Tài sản, Nợ và Mục tiêu nhen! 🐳
+              Thực hiện 5 bước: Thu nhập &amp; Thuế, Chi tiêu, Tài sản, Nợ và Mục tiêu.
             </p>
           </div>
         </div>

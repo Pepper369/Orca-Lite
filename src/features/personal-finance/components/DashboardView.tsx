@@ -7,7 +7,7 @@ import {
 } from '../types/finance.ts';
 import { OFFICIAL_MARKET_DATA } from '../engines/marketData.ts';
 import { QuickCashflowCalculator } from './QuickCashflowCalculator.tsx';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 import {
   TrendingUp,
   TrendingDown,
@@ -83,20 +83,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     ? 'caution'
     : 'saving';
 
-  // Cute conversational greeting from Bé Orca
+  // Overview greeting message
   const welcomeMessage = metrics.healthScore.total >= 80
-    ? `Bé Orca chào cậu nha! Điểm sức khỏe tài chính của cậu đạt tận ${metrics.healthScore.total}/100 lận nè, giỏi quá đi thôi! 🐳👑`
+    ? `Điểm sức khỏe tài chính đạt ${metrics.healthScore.total}/100.`
     : metrics.savingsRate >= 20
-    ? `Chào cậu nè! Tháng này cậu bỏ heo đất được ${metrics.savingsRate}% lương rồi đó, tuyệt vời ghê! 🐷✨`
-    : `Chào cậu! Bé Orca ở đây đồng hành cùng cậu giữ tiền và tính toán chi tiêu nhen! Cần gì cứ bấm bé nha! 💖`;
+    ? `Tỷ lệ tiết kiệm tháng này đạt ${metrics.savingsRate}% thu nhập.`
+    : `Quản lý ngân sách và theo dõi các chỉ số tài chính định kỳ.`;
 
   return (
     <div className="space-y-6">
-      {/* Cute Mascot Greeting Banner (Brighter & Decluttered) */}
+      {/* Overview Greeting Banner */}
       <div className="bg-gradient-to-r from-[#172d63] via-[#1f3c85] to-[#172e66] border border-sky-400/40 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 sm:gap-5">
         <div className="flex items-center gap-3 sm:gap-4">
           <div className="shrink-0 scale-90 sm:scale-100 origin-left">
-            <OrcaMascot mood={mascotMood} size={64} bubbleText={welcomeMessage} />
+            <OrcaMark size={40} />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -104,13 +104,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 KỲ SỔ SÁCH {currentSnapshot.period}
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-[11px] sm:text-xs text-sky-200 font-semibold">Bé Orca Finance</span>
+              <span className="text-[11px] sm:text-xs text-sky-200 font-semibold">ORCA Finance</span>
             </div>
             <h2 className="text-base sm:text-xl font-bold text-white mt-0.5">
-              Túi tiền của cậu hôm nay thế nào rồi nè?
+              Tổng quan Tài chính Cá nhân
             </h2>
             <p className="text-[11px] sm:text-xs text-sky-100 mt-1 hidden sm:block">
-              Cậu có thể nhập nhanh thu nhập ở bảng tính bên dưới hoặc bấm Check-in để cập nhật sổ nha! 🐳
+              {welcomeMessage} Nhập số liệu ở bảng tính bên dưới hoặc bấm Check-in để cập nhật sổ sách.
             </p>
           </div>
         </div>
@@ -121,7 +121,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={onNavigateToAskOrca}
               className="flex-1 sm:flex-initial justify-center px-3 sm:px-4 py-2 bg-gradient-to-r from-sky-500 via-sky-400 to-blue-500 hover:from-sky-400 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
             >
-              <span>💬 Hỏi Bé Orca AI</span>
+              <span>Hỏi ORCA AI</span>
             </button>
           )}
 
@@ -129,7 +129,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             onClick={onNavigateToCheckin}
             className="flex-1 sm:flex-initial justify-center px-3 sm:px-4 py-2 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
           >
-            <span>📝 Check-in <span className="hidden xs:inline">(~5 ph)</span></span>
+            <span>Check-in <span className="hidden xs:inline">(~5 ph)</span></span>
           </button>
         </div>
       </div>
@@ -138,13 +138,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between bg-[#152756] border border-[#2d4d98] px-3.5 sm:px-4 py-2.5 sm:py-3 rounded-2xl shadow-md">
           <div className="flex items-center gap-2">
-            <span className="text-base sm:text-lg">⚡</span>
             <div>
               <span className="text-[11px] sm:text-xs font-bold text-white tracking-wide uppercase">
                 BẢNG TÍNH DÒNG TIỀN (LIVE CALCULATOR)
               </span>
               <span className="text-xs text-sky-200 ml-2 hidden lg:inline">
-                · Gõ lương, thưởng, chi tiêu để bé Orca tính ngay thu nhập về ví!
+                · Nhập lương, thưởng, chi tiêu để tính thu nhập thực nhận và phân bổ dòng tiền
               </span>
             </div>
           </div>
@@ -172,7 +171,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center justify-between text-xs text-slate-200 mb-1">
               <span className="font-bold text-[10px] sm:text-[11px] uppercase tracking-wider text-sky-300 flex items-center gap-1 truncate">
-                <span>💎</span>
                 <span className="truncate">TÀI SẢN RÒNG</span>
               </span>
               <Wallet className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-amber-300 shrink-0" />
@@ -201,7 +199,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center justify-between text-xs text-slate-200 mb-1">
               <span className="font-bold text-[10px] sm:text-[11px] uppercase tracking-wider text-emerald-300 flex items-center gap-1 truncate">
-                <span>🐷</span>
                 <span className="truncate">TIẾT KIỆM KỲ NÀY</span>
               </span>
               <PiggyBank className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-emerald-300 shrink-0" />
@@ -223,8 +220,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center justify-between text-xs text-slate-200 mb-1">
               <span className="font-bold text-[10px] sm:text-[11px] uppercase tracking-wider text-amber-300 flex items-center gap-1 truncate">
-                <span>🌟</span>
-                <span className="truncate">SỨC KHỎE VÍ</span>
+                <span className="truncate">SỨC KHỎE TÀI CHÍNH</span>
               </span>
               <HeartPulse className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-rose-300 shrink-0" />
             </div>
@@ -257,7 +253,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="flex items-center justify-between text-xs text-slate-200 mb-1">
               <span className="font-bold text-[10px] sm:text-[11px] uppercase tracking-wider text-sky-300 flex items-center gap-1 truncate">
-                <span>🛡️</span>
                 <span className="truncate">QUỸ DỰ PHÒNG</span>
               </span>
               <Clock className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-sky-300 shrink-0" />
@@ -274,30 +269,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="flex items-center justify-between text-[10px] sm:text-xs pt-1.5 sm:pt-2 border-t border-[#233f82] mt-1 sm:mt-2 font-mono">
             <span className={`font-medium truncate ${metrics.emergencyFundMonths >= 3.0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {metrics.emergencyFundMonths >= 3.0 ? '✓ Đạt an toàn' : '⚠️ Cần thêm'}
+              {metrics.emergencyFundMonths >= 3.0 ? 'Đạt an toàn' : 'Cần thêm'}
             </span>
             <span className="text-slate-300 text-[9px] sm:text-[11px] hidden xs:inline">Chuẩn 3-6 th</span>
           </div>
         </div>
       </div>
 
-      {/* CUTE AI CALLOUT BANNER - Bé Orca AI phân bổ tài chính cuộc sống */}
+      {/* AI CALLOUT BANNER - ORCA AI phân bổ tài chính */}
       {onNavigateToAskOrca && (
         <div className="bg-gradient-to-r from-[#17306b] via-[#1f3e87] to-[#16316e] border border-sky-400/40 p-5 rounded-3xl shadow-xl flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <OrcaMascot mood="waving" size={72} showBadgeBackground />
+            <div className="shrink-0">
+              <OrcaMark size={40} />
+            </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-400/30 uppercase tracking-wide font-mono">
-                  ✨ TÍNH NĂNG MỚI: BÉ ORCA AI
+                  TÍNH NĂNG: ORCA AI
                 </span>
-                <span className="text-xs text-sky-200">· Trợ lý tài chính cuộc sống</span>
+                <span className="text-xs text-sky-200">· Trợ lý tài chính cá nhân</span>
               </div>
               <h3 className="text-sm sm:text-base font-bold text-white mt-0.5">
-                Cậu cần tư vấn phân bổ tiền lương, thưởng hay mục tiêu mua sắm?
+                Tư vấn phân bổ tiền lương, thưởng và kế hoạch chi tiêu
               </h3>
               <p className="text-xs text-sky-100 mt-0.5">
-                Bé Orca dùng Gemini AI tính toán con số thực tế theo hoàn cảnh sống tại Việt Nam nè! 🐳
+                Mô hình ORCA AI phân tích và đưa ra giải pháp tài chính sát với hoàn cảnh thực tế.
               </p>
             </div>
           </div>
@@ -307,7 +304,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={onNavigateToAskOrca}
               className="px-4 py-2 bg-gradient-to-r from-sky-400 to-blue-500 hover:from-sky-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer hover:scale-105 flex items-center gap-1.5"
             >
-              <span>💬 Trò chuyện cùng Bé Orca</span>
+              <span>Trò chuyện cùng ORCA AI</span>
               <ArrowUpRight className="w-4 h-4" />
             </button>
           </div>
@@ -317,8 +314,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* GLOBAL FINANCE HERO WIDGET */}
       <div className="bg-gradient-to-r from-[#0d1f47] via-[#132c66] to-[#0a1838] border border-sky-500/30 p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-500/20 border border-sky-400/40 text-2xl shadow-inner">
-            🌍
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-500/20 border border-sky-400/40 text-sky-300 shadow-inner">
+            <Globe className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -354,7 +351,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center justify-between pb-3 mb-4 border-b border-[#233f82]">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
-                <span>📈</span>
                 <span>BIẾN ĐỘNG TÀI SẢN RÒNG VÀ NỢ VAY QUA CÁC KỲ</span>
               </h3>
               <p className="text-[11px] text-sky-200">
@@ -433,7 +429,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <div className="pb-3 mb-3 border-b border-[#233f82]">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100 flex items-center gap-1.5">
-                <span>🍰</span>
                 <span>CƠ CẤU CHI TIÊU THÁNG</span>
               </h3>
               <p className="text-[11px] text-sky-200">
@@ -504,12 +499,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Quick status box */}
           <div className="mt-4 p-3.5 bg-[#172a5a] border border-[#2d4d98] rounded-xl text-xs">
             <div className="text-slate-100 font-bold mb-1 flex items-center gap-1.5">
-              <span>🐳 Bé Orca mách nhỏ:</span>
+              <span>Khuyến nghị ORCA:</span>
             </div>
             <p className="text-sky-100 text-[11px] leading-relaxed">
               {metrics.fixedCostRatio <= 65
-                ? 'Dòng tiền của cậu đang rất thảnh thơi và an toàn, tiếp tục phát huy nhen!'
-                : 'Tháng này chi cố định hơi nhỉnh hơn 65% một xíu. Cùng bé Orca kiểm tra lại nha!'}
+                ? 'Dòng tiền thảnh thơi và an toàn, tiếp tục duy trì tỷ lệ này.'
+                : 'Chi phí cố định đang vượt mức 65% thu nhập. Nên rà soát và tối ưu các khoản chi bắt buộc.'}
             </p>
           </div>
         </div>
@@ -521,10 +516,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
               <span className="w-2.5 h-2.5 bg-amber-400 rounded-full"></span>
-              LỜI KHUYÊN ƯU TIÊN TỪ BÉ ORCA (6 PHẦN ĐỊNH LƯỢNG)
+              LỜI KHUYÊN ƯU TIÊN (6 PHẦN ĐỊNH LƯỢNG)
             </h3>
             <p className="text-[11px] text-sky-200">
-              Có con số và thời hạn rõ ràng để cậu dễ dàng làm theo nhen!
+              Định lượng con số và thời hạn để thực hiện kế hoạch.
             </p>
           </div>
 
@@ -559,7 +554,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           : 'border-emerald-400 text-emerald-200 bg-emerald-950/70'
                       }`}
                     >
-                      {ins.severity === 'critical' ? '⚡ ƯU TIÊN SỐ 1' : '⚠️ LƯU Ý'}
+                      {ins.severity === 'critical' ? 'ƯU TIÊN SỐ 1' : 'LƯU Ý'}
                     </span>
                     <span className="text-[10px] font-mono text-slate-300">MÃ: {ins.ruleCode}</span>
                   </div>
@@ -603,7 +598,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         : 'bg-[#1b326e] text-slate-200 hover:text-white border-[#335bb5]'
                     }`}
                   >
-                    {ins.status === 'completed' ? '✓ Đã hoàn thành' : 'Đánh dấu đã làm'}
+                    {ins.status === 'completed' ? 'Đã hoàn thành' : 'Đánh dấu đã làm'}
                   </button>
                 </div>
               </div>

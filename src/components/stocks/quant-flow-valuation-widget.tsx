@@ -350,7 +350,7 @@ export function StockQuantFlowValuationWidget({ symbol }: { symbol: string }) {
           )}
 
           <div className="rounded-lg bg-bg-surface/80 p-2 text-[11px] text-text-secondary border border-border/40">
-            💡 <strong>Tín hiệu dòng tiền:</strong>{" "}
+            <strong>Tín hiệu dòng tiền:</strong>{" "}
             {flowChartData && flowChartData.latestCumBil > 0
               ? `Dòng tiền tích lũy lũy kế đang dương (+${fmtNum(flowChartData.latestCumBil)} Tỷ), thể hiện tổ chức và dòng tiền lớn đang tiếp tục gom giữ cổ phiếu.`
               : `Dòng tiền tích lũy đang có dấu hiệu hạ nhiệt, cần quan sát thêm lực cầu tại các vùng hỗ trợ kỹ thuật.`}

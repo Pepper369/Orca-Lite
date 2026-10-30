@@ -135,7 +135,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
                       )}
                       {goal.status === 'completed' && (
                         <span className="bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-mono px-2 py-0.5">
-                          ✓ ĐÃ HOÀN THÀNH
+                          ĐÃ HOÀN THÀNH
                         </span>
                       )}
                     </div>
@@ -451,7 +451,7 @@ export const PlanningView: React.FC<PlanningViewProps> = ({
                 </div>
                 <div className="mt-2 text-[10px] text-emerald-400 font-semibold">
                   {projectionRes.retirement.isSufficient
-                    ? '✓ Quỹ hưu trí dự phóng đáp ứng đủ nhu cầu sinh hoạt cơ bản.'
+                    ? 'Quỹ hưu trí dự phóng đáp ứng đủ nhu cầu sinh hoạt cơ bản.'
                     : 'Cần nâng tỷ lệ tích lũy đầu tư để bù đắp lạm phát dài hạn.'}
                 </div>
               </div>

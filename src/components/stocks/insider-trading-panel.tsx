@@ -111,7 +111,7 @@ export const InsiderTradingPanel = memo(function InsiderTradingPanel({ symbol }:
           <div className="rounded-xl border border-border-subtle bg-surface-base p-3">
             <span className="text-[11px] text-text-muted">Tín hiệu Dòng tiền Lãnh đạo</span>
             <div className="mt-1 text-xs font-bold text-text-primary truncate">
-              {summary?.signal === "NET_ACCUMULATION" ? "Gom Tích Lũy 🟢" : summary?.signal === "NET_DISTRIBUTION" ? "Chốt Lời / Hạ Tỷ Trọng 🔴" : "Cân Bằng ⚪"}
+              {summary?.signal === "NET_ACCUMULATION" ? "Gom Tích Lũy" : summary?.signal === "NET_DISTRIBUTION" ? "Chốt Lời / Hạ Tỷ Trọng" : "Cân Bằng"}
             </div>
           </div>
         </div>

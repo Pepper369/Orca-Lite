@@ -151,7 +151,7 @@ export function candleBiasFromPatterns(patterns: DetectedCandlePattern[]): {
       : (topBull ?? topBear);
   if (top) {
     reasons.push(
-      `Nến ${top.nameVi} (${top.score}đ${top.volumeConfirmed ? ", KL✓" : ""}${top.ageBars === 0 ? ", mới" : ""})`,
+      `Nến ${top.nameVi} (${top.score}đ${top.volumeConfirmed ? ", KL đạt" : ""}${top.ageBars === 0 ? ", mới" : ""})`,
     );
   }
   if (nBull >= 2 && nBear === 0) reasons.push(`${nBull} mẫu tăng chất lượng`);

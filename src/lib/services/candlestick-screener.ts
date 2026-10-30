@@ -423,7 +423,7 @@ export async function runCandlestickPatternAlerts(): Promise<{
         description:
           `${dirLabel} — ${p.nameVi} (${p.name})\n` +
           `Giá ${priceStr} (${chgStr}) · điểm ${p.score}` +
-          (p.volumeConfirmed ? " · volume ✓" : "") +
+          (p.volumeConfirmed ? " · volume xác nhận" : "") +
           `\n${p.description}\nXác nhận: ${p.confirmation}`,
         color,
         username: "Orca Alerts",

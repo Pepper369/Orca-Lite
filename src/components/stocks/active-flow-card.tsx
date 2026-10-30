@@ -167,11 +167,11 @@ export const ActiveFlowCard = memo(function ActiveFlowCard({ symbol }: { symbol:
             <span className="text-text-muted block text-[10px]">Áp lực thị trường</span>
             <span className="font-bold text-text-primary font-sans">
               {data.pressureStatus === "STRONG_BUY"
-                ? "Mua Áp Đảo 🔥"
+                ? "Mua Áp Đảo"
                 : data.pressureStatus === "BUY_DOMINANT"
                 ? "Bên Mua Chiếm Ưu Thế"
                 : data.pressureStatus === "STRONG_SELL"
-                ? "Bán Tháo Mạnh ⚠️"
+                ? "Bán Tháo Mạnh"
                 : data.pressureStatus === "SELL_DOMINANT"
                 ? "Bên Bán Chiếm Ưu Thế"
                 : "Giằng Co Cân Bằng"}

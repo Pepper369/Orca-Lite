@@ -133,11 +133,11 @@ export function PineScriptEditorModal({ symbol, isOpen, onClose, onExecutePlots 
             >
               {output.ok ? (
                 <div>
-                  ✓ Thành công: Đã tính {output.plots.length} chuỗi plot (
+                  Thành công: Đã tính {output.plots.length} chuỗi plot (
                   {output.plots.map((p) => p.title).join(", ")}) trên {symbol}.
                 </div>
               ) : (
-                <div>⚠ Lỗi: {output.error}</div>
+                <div>Lỗi: {output.error}</div>
               )}
             </div>
           )}

@@ -235,7 +235,7 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
       autoRenew: true,
       isEssential,
       color: isEssential ? '#38bdf8' : '#ec4899',
-      icon: '⚡',
+      icon: '',
     };
     setCustomSubs((prev) => [newSub, ...prev]);
   };
@@ -260,12 +260,10 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
 
               {useCustomAmounts ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300">
-                  <span>✏️</span>
                   <span>Chế độ: Số tiền Tự thiết lập</span>
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 bg-slate-800/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-300">
-                  <span>📁</span>
                   <span>Chế độ: Đồng bộ theo Sổ sách kỳ</span>
                 </span>
               )}
@@ -287,7 +285,7 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/25 hover:from-sky-400 hover:to-blue-500 transition-all cursor-pointer"
             >
               <SlidersHorizontal className="h-4 w-4" />
-              <span>{showConfigDrawer ? 'Đóng bảng thiết lập' : '✏️ Tự thiết lập Số tiền của tôi'}</span>
+              <span>{showConfigDrawer ? 'Đóng bảng thiết lập' : 'Tự thiết lập Số tiền của tôi'}</span>
             </button>
 
             {useCustomAmounts && (
@@ -513,7 +511,7 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               {jarsResult.disciplineScore}/100
             </div>
             <div className="text-[10px] text-slate-300">
-              {jarsResult.overspentJarsCount === 0 ? '✓ Cân đối chuẩn' : `${jarsResult.overspentJarsCount} lọ vượt chi`}
+              {jarsResult.overspentJarsCount === 0 ? 'Cân đối chuẩn' : `${jarsResult.overspentJarsCount} lọ vượt chi`}
             </div>
           </div>
 
@@ -523,7 +521,7 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               {ynabResult.ageOfMoneyDays} ngày
             </div>
             <div className="text-[10px] text-slate-300">
-              {ynabResult.ageOfMoneyDays >= 30 ? '✓ Đệm an toàn' : '⚠️ Cần đệm 30d'}
+              {ynabResult.ageOfMoneyDays >= 30 ? 'Đệm an toàn' : 'Cần đệm 30 ngày'}
             </div>
           </div>
 
@@ -559,7 +557,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                 : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
             }`}
           >
-            <span>🏺</span>
             <span>6 Chiếc Lọ (Money Lover)</span>
           </button>
 
@@ -572,7 +569,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                 : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
             }`}
           >
-            <span>⏳</span>
             <span>Age of Money &amp; Zero-Based (YNAB)</span>
           </button>
 
@@ -585,7 +581,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                 : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
             }`}
           >
-            <span>🏛️</span>
             <span>Tháp Tài Sản &amp; FIRE (Empower)</span>
           </button>
 
@@ -598,7 +593,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                 : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
             }`}
           >
-            <span>📡</span>
             <span>Thuê bao &amp; Runway (Copilot Money)</span>
           </button>
         </div>
@@ -638,7 +632,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="text-2xl">{jar.icon}</span>
                       <div>
                         <h4 className="text-sm font-bold text-white">{jar.nameVi}</h4>
                         <span className="text-[10px] text-slate-400 font-mono">Tỷ lệ: {jar.targetPercent}%</span>
@@ -653,7 +646,7 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                           : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       }`}
                     >
-                      {isOver ? '⚠️ Lạm chi' : isWarn ? '⚡ Sắp chạm trần' : '✓ An toàn'}
+                      {isOver ? 'Lạm chi' : isWarn ? 'Sắp chạm trần' : 'An toàn'}
                     </span>
                   </div>
 
@@ -794,7 +787,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <span>🏛️</span>
                     <span>Tháp Tài Sản 4 Tầng (Wealth Pyramid)</span>
                   </h3>
                   <p className="text-xs text-slate-400">Mô hình phân bổ tài sản vững chãi theo chuẩn quốc tế</p>
@@ -815,7 +807,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-lg">{tier.icon}</span>
                         <div>
                           <div className="text-xs font-bold text-white">{tier.nameVi}</div>
                           <div className="text-[10.5px] text-slate-400">{tier.descriptionVi}</div>
@@ -968,7 +959,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                     className="flex items-center justify-between rounded-xl border border-[#1b2f64] bg-[#121f47] p-3 text-xs"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="text-xl">{sub.icon}</span>
                       <div>
                         <div className="font-bold text-white">{sub.name}</div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-2">

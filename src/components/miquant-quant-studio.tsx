@@ -33,6 +33,8 @@ import {
   Flame,
   Award,
   CheckCircle2,
+  Check,
+  X,
 } from "lucide-react";
 import type {
   RankedStockItem,
@@ -1345,8 +1347,8 @@ export function OQuantStudio() {
                       key={idx}
                       className="flex items-center gap-2 rounded-xl border border-border/50 bg-bg-base/50 px-3 py-2 text-xs text-text-secondary"
                     >
-                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[10px] font-bold text-emerald-400">
-                        ✓
+                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+                        <Check className="size-3 stroke-[2.5]" />
                       </span>
                       <span>{rule}</span>
                     </div>
@@ -1470,8 +1472,9 @@ export function OQuantStudio() {
               <button
                 onClick={() => setInspectSymbol(null)}
                 className="rounded-lg p-1 text-text-muted hover:bg-bg-base hover:text-text-primary"
+                aria-label="Đóng"
               >
-                ✕
+                <X className="size-4" />
               </button>
             </div>
 

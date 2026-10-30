@@ -109,10 +109,10 @@ export async function getStockBusinessGoals(
 
       if (profitPct >= 100 || revPct >= 100) {
         status = "EXCEEDED";
-        verdictVi = "Hoàn thành và vượt chỉ tiêu kế hoạch kinh doanh năm 🌟";
+        verdictVi = "Hoàn thành và vượt chỉ tiêu kế hoạch kinh doanh năm";
       } else if (profitPct < 70) {
         status = "BEHIND";
-        verdictVi = "Tiến độ lợi nhuận chậm hơn kỳ vọng, cần bứt phá các quý cuối năm ⚠️";
+        verdictVi = "Tiến độ lợi nhuận chậm hơn kỳ vọng, cần bứt phá các quý cuối năm";
       }
 
       const currentYear = new Date().getFullYear();

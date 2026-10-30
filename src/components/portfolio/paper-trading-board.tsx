@@ -211,13 +211,13 @@ export function PaperTradingBoard() {
   const stockPct = metrics.nav > 0 ? (metrics.stockValue / metrics.nav) * 100 : 0;
 
   const handleSharePerformance = () => {
-    const text = `🌊 Orca-Lite Paper Trading (500M)
+    const text = `Orca-Lite Paper Trading (500M)
 • NAV: ${fmtVnd(metrics.nav)} (${fmtPct(metrics.totalPnlPct)})
 • Tiền mặt: ${fmtVnd(account.availableCash)}
 • Cổ phiếu: ${fmtVnd(metrics.stockValue)} (${metrics.holdings.length} mã)
 • Lãi/lỗ tạm tính: ${metrics.unrealizedPnl >= 0 ? "+" : ""}${fmtVnd(metrics.unrealizedPnl)}
 • Lãi đã chốt: ${metrics.realizedPnl >= 0 ? "+" : ""}${fmtVnd(metrics.realizedPnl)} (Winrate: ${metrics.winRate.toFixed(0)}%)
-👉 Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
+Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setOrderNotice({ type: "success", message: "Đã sao chép tóm tắt thành tích danh mục vào Clipboard!" });

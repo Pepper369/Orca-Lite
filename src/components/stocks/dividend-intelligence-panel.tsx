@@ -144,7 +144,7 @@ export const DividendIntelligencePanel = memo(function DividendIntelligencePanel
               <Award className="size-4 text-amber-400" />
             </div>
             <p className="mt-1 text-[10px] text-text-muted">
-              {metrics && metrics.consistencyScore >= 80 ? "Chi trả liên tục 5 năm 🛡️" : "Không đều hoặc giữ lại vốn"}
+              {metrics && metrics.consistencyScore >= 80 ? "Chi trả liên tục 5 năm" : "Không đều hoặc giữ lại vốn"}
             </p>
           </div>
         </div>

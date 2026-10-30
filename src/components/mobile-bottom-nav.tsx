@@ -107,7 +107,7 @@ export function MobileBottomNav({
     },
     {
       id: "ask_orca",
-      label: "Bé Orca AI",
+      label: "Hỏi ORCA AI",
       href: "/personal-finance#ask_orca",
       icon: Sparkles,
       active: activePersonalTab === "ask_orca",

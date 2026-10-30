@@ -49,7 +49,6 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">⚖️</span>
             <h3 className="text-sm font-bold text-foreground">
               Định Giá Basis & Cơ Hội Arbitrage Phái Sinh HNX ({data.symbol})
             </h3>
@@ -118,7 +117,7 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
         }`}
       >
         <div className="flex items-center gap-2 font-bold mb-1">
-          <span>{isArbitrageOpportunity ? "⚡ Tín Hiệu Arbitrage Khả Thi:" : "ℹ️ Đánh Giá Trạng Thái Thị Trường:"}</span>
+          <span>{isArbitrageOpportunity ? "Tín Hiệu Arbitrage Khả Thi:" : "Đánh Giá Trạng Thái Thị Trường:"}</span>
           <span className="text-primary">{data.arbitrageRecommendation.actionTitleVi}</span>
         </div>
         <p className="text-[11px]">{data.arbitrageRecommendation.description}</p>

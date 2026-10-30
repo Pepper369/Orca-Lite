@@ -9,7 +9,7 @@ import {
   Sparkles,
   Heart,
 } from 'lucide-react';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 
 interface HeaderProps {
   currentPeriod: string;
@@ -37,31 +37,30 @@ export const Header: React.FC<HeaderProps> = ({
   onStartCheckin,
 }) => {
   const tabs = [
-    { id: 'dashboard', label: '🏠 Tổng quan' },
-    { id: 'global_finance', label: '🌍 Tinh hoa Tài chính (6 Lọ · YNAB · FIRE)' },
-    { id: 'ask_orca', label: '💬 Bé Orca AI Tư Vấn' },
-    { id: 'cashflow_calc', label: '⚡ Tính dòng tiền & Thuế' },
-    { id: 'checkin', label: '📝 Monthly Check-in' },
-    { id: 'analytics', label: '📊 Phân tích tài chính' },
-    { id: 'planning', label: '🎯 Kế hoạch & Hưu trí' },
-    { id: 'advice', label: '💡 Lời khuyên Bé Orca' },
-    { id: 'report', label: '📄 Báo cáo & PDF' },
-    { id: 'market', label: '⚙️ Giả định & Thị trường' },
-    { id: 'privacy', label: '🔒 Quyền riêng tư' },
+    { id: 'dashboard', label: 'Tổng quan' },
+    { id: 'global_finance', label: 'Tinh hoa Tài chính (6 Lọ · YNAB · FIRE)' },
+    { id: 'ask_orca', label: 'ORCA AI Tư Vấn' },
+    { id: 'cashflow_calc', label: 'Tính dòng tiền & Thuế' },
+    { id: 'checkin', label: 'Monthly Check-in' },
+    { id: 'analytics', label: 'Phân tích tài chính' },
+    { id: 'planning', label: 'Kế hoạch & Hưu trí' },
+    { id: 'advice', label: 'Lời khuyên tài chính' },
+    { id: 'report', label: 'Báo cáo & PDF' },
+    { id: 'market', label: 'Giả định & Thị trường' },
+    { id: 'privacy', label: 'Quyền riêng tư' },
   ];
 
   return (
     <header className="border-b border-[#28468c] bg-[#101e47]/95 backdrop-blur-md sticky top-0 z-20 shadow-lg">
-      {/* Friendly, cute top bar — desktop only to maximize mobile vertical space */}
+      {/* Top command info bar */}
       <div className="hidden sm:flex border-b border-[#1c326c] px-4 py-2 items-center justify-between text-xs text-slate-200">
         <div className="flex items-center gap-2.5">
           <span className="text-sky-300 font-bold tracking-wide flex items-center gap-1.5 text-xs">
-            <span>🐳</span>
-            <span>Bé Orca Finance</span>
+            <span>ORCA Finance</span>
           </span>
           <span className="text-slate-500">·</span>
           <span className="text-slate-300 text-[11px]">
-            Cùng cậu quản lý túi tiền mỗi ngày nhen! ✨
+            Hệ thống quản lý tài chính cá nhân và dòng tiền
           </span>
         </div>
 
@@ -69,11 +68,11 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2">
             {isDemo ? (
               <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2.5 py-0.5 text-[10px] font-mono rounded-full font-bold">
-                ⭐ Dữ liệu mẫu (Demo)
+                Dữ liệu mẫu (Demo)
               </span>
             ) : (
               <span className="bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 px-2.5 py-0.5 text-[10px] font-mono rounded-full font-bold">
-                🌱 Sổ tay của bạn
+                Sổ tay cá nhân
               </span>
             )}
 
@@ -89,20 +88,20 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Main command bar with adorable Bé Orca */}
+      {/* Main command bar */}
       <div className="px-3 sm:px-4 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="shrink-0 scale-90 sm:scale-100 origin-left">
-            <OrcaMascot mood="waving" size={42} />
+            <OrcaMark size={32} />
           </div>
           
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <h1 className="text-sm sm:text-lg font-bold text-white tracking-tight leading-tight truncate">
-                Bé Orca Personal Finance
+                ORCA Personal Finance
               </h1>
               <span className="text-[10px] sm:text-[11px] font-bold text-amber-300 bg-amber-400/20 px-1.5 sm:px-2 py-0.5 rounded-full border border-amber-400/30 font-mono shrink-0">
-                Thuế 2026 ✨
+                Thuế 2026
               </span>
               {isDemo && (
                 <span className="sm:hidden text-[9px] font-mono text-amber-300 bg-amber-400/15 px-1.5 py-0.5 rounded-full border border-amber-400/30">
@@ -111,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
             <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5 hidden sm:block">
-              Tính thuế TNCN 2026, dòng tiền và nuôi heo đất cùng Bé Orca nhen! 🐳💖
+              Tính thuế TNCN 2026, tối ưu dòng tiền và theo dõi tài sản
             </p>
           </div>
         </div>

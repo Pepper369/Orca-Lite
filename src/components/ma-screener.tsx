@@ -12,11 +12,11 @@ type SignalFilter = "ALL" | "GOLDEN_CROSS" | "BULLISH_ALIGN" | "BULLISH" | "MA_S
 
 const SIGNAL_TABS: { id: SignalFilter; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "ALL", label: "Tất cả tín hiệu", icon: <Sparkles className="size-3.5 text-accent-primary" />, desc: "Toàn bộ cổ phiếu" },
-  { id: "GOLDEN_CROSS", label: "Giao cắt Vàng 🌟", icon: <TrendingUp className="size-3.5 text-amber-400" />, desc: "MA20/50 cắt lên MA50/100/200" },
-  { id: "BULLISH_ALIGN", label: "Trật tự xu hướng tăng 🚀", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Giá > MA10 > MA20 > MA50 > MA200" },
-  { id: "BULLISH", label: "Tất cả đà tăng 📈", icon: <TrendingUp className="size-3.5 text-blue-400" />, desc: "Mọi tín hiệu tăng giá MA" },
-  { id: "MA_SQUEEZE", label: "Nén chặt chờ nổ 🎯", icon: <Zap className="size-3.5 text-purple-400" />, desc: "MA co thắt nén chuẩn bị bung" },
-  { id: "DEATH_CROSS", label: "Giao cắt Tử thần ⚠️", icon: <AlertTriangle className="size-3.5 text-rose-400" />, desc: "MA ngắn cắt xuống MA dài" },
+  { id: "GOLDEN_CROSS", label: "Giao cắt Vàng", icon: <TrendingUp className="size-3.5 text-amber-400" />, desc: "MA20/50 cắt lên MA50/100/200" },
+  { id: "BULLISH_ALIGN", label: "Trật tự xu hướng tăng", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Giá > MA10 > MA20 > MA50 > MA200" },
+  { id: "BULLISH", label: "Tất cả đà tăng", icon: <TrendingUp className="size-3.5 text-blue-400" />, desc: "Mọi tín hiệu tăng giá MA" },
+  { id: "MA_SQUEEZE", label: "Nén chặt chờ nổ", icon: <Zap className="size-3.5 text-purple-400" />, desc: "MA co thắt nén chuẩn bị bung" },
+  { id: "DEATH_CROSS", label: "Giao cắt Tử thần", icon: <AlertTriangle className="size-3.5 text-rose-400" />, desc: "MA ngắn cắt xuống MA dài" },
 ];
 
 function RegimeBadge({ regime }: { regime: MaRegime }) {
@@ -24,37 +24,37 @@ function RegimeBadge({ regime }: { regime: MaRegime }) {
     case "GOLDEN_CROSS":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-400 whitespace-nowrap shadow-sm">
-          <span>🌟</span> Golden Cross
+          Golden Cross
         </span>
       );
     case "BULLISH_ALIGNMENT":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold text-emerald-400 whitespace-nowrap shadow-sm">
-          <span>🚀</span> Kênh tăng MA
+          Kênh tăng MA
         </span>
       );
     case "BULLISH_MOMENTUM":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[11px] font-semibold text-blue-400 whitespace-nowrap">
-          <span>📈</span> Đà tăng ngắn
+          Đà tăng ngắn
         </span>
       );
     case "MA_SQUEEZE":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[11px] font-semibold text-purple-400 whitespace-nowrap">
-          <span>🎯</span> MA Nén chặt
+          MA Nén chặt
         </span>
       );
     case "DEATH_CROSS":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[11px] font-bold text-rose-400 whitespace-nowrap">
-          <span>⚠️</span> Death Cross
+          Death Cross
         </span>
       );
     case "BEARISH_ALIGNMENT":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-rose-900/30 border border-rose-800/40 px-2 py-0.5 text-[11px] font-medium text-rose-400 whitespace-nowrap">
-          <span>🔴</span> Kênh giảm điểm
+          Kênh giảm điểm
         </span>
       );
     default:

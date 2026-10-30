@@ -57,7 +57,6 @@ export function ConsensusUpsideCard({ symbol }: { symbol: string }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">🎯</span>
             <h3 className="text-sm font-bold text-foreground">
               Định Giá Mục Tiêu Đồng Thuận (Consensus Target & Upside)
             </h3>
@@ -159,7 +158,7 @@ export function ConsensusUpsideCard({ symbol }: { symbol: string }) {
                     rel="noopener noreferrer"
                     className="px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 text-[11px] font-medium flex items-center gap-1 transition-colors"
                   >
-                    <span>📄</span> PDF
+                    PDF
                   </a>
                 )}
               </div>

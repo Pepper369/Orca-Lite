@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Insight } from '../types/finance.ts';
-import { OrcaMascot } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 import {
   CheckCircle2,
   XCircle,
@@ -28,23 +28,21 @@ export const AdviceView: React.FC<AdviceViewProps> = ({ insights, onToggleStatus
   });
 
   const completedCount = insights.filter((i) => i.status === 'completed').length;
-  const mascotMood = completedCount >= 2 ? 'cheering' : 'saving';
-  const mascotBubble = completedCount > 0
-    ? `Oa! Cậu đã hoàn thành ${completedCount} việc rồi nè! Bé Orca siêu tự hào về cậu luôn đó nha! 🐳🎉`
-    : `Bé Orca đã chọn lọc 5 điều quan trọng nhất cho cậu nè! Cùng làm từng việc một với bé để túi tiền luôn rủng rỉnh nhen! 💖`;
 
   return (
     <div className="space-y-6">
-      {/* Header bar with Mascot */}
+      {/* Header bar */}
       <div className="bg-[#142552] border border-[#2b4b96] p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <OrcaMascot mood={mascotMood} size={84} bubbleText={mascotBubble} />
+          <div className="shrink-0">
+            <OrcaMark size={36} />
+          </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <span>💡 Lời Khuyên Hành Động Cùng Bé Orca</span>
+              <span>Lời Khuyên Tài Chính & Hành Động</span>
             </h2>
             <p className="text-xs text-sky-200 mt-1">
-              Mỗi lời khuyên có số tiền và thời hạn rõ ràng để cậu dễ dàng làm theo từng bước nhen! 🐳
+              Mỗi lời khuyên có số tiền và thời hạn rõ ràng để thực hiện từng bước.
             </p>
           </div>
         </div>
@@ -112,10 +110,10 @@ export const AdviceView: React.FC<AdviceViewProps> = ({ insights, onToggleStatus
                     }`}
                   >
                     {ins.severity === 'critical'
-                      ? '⚡ ƯU TIÊN 1: RỦI RO CAO'
+                      ? 'ƯU TIÊN 1: RỦI RO CAO'
                       : ins.severity === 'warning'
-                      ? '⚠️ CẢNH BÁO CẦN LƯU Ý'
-                      : '🌱 TÍCH LŨY TĂNG TRƯỞNG'}
+                      ? 'CẢNH BÁO CẦN LƯU Ý'
+                      : 'TÍCH LŨY TĂNG TRƯỞNG'}
                   </span>
                   <h3 className="text-sm font-bold text-white">{ins.title}</h3>
                 </div>
@@ -156,7 +154,7 @@ export const AdviceView: React.FC<AdviceViewProps> = ({ insights, onToggleStatus
                 <div className="space-y-3">
                   <div className="bg-[#081124] border border-[#1a2d5a] p-3.5 rounded-xl">
                     <span className="text-amber-400 font-bold block mb-1 flex items-center gap-1">
-                      <span>✨ 3. HÀNH ĐỘNG CỤ THỂ BẠN NÊN LÀM:</span>
+                      <span>3. HÀNH ĐỘNG CỤ THỂ BẠN NÊN LÀM:</span>
                     </span>
                     <p className="text-white leading-relaxed font-sans font-medium">{ins.content.action}</p>
                   </div>
@@ -191,7 +189,7 @@ export const AdviceView: React.FC<AdviceViewProps> = ({ insights, onToggleStatus
                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-600 rounded-xl transition-all cursor-pointer font-bold"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>Đánh dấu đã thực hiện xong 🎉</span>
+                    <span>Đánh dấu đã thực hiện xong</span>
                   </button>
                 ) : (
                   <button

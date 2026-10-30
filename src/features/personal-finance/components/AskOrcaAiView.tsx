@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MonthlySnapshot, FinanceProfile } from '../types/finance.ts';
-import { OrcaMascot, MascotMood } from './OrcaMascot.tsx';
+import { OrcaMark } from '@/components/logo';
 import { formatVND } from '../utils/formatters.ts';
 import {
   Send,
@@ -30,7 +30,6 @@ interface ChatMessage {
   sender: 'user' | 'orca';
   text: string;
   timestamp: string;
-  mood?: MascotMood;
 }
 
 interface AskOrcaAiViewProps {
@@ -42,34 +41,34 @@ interface AskOrcaAiViewProps {
 
 const PRESET_QUESTIONS = [
   {
-    category: '💰 Lương & Chi tiêu',
+    category: 'Lương & Chi tiêu',
     label: 'Lương thực nhận của mình nên chia 50/30/20 ra sao?',
-    question: 'Dựa trên mức lương thực nhận và chi tiêu thực tế hiện tại của mình trong sổ, Bé Orca hãy tính bảng phân bổ 50/30/20 chi tiết đến từng đồng VND và chỉ ra khoản chi nào của mình đang vượt chuẩn nha!',
+    question: 'Dựa trên mức lương thực nhận và chi tiêu thực tế hiện tại của mình trong sổ, hãy tính bảng phân bổ 50/30/20 chi tiết đến từng đồng VND và chỉ ra khoản chi nào của mình đang vượt chuẩn!',
   },
   {
-    category: '💰 Lương & Chi tiêu',
+    category: 'Lương & Chi tiêu',
     label: 'Quy tắc 6 chiếc lọ (JARS) áp dụng vào mình thế nào?',
-    question: 'Bé Orca hãy chia nhỏ thu nhập hiện tại của mình thành 6 chiếc lọ (JARS) với số tiền VND cụ thể cho từng lọ, và so sánh với các khoản chi cố định mình đang trả mỗi tháng nhen!',
+    question: 'Hãy chia nhỏ thu nhập hiện tại của mình thành 6 chiếc lọ (JARS) với số tiền VND cụ thể cho từng lọ, và so sánh với các khoản chi cố định mình đang trả mỗi tháng!',
   },
   {
-    category: '🎁 Thưởng & Tiền nhàn rỗi',
+    category: 'Thưởng & Tiền nhàn rỗi',
     label: 'Vừa nhận thưởng 20 triệu nên phân bổ thế nào?',
-    question: 'Mình vừa nhận được khoản thưởng 20 triệu đồng. Nhìn vào tình trạng quỹ khẩn cấp và nợ vay hiện tại của mình, Bé Orca khuyên mình nên chia khoản này thế nào để vừa an toàn vừa được tự thưởng?',
+    question: 'Mình vừa nhận được khoản thưởng 20 triệu đồng. Nhìn vào tình trạng quỹ khẩn cấp và nợ vay hiện tại của mình, bạn khuyên mình nên chia khoản này thế nào để vừa an toàn vừa hợp lý?',
   },
   {
-    category: '🎁 Thưởng & Tiền nhàn rỗi',
+    category: 'Thưởng & Tiền nhàn rỗi',
     label: 'Có 50 triệu nên gửi tiết kiệm hay mua vàng?',
-    question: 'Mình đang có 50 triệu tiền nhàn rỗi, đang phân vân giữa gửi tiết kiệm ngân hàng, mua vàng nhẫn hay quỹ mở. Dựa trên quỹ dự phòng hiện có của mình, Bé Orca tư vấn tỷ lệ phân bổ an toàn nha!',
+    question: 'Mình đang có 50 triệu tiền nhàn rỗi, đang phân vân giữa gửi tiết kiệm ngân hàng, mua vàng nhẫn hay quỹ mở. Dựa trên quỹ dự phòng hiện có của mình, hãy tư vấn tỷ lệ phân bổ an toàn!',
   },
   {
-    category: '🚗 Mua sắm lớn',
+    category: 'Mua sắm lớn',
     label: 'Với dòng tiền hiện tại, mình có nên mua xe trả góp?',
-    question: 'Nhìn vào số tiền dư hàng tháng và chi phí cố định hiện tại của mình, Bé Orca tính giúp xem mình có đủ sức gánh khoản trả góp mua xe máy/ô tô không, và mức trả góp tối đa an toàn là bao nhiêu?',
+    question: 'Nhìn vào số tiền dư hàng tháng và chi phí cố định hiện tại của mình, hãy tính giúp xem mình có đủ sức gánh khoản trả góp mua xe máy/ô tô không, và mức trả góp tối đa an toàn là bao nhiêu?',
   },
   {
-    category: '🛡️ Nợ & Dự phòng',
+    category: 'Nợ & Dự phòng',
     label: 'Chiến lược xử lý nợ và gia cố quỹ khẩn cấp?',
-    question: 'Bé Orca xem giúp cơ cấu nợ và quỹ khẩn cấp hiện tại của mình, chỉ cho mình lộ trình dập nợ và tăng quỹ dự phòng nhanh nhất trong 6 tháng tới mà không bị kiệt quệ tài chính nhen!',
+    question: 'Hãy xem giúp cơ cấu nợ và quỹ khẩn cấp hiện tại của mình, chỉ cho mình lộ trình dập nợ và tăng quỹ dự phòng nhanh nhất trong 6 tháng tới mà không bị kiệt quệ tài chính!',
   },
 ];
 
@@ -102,16 +101,15 @@ export const AskOrcaAiView: React.FC<AskOrcaAiViewProps> = ({
     {
       id: 'welcome',
       sender: 'orca',
-      mood: 'happy',
       timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-      text: `Oa chào cậu nha! Bé Orca đã nạp toàn bộ số liệu sổ kỳ ${currentSnapshot.period} của cậu rồi nè! 🐳💖
+      text: `Hệ thống đã nạp toàn bộ số liệu kỳ ${currentSnapshot.period} của bạn.
 
-Hiện tại Bé Orca đang nắm các con số thực tế của cậu:
+Thông tin tài chính ghi nhận:
 • Lương thực nhận về ví: ${formatVND(netIncome)}/tháng.
-• Chi phí sinh hoạt: ${formatVND(totalExpenses)} (Trong đó chi cố định chiếm ${fixedCostRatio}% lương).
-• Đệm an toàn dự phòng: ${emergencyMonths} tháng chi tiêu.
+• Chi phí sinh hoạt: ${formatVND(totalExpenses)} (Chi cố định chiếm ${fixedCostRatio}% thu nhập).
+• Quỹ dự phòng: ${emergencyMonths} tháng chi tiêu.
 ${totalDebt > 0 ? `• Dư nợ đang theo dõi: ${formatVND(totalDebt)}.\n` : ''}
-Bất kỳ câu hỏi nào cậu đặt ra (chia lương, phân bổ thưởng Tết, tính mua xe trả góp hay xử lý nợ), Bé Orca sẽ tính toán trực tiếp trên số tiền thật này của cậu, không hề nói chung chung đâu nhen! Cậu bấm câu hỏi gợi ý bên dưới hoặc gõ tự do nhé! ✨`,
+Các bài toán chia lương 50/30/20, phân bổ thưởng, trả góp xe hay kế hoạch xử lý nợ sẽ được tính toán trực tiếp trên số liệu tài chính này. Vui lòng chọn câu hỏi gợi ý hoặc nhập câu hỏi trực tiếp.`,
     },
   ]);
 
@@ -222,36 +220,30 @@ Bất kỳ câu hỏi nào cậu đặt ra (chia lương, phân bổ thưởng T
           answerText = data?.data?.answer || data?.answer || '';
         }
       } catch (netErr) {
-        console.warn('Không thể kết nối API Bé Orca, sử dụng phân tích cục bộ:', netErr);
+        console.warn('Không thể kết nối API ORCA, sử dụng phân tích cục bộ:', netErr);
       }
 
       if (!answerText) {
-        answerText = `Chào cậu nhen! Bé Orca đã phân tích trực tiếp theo sổ kỳ ${currentSnapshot.period} của cậu nè: 🐳✨
+        answerText = `Phân tích theo dữ liệu sổ kỳ ${currentSnapshot.period}:
 
-🐳 1. NHẬN DIỆN BỐI CẢNH CỦA CẬU:
+1. BỐI CẢNH TÀI CHÍNH:
 • Lương thực nhận hiện tại: ${formatVND(netIncome)}/tháng (${location}).
-• Chi phí sinh hoạt: ${formatVND(totalExpenses)} (Chi cố định đang chiếm ${fixedCostRatio}% lương).
-• Đệm an toàn: ${emergencyMonths} tháng chi tiêu.
+• Chi phí sinh hoạt: ${formatVND(totalExpenses)} (Chi cố định chiếm ${fixedCostRatio}% lương).
+• Đệm dự phòng: ${emergencyMonths} tháng chi tiêu.
 
-📊 2. BẢNG PHÂN BỔ ĐO NI ĐÓNG GIÀY:
-• 🏠 Thiết yếu bắt buộc (50%): ${formatVND(Math.round(netIncome * 0.5))} (Cậu đang chi ${formatVND(fixedExpenses)}, ${fixedExpenses > netIncome * 0.5 ? 'hơi cao, cần tối ưu' : 'rất an toàn'}).
-• 🐷 Nuôi heo đất & Đầu tư (20%): ${formatVND(Math.round(netIncome * 0.2))} (Ưu tiên gia cố quỹ khẩn cấp lên đủ 3-6 tháng).
-• ☕ Chi tiêu linh hoạt (30%): ${formatVND(Math.round(netIncome * 0.3))} cho tận hưởng cuộc sống và học tập.
+2. PHÂN BỔ ĐỀ XUẤT 50/30/20:
+• Chi phí thiết yếu (50%): ${formatVND(Math.round(netIncome * 0.5))} (Hiện tại chi ${formatVND(fixedExpenses)}, ${fixedExpenses > netIncome * 0.5 ? 'cần rà soát tối ưu' : 'an toàn'}).
+• Tích lũy & Đầu tư (20%): ${formatVND(Math.round(netIncome * 0.2))} (Ưu tiên hoàn thiện quỹ dự phòng 3-6 tháng).
+• Chi tiêu linh hoạt (30%): ${formatVND(Math.round(netIncome * 0.3))} cho sinh hoạt hàng ngày và học tập.
 
-✨ 3. HÀNH ĐỘNG TUẦN NÀY:
-Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết kiệm riêng ngay ngày nhận lương nhé! 💖`;
+3. HÀNH ĐỘNG ĐỀ XUẤT:
+Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tích lũy riêng ngay khi nhận lương.`;
       }
 
       const orcaMessage: ChatMessage = {
         id: nextMessageId('orca'),
         sender: 'orca',
         text: answerText,
-        mood:
-          answerText.includes('giỏi') || answerText.includes('chúc mừng')
-            ? 'cheering'
-            : answerText.includes('cảnh báo') || answerText.includes('nguy hiểm')
-            ? 'caution'
-            : 'happy',
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       };
 
@@ -274,31 +266,32 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
       {
         id: 'welcome-reset',
         sender: 'orca',
-        mood: 'happy',
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        text: `Chào cậu nha! Tụi mình bắt đầu chủ đề mới nhen! Bé Orca vẫn đang giữ các số liệu tài chính kỳ ${currentSnapshot.period} của cậu sẵn sàng nè, cậu muốn bé tính toán bài toán nào? 🐳✨`,
+        text: `Đã làm mới chủ đề hội thoại. Dữ liệu tài chính kỳ ${currentSnapshot.period} đã sẵn sàng, bạn muốn tính toán hoặc giải quyết bài toán nào?`,
       },
     ]);
   };
 
   return (
     <div className="space-y-5">
-      {/* Friendly Header with Bé Orca Mascot */}
+      {/* Header */}
       <div className="bg-gradient-to-r from-[#17306b] via-[#1c3a82] to-[#173270] border border-[#2d4e9e] p-5 sm:p-6 rounded-3xl shadow-xl flex flex-wrap items-center justify-between gap-5">
         <div className="flex items-center gap-4">
-          <OrcaMascot mood="cheering" size={82} bubbleText="Bé Orca tính toán sát sạt theo số tiền thật của cậu nhen! 🐳💖" />
+          <div className="shrink-0">
+            <OrcaMark size={40} />
+          </div>
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-full border border-amber-400/30 font-mono">
-                ✨ AI ĐO NI ĐÓNG GIÀY THEO NGỮ CẢNH
+                AI TƯ VẤN THEO NGỮ CẢNH
               </span>
               <span className="text-xs text-sky-200">· Chuẩn cuộc sống Việt Nam</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white mt-1">
-              Hỏi Bé Orca Về Phân Bổ Tiền Bạc
+              ORCA AI Tư Vấn Tài Chính
             </h2>
             <p className="text-xs sm:text-sm text-sky-100 mt-1 max-w-xl">
-              Không nói chung chung — Bé Orca đọc trực tiếp số liệu sổ sách của cậu để tính toán từng đồng VND, cân đối chi phí cố định, dập nợ và dự phòng an toàn! 🐳
+              Hệ thống đọc trực tiếp số liệu sổ sách cá nhân để tính toán cụ thể từng khoản chi, cân đối ngân sách và tối ưu dòng tiền.
             </p>
           </div>
         </div>
@@ -334,7 +327,7 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5 font-mono">
               <Sliders className="w-4 h-4" />
-              BỐI CẢNH ĐỜI SỐNG CỦA CẬU ĐANG ÁP DỤNG VÀO CÂU TRẢ LỜI:
+              BỐI CẢNH ĐỜI SỐNG ĐANG ÁP DỤNG VÀO CÂU TRẢ LỜI:
             </span>
           </div>
 
@@ -453,7 +446,7 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
             >
               {msg.sender === 'orca' && (
                 <div className="shrink-0 mt-0.5">
-                  <OrcaMascot mood={msg.mood || 'happy'} size={48} />
+                  <OrcaMark size={28} />
                 </div>
               )}
 
@@ -469,12 +462,12 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
                     {msg.sender === 'user' ? (
                       <>
                         <User className="w-3 h-3" />
-                        <span>Cậu nè</span>
+                        <span>Người dùng</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-3 h-3 text-amber-300" />
-                        <span className="text-amber-300">Bé Orca thông thái 🐳</span>
+                        <span className="text-amber-300">ORCA AI Assistant</span>
                       </>
                     )}
                   </span>
@@ -500,12 +493,12 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
 
                 {msg.sender === 'orca' && onNavigateToCalculator && (
                   <div className="mt-3 pt-2.5 border-t border-sky-400/20 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="text-sky-200 text-[11px]">Cậu muốn thử số này ngay không?</span>
+                    <span className="text-sky-200 text-[11px]">Thử nghiệm trên máy tính dòng tiền:</span>
                     <button
                       onClick={onNavigateToCalculator}
                       className="text-[11px] font-bold text-amber-300 bg-[#223f85] hover:bg-[#2b4fa4] px-2.5 py-1 rounded-xl border border-amber-400/30 flex items-center gap-1 cursor-pointer transition-all"
                     >
-                      <span>⚡ Mở Máy Tính Dòng Tiền</span>
+                      <span>Mở Máy Tính Dòng Tiền</span>
                       <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
@@ -523,14 +516,14 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
           {/* Loading bubble */}
           {isLoading && (
             <div className="flex gap-3 items-center justify-start">
-              <OrcaMascot mood="calculating" size={48} />
+              <OrcaMark size={28} />
               <div className="bg-[#182e63] border border-[#2f51a3] text-sky-200 rounded-3xl rounded-tl-xs p-4 shadow-md text-xs flex items-center gap-3">
                 <div className="flex gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-sky-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-2 h-2 rounded-full bg-sky-300 animate-bounce" style={{ animationDelay: '150ms' }} />
                   <span className="w-2 h-2 rounded-full bg-amber-300 animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
-                <span>Bé Orca đang đọc dữ liệu sổ sách và tính toán con số đo ni đóng giày cho cậu nè... 🐳✨</span>
+                <span>Đang đọc dữ liệu sổ sách và tính toán phương án...</span>
               </div>
             </div>
           )}
@@ -552,7 +545,7 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Hỏi Bé Orca bất kỳ điều gì: 'Lương thực nhận của mình nên chia thế nào?', 'Mình đang dư 5 triệu/tháng có nên mua xe?'..."
+                placeholder="Đặt câu hỏi về phân bổ lương 50/30/20, xử lý nợ vay, tối ưu chi phí sinh hoạt..."
                 disabled={isLoading}
                 className="w-full bg-[#162a5b] text-white text-xs sm:text-sm px-4 py-3 rounded-2xl border border-[#3053a4] focus:outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30 transition-all placeholder:text-slate-400"
               />
@@ -563,16 +556,15 @@ Trích ngay ${formatVND(Math.round(netIncome * 0.2))} vào tài khoản tiết k
               disabled={isLoading || !inputValue.trim()}
               className="px-5 py-3 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 text-slate-950 font-bold text-xs sm:text-sm rounded-2xl shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-105 active:scale-95 shrink-0"
             >
-              <span>Hỏi Bé</span>
+              <span>Gửi câu hỏi</span>
               <Send className="w-4 h-4" />
             </button>
           </form>
           <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
             <span className="flex items-center gap-1">
-              <span>🐳</span>
-              <span>Bé Orca gắn chặt dữ liệu thu nhập, chi cố định và nợ vay để cá nhân hóa 100%.</span>
+              <span>Phân tích gắn với dữ liệu thu nhập, chi cố định và nợ vay để cá nhân hóa kết quả.</span>
             </span>
-            <span className="text-sky-300 font-medium hidden sm:inline">Phản hồi ngữ cảnh với Gemini AI ✨</span>
+            <span className="text-sky-300 font-medium hidden sm:inline">Phản hồi ngữ cảnh với Gemini AI</span>
           </div>
         </div>
       </div>

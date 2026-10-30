@@ -145,7 +145,7 @@ export const RrgChart = memo(function RrgChart() {
               </span>
             </h2>
             <p className="text-xs text-text-muted">
-              Chu kỳ 4 pha: Tích lũy ➔ Dẫn dắt ➔ Suy yếu ➔ Tụt hậu so với VN-Index (Cập nhật: {rrg?.asOfDate})
+              Chu kỳ 4 pha: Tích lũy -&gt; Dẫn dắt -&gt; Suy yếu -&gt; Tụt hậu so với VN-Index (Cập nhật: {rrg?.asOfDate})
             </p>
           </div>
         </div>
@@ -328,7 +328,7 @@ export const RrgChart = memo(function RrgChart() {
             textAnchor="middle"
             className="fill-text-muted text-[11px] font-semibold tracking-wide"
           >
-            Sức Mạnh Giá Tương Đối (RS-Ratio so với VN-Index) ➔
+            Sức Mạnh Giá Tương Đối (RS-Ratio so với VN-Index)
           </text>
           <text
             x={15}
@@ -337,7 +337,7 @@ export const RrgChart = memo(function RrgChart() {
             transform={`rotate(-90 15 ${height / 2})`}
             className="fill-text-muted text-[11px] font-semibold tracking-wide"
           >
-            Gia Tốc Động Lượng (RS-Momentum) ➔
+            Gia Tốc Động Lượng (RS-Momentum)
           </text>
 
           {/* Center Benchmark Point */}
@@ -528,7 +528,7 @@ export const RrgChart = memo(function RrgChart() {
                         href={`/stocks/${item.code}`}
                         className="text-[11px] font-medium text-accent-primary hover:underline"
                       >
-                        Phân tích ➔
+                        Phân tích
                       </Link>
                     ) : (
                       <span className="text-[11px] text-text-muted">Theo dõi</span>

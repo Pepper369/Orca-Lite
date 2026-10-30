@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useSettings } from "@/lib/settings";
 import type { ApiResponse, Meta } from "@/lib/types";
+import { OrcaMark } from "@/components/logo";
 import { loadProfileFromStorage, loadSnapshotsFromStorage } from "@/features/personal-finance/storage/financeStore";
 
 type WidgetMode = "market" | "finance";
@@ -146,7 +147,7 @@ export function AiAssistantWidget() {
       role: "assistant",
       mode: "finance",
       timestamp: "Bây giờ",
-      text: "Chào cậu nha! Bé Orca đã sẵn sàng hỗ trợ tính toán thu chi, phân bổ lương 50/30/20, xử lý nợ và gia cố quỹ khẩn cấp theo số liệu thực tế của cậu nè! 🐳✨",
+      text: "Xin chào! Trợ lý ORCA sẵn sàng hỗ trợ phân tích thu chi, phân bổ dòng tiền 50/30/20, tối ưu nợ và xây dựng quỹ dự phòng theo số liệu thực tế.",
     },
   ]);
 
@@ -207,7 +208,7 @@ export function AiAssistantWidget() {
           role: "assistant",
           mode: "finance",
           timestamp: "Bây giờ",
-          text: "Bé Orca đã dọn sạch bảng hội thoại rồi nè! Cậu muốn cùng Bé Orca lập kế hoạch gì tiếp theo? 🐳💖",
+          text: "Đã làm mới đoạn hội thoại. Bạn muốn phân tích hoặc lập kế hoạch tài chính nào tiếp theo?",
         },
       ]);
     }
@@ -359,7 +360,7 @@ export function AiAssistantWidget() {
             {
               id: `err-${Date.now()}`,
               role: "assistant",
-              text: `Bé Orca chưa tính được rồi: ${json.error?.message || "Lỗi xử lý"}`,
+              text: `Không thể hoàn tất tính toán: ${json.error?.message || "Lỗi xử lý"}`,
               timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
               mode: "finance",
             },
@@ -371,7 +372,7 @@ export function AiAssistantWidget() {
           {
             id: `err-${Date.now()}`,
             role: "assistant",
-            text: "Lỗi kết nối tới Bé Orca AI. Vui lòng kiểm tra mạng và thử lại.",
+            text: "Lỗi kết nối tới ORCA AI. Vui lòng kiểm tra mạng và thử lại.",
             timestamp: new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
             mode: "finance",
           },
@@ -404,19 +405,14 @@ export function AiAssistantWidget() {
             type="button"
             onClick={() => setIsOpen(true)}
             aria-label="Mở Trợ lý AI Orca"
-            title="Hỏi Bé Orca AI (Cá voi sát thủ thông minh)"
+            title="Mở Trợ lý ORCA AI"
             className="group relative flex size-14 items-center justify-center rounded-full bg-slate-900/90 border-2 border-cyan-400/50 shadow-2xl shadow-cyan-500/30 hover:border-cyan-300 hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer select-none"
           >
             {/* Ambient Pulsing Glow */}
             <span className="absolute -inset-1 rounded-full bg-gradient-to-tr from-cyan-500 to-teal-400 opacity-30 blur-md group-hover:opacity-60 transition-opacity animate-pulse pointer-events-none" />
 
-            {/* Sticker Cá voi sát thủ Bé Orca */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/be_orca_transparent.png"
-              alt="Bé Orca AI"
-              className="relative size-11 object-contain drop-shadow-md group-hover:rotate-6 transition-transform duration-300 pointer-events-none"
-            />
+            {/* Clean Orca Brand Mark */}
+            <OrcaMark size={32} className="relative select-none pointer-events-none drop-shadow-md group-hover:scale-105 transition-transform duration-300" />
 
             {/* Online Indicator Badge */}
             <span className="absolute top-0 right-0 flex size-3.5">
@@ -445,12 +441,7 @@ export function AiAssistantWidget() {
           <div className="flex items-center justify-between border-b border-white/10 bg-slate-900/80 px-3.5 py-2.5 select-none">
             <div className="flex items-center gap-2 min-w-0">
               <div className="relative flex size-8 shrink-0 items-center justify-center rounded-xl bg-slate-800/90 border border-cyan-400/30">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/brand/be_orca_transparent.png"
-                  alt="Orca"
-                  className="size-7 object-contain drop-shadow"
-                />
+                <OrcaMark size={22} className="select-none pointer-events-none" />
                 <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border border-slate-900 bg-emerald-400" />
               </div>
               <div className="min-w-0">
@@ -461,7 +452,7 @@ export function AiAssistantWidget() {
                   </span>
                 </div>
                 <div className="text-[10px] text-slate-400 truncate">
-                  {mode === "market" ? "Trợ lý Phân tích Đầu tư" : "Bé Orca Tài chính cá nhân"}
+                  {mode === "market" ? "Trợ lý Phân tích Đầu tư" : "Quản lý Tài chính cá nhân"}
                 </div>
               </div>
             </div>
@@ -542,7 +533,7 @@ export function AiAssistantWidget() {
                     {!isUser && (
                       <div className="flex items-center justify-between gap-2 mb-1.5 pb-1 border-b border-white/5 text-[10px] text-slate-400">
                         <span className="font-semibold text-cyan-300">
-                          {m.mode === "market" ? "ORCA Market Intel" : "Bé Orca AI"}
+                          {m.mode === "market" ? "ORCA Market Intel" : "ORCA Personal Finance"}
                         </span>
                         {m.confidence && (
                           <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-400/10 text-cyan-300">
@@ -579,7 +570,7 @@ export function AiAssistantWidget() {
                   <span className="size-1.5 rounded-full bg-cyan-400 animate-bounce [animation-delay:0.2s]" />
                   <span className="size-1.5 rounded-full bg-cyan-400 animate-bounce [animation-delay:0.4s]" />
                   <span className="ml-2 text-[11px] text-slate-400">
-                    {mode === "market" ? "Đang phân tích dữ liệu thị trường..." : "Bé Orca đang tính toán số liệu..."}
+                    {mode === "market" ? "Đang phân tích dữ liệu thị trường..." : "Đang tính toán số liệu..."}
                   </span>
                 </div>
               </div>

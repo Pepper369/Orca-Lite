@@ -31,15 +31,15 @@ type Universe =
   | "alpha-beta";
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
-  { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine) 🔥" },
-  { id: "confluence", label: "Siêu Hội Tụ (Orca Confluence Pro) 🌟" },
-  { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế 🌐" },
-  { id: "rrg-rotation", label: "Vòng xoay RRG Ngành 🌀" },
-  { id: "stocks", label: "Cổ phiếu VN ⭐" },
-  { id: "oquant-quant", label: "OQuant AI Bot & Quant 🤖⚡" },
-  { id: "ma-cross", label: "Đường MA (Golden/Death Cross) 📈" },
-  { id: "sector-flow", label: "Dòng tiền ngành 🌊" },
-  { id: "four-m", label: "Bộ lọc 4M 💎" },
+  { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine)" },
+  { id: "confluence", label: "Siêu Hội Tụ (Orca Confluence Pro)" },
+  { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế" },
+  { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
+  { id: "stocks", label: "Cổ phiếu VN" },
+  { id: "oquant-quant", label: "OQuant AI Bot & Quant" },
+  { id: "ma-cross", label: "Đường MA (Golden/Death Cross)" },
+  { id: "sector-flow", label: "Dòng tiền ngành" },
+  { id: "four-m", label: "Bộ lọc 4M" },
   { id: "canslim", label: "CANSLIM" },
   { id: "divergence", label: "Phân kỳ" },
   { id: "alpha-beta", label: "Hệ số cổ phiếu" },
@@ -251,7 +251,7 @@ function ScreenerInner() {
               onClick={() => setShowBacktest(true)}
               className="self-start sm:self-auto px-3.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
             >
-              <span>⚡</span> Backtest Mô Phỏng (OQuant)
+              Backtest Mô Phỏng (OQuant)
             </button>
           </div>
           <div className="seg-scroll mt-3">

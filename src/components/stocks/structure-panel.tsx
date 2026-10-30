@@ -128,7 +128,7 @@ export const StockStructurePanel = memo(function StockStructurePanel({ symbol }:
             </div>
             <p className="mt-1.5 text-[11px] leading-relaxed text-text-secondary">{ab.summary}</p>
             {ab.quality?.flags?.length ? (
-              <p className="mt-1 text-[10px] text-text-muted">⚠ {ab.quality.flags.join(" · ")}</p>
+              <p className="mt-1 text-[10px] text-text-muted">{ab.quality.flags.join(" · ")}</p>
             ) : null}
           </div>
         ) : null}

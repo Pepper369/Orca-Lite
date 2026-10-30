@@ -110,7 +110,7 @@ const PERSONAL_FINANCE_NAV: typeof NAV_SECTIONS = [
       { href: "/personal-finance#analytics", label: "Phân tích tài chính", icon: ChartNoAxesCombined },
       { href: "/personal-finance#planning", label: "Kế hoạch & hưu trí", icon: Target },
       { href: "/personal-finance#advice", label: "Lời khuyên", icon: HeartPulse },
-      { href: "#ask_orca", label: "Hỏi Bé Orca AI", icon: Bot },
+      { href: "#ask_orca", label: "Hỏi ORCA AI", icon: Bot },
       { href: "/personal-finance#report", label: "Báo cáo", icon: FileText },
       { href: "/personal-finance#privacy", label: "Quyền riêng tư", icon: PiggyBank },
     ],
@@ -491,7 +491,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
                       : "rounded-md px-2 sm:px-2.5 py-1 sm:py-1.5 text-text-muted hover:text-text-primary"
                   }
                 >
-                  <span className="sm:hidden">📈 Đầu tư</span>
+                  <span className="sm:hidden">Đầu tư</span>
                   <span className="hidden sm:inline">Đầu tư</span>
                 </button>
                 <button
@@ -504,7 +504,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
                       : "rounded-md px-2 sm:px-2.5 py-1 sm:py-1.5 text-text-muted hover:text-text-primary"
                   }
                 >
-                  <span className="sm:hidden">👛 Cá nhân</span>
+                  <span className="sm:hidden">Cá nhân</span>
                   <span className="hidden sm:inline">Tài chính cá nhân</span>
                 </button>
               </div>

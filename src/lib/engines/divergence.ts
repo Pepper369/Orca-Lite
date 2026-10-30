@@ -375,6 +375,6 @@ export function divergenceSummaryLine(s: DivergenceSignal): string {
   const tf = s.timeframe ? ` · ${s.timeframe}` : "";
   const struct = s.structure && s.structure !== "double" ? ` · ${s.structure}` : "";
   const vol =
-    s.volumeConfirmed === true ? " · vol✓" : s.volumeConfirmed === false ? " · vol✗" : "";
+    s.volumeConfirmed === true ? " · vol xác nhận" : s.volumeConfirmed === false ? " · vol chưa đạt" : "";
   return `${DIVERGENCE_KIND_VI[s.kind]} · ${osc}${tf}${struct} · class ${s.strength} · hạng ${s.strength} · ${s.barsBetween} nến${vol}`;
 }

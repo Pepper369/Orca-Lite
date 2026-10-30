@@ -323,7 +323,7 @@ export function DerivativesDashboard() {
                 : "border border-border-subtle bg-surface-elevated/70 text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
             }`}
           >
-            <span>🇻🇳 Phái sinh HĐTL Việt Nam</span>
+            <span>Phái sinh HĐTL Việt Nam</span>
             <span className={`rounded-full px-1.5 py-0.2 text-[9px] font-bold ${category === "VN_FUTURES" ? "bg-black/20 text-black" : "bg-accent-primary/20 text-accent-primary"}`}>
               Ưu tiên
             </span>
@@ -342,7 +342,7 @@ export function DerivativesDashboard() {
             }`}
           >
             <Globe className="size-3.5" />
-            <span>🌐 Hàng hóa Phái sinh Quốc tế (MXV / CME)</span>
+            <span>Hàng hóa Phái sinh Quốc tế (MXV / CME)</span>
           </button>
         </div>
 
