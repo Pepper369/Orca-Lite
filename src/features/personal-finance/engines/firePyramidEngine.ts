@@ -20,7 +20,7 @@ export interface PyramidTier {
   targetPercentRange: [number, number];
   status: 'OPTIMAL' | 'UNDER' | 'OVER';
   color: string;
-  icon: string;
+  icon?: string;
 }
 
 export interface FireMetrics {
@@ -111,7 +111,6 @@ export function calculateFireAndPyramid(
       targetPercentRange: [15, 25],
       status: p1 < 10 ? 'UNDER' : p1 > 35 ? 'OVER' : 'OPTIMAL',
       color: '#38bdf8',
-      icon: '',
     },
     {
       tierNumber: 2,
@@ -123,7 +122,6 @@ export function calculateFireAndPyramid(
       targetPercentRange: [15, 30],
       status: p2 < 10 ? 'UNDER' : 'OPTIMAL',
       color: '#818cf8',
-      icon: '',
     },
     {
       tierNumber: 3,
@@ -135,7 +133,6 @@ export function calculateFireAndPyramid(
       targetPercentRange: [40, 65],
       status: p3 < 30 ? 'UNDER' : 'OPTIMAL',
       color: '#34d399',
-      icon: '',
     },
     {
       tierNumber: 4,
@@ -147,7 +144,6 @@ export function calculateFireAndPyramid(
       targetPercentRange: [0, 10],
       status: p4 > 15 ? 'OVER' : 'OPTIMAL',
       color: '#f59e0b',
-      icon: '',
     },
   ];
 

@@ -20,7 +20,7 @@ export interface SubscriptionItem {
   autoRenew: boolean;
   isEssential: boolean;
   color: string;
-  icon: string;
+  icon?: string;
 }
 
 export interface SubscriptionsAnalysisResult {
@@ -48,23 +48,23 @@ export function analyzeSubscriptionsAndRunway(
   const cashAssets = customCash !== undefined
     ? Math.max(0, customCash)
     : snapshot.assets
-        .filter((a) => a.category === 'cash')
-        .reduce((sum, a) => sum + (a.balance || 0), 0);
+      .filter((a) => a.category === 'cash')
+      .reduce((sum, a) => sum + (a.balance || 0), 0);
 
   // Nhận diện tự động các khoản thuê bao / hóa đơn định kỳ từ danh mục chi tiêu
   const detectedSubs: SubscriptionItem[] = [];
 
   const subKeywords = [
-    { key: 'netflix', name: 'Netflix Premium', cat: 'digital', icon: '', isEssential: false },
-    { key: 'spotify', name: 'Spotify Music', cat: 'digital', icon: '', isEssential: false },
-    { key: 'youtube', name: 'YouTube Premium', cat: 'digital', icon: '', isEssential: false },
-    { key: 'icloud', name: 'Apple iCloud+', cat: 'digital', icon: '', isEssential: true },
-    { key: 'google', name: 'Google One Drive', cat: 'digital', icon: '', isEssential: true },
-    { key: 'chatgpt', name: 'ChatGPT Plus AI', cat: 'productivity', icon: '', isEssential: true },
-    { key: 'gym', name: 'Tập Gym / Fitness', cat: 'wellness', icon: '', isEssential: false },
-    { key: 'internet', name: 'Internet cáp quang', cat: 'living', icon: '', isEssential: true },
-    { key: 'nhà', name: 'Tiền thuê nhà / Chung cư', cat: 'living', icon: '', isEssential: true },
-    { key: 'điện', name: 'Tiền điện & Nước', cat: 'living', icon: '', isEssential: true },
+    { key: 'netflix', name: 'Netflix Premium', cat: 'digital', isEssential: false },
+    { key: 'spotify', name: 'Spotify Music', cat: 'digital', isEssential: false },
+    { key: 'youtube', name: 'YouTube Premium', cat: 'digital', isEssential: false },
+    { key: 'icloud', name: 'Apple iCloud+', cat: 'digital', isEssential: true },
+    { key: 'google', name: 'Google One Drive', cat: 'digital', isEssential: true },
+    { key: 'chatgpt', name: 'ChatGPT Plus AI', cat: 'productivity', isEssential: true },
+    { key: 'gym', name: 'Tập Gym / Fitness', cat: 'wellness', isEssential: false },
+    { key: 'internet', name: 'Internet cáp quang', cat: 'living', isEssential: true },
+    { key: 'nhà', name: 'Tiền thuê nhà / Chung cư', cat: 'living', isEssential: true },
+    { key: 'điện', name: 'Tiền điện & Nước', cat: 'living', isEssential: true },
   ];
 
   for (const exp of expenses) {
@@ -81,7 +81,6 @@ export function analyzeSubscriptionsAndRunway(
         autoRenew: true,
         isEssential: matched ? matched.isEssential : true,
         color: matched?.cat === 'digital' ? '#ec4899' : matched?.cat === 'productivity' ? '#818cf8' : '#38bdf8',
-        icon: '',
       });
     }
   }

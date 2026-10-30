@@ -23,7 +23,7 @@ export interface JarItem {
   remainingAmount: number;
   status: 'SAFE' | 'WARNING' | 'OVERSPENT';
   description: string;
-  icon: string;
+  icon?: string;
   color: string;
 }
 
@@ -102,15 +102,14 @@ export function calculateJarsDistribution(
     id: 'NEC' | 'FFA' | 'LTSS' | 'EDU' | 'PLAY' | 'GIVE';
     nameVi: string;
     desc: string;
-    icon: string;
     color: string;
   }> = [
-    { id: 'NEC', nameVi: 'Thiết yếu (NEC)', desc: 'Tiền nhà, ăn uống, hóa đơn, sinh hoạt phí cố định', icon: '', color: '#38bdf8' },
-    { id: 'FFA', nameVi: 'Tự do tài chính (FFA)', desc: 'Đầu tư cổ phiếu, ETF, bất động sản, tài sản sinh lời', icon: '', color: '#34d399' },
-    { id: 'LTSS', nameVi: 'Tiết kiệm dài hạn (LTSS)', desc: 'Quỹ khẩn cấp, mua sắm lớn tương lai, bảo hiểm', icon: '', color: '#818cf8' },
-    { id: 'EDU', nameVi: 'Học tập & Kỹ năng (EDU)', desc: 'Sách, khóa học, nâng cấp năng lực kiếm tiền', icon: '', color: '#f59e0b' },
-    { id: 'PLAY', nameVi: 'Hưởng thụ (PLAY)', desc: 'Tự thưởng bản thân, du lịch, giải trí, tái tạo năng lượng', icon: '', color: '#ec4899' },
-    { id: 'GIVE', nameVi: 'Cho đi (GIVE)', desc: 'Biếu bố mẹ, người thân, giúp đỡ cộng đồng, từ thiện', icon: '', color: '#f43f5e' },
+    { id: 'NEC', nameVi: 'Thiết yếu (NEC)', desc: 'Tiền nhà, ăn uống, hóa đơn, sinh hoạt phí cố định', color: '#38bdf8' },
+    { id: 'FFA', nameVi: 'Tự do tài chính (FFA)', desc: 'Đầu tư cổ phiếu, ETF, bất động sản, tài sản sinh lời', color: '#34d399' },
+    { id: 'LTSS', nameVi: 'Tiết kiệm dài hạn (LTSS)', desc: 'Quỹ khẩn cấp, mua sắm lớn tương lai, bảo hiểm', color: '#818cf8' },
+    { id: 'EDU', nameVi: 'Học tập & Kỹ năng (EDU)', desc: 'Sách, khóa học, nâng cấp năng lực kiếm tiền', color: '#f59e0b' },
+    { id: 'PLAY', nameVi: 'Hưởng thụ (PLAY)', desc: 'Tự thưởng bản thân, du lịch, giải trí, tái tạo năng lượng', color: '#ec4899' },
+    { id: 'GIVE', nameVi: 'Cho đi (GIVE)', desc: 'Biếu bố mẹ, người thân, giúp đỡ cộng đồng, từ thiện', color: '#f43f5e' },
   ];
 
   let overspentCount = 0;
@@ -138,7 +137,6 @@ export function calculateJarsDistribution(
       remainingAmount: remaining,
       status,
       description: cfg.desc,
-      icon: cfg.icon,
       color: cfg.color,
     };
   });

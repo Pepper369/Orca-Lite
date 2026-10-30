@@ -1,4 +1,4 @@
-"use client";
+ent"use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { MonthlySnapshot } from '../types/finance';
@@ -7,21 +7,6 @@ import { calculateYnabMetrics } from '../engines/ynabEngine';
 import { calculateFireAndPyramid } from '../engines/firePyramidEngine';
 import { analyzeSubscriptionsAndRunway, SubscriptionItem } from '../engines/subscriptionsEngine';
 import {
-  Globe,
-  Sparkles,
-  ShieldCheck,
-  TrendingUp,
-  Clock,
-  Flame,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronRight,
-  Layers,
-  CreditCard,
-  Target,
-  DollarSign,
-  HelpCircle,
-  Zap,
   SlidersHorizontal,
   RotateCcw,
   Save,
@@ -79,36 +64,32 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
 
   // Load custom settings from LocalStorage
   useEffect(() => {
-    void Promise.resolve().then(() => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed.customIncome != null) setCustomIncome(parsed.customIncome);
-          if (parsed.customExpenses != null) setCustomExpenses(parsed.customExpenses);
-          if (parsed.customCash != null) setCustomCash(parsed.customCash);
-          if (parsed.customInvested != null) setCustomInvested(parsed.customInvested);
-          if (parsed.customAge != null) setCustomAge(parsed.customAge);
-          if (parsed.customCagr != null) setCustomCagr(parsed.customCagr);
-          if (parsed.jarsRatios != null) setJarsRatios(parsed.jarsRatios);
-          if (parsed.customSubs != null && Array.isArray(parsed.customSubs)) setCustomSubs(parsed.customSubs);
-          if (parsed.useCustomAmounts != null) setUseCustomAmounts(parsed.useCustomAmounts);
-        }
-      } catch {
-        /* ignore storage load error */
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.customIncome != null) setCustomIncome(parsed.customIncome);
+        if (parsed.customExpenses != null) setCustomExpenses(parsed.customExpenses);
+        if (parsed.customCash != null) setCustomCash(parsed.customCash);
+        if (parsed.customInvested != null) setCustomInvested(parsed.customInvested);
+        if (parsed.customAge != null) setCustomAge(parsed.customAge);
+        if (parsed.customCagr != null) setCustomCagr(parsed.customCagr);
+        if (parsed.jarsRatios != null) setJarsRatios(parsed.jarsRatios);
+        if (parsed.customSubs != null && Array.isArray(parsed.customSubs)) setCustomSubs(parsed.customSubs);
+        if (parsed.useCustomAmounts != null) setUseCustomAmounts(parsed.useCustomAmounts);
       }
-    });
+    } catch {
+      /* ignore storage load error */
+    }
   }, []);
 
   // Đồng bộ khi snapshot thay đổi nếu người dùng đang dùng chế độ Sổ sách
   useEffect(() => {
     if (!useCustomAmounts) {
-      void Promise.resolve().then(() => {
-        setCustomIncome(snapIncome);
-        setCustomExpenses(snapExpenses);
-        setCustomCash(snapCash);
-        setCustomInvested(snapInvested);
-      });
+      setCustomIncome(snapIncome);
+      setCustomExpenses(snapExpenses);
+      setCustomCash(snapCash);
+      setCustomInvested(snapInvested);
     }
   }, [snapIncome, snapExpenses, snapCash, snapInvested, useCustomAmounts]);
 
@@ -235,7 +216,6 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
       autoRenew: true,
       isEssential,
       color: isEssential ? '#38bdf8' : '#ec4899',
-      icon: '',
     };
     setCustomSubs((prev) => [newSub, ...prev]);
   };
@@ -249,22 +229,21 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
       {/* Institutional Global Banner */}
       <div className="relative overflow-hidden rounded-2xl border border-sky-500/30 bg-gradient-to-br from-[#0c1a3a] via-[#102454] to-[#0a1329] p-4 sm:p-6 shadow-xl">
         <div className="absolute top-0 right-0 -mt-6 -mr-6 h-36 w-36 rounded-full bg-sky-500/10 blur-2xl pointer-events-none" />
-        
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
-                <Globe className="h-3.5 w-3.5" />
-                <span>Dịch ngược Tinh hoa Tài chính Quốc tế &amp; VN</span>
+              <span className="inline-flex items-center rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
+                <span>Mô hình Quản trị Tài chính Chuẩn Quốc tế &amp; VN</span>
               </span>
 
               {useCustomAmounts ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300">
+                <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300">
                   <span>Chế độ: Số tiền Tự thiết lập</span>
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-full border border-slate-600 bg-slate-800/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-300">
-                  <span>Chế độ: Đồng bộ theo Sổ sách kỳ</span>
+                <span className="inline-flex items-center rounded-full border border-slate-600 bg-slate-800/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-300">
+                  <span>Chế độ: Đồng bộ theo Sổ sách cá nhân</span>
                 </span>
               )}
             </div>
@@ -551,11 +530,10 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('jars')}
-            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'jars'
-                ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-                : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
-            }`}
+            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${activeTab === 'jars'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
+              }`}
           >
             <span>6 Chiếc Lọ (Money Lover)</span>
           </button>
@@ -563,11 +541,10 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('ynab')}
-            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'ynab'
-                ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25'
-                : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
-            }`}
+            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${activeTab === 'ynab'
+              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25'
+              : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
+              }`}
           >
             <span>Age of Money &amp; Zero-Based (YNAB)</span>
           </button>
@@ -575,11 +552,10 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('fire')}
-            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'fire'
-                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25'
-                : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
-            }`}
+            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${activeTab === 'fire'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25'
+              : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
+              }`}
           >
             <span>Tháp Tài Sản &amp; FIRE (Empower)</span>
           </button>
@@ -587,11 +563,10 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('copilot')}
-            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'copilot'
-                ? 'bg-pink-500 text-white shadow-md shadow-pink-500/25'
-                : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
-            }`}
+            className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer ${activeTab === 'copilot'
+              ? 'bg-pink-500 text-white shadow-md shadow-pink-500/25'
+              : 'bg-[#152754]/80 text-slate-300 hover:bg-[#1b326d] hover:text-white'
+              }`}
           >
             <span>Thuê bao &amp; Runway (Copilot Money)</span>
           </button>
@@ -622,29 +597,28 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
               return (
                 <div
                   key={jar.id}
-                  className={`rounded-2xl border p-4 transition-all ${
-                    isOver
-                      ? 'border-rose-500/50 bg-rose-950/20'
-                      : isWarn
+                  className={`rounded-2xl border p-4 transition-all ${isOver
+                    ? 'border-rose-500/50 bg-rose-950/20'
+                    : isWarn
                       ? 'border-amber-500/40 bg-amber-950/20'
                       : 'border-[#1e346d] bg-[#0d1736]'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: jar.color }} />
                       <div>
                         <h4 className="text-sm font-bold text-white">{jar.nameVi}</h4>
                         <span className="text-[10px] text-slate-400 font-mono">Tỷ lệ: {jar.targetPercent}%</span>
                       </div>
                     </div>
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        isOver
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                          : isWarn
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isOver
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : isWarn
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      }`}
+                        }`}
                     >
                       {isOver ? 'Lạm chi' : isWarn ? 'Sắp chạm trần' : 'An toàn'}
                     </span>
@@ -664,9 +638,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                     <div className="flex justify-between font-medium">
                       <span>Còn lại:</span>
                       <span
-                        className={`font-mono font-bold ${
-                          jar.remainingAmount >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                        }`}
+                        className={`font-mono font-bold ${jar.remainingAmount >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
                       >
                         {formatVnd(jar.remainingAmount)}
                       </span>
@@ -681,9 +654,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-[#182a58]">
                       <div
-                        className={`h-full transition-all ${
-                          isOver ? 'bg-rose-500' : isWarn ? 'bg-amber-400' : 'bg-sky-400'
-                        }`}
+                        className={`h-full transition-all ${isOver ? 'bg-rose-500' : isWarn ? 'bg-amber-400' : 'bg-sky-400'
+                          }`}
                         style={{ width: `${Math.min(100, Math.max(2, pctSpent))}%` }}
                       />
                     </div>
@@ -701,9 +673,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <div className="grid gap-4 md:grid-cols-12">
             {/* Age of Money Card */}
             <div className="md:col-span-5 rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-[#0c223a] to-[#0d1736] p-5 shadow-lg">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-400">
-                <Clock className="h-4 w-4" />
-                <span>Thước đo Tuổi Dòng Tiền (Age of Money)</span>
+              <div className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Thước đo Tuổi Dòng Tiền (Age of Money)
               </div>
 
               <div className="mt-4 flex items-baseline gap-2">
@@ -758,18 +729,18 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        {rule.pass ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                        ) : (
-                          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                        )}
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            rule.pass ? 'bg-emerald-400' : 'bg-amber-400'
+                          }`}
+                        />
                         <span className="font-semibold text-white">
                           Rule {rule.ruleNumber}: {rule.titleVi}
                         </span>
                       </div>
                       <span className="font-mono font-bold text-sky-300">{rule.score}/25</span>
                     </div>
-                    <p className="mt-1 text-[11.5px] text-slate-300 ml-6">{rule.detailVi}</p>
+                    <p className="mt-1 text-[11.5px] text-slate-300 ml-4">{rule.detailVi}</p>
                   </div>
                 ))}
               </div>
@@ -786,8 +757,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
             <div className="md:col-span-7 rounded-2xl border border-amber-500/30 bg-[#0d1736] p-5 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <span>Tháp Tài Sản 4 Tầng (Wealth Pyramid)</span>
+                  <h3 className="text-base font-bold text-white">
+                    Tháp Tài Sản 4 Tầng (Wealth Pyramid)
                   </h3>
                   <p className="text-xs text-slate-400">Mô hình phân bổ tài sản vững chãi theo chuẩn quốc tế</p>
                 </div>
@@ -806,7 +777,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                     className="rounded-xl border border-[#1e346d] bg-[#101e47] p-3 transition-all hover:border-amber-400/40"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: tier.color }} />
                         <div>
                           <div className="text-xs font-bold text-white">{tier.nameVi}</div>
                           <div className="text-[10.5px] text-slate-400">{tier.descriptionVi}</div>
@@ -831,9 +803,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
 
             {/* FIRE Simulator */}
             <div className="md:col-span-5 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-[#241708] via-[#1a1408] to-[#0d1736] p-5 space-y-4">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400">
-                <Flame className="h-4 w-4" />
-                <span>Bộ Mô Phỏng Tự Do Tài Chính (FIRE)</span>
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                Bộ Mô Phỏng Tự Do Tài Chính (FIRE)
               </div>
 
               <div>
@@ -890,9 +861,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
           <div className="grid gap-4 md:grid-cols-12">
             {/* Cash Flow Runway Radar */}
             <div className="md:col-span-5 rounded-2xl border border-pink-500/30 bg-gradient-to-br from-[#240a1d] to-[#0d1736] p-5 space-y-4">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-pink-400">
-                <Zap className="h-4 w-4" />
-                <span>Cash Flow Runway Radar (Số tháng sống sót)</span>
+              <div className="text-xs font-bold uppercase tracking-wider text-pink-400">
+                Cash Flow Runway Radar (Số tháng sống sót)
               </div>
 
               <div className="flex items-baseline gap-2">
@@ -930,9 +900,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
             <div className="md:col-span-7 rounded-2xl border border-[#203671] bg-[#0d1736] p-5 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-pink-400" />
-                    <span>Khoản Chi Định Kỳ &amp; Thuê Bao Số</span>
+                  <h3 className="text-base font-bold text-white">
+                    Khoản Chi Định Kỳ &amp; Thuê Bao Số
                   </h3>
                   <p className="text-xs text-slate-400">Theo dõi ngày thu tiền và mức độ thiết yếu của từng dịch vụ</p>
                 </div>
@@ -958,7 +927,8 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
                     key={sub.id}
                     className="flex items-center justify-between rounded-xl border border-[#1b2f64] bg-[#121f47] p-3 text-xs"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
                       <div>
                         <div className="font-bold text-white">{sub.name}</div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-2">
