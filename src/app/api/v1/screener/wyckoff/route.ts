@@ -20,6 +20,8 @@ const PHASES = new Set<WyckoffPhase>([
 
 const SETUPS = new Set<WyckoffSetup>([
   "spring",
+  "spring-tested",
+  "lps-pullback",
   "upthrust",
   "sos-breakout",
   "sow-breakdown",

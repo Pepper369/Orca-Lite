@@ -8,10 +8,20 @@ import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import { Badge, Chg, fmtCompact, fmtNum, Loading, MetaLine, Panel } from "@/components/ui";
 import type { MaScreenRow, MaRegime } from "@/lib/services/ma-screener";
 
-type SignalFilter = "ALL" | "GOLDEN_CROSS" | "BULLISH_ALIGN" | "BULLISH" | "MA_SQUEEZE" | "DEATH_CROSS";
+type SignalFilter =
+  | "ALL"
+  | "PULLBACK_RETEST"
+  | "FRESH_CROSS"
+  | "GOLDEN_CROSS"
+  | "BULLISH_ALIGN"
+  | "BULLISH"
+  | "MA_SQUEEZE"
+  | "DEATH_CROSS";
 
 const SIGNAL_TABS: { id: SignalFilter; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "ALL", label: "Tất cả tín hiệu", icon: <Sparkles className="size-3.5 text-accent-primary" />, desc: "Toàn bộ cổ phiếu" },
+  { id: "PULLBACK_RETEST", label: "Test lại MA hỗ trợ", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Kiểm định MA20/50 rút chân (Điểm mua chuẩn)" },
+  { id: "FRESH_CROSS", label: "Golden Cross mới", icon: <TrendingUp className="size-3.5 text-cyan-400" />, desc: "Vừa giao cắt 0-3 phiên gần nhất" },
   { id: "GOLDEN_CROSS", label: "Giao cắt Vàng", icon: <TrendingUp className="size-3.5 text-amber-400" />, desc: "MA20/50 cắt lên MA50/100/200" },
   { id: "BULLISH_ALIGN", label: "Trật tự xu hướng tăng", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Giá > MA10 > MA20 > MA50 > MA200" },
   { id: "BULLISH", label: "Tất cả đà tăng", icon: <TrendingUp className="size-3.5 text-blue-400" />, desc: "Mọi tín hiệu tăng giá MA" },
@@ -21,6 +31,18 @@ const SIGNAL_TABS: { id: SignalFilter; label: string; icon: React.ReactNode; des
 
 function RegimeBadge({ regime }: { regime: MaRegime }) {
   switch (regime) {
+    case "PULLBACK_RETEST":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[11px] font-bold text-emerald-300 whitespace-nowrap shadow-sm">
+          Test MA Hỗ trợ
+        </span>
+      );
+    case "FRESH_CROSS":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[11px] font-bold text-cyan-400 whitespace-nowrap shadow-sm">
+          Golden Cross Mới
+        </span>
+      );
     case "GOLDEN_CROSS":
       return (
         <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-400 whitespace-nowrap shadow-sm">
@@ -37,6 +59,12 @@ function RegimeBadge({ regime }: { regime: MaRegime }) {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[11px] font-semibold text-blue-400 whitespace-nowrap">
           Đà tăng ngắn
+        </span>
+      );
+    case "OVEREXTENDED":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-amber-900/30 border border-amber-600/40 px-2 py-0.5 text-[11px] font-semibold text-amber-300 whitespace-nowrap">
+          Kéo căng MA20
         </span>
       );
     case "MA_SQUEEZE":
@@ -299,9 +327,16 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
 
                     <td className="num py-2.5 text-right">
                       {row.metrics.distMa200Pct != null ? (
-                        <span className={row.metrics.distMa200Pct >= 0 ? "text-emerald-400 font-medium" : "text-rose-400"}>
-                          {row.metrics.distMa200Pct >= 0 ? "+" : ""}{row.metrics.distMa200Pct}%
-                        </span>
+                        <div>
+                          <span className={row.metrics.distMa200Pct >= 0 ? "text-emerald-400 font-medium" : "text-rose-400"}>
+                            {row.metrics.distMa200Pct >= 0 ? "+" : ""}{row.metrics.distMa200Pct}%
+                          </span>
+                          {row.metrics.distMa20Pct != null ? (
+                            <div className="text-[10px] text-text-muted">
+                              MA20: {row.metrics.distMa20Pct >= 0 ? "+" : ""}{row.metrics.distMa20Pct}%
+                            </div>
+                          ) : null}
+                        </div>
                       ) : (
                         "—"
                       )}
@@ -318,7 +353,14 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
                     </td>
 
                     <td className="py-2.5 text-center">
-                      <RegimeBadge regime={row.regime} />
+                      <div className="flex flex-col items-center gap-0.5">
+                        <RegimeBadge regime={row.regime} />
+                        {row.metrics.crossBarsAgo != null ? (
+                          <span className="text-[10px] text-text-muted">
+                            {row.metrics.crossBarsAgo === 0 ? "Hôm nay" : `T-${row.metrics.crossBarsAgo} phiên`}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
 
                     <td className="num py-2.5 pr-3.5 text-right">

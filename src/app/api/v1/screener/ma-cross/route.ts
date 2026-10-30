@@ -35,6 +35,9 @@ export async function GET(req: Request) {
     | "BULLISH"
     | "GOLDEN_CROSS"
     | "BULLISH_ALIGN"
+    | "PULLBACK_RETEST"
+    | "FRESH_CROSS"
+    | "SLOPE_BULLISH"
     | "MA_SQUEEZE"
     | "BEARISH"
     | "DEATH_CROSS";

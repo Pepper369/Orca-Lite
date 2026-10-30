@@ -82,10 +82,22 @@ export async function GET(req: Request) {
         .filter(Boolean)
     : undefined;
 
+  const statusRaw = (url.searchParams.get("status") ?? "all").toLowerCase();
+  const status = ["all", "confirmed", "forming", "playing_out"].includes(statusRaw)
+    ? (statusRaw as "all" | "confirmed" | "forming" | "playing_out")
+    : "all";
+
+  const zoneRaw = (url.searchParams.get("zone") ?? "all").toLowerCase();
+  const zone = ["all", "oversold", "overbought"].includes(zoneRaw)
+    ? (zoneRaw as "all" | "oversold" | "overbought")
+    : "all";
+
   const opts = {
     kind: kindRaw as DivergenceKind | "any",
     oscillator: oscRaw as DivergenceOscillator | "any",
     minStrength: minStrength as DivergenceStrength,
+    status,
+    zone,
     timeframe,
     limit: Number.isFinite(limit) ? limit : 40,
     symbols,

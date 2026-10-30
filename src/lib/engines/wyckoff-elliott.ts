@@ -13,6 +13,17 @@ export type WyckoffPhase =
 
 export type WyckoffSubPhase = "A" | "B" | "C" | "D" | "E" | null;
 
+export type WyckoffTransitionStatus =
+  | "PHASE_A_STOPPING"
+  | "PHASE_B_BUILDING"
+  | "PHASE_C_TESTING"
+  | "PHASE_C_VERIFIED"
+  | "PHASE_D_LPS"
+  | "PHASE_D_SOS"
+  | "PHASE_E_MARKUP"
+  | "PHASE_E_MARKDOWN"
+  | "NEUTRAL";
+
 export type ElliottPattern =
   | "impulse-up"
   | "impulse-down"
@@ -39,6 +50,14 @@ export interface WyckoffSnapshot {
   volumeTrend: "rising" | "falling" | "flat";
   range: { high: number; low: number } | null;
   notes: string[];
+  transitionStatus?: WyckoffTransitionStatus;
+  transitionVi?: string;
+  springTested?: boolean;
+  lpsConfirmed?: boolean;
+  phaseAgeBars?: number;
+  creekLevel?: number | null;
+  iceLevel?: number | null;
+  testVolumeRatio?: number | null;
 }
 
 export interface ElliottSnapshot {
@@ -124,6 +143,8 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     volumeTrend: "flat",
     range: null,
     notes,
+    transitionStatus: "NEUTRAL",
+    transitionVi: "Chưa xác định",
   };
 }
 
@@ -215,6 +236,40 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     bcBar.close > bcBar.open &&
     (bcBar.high - bcBar.low) / Math.max(bcBar.close, 1e-9) > 0.02;
 
+  // Kiểm tra Spring & Test of Spring (Xác minh Pha C)
+  let springTested = false;
+  let testVolumeRatio: number | null = null;
+  if (spring) {
+    const lowIdx = recent.indexOf(recentLowBar);
+    if (lowIdx >= 0 && lowIdx < recent.length - 1) {
+      const subsequent = recent.slice(lowIdx + 1);
+      for (const sb of subsequent) {
+        const distToLow = Math.abs(sb.low - recentLowBar.low) / Math.max(recentLowBar.low, 1e-9);
+        const sbVol = sb.volume || 0;
+        const lowVol = recentLowBar.volume || 1;
+        if (distToLow <= 0.025 && sbVol < lowVol * 0.88 && sb.close >= sb.open) {
+          springTested = true;
+          testVolumeRatio = Number((sbVol / lowVol).toFixed(2));
+          break;
+        }
+      }
+    }
+  }
+
+  const isRange = rangePct < 22 && Math.abs(ret) < 14;
+
+  // Kiểm tra LPS (Last Point of Support trong Pha D)
+  let lpsConfirmed = false;
+  if (isRange && posInRange >= 0.48 && posInRange <= 0.88 && secondHalfRet >= 0) {
+    const last3 = recent.slice(-3);
+    const min3Low = Math.min(...last3.map((b) => b.low));
+    const avg3Vol = avg(last3.map((b) => b.volume || 0));
+    const midRange = (rangeHigh + rangeLow) / 2;
+    if (min3Low >= midRange * 0.985 && avg3Vol < avgVol * 1.05 && lastBar.close >= lastBar.open) {
+      lpsConfirmed = true;
+    }
+  }
+
   if (sc) {
     eventCodes.push("SC");
     events.push("SC — bán cao điểm đầu cửa sổ, nghi dừng xuống");
@@ -223,9 +278,16 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     eventCodes.push("BC");
     events.push("BC — mua cao điểm đầu cửa sổ, nghi dừng lên");
   }
-  if (spring) {
+  if (springTested) {
+    eventCodes.push("SPRING_TESTED");
+    events.push(`Spring Tested — đã test cạn cung (${testVolumeRatio ?? 0.7}x vol đáy)`);
+  } else if (spring) {
     eventCodes.push("SPRING");
     events.push("Spring — thủng hỗ trợ rồi thu hồi vào range");
+  }
+  if (lpsConfirmed && !sos) {
+    eventCodes.push("LPS");
+    events.push("LPS — Điểm tựa cuối giữ vững trên nửa trên range, vol cạn kiệt");
   }
   if (utad) {
     eventCodes.push("UTAD");
@@ -246,7 +308,6 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     events.push("Nỗ lực giảm: KL nến giảm chiếm ưu thế");
   }
 
-  const isRange = rangePct < 22 && Math.abs(ret) < 14;
   const strongUp = ret > 12 || (firstHalfRet > 0.03 && secondHalfRet > 0.03);
   const strongDown = ret < -12 || (firstHalfRet < -0.03 && secondHalfRet < -0.03);
 
@@ -254,30 +315,56 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
   let subPhase: WyckoffSubPhase = null;
   let confidence = 35;
   let bias: WyckoffSnapshot["bias"] = "neutral";
+  let transitionStatus: WyckoffTransitionStatus = "NEUTRAL";
+  let transitionVi = "Chưa xác định";
 
   if (sos && (firstHalfRet < 0 || isRange)) {
     phase = firstHalfRet < -0.04 ? "markup" : "re-accumulation";
     subPhase = "E";
     bias = "bullish";
-    confidence = 68;
+    confidence = 72;
+    transitionStatus = "PHASE_E_MARKUP";
+    transitionVi = "Chuyển pha E: SOS Bứt phá Trading Range (Markup)";
     notes.push("SOS rời range — Phase E markup nghiêng tích lũy");
   } else if (sow && (firstHalfRet > 0 || isRange)) {
     phase = firstHalfRet > 0.04 ? "markdown" : "re-distribution";
     subPhase = "E";
     bias = "bearish";
-    confidence = 68;
+    confidence = 72;
+    transitionStatus = "PHASE_E_MARKDOWN";
+    transitionVi = "Chuyển pha E: SOW Thủng đáy Range (Markdown)";
     notes.push("SOW rời range — Phase E markdown nghiêng phân phối");
+  } else if (lpsConfirmed && isRange) {
+    phase = "accumulation";
+    subPhase = "D";
+    bias = "bullish";
+    confidence = 75;
+    transitionStatus = "PHASE_D_LPS";
+    transitionVi = "Chuyển pha D: LPS Điểm tựa cuối kiểm định hỗ trợ";
+    notes.push("Phase D LPS — Điểm vào lệnh tối ưu kiểm định cung trước SOS");
+  } else if (springTested && isRange) {
+    phase = firstHalfRet < 0 ? "accumulation" : "re-accumulation";
+    subPhase = "C";
+    bias = "bullish";
+    confidence = 78;
+    transitionStatus = "PHASE_C_VERIFIED";
+    transitionVi = "Pha C hoàn thành: Spring đã Test cạn cung thành công";
+    notes.push("Phase C Spring Tested — kiểm định cạn cung hoàn tất, sẵn sàng chuyển pha D");
   } else if (spring && isRange) {
     phase = firstHalfRet < 0 ? "accumulation" : "re-accumulation";
     subPhase = "C";
     bias = "bullish";
     confidence = 70;
+    transitionStatus = "PHASE_C_TESTING";
+    transitionVi = "Pha C: Vừa xuất hiện Spring, đang chờ phiên Test";
     notes.push("Phase C Spring — test nguồn cung còn lại");
   } else if (utad && isRange) {
     phase = firstHalfRet > 0 ? "distribution" : "re-distribution";
     subPhase = "C";
     bias = "bearish";
     confidence = 70;
+    transitionStatus = "PHASE_C_TESTING";
+    transitionVi = "Pha C Phân phối: Upthrust / UTAD bẫy cầu";
     notes.push("Phase C UTAD — test nhu cầu còn lại");
   } else if (isRange && firstHalfRet < -0.04) {
     phase = "accumulation";
@@ -285,14 +372,20 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     if (sc) {
       subPhase = "A";
       confidence = 55;
+      transitionStatus = "PHASE_A_STOPPING";
+      transitionVi = "Pha A: SC/AR đang chặn đà rơi";
       notes.push("Phase A — SC/AR đang dừng xuống");
     } else if (posInRange > 0.62 && upVol > downVol) {
       subPhase = "D";
-      confidence = 58;
+      confidence = 62;
+      transitionStatus = "PHASE_D_SOS";
+      transitionVi = "Pha D: Nỗ lực bứt phá nửa trên range";
       notes.push("Phase D — giá ở nửa trên range, nghi SOS sắp tới");
     } else {
       subPhase = "B";
       confidence = 48;
+      transitionStatus = "PHASE_B_BUILDING";
+      transitionVi = "Pha B: Đi ngang tích tụ nguyên nhân trong Range";
       notes.push("Phase B — đi ngang sau giảm, đang xây nguyên nhân");
     }
   } else if (isRange && firstHalfRet > 0.04) {
@@ -301,39 +394,55 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     if (bc) {
       subPhase = "A";
       confidence = 55;
+      transitionStatus = "PHASE_A_STOPPING";
+      transitionVi = "Pha A: BC/AR đang chặn đà tăng";
       notes.push("Phase A — BC/AR đang dừng lên");
     } else if (posInRange < 0.38 && downVol > upVol) {
       subPhase = "D";
-      confidence = 58;
+      confidence = 62;
+      transitionStatus = "PHASE_D_SOS";
+      transitionVi = "Pha D: Áp lực giảm nửa dưới range";
       notes.push("Phase D — giá ở nửa dưới range, nghi SOW sắp tới");
     } else {
       subPhase = "B";
       confidence = 48;
+      transitionStatus = "PHASE_B_BUILDING";
+      transitionVi = "Pha B: Đi ngang phân phối trong Range";
       notes.push("Phase B — đi ngang sau tăng, đang xây nguyên nhân");
     }
   } else if (strongUp && !isRange) {
     phase = secondHalfRet > 0.02 && firstHalfRet > 0.02 ? "markup" : "re-accumulation";
     subPhase = phase === "markup" ? "E" : "B";
     bias = "bullish";
-    confidence = 58;
+    confidence = 60;
+    transitionStatus = "PHASE_E_MARKUP";
+    transitionVi = "Pha E: Xu hướng tăng Mark-up dốc";
     notes.push("Đà tăng chiếm ưu thế — markup / tái tích lũy");
   } else if (strongDown && !isRange) {
     phase = secondHalfRet < -0.02 && firstHalfRet < -0.02 ? "markdown" : "re-distribution";
     subPhase = phase === "markdown" ? "E" : "B";
     bias = "bearish";
-    confidence = 58;
+    confidence = 60;
+    transitionStatus = "PHASE_E_MARKDOWN";
+    transitionVi = "Pha E: Xu hướng giảm Mark-down dốc";
     notes.push("Đà giảm chiếm ưu thế — markdown / tái phân phối");
   } else if (ret > 3) {
     phase = "markup";
     subPhase = "E";
     bias = "bullish";
-    confidence = 42;
+    confidence = 45;
+    transitionStatus = "PHASE_E_MARKUP";
+    transitionVi = "Pha E: Nhịp tăng ngắn hạn";
   } else if (ret < -3) {
     phase = "markdown";
     subPhase = "E";
     bias = "bearish";
-    confidence = 42;
+    confidence = 45;
+    transitionStatus = "PHASE_E_MARKDOWN";
+    transitionVi = "Pha E: Nhịp giảm ngắn hạn";
   } else {
+    transitionStatus = "PHASE_B_BUILDING";
+    transitionVi = "Pha B: Dao động cân bằng";
     notes.push("Biên độ hẹp / hỗn hợp — chờ phá vỡ kèm khối lượng");
   }
 
@@ -343,6 +452,7 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     notes.push("Khối lượng co trong biên — đặc trưng giai đoạn cân bằng");
   }
   if (spring || utad) confidence = Math.min(85, confidence + 6);
+  if (springTested) confidence = Math.min(88, confidence + 5);
 
   return {
     phase,
@@ -355,6 +465,13 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     volumeTrend: vt,
     range: { high: rangeHigh, low: rangeLow },
     notes: notes.slice(0, 4),
+    transitionStatus,
+    transitionVi,
+    springTested,
+    lpsConfirmed,
+    creekLevel: rangeHigh,
+    iceLevel: rangeLow,
+    testVolumeRatio,
   };
 }
 

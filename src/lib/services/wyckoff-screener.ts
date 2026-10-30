@@ -9,9 +9,11 @@ import type { Meta, Quote } from "../types";
 
 export type WyckoffSetup =
   | "spring"
-  | "upthrust"
+  | "spring-tested"
+  | "lps-pullback"
   | "sos-breakout"
   | "sow-breakdown"
+  | "upthrust"
   | "accumulation-range"
   | "distribution-range"
   | "markup"
@@ -36,13 +38,21 @@ export interface WyckoffScreenRow {
   eventCodes: string[];
   range: { high: number; low: number } | null;
   notes: string[];
+  transitionStatus?: string;
+  transitionVi?: string;
+  springTested?: boolean;
+  lpsConfirmed?: boolean;
+  creekLevel?: number | null;
+  iceLevel?: number | null;
 }
 
 const SETUP_VI: Record<WyckoffSetup, string> = {
   spring: "Spring / Shakeout",
+  "spring-tested": "Spring đã Test (Pha C xác nhận)",
+  "lps-pullback": "LPS Điểm tựa cuối (Pha D)",
+  "sos-breakout": "SOS — Phá kháng cự (Pha D->E)",
+  "sow-breakdown": "SOW — Gãy hỗ trợ",
   upthrust: "Upthrust / UTAD",
-  "sos-breakout": "SOS — phá kháng cự",
-  "sow-breakdown": "SOW — gãy hỗ trợ",
   "accumulation-range": "Range tích lũy",
   "distribution-range": "Range phân phối",
   markup: "Markup",
@@ -53,6 +63,8 @@ const SETUP_VI: Record<WyckoffSetup, string> = {
 function pickSetup(w: WyckoffSnapshot): WyckoffSetup {
   const codes = new Set((w.eventCodes ?? []).map((c) => c.toUpperCase()));
   const blob = (w.events ?? []).join(" ").toLowerCase();
+  if (w.springTested || codes.has("SPRING_TESTED")) return "spring-tested";
+  if (w.lpsConfirmed || codes.has("LPS")) return "lps-pullback";
   if (codes.has("SPRING") || blob.includes("spring")) return "spring";
   if (codes.has("UTAD") || codes.has("UT") || blob.includes("utad") || blob.includes("upthrust")) return "upthrust";
   if ((codes.has("SOS") || blob.includes("sos")) && (w.phase === "markup" || w.phase === "accumulation" || w.phase === "re-accumulation"))
@@ -110,6 +122,12 @@ export async function screenWyckoff(args?: {
       eventCodes: w.eventCodes ?? [],
       range: w.range,
       notes: w.notes,
+      transitionStatus: w.transitionStatus,
+      transitionVi: w.transitionVi,
+      springTested: w.springTested,
+      lpsConfirmed: w.lpsConfirmed,
+      creekLevel: w.creekLevel,
+      iceLevel: w.iceLevel,
     };
     return row;
   });

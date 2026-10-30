@@ -111,6 +111,7 @@ function pairAdjacent(
   minPriceMovePct: number,
   volumes: number[],
   timeframe?: string,
+  bars?: OhlcvBar[],
 ): DivergenceSignal[] {
   const signals: DivergenceSignal[] = [];
   const tol = osc === "rsi" || osc === "stoch" ? 2 : 3;
@@ -174,7 +175,99 @@ function pairAdjacent(
       volumeConfirmed = volB >= volA * 0.9;
       if (volumeConfirmed) confidence += 0.06;
     }
-    confidence = Math.max(0.2, Math.min(0.95, confidence));
+
+    // Zone assessment (Oversold / Overbought edge)
+    let zone: "oversold" | "overbought" | "neutral" = "neutral";
+    if (osc === "rsi" || osc === "stoch") {
+      if (oa.value <= 35 || ob.value <= 35) zone = "oversold";
+      else if (oa.value >= 65 || ob.value >= 65) zone = "overbought";
+    }
+    if (bullish && zone === "oversold") confidence += 0.08;
+    if (!bullish && zone === "overbought") confidence += 0.08;
+
+    // Detection timing, confirmation bar & lifecycle status
+    let status: "forming" | "confirmed" | "playing_out" | "exhausted" | "invalidated" = "forming";
+    let trigger = "Đang hình thành pivot thứ 2";
+    let confirmationBarIndex: number | null = null;
+    let barsAgo = 0;
+
+    if (bars && bars.length > 0) {
+      const currentIdx = bars.length - 1;
+      const barsSincePivot = Math.max(0, currentIdx - b.index);
+      barsAgo = barsSincePivot;
+
+      if (bullish) {
+        let broken = false;
+        let confirmedIdx = -1;
+        const pivotHigh = bars[b.index]?.high ?? b.price;
+        for (let k = b.index + 1; k <= currentIdx; k++) {
+          const barK = bars[k]!;
+          if (barK.low < b.price * 0.985) {
+            broken = true;
+            break;
+          }
+          if (confirmedIdx === -1 && barK.close > pivotHigh) {
+            confirmedIdx = k;
+          }
+        }
+        if (broken) {
+          status = "invalidated";
+          trigger = "Giá phá vỡ đáy pivot 2 (bị gãy)";
+          confidence = Math.max(0.1, confidence - 0.25);
+        } else if (confirmedIdx !== -1) {
+          confirmationBarIndex = confirmedIdx;
+          const lastClose = bars[currentIdx]!.close;
+          const pctFromPivot = ((lastClose - b.price) / Math.max(b.price, 1e-9)) * 100;
+          if (pctFromPivot > 4.5 || (barsSincePivot > 4 && pctFromPivot > 2.0)) {
+            status = "playing_out";
+            trigger = `Đang diễn biến (+${pctFromPivot.toFixed(1)}% từ đáy)`;
+          } else {
+            status = "confirmed";
+            trigger = `Nến T+${confirmedIdx - b.index} xác nhận nảy đóng vượt đỉnh pivot`;
+            confidence += 0.07;
+          }
+        } else {
+          status = "forming";
+          trigger = `Đang kiểm định đáy (${barsSincePivot} phiên), chờ nến xanh bứt phá`;
+        }
+      } else {
+        let broken = false;
+        let confirmedIdx = -1;
+        const pivotLow = bars[b.index]?.low ?? b.price;
+        for (let k = b.index + 1; k <= currentIdx; k++) {
+          const barK = bars[k]!;
+          if (barK.high > b.price * 1.015) {
+            broken = true;
+            break;
+          }
+          if (confirmedIdx === -1 && barK.close < pivotLow) {
+            confirmedIdx = k;
+          }
+        }
+        if (broken) {
+          status = "invalidated";
+          trigger = "Giá vượt đỉnh pivot 2 (bị gãy)";
+          confidence = Math.max(0.1, confidence - 0.25);
+        } else if (confirmedIdx !== -1) {
+          confirmationBarIndex = confirmedIdx;
+          const lastClose = bars[currentIdx]!.close;
+          const pctFromPivot = ((b.price - lastClose) / Math.max(b.price, 1e-9)) * 100;
+          if (pctFromPivot > 4.5 || (barsSincePivot > 4 && pctFromPivot > 2.0)) {
+            status = "playing_out";
+            trigger = `Đang diễn biến giảm (-${pctFromPivot.toFixed(1)}% từ đỉnh)`;
+          } else {
+            status = "confirmed";
+            trigger = `Nến T+${confirmedIdx - b.index} xác nhận thủng đáy pivot`;
+            confidence += 0.07;
+          }
+        } else {
+          status = "forming";
+          trigger = `Đang kiểm định đỉnh (${barsSincePivot} phiên), chờ nến đỏ xác nhận`;
+        }
+      }
+    }
+
+    confidence = Math.max(0.2, Math.min(0.96, confidence));
 
     const strength: DivergenceStrength =
       confidence >= 0.72 ? "A" : confidence >= 0.55 ? "B" : "C";
@@ -191,6 +284,11 @@ function pairAdjacent(
       structure: "double",
       volumeConfirmed,
       detectedAt: b.time,
+      status,
+      barsAgo,
+      zone,
+      trigger,
+      confirmationBarIndex,
     } as DivergenceSignal);
   }
   return signals;
@@ -248,6 +346,7 @@ export function detectDivergences(
         minPriceMovePct,
         volumes,
         timeframe,
+        bars,
       ),
       ...pairAdjacent(
         priceTroughs,
@@ -259,6 +358,7 @@ export function detectDivergences(
         minPriceMovePct,
         volumes,
         timeframe,
+        bars,
       ),
       ...pairAdjacent(
         pricePeaks,
@@ -270,6 +370,7 @@ export function detectDivergences(
         minPriceMovePct,
         volumes,
         timeframe,
+        bars,
       ),
       ...pairAdjacent(
         priceTroughs,
@@ -281,6 +382,7 @@ export function detectDivergences(
         minPriceMovePct,
         volumes,
         timeframe,
+        bars,
       ),
     );
   };
@@ -376,5 +478,16 @@ export function divergenceSummaryLine(s: DivergenceSignal): string {
   const struct = s.structure && s.structure !== "double" ? ` · ${s.structure}` : "";
   const vol =
     s.volumeConfirmed === true ? " · vol xác nhận" : s.volumeConfirmed === false ? " · vol chưa đạt" : "";
-  return `${DIVERGENCE_KIND_VI[s.kind]} · ${osc}${tf}${struct} · class ${s.strength} · hạng ${s.strength} · ${s.barsBetween} nến${vol}`;
+  const statusStr =
+    s.status === "confirmed"
+      ? " · Đã xác nhận"
+      : s.status === "forming"
+      ? " · Đang hình thành"
+      : s.status === "playing_out"
+      ? " · Đang diễn biến"
+      : s.status === "invalidated"
+      ? " · Đã gãy"
+      : "";
+  const agoStr = s.barsAgo != null ? ` · T-${s.barsAgo}` : "";
+  return `${DIVERGENCE_KIND_VI[s.kind]} · ${osc}${tf}${struct} · class ${s.strength} · hạng ${s.strength} · ${s.barsBetween} nến${vol}${statusStr}${agoStr}`;
 }

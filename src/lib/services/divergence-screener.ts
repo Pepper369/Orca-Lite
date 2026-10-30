@@ -46,6 +46,8 @@ export type DivergenceScreenOpts = {
   kind?: DivergenceKind | "any";
   oscillator?: DivergenceOscillator | "any";
   minStrength?: DivergenceStrength;
+  status?: "all" | "confirmed" | "forming" | "playing_out";
+  zone?: "all" | "oversold" | "overbought";
   timeframe?: string;
   limit?: number;
   asset?: "stock" | "crypto" | "multi";
@@ -81,10 +83,12 @@ function strengthOk(s: string | number, min: DivergenceStrength): boolean {
 }
 
 function isAlertWorthy(d: DivergenceSignal): boolean {
+  if (d.status === "invalidated") return false;
   const multi = d.structure === "double" || d.structure === "triple";
   const confFloor = multi ? 0.5 : 0.55;
   const volOk = d.volumeConfirmed === true;
   const volSoft = d.volumeConfirmed !== false;
+  if (d.status === "confirmed" && d.confidence >= 0.5) return true;
   if (strengthRank(d.strength) === 3 && d.confidence >= confFloor && (volOk || (volSoft && d.confidence >= 0.7))) {
     return true;
   }
@@ -107,6 +111,12 @@ function filterSignals(list: DivergenceSignal[], opts: DivergenceScreenOpts): Di
   if (opts.kind && opts.kind !== "any") out = out.filter((d) => d.kind === opts.kind);
   if (opts.oscillator && opts.oscillator !== "any") {
     out = out.filter((d) => d.oscillator === opts.oscillator);
+  }
+  if (opts.status && opts.status !== "all") {
+    out = out.filter((d) => d.status === opts.status);
+  }
+  if (opts.zone && opts.zone !== "all") {
+    out = out.filter((d) => d.zone === opts.zone);
   }
   return out;
 }
@@ -140,9 +150,11 @@ function cacheKeyVn(opts: DivergenceScreenOpts, universe: string[]): string {
   const k = opts.kind ?? "any";
   const o = opts.oscillator ?? "any";
   const s = opts.minStrength ?? "C";
+  const st = opts.status ?? "all";
+  const z = opts.zone ?? "all";
   const lim = Math.min(opts.limit ?? 40, 80);
   const symPart = opts.symbols?.length ? universe.join(",") : "vn100";
-  return `div:vn:v5:${w}:${tf}:${k}:${o}:${s}:${lim}:${symPart}`;
+  return `div:vn:v6:${w}:${tf}:${k}:${o}:${s}:${st}:${z}:${lim}:${symPart}`;
 }
 
 export async function screenVnDivergences(

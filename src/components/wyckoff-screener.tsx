@@ -41,11 +41,13 @@ const WYCKOFF_PHASES = [
 
 const WYCKOFF_SETUPS = [
   { v: "all", l: "Mọi setup" },
-  { v: "spring", l: "Spring" },
-  { v: "upthrust", l: "Upthrust / UTAD" },
-  { v: "sos-breakout", l: "SOS breakout" },
-  { v: "sow-breakdown", l: "SOW breakdown" },
+  { v: "lps-pullback", l: "LPS Điểm tựa (Pha D)" },
+  { v: "spring-tested", l: "Spring đã Test (Pha C)" },
+  { v: "spring", l: "Spring Shakeout" },
+  { v: "sos-breakout", l: "SOS Breakout (Pha D->E)" },
   { v: "accumulation-range", l: "Range tích lũy" },
+  { v: "upthrust", l: "Upthrust / UTAD" },
+  { v: "sow-breakdown", l: "SOW Breakdown" },
   { v: "distribution-range", l: "Range phân phối" },
 ] as const;
 
@@ -277,14 +279,26 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                           {r.subPhase ? ` · ${r.subPhase}` : ""}
                         </Badge>
                       </td>
-                      <td className="py-2 text-ink-2">{r.setupVi}</td>
+                      <td className="py-2 text-ink-2">
+                        <div className="font-medium text-text-primary">{r.setupVi}</div>
+                        {r.transitionVi ? (
+                          <div className="mt-0.5 text-[10px] text-accent-primary">{r.transitionVi}</div>
+                        ) : null}
+                      </td>
                       <td className="num py-2 text-right">{r.confidence}%</td>
                       <td className="num py-2 text-right">{fmtNum(r.price, 2)}</td>
                       <td className="py-2 text-right">
                         <Chg value={r.changePercent} arrow={false} />
                       </td>
                       <td className="max-w-[280px] py-2 pr-3.5 text-[11px] leading-snug text-ink-2">
-                        {r.events[0] ?? r.notes[0] ?? "—"}
+                        <div>{r.events[0] ?? r.notes[0] ?? "—"}</div>
+                        {r.range ? (
+                          <div className="mt-0.5 text-[10px] text-text-muted">
+                            Range: {fmtNum(r.range.low, 1)} – {fmtNum(r.range.high, 1)}
+                            {r.springTested ? <span className="ml-1 text-emerald-400 font-semibold">(Spring Tested)</span> : null}
+                            {r.lpsConfirmed ? <span className="ml-1 text-cyan-400 font-semibold">(LPS Support)</span> : null}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   ))

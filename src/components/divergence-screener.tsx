@@ -14,6 +14,11 @@ type DivSignal = {
   barsBetween: number;
   timeframe: string | null;
   structure?: "single" | "double" | "triple";
+  status?: "forming" | "confirmed" | "playing_out" | "exhausted" | "invalidated";
+  barsAgo?: number;
+  zone?: "oversold" | "overbought" | "neutral";
+  trigger?: string;
+  confirmationBarIndex?: number | null;
 };
 
 type DivRow = {
@@ -60,6 +65,19 @@ const STRENGTHS = [
   { id: "A", label: "Chỉ class A" },
 ] as const;
 
+const STATUSES = [
+  { id: "all", label: "Tất cả trạng thái" },
+  { id: "confirmed", label: "Đã xác nhận (Triggered)" },
+  { id: "forming", label: "Đang hình thành (Mới)" },
+  { id: "playing_out", label: "Đang diễn biến thuận" },
+] as const;
+
+const ZONES = [
+  { id: "all", label: "Mọi vùng biên độ" },
+  { id: "oversold", label: "Quá Bán sâu (RSI ≤ 35)" },
+  { id: "overbought", label: "Quá Mua (RSI ≥ 65)" },
+] as const;
+
 const ASSETS = [
   { id: "stock", label: "Cổ phiếu VN" },
   { id: "crypto", label: "Crypto" },
@@ -96,6 +114,8 @@ export function DivergenceScreener() {
   const [kind, setKind] = useState("any");
   const [oscillator, setOscillator] = useState("any");
   const [minStrength, setMinStrength] = useState("B");
+  const [status, setStatus] = useState("all");
+  const [zone, setZone] = useState("all");
   const [alertOnly, setAlertOnly] = useState(false);
   const [pressed, setPressed] = useState(false);
 
@@ -105,10 +125,12 @@ export function DivergenceScreener() {
     if (kind !== "any") p.set("kind", kind);
     if (oscillator !== "any") p.set("oscillator", oscillator);
     p.set("minStrength", minStrength);
+    if (status !== "all") p.set("status", status);
+    if (zone !== "all") p.set("zone", zone);
     p.set("limit", "50");
     if (asset === "crypto") p.set("timeframe", "1h");
     return p.toString();
-  }, [asset, kind, oscillator, minStrength]);
+  }, [asset, kind, oscillator, minStrength, status, zone]);
 
   const { res, data, meta, isLoading, isValidating, mutate } = useApi<ScreenPayload>(
     `/api/v1/screener/divergence?${qs}`,
@@ -194,6 +216,34 @@ export function DivergenceScreener() {
               ))}
             </select>
           </label>
+          <label>
+            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Trạng thái</span>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="input !w-36 !py-1.5 text-[12px]"
+            >
+              {STATUSES.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Vùng biên</span>
+            <select
+              value={zone}
+              onChange={(e) => setZone(e.target.value)}
+              className="input !w-36 !py-1.5 text-[12px]"
+            >
+              {ZONES.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-center gap-1.5 pb-1.5 text-[12px]">
             <input type="checkbox" checked={alertOnly} onChange={(e) => setAlertOnly(e.target.checked)} />
             Chỉ alert-worthy
@@ -234,6 +284,7 @@ export function DivergenceScreener() {
                 <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-3">
                   <th className="px-3.5 py-2 font-medium">Mã</th>
                   <th className="py-2 font-medium">Phân kỳ</th>
+                  <th className="py-2 font-medium">Trạng thái & Xác nhận</th>
                   <th className="py-2 font-medium">Osc</th>
                   <th className="py-2 text-center font-medium">Class</th>
                   <th className="py-2 text-right font-medium">Conf</th>
@@ -261,9 +312,46 @@ export function DivergenceScreener() {
                         ) : null}
                       </td>
                       <td className="py-2 text-[11px]">
-                        <Badge tone={tone}>{kindShort(t.kind)}</Badge>
-                        <div className="mt-0.5 max-w-[220px] truncate text-[10px] text-ink-3" title={row.summary}>
-                          {row.summary}
+                        <div className="flex items-center gap-1.5">
+                          <Badge tone={tone}>{kindShort(t.kind)}</Badge>
+                          {t.barsAgo != null ? (
+                            <span className="rounded bg-panel-2 px-1 py-0.5 text-[10px] text-text-muted">
+                              T-{t.barsAgo}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 max-w-[220px] truncate text-[10px] text-ink-3" title={t.trigger || row.summary}>
+                          {t.trigger || row.summary}
+                        </div>
+                      </td>
+                      <td className="py-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {t.status === "confirmed" ? (
+                            <span className="inline-flex items-center rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-400">
+                              Đã xác nhận
+                            </span>
+                          ) : t.status === "forming" ? (
+                            <span className="inline-flex items-center rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-amber-400">
+                              Đang tạo đáy
+                            </span>
+                          ) : t.status === "playing_out" ? (
+                            <span className="inline-flex items-center rounded bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-blue-400">
+                              Đang diễn biến
+                            </span>
+                          ) : t.status === "invalidated" ? (
+                            <span className="inline-flex items-center rounded bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-rose-400">
+                              Đã gãy
+                            </span>
+                          ) : null}
+                          {t.zone === "oversold" ? (
+                            <span className="rounded bg-purple-500/15 border border-purple-500/30 px-1 py-0.2 text-[9px] font-medium text-purple-300">
+                              RSI Quá bán
+                            </span>
+                          ) : t.zone === "overbought" ? (
+                            <span className="rounded bg-rose-500/15 border border-rose-500/30 px-1 py-0.2 text-[9px] font-medium text-rose-300">
+                              RSI Quá mua
+                            </span>
+                          ) : null}
                         </div>
                       </td>
                       <td className="py-2 text-[11px] text-ink-2">

@@ -181,6 +181,11 @@ export interface DivergenceSignal {
   volumeConfirmed: boolean | null;
   volumeRatio?: number | null;
   detectedAt: number;
+  status?: "forming" | "confirmed" | "playing_out" | "exhausted" | "invalidated" | string;
+  barsAgo?: number;
+  zone?: "oversold" | "overbought" | "neutral" | string;
+  trigger?: string;
+  confirmationBarIndex?: number | null;
   type?: string;
   direction?: "bullish" | "bearish" | string;
   indicator?: string;
