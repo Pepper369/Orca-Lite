@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { VnStockDetail } from "@/lib/services/stocks";
-import { ArrowDownRight, ArrowUpRight, CheckCircle2, ShieldAlert, Sparkles, Target, Zap } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CheckCircle2, Layers, ShieldAlert, Sparkles, Target, Zap } from "lucide-react";
 
 export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
   symbol,
@@ -26,22 +26,22 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
   const fmt = (n?: number | null) => (n != null ? n.toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "—");
 
   const diffPct = plan && lastPrice > 0 ? ((lastPrice - plan.entry) / lastPrice) * 100 : 0;
-  const isOptimalNow = Math.abs(diffPct) <= 0.5;
-  const isWaitingPullback = diffPct > 0.5;
+  const isOptimalNow = Math.abs(diffPct) <= 0.6;
+  const isWaitingPullback = diffPct > 0.6;
 
   return (
     <div className="space-y-2.5 text-xs">
-      {/* 1. Header Khuyến nghị Tức Thì */}
+      {/* 1. Header Khuyến nghị Tức Thì & Điểm Số Định Lượng Bất Đối Xứng */}
       <div className={`p-2.5 rounded-lg border ${bgTone}`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <span className={`font-extrabold text-[13px] flex items-center gap-1 ${tone}`}>
               {isBuy ? <ArrowUpRight className="size-4" /> : isSell ? <ArrowDownRight className="size-4" /> : <Sparkles className="size-4" />}
-              LỆNH ĐỀ XUẤT: {signal}
+              LỆNH: {signal}
             </span>
-            {ts?.confidence != null && (
-              <span className="rounded bg-surface-base px-1.5 py-0.5 text-[10px] font-bold text-text-primary border border-border-subtle">
-                Độ chắc chắn {Math.round(ts.confidence)}%
+            {plan?.asymmetricScore != null && (
+              <span className="rounded bg-accent-primary/20 text-accent-primary px-1.5 py-0.5 text-[10px] font-black border border-accent-primary/40">
+                AQS {plan.asymmetricScore}/100
               </span>
             )}
           </div>
@@ -50,31 +50,31 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
           </span>
         </div>
 
-        {/* Khuyến nghị hành động rõ ràng theo giá */}
+        {/* Lời phán quyết hành động từ Quant Engine */}
         {plan && (
-          <div className="mt-2 pt-2 border-t border-border-subtle/50 text-[11px] font-medium">
+          <div className="mt-2 pt-2 border-t border-border-subtle/50 text-[11px] font-medium leading-relaxed">
             {isWaitingPullback ? (
-              <div className="text-amber-300 flex items-center gap-1">
-                <span>⚠️ Thị trường đang cao hơn điểm an toàn <b>+{diffPct.toFixed(1)}%</b>. Đặt lệnh chờ tại <b>{fmt(plan.entry)}</b> để LỖ ÍT NHẤT.</span>
+              <div className="text-amber-300">
+                ⚠️ Giá sàn đang cao hơn điểm mua <b>+{diffPct.toFixed(1)}%</b>. Đặt lệnh chờ tại <b>{fmt(plan.entry)}</b> để khống chế lỗ tối đa chỉ <b>-{plan.riskPct}%</b>.
               </div>
             ) : isOptimalNow ? (
-              <div className="text-emerald-400 flex items-center gap-1">
-                <span>✅ Thị trường đang ở đúng vùng giá an toàn sát hỗ trợ. Có thể giải ngân ngay.</span>
+              <div className="text-emerald-400">
+                ✅ Giá sàn đang ở đúng bệ đỡ hội tụ. Giải ngân ngay để đạt tỷ suất <b>1 ăn {plan.riskReward.toFixed(1)}</b>.
               </div>
             ) : (
-              <div className="text-sky-300 flex items-center gap-1">
-                <span>⚡ Giá đã chiết khấu sâu về dưới hỗ trợ. Ưu tiên giải ngân tích lũy quanh <b>{fmt(plan.entry)}</b>.</span>
+              <div className="text-sky-300">
+                ⚡ Giá đã chiết khấu sâu về dưới hỗ trợ. Giải ngân tích lũy quanh <b>{fmt(plan.entry)}</b> đón sóng bật tăng lớn.
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* 2. Điểm Mua & Vùng gom lệnh tối ưu (Không mua đuổi) */}
+      {/* 2. Điểm Mua & Vùng Gom Lệnh Tối Ưu */}
       <div className="p-2.5 rounded-lg border border-border-subtle bg-surface-elevated/40 space-y-2">
         <div className="text-[10px] font-bold uppercase tracking-wider text-text-muted flex items-center justify-between">
           <span>Điểm Vào Lệnh (Entry) Tối Ưu</span>
-          <span className="text-accent-primary font-mono text-[9.5px]">Tối thiểu rủi ro thua lỗ</span>
+          <span className="text-accent-primary font-mono text-[9.5px]">Sát bệ đỡ hội tụ</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -95,13 +95,30 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
               {plan ? fmt(plan.entry) : fmt(lastPrice)}
             </div>
             <div className="text-[9px] font-semibold mt-0.5 text-text-secondary">
-              {plan?.entryZone ? `Vùng gom: ${fmt(plan.entryZone[0])} – ${fmt(plan.entryZone[1])}` : "Sát hỗ trợ cứng"}
+              {plan?.entryZone ? `Vùng gom: ${fmt(plan.entryZone[0])} – ${fmt(plan.entryZone[1])}` : "Sát bệ đỡ"}
             </div>
           </div>
         </div>
+
+        {/* Các lớp hỗ trợ bê tông hội tụ */}
+        {plan?.confluenceLayers && plan.confluenceLayers.length > 0 && (
+          <div className="pt-1 border-t border-border-subtle/50 text-[10px]">
+            <div className="text-text-muted font-medium mb-1 flex items-center gap-1">
+              <Layers className="size-3 text-accent-primary" />
+              <span>Bệ đỡ hội tụ {plan.confluenceLayers.length} lớp kỹ thuật:</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {plan.confluenceLayers.map((layer, i) => (
+                <span key={i} className="rounded bg-surface-base px-1.5 py-0.5 text-[9.5px] font-medium text-text-secondary border border-border-subtle">
+                  {layer}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 3. BẢNG KẾT QUẢ ĐẦU TƯ: LỖ ÍT NHẤT vs LÃI CAO NHẤT */}
+      {/* 3. BẢNG KẾT QUẢ ĐẦU TƯ: LỖ TỐI THIỂU vs LÃI TỐI ĐA */}
       {plan && (
         <div className="p-2.5 rounded-lg border border-border-subtle bg-surface-elevated/40 space-y-2.5">
           <div className="flex items-center justify-between border-b border-border-subtle/60 pb-1.5">
@@ -113,7 +130,7 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
             </span>
           </div>
 
-          {/* 2 Cột Đối chiếu Rõ Ràng: Thua mất bao nhiêu? Thắng được bao nhiêu? */}
+          {/* 2 Cột Đối chiếu Rõ Ràng */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             {/* Cột Thua: Lỗ ít nhất */}
             <div className="p-2 rounded-md bg-rose-500/10 border border-rose-500/30">
@@ -128,7 +145,7 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
                 Cắt lỗ tại: <b>{fmt(plan.stopLoss)}</b>
               </div>
               <div className="text-[9px] text-text-muted mt-1 border-t border-rose-500/20 pt-1">
-                Bảo vệ <b>{(100 - plan.riskPct).toFixed(1)}%</b> vốn
+                Bảo vệ an toàn <b>{(100 - plan.riskPct).toFixed(1)}%</b> vốn
               </div>
             </div>
 
@@ -176,12 +193,20 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
         </div>
       )}
 
-      {/* 4. Tóm tắt nguyên tắc kết quả */}
-      <div className="p-2 rounded-md bg-surface-base border border-border-subtle text-[10px] text-text-muted space-y-0.5">
-        <div className="font-semibold text-text-secondary">Nguyên tắc cốt lõi:</div>
-        <div>• Mua sát điểm đỡ hỗ trợ để nếu sai, cắt lỗ ngay và mức lỗ tối đa chỉ quanh <b>2.5% – 3.5%</b>.</div>
-        <div>• Khi thị trường vào sóng tăng, biên độ lợi nhuận mở rộng tối đa lên kháng cự trên (đạt từ <b>12% – 25%+</b>).</div>
-      </div>
+      {/* 4. Căn cứ định lượng */}
+      {plan?.basis && plan.basis.length > 0 && (
+        <div className="p-2 rounded-lg border border-border-subtle bg-surface-base text-[11px] space-y-1">
+          <div className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1">
+            Xác nhận định lượng:
+          </div>
+          {plan.basis.map((b, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-text-secondary text-[10.5px]">
+              <CheckCircle2 className="size-3 text-accent-primary shrink-0 mt-0.5" />
+              <span>{b}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 });

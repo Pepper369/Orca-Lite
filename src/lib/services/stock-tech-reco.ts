@@ -329,6 +329,7 @@ export function computeStockTechReco(
       volatility30d: tech.volatility30d,
       sma20: tech.sma?.sma20,
       sma50: tech.sma?.sma50,
+      sma200: tech.sma?.sma200,
       rsi14: tech.rsi14,
       bollinger: tech.bollinger,
       trendScore: tech.trend?.score,
@@ -362,6 +363,9 @@ export function computeStockTechReco(
         invalidation: ts.plan.invalidation,
         basis: ts.plan.basis,
         notes: ts.plan.notes,
+        asymmetricScore: ts.plan.asymmetricScore,
+        confluenceLayers: ts.plan.confluenceLayers,
+        actionVerdict: ts.plan.actionVerdict,
       };
     } else if (ts.action === "watch" && (ts.confidence ?? 0) >= 45) {
       signal = "QUAN_SÁT";

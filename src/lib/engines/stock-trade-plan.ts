@@ -4,6 +4,8 @@
  * Pure (no server-only) so client DecisionStrip can reuse.
  */
 
+import { computeAsymmetricPlan } from "./asymmetric-quant-engine";
+
 export type StockTradeSide = "buy" | "sell";
 
 export interface StockTradePlan {
@@ -31,6 +33,12 @@ export interface StockTradePlan {
   invalidation: number;
   basis: string[];
   notes: string[];
+  /** Điểm số chất lượng bất đối xứng (0-100) */
+  asymmetricScore?: number;
+  /** Các lớp hỗ trợ hội tụ làm bệ đỡ bê tông */
+  confluenceLayers?: string[];
+  /** Lời phán quyết hành động tức thì */
+  actionVerdict?: string;
 }
 
 export interface StockTradePlanInput {
@@ -42,6 +50,8 @@ export interface StockTradePlanInput {
   volatility30d?: number | null;
   sma20?: number | null;
   sma50?: number | null;
+  sma200?: number | null;
+  ema20?: number | null;
   rsi14?: number | null;
   bollinger?: { upper?: number | null; mid?: number | null; lower?: number | null } | null;
   trendScore?: number | null;
@@ -101,118 +111,43 @@ export function buildStockTradePlan(
   let takeProfit: number;
 
   if (side === "buy") {
-    const sup = nearestBelow(supports, last);
-    const res = nearestAbove(resistances, last);
-    const sma20 = input.sma20 != null && input.sma20 > 0 ? input.sma20 : null;
-    const rsi = input.rsi14;
-
-    // =========================================================================
-    // NGUYÊN TẮC BẤT ĐỐI XỨNG (ASYMMETRIC ALPHA): LỖ ÍT NHẤT - LÃI CAO NHẤT
-    // 1. Lỗ ít nhất: Điểm mua kéo sát về điểm tựa hỗ trợ cứng/SMA20 -> Rủi ro SL cực hẹp (2.0% - 3.2%)
-    // 2. Lãi cao nhất: Mua từ chân sóng mở rộng biên độ lên kháng cự trên -> Biên lãi tối đa (12% - 25%+)
-    // =========================================================================
-    let optimalEntry = last;
-    let entryMin = last;
-    let entryMax = last;
-    let entryStrategyVi = "Mua sát hỗ trợ";
-
-    const distToSupPct = sup != null ? ((last - sup) / last) * 100 : null;
-    const distToSma20Pct = sma20 != null ? ((last - sma20) / last) * 100 : null;
-
-    if (sup != null && sup < last) {
-      // Đẩy điểm entry về sát hỗ trợ (chỉ trên hỗ trợ 0.8% - 1.5%) để khi vi phạm, cắt lỗ ngay và lỗ cực ít
-      const tightBuyAnchor = Math.min(last, sup + Math.min(atr * 0.35, sup * 0.015));
-      if (last > tightBuyAnchor * 1.01) {
-        // Giá hiện tại đang cao hơn điểm mua an toàn -> Khuyến nghị chờ kéo ngược
-        optimalEntry = tickRound(tightBuyAnchor);
-        entryMin = tickRound(sup * 0.998);
-        entryMax = tickRound(tightBuyAnchor * 1.01);
-        entryStrategyVi = "Canh mua chân sóng sát Hỗ trợ (Tối thiểu rủi ro)";
-      } else {
-        // Giá hiện tại đang ở ngay vùng mua an toàn
-        optimalEntry = tickRound(last);
-        entryMin = tickRound(sup * 0.998);
-        entryMax = tickRound(last * 1.008);
-        entryStrategyVi = "Mua ngay tại vùng đỡ giá bê tông";
-      }
-    } else if (sma20 != null && sma20 < last) {
-      const tightBuyAnchor = Math.min(last, sma20 + Math.min(atr * 0.3, sma20 * 0.012));
-      optimalEntry = tickRound(tightBuyAnchor);
-      entryMin = tickRound(sma20 * 0.995);
-      entryMax = tickRound(tightBuyAnchor * 1.01);
-      entryStrategyVi = "Canh mua retest đường SMA20";
-    } else {
-      optimalEntry = tickRound(last - Math.min(atr * 0.5, last * 0.02));
-      entryMin = tickRound(optimalEntry * 0.992);
-      entryMax = tickRound(last);
-      entryStrategyVi = "Mua chiết khấu quản trị rủi ro";
-    }
-
-    entry = optimalEntry;
-    const currentPriceDiffPct = Math.round(((entry - last) / last) * 1000) / 10;
-
-    // Thiết lập Cắt lỗ (SL): Ngay sát dưới hỗ trợ -> LỖ ÍT NHẤT (chỉ 2.0% - 3.2%)
-    if (sup != null && entry > sup) {
-      stopLoss = tickRound(sup * 0.99); // Dưới hỗ trợ 1%
-    } else {
-      stopLoss = tickRound(entry * 0.972); // Cắt lỗ tối đa 2.8%
-    }
-
-    // Đảm bảo mức lỗ không vượt quá 3.5% để thỏa mãn "Lỗ ít nhất"
-    if ((entry - stopLoss) / entry > 0.038) {
-      stopLoss = tickRound(entry * 0.968);
-    }
-    // Và không để SL quá sát (< 1.5%) tránh bị quét râu nến nhiễu
-    if ((entry - stopLoss) / entry < 0.015) {
-      stopLoss = tickRound(entry * 0.978);
-    }
-
-    const risk = entry - stopLoss;
-    if (risk <= 0) return null;
-
-    // Thiết lập Chốt lời (TP): Tối đa hóa tỷ suất sinh lời (Upside Maximization)
-    // Tỷ lệ R:R hướng tới 1:3.5 đến 1:5.0
-    const target3_5r = tickRound(entry + risk * 3.5);
-    if (res != null && res > entry + risk * 2.5) {
-      takeProfit = tickRound(Math.max(res, target3_5r));
-    } else {
-      takeProfit = target3_5r;
-    }
-
-    stopLoss = tickRound(stopLoss);
-    takeProfit = tickRound(takeProfit);
-
-    const risk2 = entry - stopLoss;
-    if (risk2 <= 0) return null;
-    const reward = takeProfit - entry;
-    const rr = reward / risk2;
-
-    const tp1 = tickRound(entry + risk2 * 1.8);
-    const tp2 = tickRound(entry + risk2 * 3.0);
-    const tp3 = tickRound(entry + risk2 * 4.5);
-
-    basis.push(`Điểm mua tối ưu sát hỗ trợ ${tickRound(sup ?? sma20 ?? 0)} (Lỗ tối đa chỉ -${((risk2 / entry) * 100).toFixed(1)}%)`);
-    basis.push(`Biên lãi kỳ vọng +${(((takeProfit - entry) / entry) * 100).toFixed(1)}% (Tỷ suất 1 ăn ${rr.toFixed(1)})`);
+    // Kích hoạt Engine Định Lượng Bất Đối Xứng Đa Yếu Tố
+    const asym = computeAsymmetricPlan({
+      last,
+      atr14: input.atr14,
+      supports,
+      resistances,
+      sma20: input.sma20,
+      sma50: input.sma50,
+      sma200: input.sma200,
+      ema20: input.ema20,
+      rsi14: input.rsi14,
+      bollinger: input.bollinger,
+      trendScore: input.trendScore,
+    });
 
     return {
       side,
       sideVi: "MUA",
-      entry,
-      entryZone: [entryMin, entryMax],
-      entryStrategyVi,
-      currentPriceDiffPct,
-      stopLoss,
-      takeProfit: tickRound(Math.max(takeProfit, tp1)),
-      takeProfit1: tp1,
-      takeProfit2: Math.max(tp2, tickRound(takeProfit)),
-      takeProfit3: tp3,
-      riskReward: Math.round(rr * 100) / 100,
-      riskPct: Math.round((risk2 / entry) * 1000) / 10,
-      rewardPct: Math.round(((Math.max(takeProfit, tp1) - entry) / entry) * 1000) / 10,
-      riskPerShare: Math.round(risk2 * 100) / 100,
-      invalidation: stopLoss,
-      basis,
+      entry: asym.entry,
+      entryZone: asym.entryZone,
+      entryStrategyVi: asym.actionVerdict,
+      currentPriceDiffPct: asym.currentPriceDiffPct,
+      stopLoss: asym.stopLoss,
+      takeProfit: asym.takeProfit,
+      takeProfit1: asym.takeProfit1,
+      takeProfit2: asym.takeProfit2,
+      takeProfit3: asym.takeProfit3,
+      riskReward: asym.riskReward,
+      riskPct: asym.riskPct,
+      rewardPct: asym.rewardPct,
+      riskPerShare: asym.riskPerShare,
+      invalidation: asym.stopLoss,
+      basis: asym.confluenceBasis,
       notes,
+      asymmetricScore: asym.asymmetricScore,
+      confluenceLayers: asym.confluenceCluster.layers,
+      actionVerdict: asym.actionVerdict,
     };
   }
 

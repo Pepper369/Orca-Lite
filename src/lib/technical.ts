@@ -425,6 +425,7 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
       volatility30d: vol,
       sma20,
       sma50,
+      sma200,
       rsi14,
       bollinger: bb ? { upper: bb.upper, mid: bb.mid, lower: bb.lower } : null,
       trendScore: score,
