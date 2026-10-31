@@ -967,6 +967,7 @@ function ConfluenceRowItem({
                   </div>
                 </div>
               </div>
+            </div>
           </td>
         </tr>
       )}
