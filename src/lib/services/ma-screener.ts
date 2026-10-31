@@ -34,7 +34,8 @@ export interface MaMetrics {
   distMa200Pct: number | null; // (close - ma200)/ma200 * 100
   slopeMa20: number;           // % thay đổi MA20 3 phiên gần nhất
   slopeMa50: number;           // % thay đổi MA50 5 phiên gần nhất
-  crossBarsAgo: number | null; // Cửa sổ phát hiện: Cắt cách đây bao nhiêu phiên
+  crossBarsAgo: number | null; // Cửa sổ phát hiện: Cắt cách đây bao nhiêu phiên (0 = hôm nay)
+  crossType: string | null;    // Tên cặp giao cắt: "MA20 x MA50", "MA50 x MA200", ...
   volume20: number | null;
   volRatio20: number | null;
   maCompressionPct: number | null; // |ma10 - ma50| / ma50 * 100
@@ -53,6 +54,9 @@ export interface MaCriteria {
 
   // Cửa sổ phát hiện & Xác minh trạng thái
   isFreshCross: boolean;     // Golden cross trong 0-3 phiên gần nhất
+  isTodayCross: boolean;     // Golden cross ngay trong phiên hiện tại (BarsAgo = 0)
+  crossType: string | null;   // Cặp đường MA vừa cắt nhau
+  crossBarsAgo: number | null;
   isPullbackRetest: boolean; // Giá test lại MA20/MA50 hỗ trợ với vol cạn rồi nảy
   isSlopeBullish: boolean;   // MA20 & MA50 đều dốc lên thuận xu hướng
   isOverextended: boolean;   // Giá vượt MA20 > 8.5% (quá mua, rủi ro điều chỉnh)
@@ -67,7 +71,7 @@ export interface MaCriteria {
   bearishAlignment: boolean; // Price < MA10 <= MA20 < MA50
 
   // Volume & Compression
-  volumeSurge: boolean; // Volume >= 1.3x MA20 Volume
+  volumeSurge: boolean; // Volume >= 1.2x MA20 Volume
   maSqueeze: boolean;   // MA10, MA20, MA50 within 1.8% of each other
 }
 
@@ -126,21 +130,27 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
   if (closes.length < 30) return null;
 
-  const close = quote?.price && quote.price > 0 ? quote.price : closes[closes.length - 1]!;
+  // Cập nhật giá đóng cửa bằng quote thời gian thực nếu có để phản ánh phiên hiện tại
+  const effectiveCloses = [...closes];
+  if (quote?.price && quote.price > 0 && effectiveCloses.length > 0) {
+    effectiveCloses[effectiveCloses.length - 1] = quote.price;
+  }
+
+  const close = quote?.price && quote.price > 0 ? quote.price : effectiveCloses[effectiveCloses.length - 1]!;
   const changePercent = quote?.changePercent ?? null;
   const volume = quote?.volume ?? bars[bars.length - 1]?.volume ?? null;
 
-  const sma10 = lastSma(closes, 10);
-  const sma20 = lastSma(closes, 20);
-  const sma50 = lastSma(closes, 50);
-  const sma100 = lastSma(closes, 100);
-  const sma200 = lastSma(closes, 200);
+  const sma10 = lastSma(effectiveCloses, 10);
+  const sma20 = lastSma(effectiveCloses, 20);
+  const sma50 = lastSma(effectiveCloses, 50);
+  const sma100 = lastSma(effectiveCloses, 100);
+  const sma200 = lastSma(effectiveCloses, 200);
 
-  const prevSma10Val = prevSma(closes, 10, 1);
-  const prevSma20Val = prevSma(closes, 20, 1);
-  const prevSma50Val = prevSma(closes, 50, 1);
-  const prevSma100Val = prevSma(closes, 100, 1);
-  const prevSma200Val = prevSma(closes, 200, 1);
+  const prevSma10Val = prevSma(effectiveCloses, 10, 1);
+  const prevSma20Val = prevSma(effectiveCloses, 20, 1);
+  const prevSma50Val = prevSma(effectiveCloses, 50, 1);
+  const prevSma100Val = prevSma(effectiveCloses, 100, 1);
+  const prevSma200Val = prevSma(effectiveCloses, 200, 1);
 
   const volume20 = avgVol(bars, 20);
   const volRatio20 = volume && volume20 && volume20 > 0 ? Number((volume / volume20).toFixed(2)) : null;
@@ -149,35 +159,80 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   const distMa50Pct = sma50 ? Number((((close - sma50) / sma50) * 100).toFixed(2)) : null;
   const distMa20Pct = sma20 ? Number((((close - sma20) / sma20) * 100).toFixed(2)) : null;
 
-  // 1. Khoảng thời gian phát hiện: Cửa sổ quét 0 -> 3 phiên gần nhất
-  let crossBarsAgo: number | null = null;
-  let recentGoldenCross = false;
-  let recentDeathCross = false;
+  // 1. Quét giao cắt đa chu kỳ trên cửa sổ 0 -> 5 phiên gần nhất
+  // Cửa sổ 0 = hôm nay (phiên hiện tại), 1 = T-1 (hôm qua), 2 = T-2, 3 = T-3
+  interface CrossScan {
+    barsAgo: number;
+    type: "GOLDEN" | "DEATH";
+    pairName: string;
+    priority: number;
+  }
 
-  for (let bAgo = 0; bAgo <= 3; bAgo++) {
-    const s20Cur = prevSma(closes, 20, bAgo);
-    const s50Cur = prevSma(closes, 50, bAgo);
-    const s20Prev = prevSma(closes, 20, bAgo + 1);
-    const s50Prev = prevSma(closes, 50, bAgo + 1);
-    if (s20Cur != null && s50Cur != null && s20Prev != null && s50Prev != null) {
-      if (s20Prev <= s50Prev && s20Cur > s50Cur) {
-        crossBarsAgo = bAgo;
-        recentGoldenCross = true;
-        break;
-      }
-      if (s20Prev >= s50Prev && s20Cur < s50Cur) {
-        crossBarsAgo = bAgo;
-        recentDeathCross = true;
-        break;
+  const detectedCrosses: CrossScan[] = [];
+  const crossPairs = [
+    { fast: 50, slow: 200, name: "MA50 x MA200", priority: 1 }, // Classic Golden Cross
+    { fast: 20, slow: 50, name: "MA20 x MA50", priority: 2 },   // Swing Golden Cross
+    { fast: 20, slow: 100, name: "MA20 x MA100", priority: 3 }, // Intermediate
+    { fast: 10, slow: 50, name: "MA10 x MA50", priority: 4 },   // Momentum Breakout
+    { fast: 10, slow: 20, name: "MA10 x MA20", priority: 5 },   // Fast Cross
+  ];
+
+  for (let bAgo = 0; bAgo <= 5; bAgo++) {
+    for (const cp of crossPairs) {
+      const fastCur = prevSma(effectiveCloses, cp.fast, bAgo);
+      const slowCur = prevSma(effectiveCloses, cp.slow, bAgo);
+      const fastPrev = prevSma(effectiveCloses, cp.fast, bAgo + 1);
+      const slowPrev = prevSma(effectiveCloses, cp.slow, bAgo + 1);
+
+      if (fastCur != null && slowCur != null && fastPrev != null && slowPrev != null) {
+        if (fastPrev <= slowPrev && fastCur > slowCur) {
+          detectedCrosses.push({
+            barsAgo: bAgo,
+            type: "GOLDEN",
+            pairName: cp.name,
+            priority: cp.priority,
+          });
+        } else if (fastPrev >= slowPrev && fastCur < slowCur) {
+          detectedCrosses.push({
+            barsAgo: bAgo,
+            type: "DEATH",
+            pairName: cp.name,
+            priority: cp.priority,
+          });
+        }
       }
     }
   }
 
+  const goldenCrosses = detectedCrosses.filter((c) => c.type === "GOLDEN");
+  goldenCrosses.sort((a, b) => a.barsAgo - b.barsAgo || a.priority - b.priority);
+
+  const deathCrosses = detectedCrosses.filter((c) => c.type === "DEATH");
+  deathCrosses.sort((a, b) => a.barsAgo - b.barsAgo || a.priority - b.priority);
+
+  const bestGolden = goldenCrosses[0] ?? null;
+  const bestDeath = deathCrosses[0] ?? null;
+
+  let crossBarsAgo: number | null = null;
+  let crossType: string | null = null;
+  let recentGoldenCross = false;
+  let recentDeathCross = false;
+
+  if (bestGolden && (!bestDeath || bestGolden.barsAgo <= bestDeath.barsAgo)) {
+    crossBarsAgo = bestGolden.barsAgo;
+    crossType = bestGolden.pairName;
+    recentGoldenCross = true;
+  } else if (bestDeath) {
+    crossBarsAgo = bestDeath.barsAgo;
+    crossType = bestDeath.pairName;
+    recentDeathCross = true;
+  }
+
   // 2. Độ dốc & Động lượng MA (MA Slopes)
-  const s20Ago3 = prevSma(closes, 20, 3);
+  const s20Ago3 = prevSma(effectiveCloses, 20, 3);
   const slopeMa20 = sma20 && s20Ago3 && s20Ago3 > 0 ? Number((((sma20 - s20Ago3) / s20Ago3) * 100).toFixed(2)) : 0;
 
-  const s50Ago5 = prevSma(closes, 50, 5);
+  const s50Ago5 = prevSma(effectiveCloses, 50, 5);
   const slopeMa50 = sma50 && s50Ago5 && s50Ago5 > 0 ? Number((((sma50 - s50Ago5) / s50Ago5) * 100).toFixed(2)) : 0;
 
   const isSlopeBullish = slopeMa20 > 0.15 && slopeMa50 >= 0;
@@ -204,13 +259,14 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   }
 
   const isFreshCross = recentGoldenCross && crossBarsAgo !== null && crossBarsAgo <= 3;
+  const isTodayCross = recentGoldenCross && crossBarsAgo === 0;
 
   let maCompressionPct: number | null = null;
   if (sma10 && sma50 && sma50 > 0) {
     maCompressionPct = Number(((Math.abs(sma10 - sma50) / sma50) * 100).toFixed(2));
   }
 
-  // Cross checks (giao cắt gần đây trong 1-2 phiên)
+  // Cross checks (giao cắt gần đây trong 1-2 phiên hoặc theo bestCross)
   const isCrossUp = (curA: number | null, curB: number | null, prevA: number | null, prevB: number | null) => {
     return curA != null && curB != null && prevA != null && prevB != null && prevA <= prevB && curA > curB;
   };
@@ -219,16 +275,16 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     return curA != null && curB != null && prevA != null && prevB != null && prevA >= prevB && curA < curB;
   };
 
-  const ma10CrossUpMa20 = isCrossUp(sma10, sma20, prevSma10Val, prevSma20Val);
-  const ma10CrossUpMa50 = isCrossUp(sma10, sma50, prevSma10Val, prevSma50Val);
-  const ma20CrossUpMa50 = isCrossUp(sma20, sma50, prevSma20Val, prevSma50Val) || (recentGoldenCross && crossBarsAgo === 0);
-  const ma20CrossUpMa100 = isCrossUp(sma20, sma100, prevSma20Val, prevSma100Val);
-  const ma50CrossUpMa200 = isCrossUp(sma50, sma200, prevSma50Val, prevSma200Val);
+  const ma10CrossUpMa20 = isCrossUp(sma10, sma20, prevSma10Val, prevSma20Val) || (recentGoldenCross && crossType === "MA10 x MA20");
+  const ma10CrossUpMa50 = isCrossUp(sma10, sma50, prevSma10Val, prevSma50Val) || (recentGoldenCross && crossType === "MA10 x MA50");
+  const ma20CrossUpMa50 = isCrossUp(sma20, sma50, prevSma20Val, prevSma50Val) || (recentGoldenCross && crossType === "MA20 x MA50");
+  const ma20CrossUpMa100 = isCrossUp(sma20, sma100, prevSma20Val, prevSma100Val) || (recentGoldenCross && crossType === "MA20 x MA100");
+  const ma50CrossUpMa200 = isCrossUp(sma50, sma200, prevSma50Val, prevSma200Val) || (recentGoldenCross && crossType === "MA50 x MA200");
 
-  const ma10CrossDownMa20 = isCrossDown(sma10, sma20, prevSma10Val, prevSma20Val);
-  const ma10CrossDownMa50 = isCrossDown(sma10, sma50, prevSma10Val, prevSma50Val);
-  const ma20CrossDownMa50 = isCrossDown(sma20, sma50, prevSma20Val, prevSma50Val) || (recentDeathCross && crossBarsAgo === 0);
-  const ma50CrossDownMa200 = isCrossDown(sma50, sma200, prevSma50Val, prevSma200Val);
+  const ma10CrossDownMa20 = isCrossDown(sma10, sma20, prevSma10Val, prevSma20Val) || (recentDeathCross && crossType === "MA10 x MA20");
+  const ma10CrossDownMa50 = isCrossDown(sma10, sma50, prevSma10Val, prevSma50Val) || (recentDeathCross && crossType === "MA10 x MA50");
+  const ma20CrossDownMa50 = isCrossDown(sma20, sma50, prevSma20Val, prevSma50Val) || (recentDeathCross && crossType === "MA20 x MA50");
+  const ma50CrossDownMa200 = isCrossDown(sma50, sma200, prevSma50Val, prevSma200Val) || (recentDeathCross && crossType === "MA50 x MA200");
 
   const priceAboveMa200 = sma200 != null && close > sma200;
   const priceAboveMa50 = sma50 != null && close > sma50;
@@ -251,7 +307,7 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     sma10 <= sma20 &&
     (sma50 == null || sma20 < sma50);
 
-  const volumeSurge = volRatio20 != null && volRatio20 >= 1.3;
+  const volumeSurge = volRatio20 != null && volRatio20 >= 1.2;
   const maSqueeze = maCompressionPct != null && maCompressionPct <= 1.8;
 
   const criteria: MaCriteria = {
@@ -264,6 +320,9 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     priceAboveMa50,
     bullishAlignment,
     isFreshCross,
+    isTodayCross,
+    crossType,
+    crossBarsAgo,
     isPullbackRetest,
     isSlopeBullish,
     isOverextended,
@@ -296,6 +355,7 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     slopeMa20,
     slopeMa50,
     crossBarsAgo,
+    crossType,
     volume20,
     volRatio20,
     maCompressionPct,
@@ -303,25 +363,37 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
 
   const signals: string[] = [];
   if (isPullbackRetest) signals.push(`Retest MA hỗ trợ thành công (${retestNote})`);
-  if (isFreshCross) signals.push(`Vừa Golden Cross ${crossBarsAgo === 0 ? "hôm nay" : `${crossBarsAgo} phiên trước`}`);
-  if (ma50CrossUpMa200) signals.push("Golden Cross Dài Hạn (MA50 cắt lên MA200)");
-  if (ma20CrossUpMa50) signals.push("Golden Cross Trung Hạn (MA20 cắt lên MA50)");
+  if (recentGoldenCross && crossBarsAgo !== null && crossType) {
+    if (crossBarsAgo === 0) {
+      signals.push(`🔥 Vừa Golden Cross HÔM NAY (${crossType})`);
+    } else {
+      signals.push(`✨ Golden Cross T-${crossBarsAgo} (${crossType})`);
+    }
+  } else if (ma50CrossUpMa200) {
+    signals.push("Golden Cross Dài Hạn (MA50 cắt lên MA200)");
+  } else if (ma20CrossUpMa50) {
+    signals.push("Golden Cross Trung Hạn (MA20 cắt lên MA50)");
+  }
   if (ma20CrossUpMa100) signals.push("MA20 cắt lên MA100");
   if (ma10CrossUpMa50) signals.push("MA10 bứt phá cắt lên MA50");
   if (ma10CrossUpMa20) signals.push("MA10 cắt lên MA20 (Nhịp tăng ngắn)");
   if (bullishAlignment) signals.push("Trật tự xu hướng tăng hoàn hảo (Bullish Ribbon)");
   if (isSlopeBullish) signals.push(`MA20 & MA50 dốc tăng thuận xu hướng (+${slopeMa20}%)`);
   if (isAccelerating) signals.push("Động lượng MA gia tốc bứt phá");
-  if (volumeSurge) signals.push(`Thanh khoản đột biến (${volRatio20}x TB20)`);
+  if (volumeSurge) signals.push(`Thanh khoản xác nhận (${volRatio20}x TB20)`);
   if (maSqueeze) signals.push("MA nén chặt chuẩn bị mở rộng biên độ");
   if (isOverextended) signals.push(`Giá kéo căng xa MA20 (+${distMa20Pct}%), cẩn trọng điều chỉnh`);
 
-  if (ma50CrossDownMa200) signals.push("Death Cross Dài Hạn (MA50 cắt xuống MA200)");
-  if (ma20CrossDownMa50 || recentDeathCross) signals.push("Death Cross Trung Hạn (MA20 cắt xuống MA50)");
+  if (recentDeathCross && crossBarsAgo !== null && crossType) {
+    signals.push(`⚠️ Death Cross ${crossBarsAgo === 0 ? "hôm nay" : `T-${crossBarsAgo}`} (${crossType})`);
+  } else {
+    if (ma50CrossDownMa200) signals.push("Death Cross Dài Hạn (MA50 cắt xuống MA200)");
+    if (ma20CrossDownMa50) signals.push("Death Cross Trung Hạn (MA20 cắt xuống MA50)");
+  }
   if (ma10CrossDownMa50) signals.push("MA10 gãy cắt xuống MA50");
   if (bearishAlignment) signals.push("Trật tự xu hướng giảm (Bearish Alignment)");
 
-  // Determine Overall Regime
+  // Xác định Regime chủ đạo
   let regime: MaRegime = "NEUTRAL";
   let regimeLabel = "Đi ngang / Tích lũy";
 
@@ -330,10 +402,12 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     regimeLabel = "Test lại MA hỗ trợ (Điểm mua chuẩn)";
   } else if (isFreshCross) {
     regime = "FRESH_CROSS";
-    regimeLabel = `Golden Cross mới (${crossBarsAgo === 0 ? "Hôm nay" : `T-${crossBarsAgo}`})`;
+    regimeLabel = crossBarsAgo === 0
+      ? `Golden Cross Hôm Nay (${crossType ?? "MA"})`
+      : `Golden Cross Mới T-${crossBarsAgo} (${crossType ?? "MA"})`;
   } else if (ma50CrossUpMa200 || ma20CrossUpMa50 || ma20CrossUpMa100 || recentGoldenCross) {
     regime = "GOLDEN_CROSS";
-    regimeLabel = "Giao cắt Vàng (Golden Cross)";
+    regimeLabel = crossType ? `Golden Cross (${crossType})` : "Giao cắt Vàng (Golden Cross)";
   } else if (isOverextended) {
     regime = "OVEREXTENDED";
     regimeLabel = `Kéo căng MA20 (+${distMa20Pct}%)`;
@@ -363,16 +437,22 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   else score -= 10;
 
   if (bullishAlignment) score += 15;
-  if (isFreshCross || ma20CrossUpMa50 || ma50CrossUpMa200) score += 20;
+
+  // Điểm thưởng cho độ tươi mới và xác nhận thanh khoản
+  if (isTodayCross) score += 25; // Cực mới hôm nay
+  else if (crossBarsAgo === 1) score += 22; // Mới T-1
+  else if (isFreshCross) score += 18; // Mới T-2, T-3
+  else if (ma20CrossUpMa50 || ma50CrossUpMa200 || recentGoldenCross) score += 15;
+
   if (isPullbackRetest) score += 18;
   if (isSlopeBullish) score += 12;
-  if (volumeSurge) score += 8;
+  if (volumeSurge) score += 10;
 
-  if (isOverextended) score -= 10; // Trừ điểm nếu bị kéo căng quá mức
+  if (isOverextended) score -= 10;
   if (bearishAlignment) score -= 20;
   if (ma20CrossDownMa50 || ma50CrossDownMa200 || recentDeathCross) score -= 20;
 
-  const bullScore = Math.max(5, Math.min(98, score));
+  const bullScore = Math.max(5, Math.min(99, score));
 
   const sec = getSecurity(symbol);
 
@@ -460,12 +540,22 @@ export async function screenMovingAverages(args?: {
       }
     } else if (sig === "PULLBACK_RETEST") {
       if (!row.criteria.isPullbackRetest && row.regime !== "PULLBACK_RETEST") continue;
-    } else if (sig === "FRESH_CROSS") {
-      if (!row.criteria.isFreshCross && row.regime !== "FRESH_CROSS") continue;
+    } else if (sig === "GOLDEN_CROSS" || sig === "FRESH_CROSS") {
+      // GỘP CHUNG GIAO CẮT VÀNG & GOLDEN CROSS MỚI:
+      // Bao gồm tất cả các trường hợp Golden Cross mới (0-3 phiên), Golden Cross hôm nay và các cấu trúc Golden Cross kinh điển
+      const isGc =
+        row.criteria.isFreshCross ||
+        row.criteria.isTodayCross ||
+        row.regime === "FRESH_CROSS" ||
+        row.regime === "GOLDEN_CROSS" ||
+        row.criteria.ma20CrossUpMa50 ||
+        row.criteria.ma50CrossUpMa200 ||
+        row.criteria.ma20CrossUpMa100 ||
+        row.criteria.ma10CrossUpMa50 ||
+        row.criteria.ma10CrossUpMa20;
+      if (!isGc) continue;
     } else if (sig === "SLOPE_BULLISH") {
       if (!row.criteria.isSlopeBullish) continue;
-    } else if (sig === "GOLDEN_CROSS") {
-      if (row.regime !== "GOLDEN_CROSS" && !row.criteria.ma20CrossUpMa50 && !row.criteria.ma50CrossUpMa200) continue;
     } else if (sig === "BULLISH_ALIGN") {
       if (row.regime !== "BULLISH_ALIGNMENT" && !row.criteria.bullishAlignment) continue;
     } else if (sig === "MA_SQUEEZE") {
@@ -473,14 +563,45 @@ export async function screenMovingAverages(args?: {
     } else if (sig === "BEARISH") {
       if (row.regime !== "DEATH_CROSS" && row.regime !== "BEARISH_ALIGNMENT") continue;
     } else if (sig === "DEATH_CROSS") {
-      if (row.regime !== "DEATH_CROSS") continue;
+      if (
+        row.regime !== "DEATH_CROSS" &&
+        !row.criteria.ma20CrossDownMa50 &&
+        !row.criteria.ma50CrossDownMa200 &&
+        !row.criteria.ma10CrossDownMa50
+      ) {
+        continue;
+      }
     }
 
     rows.push(row);
   }
 
-  // Sort: Ưu tiên Điểm Sức mạnh MA cao nhất
-  rows.sort((a, b) => b.bullScore - a.bullScore || (b.volume ?? 0) - (a.volume ?? 0));
+  // TỐI ƯU HÓA XẾP HẠNG & NHẬN DIỆN TÍN HIỆU MỚI NHẤT
+  const isGoldenMode = args?.signal === "GOLDEN_CROSS" || args?.signal === "FRESH_CROSS";
+
+  rows.sort((a, b) => {
+    if (isGoldenMode) {
+      // 1. Ưu tiên độ tươi mới nhất (0 = Hôm nay, 1 = T-1, 2 = T-2, 3 = T-3, sau đó đến các mã cũ hơn)
+      const aFresh = a.criteria.isFreshCross && a.metrics.crossBarsAgo !== null ? a.metrics.crossBarsAgo : 99;
+      const bFresh = b.criteria.isFreshCross && b.metrics.crossBarsAgo !== null ? b.metrics.crossBarsAgo : 99;
+      if (aFresh !== bFresh) {
+        return aFresh - bFresh;
+      }
+
+      // 2. Xác nhận thanh khoản bứt phá (Vol/TB20 lớn hơn phản ánh dòng tiền nhập cuộc)
+      const aVolRatio = a.metrics.volRatio20 ?? 0;
+      const bVolRatio = b.metrics.volRatio20 ?? 0;
+      if (Math.abs(bVolRatio - aVolRatio) >= 0.25) {
+        return bVolRatio - aVolRatio;
+      }
+
+      // 3. Điểm Bull Score tổng thể
+      return b.bullScore - a.bullScore;
+    }
+
+    // Mặc định: Điểm Sức mạnh MA cao nhất, sau đó đến thanh khoản
+    return b.bullScore - a.bullScore || (b.volume ?? 0) - (a.volume ?? 0);
+  });
 
   const limit = Math.max(1, Math.min(args?.limit ?? 50, 100));
   const paginated = rows.slice(0, limit);
