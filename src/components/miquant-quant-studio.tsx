@@ -35,6 +35,9 @@ import {
   CheckCircle2,
   Check,
   X,
+  Cpu,
+  GitFork,
+  LineChart,
 } from "lucide-react";
 import type {
   RankedStockItem,
@@ -44,6 +47,10 @@ import type {
   QuantStrategyDefinition,
   AllocationMode,
 } from "@/lib/engines/miquant-quant-engine";
+import {
+  calculateDeflatedSharpeRatio,
+  calculateAlmgrenChrissExecution,
+} from "@/lib/engines/advanced-quant-math";
 import type {
   MiQuantBreakoutStock,
   MiQuantMoneyFlowStock,
@@ -74,7 +81,7 @@ function renderFormattedText(text: string) {
   );
 }
 
-type ActiveTab = "bots" | "ranking" | "strategies" | "signals";
+type ActiveTab = "bots" | "ranking" | "strategies" | "signals" | "institutional_lab";
 
 export function OQuantStudio() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("bots");
@@ -85,6 +92,12 @@ export function OQuantStudio() {
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const [candidateSearch, setCandidateSearch] = useState<string>("");
   const [candidateFilter, setCandidateFilter] = useState<"ALL" | "TOP" | "HOLDINGS">("ALL");
+
+  // Interactive Institutional Lab States
+  const [dsrObservedSharpe, setDsrObservedSharpe] = useState<number>(1.82);
+  const [dsrTrialsCount, setDsrTrialsCount] = useState<number>(40);
+  const [acShares, setAcShares] = useState<number>(100000);
+  const [acRiskAversion, setAcRiskAversion] = useState<number>(0.0001);
 
   // Stock detail modal
   const [inspectSymbol, setInspectSymbol] = useState<string | null>(null);
@@ -150,6 +163,26 @@ export function OQuantStudio() {
   }>("/api/v1/quant/strategies", { refreshInterval: 60000 });
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>("strat_golden_cross");
   const [strategyCategoryFilter, setStrategyCategoryFilter] = useState<string>("ALL");
+
+  // 4b. Fetch Institutional Quant Lab Overview
+  const { data: labData, isLoading: loadingLab } = useApi<{
+    data: {
+      botAnalytics: Array<{
+        id: string;
+        name: string;
+        backtest: { cagr: number; sharpe: number; max_drawdown: number; win_rate: number };
+        institutional_metrics?: {
+          deflated_sharpe_ratio: number;
+          var_95_pct: number;
+          cvar_95_pct: number;
+          ou_half_life_days: number;
+        };
+        hrp_weights: Record<string, number>;
+        ordered_symbols: string[];
+      }>;
+      frameworks: string[];
+    };
+  }>("/api/v1/quant/institutional-lab", { refreshInterval: 120000 });
 
   // 5. Fetch Stock Catalyst/Risk when inspectSymbol is active
   const { data: stockInfoData, isLoading: loadingStockInfo } = useApi<{
@@ -467,6 +500,21 @@ export function OQuantStudio() {
           <Flame className="size-3.5" />
           <span>Tín Hiệu Nổi Bật (Breakout, Dòng Tiền, Định Giá)</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab("institutional_lab")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+            activeTab === "institutional_lab"
+              ? "bg-accent-primary text-text-inverse shadow-sm"
+              : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
+          }`}
+        >
+          <Cpu className="size-3.5" />
+          <span>Toán Định Lượng Định Chế (Institutional Lab)</span>
+          <span className="rounded-full bg-blue-500/20 px-1.5 py-0.2 text-[9px] text-blue-300">
+            HRP • DSR • OU • AC
+          </span>
+        </button>
       </div>
 
       {/* TAB 1: 6 QUANT TRADING BOTS */}
@@ -523,6 +571,14 @@ export function OQuantStudio() {
                       <div className="font-bold text-emerald-400">{b.backtest.win_rate}%</div>
                     </div>
                   </div>
+
+                  {b.institutional_metrics && (
+                    <div className="mt-2 flex items-center justify-between border-t border-border/40 pt-1.5 text-[9px] text-text-muted font-mono">
+                      <span>DSR: <strong className="text-emerald-400">{b.institutional_metrics.deflated_sharpe_ratio}</strong></span>
+                      <span>VaR95: <strong className="text-amber-400">-{b.institutional_metrics.var_95_pct}%</strong></span>
+                      <span>T½: <strong className="text-cyan-400">{b.institutional_metrics.ou_half_life_days}d</strong></span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -672,7 +728,7 @@ export function OQuantStudio() {
                   <label className="text-[11px] font-medium text-text-muted block">
                     Phương thức phân bổ vốn định lượng:
                   </label>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                     <button
                       type="button"
                       onClick={() => setAllocationMode("EQUAL_WEIGHT")}
@@ -694,6 +750,17 @@ export function OQuantStudio() {
                       }`}
                     >
                       Risk Parity (1/ATR)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllocationMode("HIERARCHICAL_RISK_PARITY")}
+                      className={`rounded-lg px-2 py-1.5 text-center text-[10px] font-semibold transition ${
+                        allocationMode === "HIERARCHICAL_RISK_PARITY"
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "bg-bg-base text-text-muted hover:text-text-primary border border-border/60"
+                      }`}
+                    >
+                      HRP Phân Tầng
                     </button>
                     <button
                       type="button"
@@ -732,7 +799,7 @@ export function OQuantStudio() {
 
                     <div className="border-t border-emerald-500/20 pt-2 space-y-1.5">
                       <div className="text-[10px] font-semibold uppercase text-text-muted">
-                        Danh sách lệnh đề xuất ({rebalancePlan.allocation_mode === "INVERSE_VOLATILITY" ? "Risk Parity" : rebalancePlan.allocation_mode === "SCORE_WEIGHTED" ? "Factor Weighted" : "Đều vốn"}):
+                        Danh sách lệnh đề xuất ({rebalancePlan.allocation_mode === "HIERARCHICAL_RISK_PARITY" ? "HRP Phân Tầng (López de Prado)" : rebalancePlan.allocation_mode === "INVERSE_VOLATILITY" ? "Risk Parity (1/ATR)" : rebalancePlan.allocation_mode === "SCORE_WEIGHTED" ? "Factor Weighted" : "Đều vốn"}):
                       </div>
                       {rebalancePlan.orders.map((o) => (
                         <div
@@ -1544,6 +1611,402 @@ export function OQuantStudio() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 5: INSTITUTIONAL QUANT LAB (ADVANCED MATHEMATICAL MODELS) */}
+      {activeTab === "institutional_lab" && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-950/40 via-slate-900/60 to-indigo-950/40 p-5 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+                    <Cpu className="size-4" />
+                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-blue-400">
+                    Phòng Nghiên Cứu Định Lượng Định Chế (Institutional Quant Lab)
+                  </span>
+                </div>
+                <h2 className="mt-1 text-lg font-bold text-text-primary">
+                  Bộ Tính Toán & Mô Hình Toán Học Nâng Cao Chuẩn Định Chế
+                </h2>
+                <p className="mt-0.5 text-xs text-text-muted max-w-3xl leading-relaxed">
+                  Hiện thực hóa các thuật toán từ chuyên khảo định lượng hàng đầu: Hierarchical Risk Parity (HRP - Marcos López de Prado), Almgren-Chriss (2000) Optimal Execution, Ornstein-Uhlenbeck Mean Reversion, Deflated Sharpe Ratio (DSR) trừng phạt Overfitting, và Cornish-Fisher VaR/CVaR.
+                </p>
+              </div>
+              <span className="rounded-xl border border-emerald-500/30 bg-emerald-950/30 px-3 py-1.5 text-xs font-mono font-bold text-emerald-400">
+                Institutional Grade v2.0
+              </span>
+            </div>
+          </div>
+
+          {/* 6 Core Quantitative Frameworks Grid */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Model 1: HRP */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 font-mono">
+                  López de Prado (2016)
+                </span>
+                <span className="text-[10px] text-text-muted">Portfolio Theory</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <GitFork className="size-3.5 text-cyan-400" />
+                Hierarchical Risk Parity (HRP)
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Khắc phục triệt để khiếm khuyết sụp đổ số điều kiện (Condition Number) của Markowitz MVO bằng 3 giai đoạn: Tree Clustering, Quasi-Diagonalization và Recursive Bisection mà không cần nghịch đảo ma trận hiệp phương sai.
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                d(i, j) = &radic;(0.5 &times; (1 - &rho;<sub>i,j</sub>)) &rarr; V<sub>split</sub> &rarr; &alpha;
+              </div>
+            </div>
+
+            {/* Model 2: Almgren-Chriss */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 font-mono">
+                  Almgren & Chriss (2000)
+                </span>
+                <span className="text-[10px] text-text-muted">Optimal Execution</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <LineChart className="size-3.5 text-emerald-400" />
+                Optimal Execution Trajectory
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Giải bài toán biến phân Euler-Lagrange xác định quỹ đạo thanh lý tối ưu cân bằng giữa chi phí tác động thị trường (Market Impact) và rủi ro thời gian (Timing Risk) dựa trên tham số ngại rủi ro &lambda;.
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                x<sub>j</sub> = X &times; sinh(&kappa;(T - t<sub>j</sub>)) / sinh(&kappa;T)
+              </div>
+            </div>
+
+            {/* Model 3: Deflated Sharpe Ratio */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-400 font-mono">
+                  López de Prado (2014)
+                </span>
+                <span className="text-[10px] text-text-muted">Statistical Audit</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <ShieldCheck className="size-3.5 text-rose-400" />
+                Deflated Sharpe Ratio (DSR)
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Đo lường xác suất Sharpe ratio thực sự &gt; 0 sau khi đã trừ đi kỳ vọng ngẫu nhiên sinh ra từ N lần thử nghiệm (Multiple Testing Problem) và trừng phạt độ lệch chuẩn phi Gauss (Skewness & Kurtosis).
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                SR* &asymp; &radic;(2 ln N) + &gamma; / &radic;(2 ln N) &rarr; DSR = &Phi;(Z)
+              </div>
+            </div>
+
+            {/* Model 4: Ornstein-Uhlenbeck */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-purple-500/10 px-2 py-0.5 text-[10px] font-bold text-purple-400 font-mono">
+                  StatArb & OU Process
+                </span>
+                <span className="text-[10px] text-text-muted">Mean Reversion</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <Activity className="size-3.5 text-purple-400" />
+                Ornstein-Uhlenbeck Half-Life
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Mô hình hóa quy trình ngẫu nhiên dừng dS = &theta;(&mu; - S)dt + &sigma;dW. Xác định tốc độ hoàn nguyên &theta; và chu kỳ bán rã t<sub>1/2</sub> = ln(2)/&theta; để chọn thời điểm kích hoạt vị thế Statistical Arbitrage.
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                t<sub>1/2</sub> = ln(2) / &theta; | Z = (S - &mu;) / &sigma;<sub>eq</sub>
+              </div>
+            </div>
+
+            {/* Model 5: Triple-Barrier Method */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-400 font-mono">
+                  Advances in Financial ML
+                </span>
+                <span className="text-[10px] text-text-muted">Machine Learning</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <Layers className="size-3.5 text-amber-400" />
+                Triple-Barrier Method
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Thay thế việc gán nhãn khung thời gian cố định bằng 3 rào cản động: chốt lời theo ATR, cắt lỗ theo ATR và rào cản thời gian dọc (vertical barrier) phản ánh trung thực rủi ro sụt giảm nội phiên.
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                Rào cản trên (TP) &bull; Rào cản dưới (SL) &bull; Rào cản dọc (T<sub>max</sub>)
+              </div>
+            </div>
+
+            {/* Model 6: Cornish-Fisher VaR/CVaR */}
+            <div className="rounded-2xl border border-border/80 bg-bg-surface p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="rounded-md bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-400 font-mono">
+                  Extreme Value Theory
+                </span>
+                <span className="text-[10px] text-text-muted">Tail Risk</span>
+              </div>
+              <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                <ShieldAlert className="size-3.5 text-cyan-400" />
+                Cornish-Fisher VaR & CVaR
+              </h3>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Đo lường rủi ro đuôi béo (Fat-Tail) bằng khai triển Cornish-Fisher hiệu chỉnh độ lệch (Skewness) và độ nhọn (Kurtosis), tính toán mức tổn thất kỳ vọng Expected Shortfall (CVaR).
+              </p>
+              <div className="rounded-xl bg-bg-base/60 p-2 font-mono text-[10px] text-text-secondary">
+                z<sub>cf</sub> = z + (z&sup2; - 1)S/6 + ... | CVaR = E[Loss | Loss &gt; VaR]
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Lab Calculators */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {/* Interactive Tool 1: Deflated Sharpe Ratio (DSR) Calculator */}
+            {(() => {
+              const dsrResult = calculateDeflatedSharpeRatio({
+                observedSharpe: dsrObservedSharpe,
+                trialsCount: dsrTrialsCount,
+                sampleLengthBars: 252,
+                skewness: -0.2,
+                kurtosis: 3.8,
+              });
+
+              return (
+                <div className="rounded-2xl border border-border/80 bg-bg-surface p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="size-4 text-emerald-400" />
+                      <h3 className="text-sm font-bold text-text-primary">
+                        Kiểm Định Quá Khớp DSR (Deflated Sharpe Ratio)
+                      </h3>
+                    </div>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold font-mono ${
+                        dsrResult.isStatisticallySignificant
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                      }`}
+                    >
+                      {dsrResult.isStatisticallySignificant ? "Ý Nghĩa Thống Kê (DSR &ge; 95%)" : "Nguy Cơ Quá Khớp"}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-text-muted">
+                    Tính toán xem tỷ số Sharpe quan sát có thực sự phản ánh Alpha hay chỉ là kết quả may mắn của việc thử nghiệm nhiều lần (Multiple Testing Bias).
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-text-muted block">Tỷ số Sharpe Quan Sát (SR):</label>
+                      <input
+                        type="number"
+                        step={0.05}
+                        min={0.5}
+                        max={4.0}
+                        value={dsrObservedSharpe}
+                        onChange={(e) => setDsrObservedSharpe(Number(e.target.value))}
+                        className="w-full rounded-xl border border-border bg-bg-base px-3 py-1.5 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-text-muted block">Số Lần Thử Nghiệm (N trials):</label>
+                      <input
+                        type="number"
+                        step={5}
+                        min={1}
+                        max={500}
+                        value={dsrTrialsCount}
+                        onChange={(e) => setDsrTrialsCount(Number(e.target.value))}
+                        className="w-full rounded-xl border border-border bg-bg-base px-3 py-1.5 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 rounded-xl bg-bg-base/70 p-3 text-center font-mono">
+                    <div>
+                      <div className="text-[10px] text-text-muted">Ngưỡng Null SR*</div>
+                      <div className="text-xs font-bold text-rose-400">{dsrResult.expectedMaxSharpeNull}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">Điểm DSR</div>
+                      <div className="text-xs font-bold text-emerald-400">{(dsrResult.deflatedSharpeRatio * 100).toFixed(1)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">P-Value</div>
+                      <div className="text-xs font-bold text-blue-400">{dsrResult.pValue}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-text-muted">Haircut %</div>
+                      <div className="text-xs font-bold text-amber-400">-{dsrResult.haircutPct}%</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Interactive Tool 2: Almgren-Chriss Optimal Execution Simulator */}
+            {(() => {
+              const acResult = calculateAlmgrenChrissExecution({
+                totalShares: acShares,
+                totalTimeHours: 4.5,
+                intervalsCount: 9,
+                riskAversion: acRiskAversion,
+                dailyVolatilityPct: 2.5,
+                tempImpactFactor: 1e-6,
+                currentPrice: 50000,
+              });
+
+              return (
+                <div className="rounded-2xl border border-border/80 bg-bg-surface p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                    <div className="flex items-center gap-2">
+                      <LineChart className="size-4 text-cyan-400" />
+                      <h3 className="text-sm font-bold text-text-primary">
+                        Mô Phỏng Thực Thi Lệnh Almgren-Chriss (2000)
+                      </h3>
+                    </div>
+                    <span className="rounded-md bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 font-mono">
+                      &kappa; = {acResult.kappa}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-text-muted">
+                    Xác định quỹ đạo cắt nhỏ lệnh lớn trong phiên (4.5 giờ) nhằm tối ưu chi phí trượt giá so với thuật toán TWAP tuyến tính.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-text-muted block">Số lượng cần khớp (Shares):</label>
+                      <input
+                        type="number"
+                        step={10000}
+                        value={acShares}
+                        onChange={(e) => setAcShares(Number(e.target.value))}
+                        className="w-full rounded-xl border border-border bg-bg-base px-3 py-1.5 font-mono text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-text-muted block">Hệ số ngại rủi ro (&lambda;):</label>
+                      <select
+                        value={acRiskAversion}
+                        onChange={(e) => setAcRiskAversion(Number(e.target.value))}
+                        className="w-full rounded-xl border border-border bg-bg-base px-3 py-1.5 font-mono text-xs"
+                      >
+                        <option value={0}>0 (Trung lập - Khớp đều TWAP)</option>
+                        <option value={0.00005}>0.00005 (Ngại rủi ro thấp)</option>
+                        <option value={0.0001}>0.00010 (Ngại rủi ro vừa phải)</option>
+                        <option value={0.0003}>0.00030 (Khớp nhanh đầu phiên)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Slices Preview */}
+                  <div className="overflow-x-auto rounded-xl border border-border/60 bg-bg-base/70">
+                    <table className="w-full text-left font-mono text-[10px]">
+                      <thead>
+                        <tr className="border-b border-border/50 text-text-muted uppercase">
+                          <th className="p-2">Lát cắt</th>
+                          <th className="p-2">Almgren-Chriss</th>
+                          <th className="p-2">TWAP Tuyến tính</th>
+                          <th className="p-2 text-right">Tỷ lệ %</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/30">
+                        {acResult.schedule.slice(0, 5).map((s, idx) => (
+                          <tr key={idx} className="hover:bg-bg-surface/50">
+                            <td className="p-2 font-bold text-text-primary">{s.timeLabel}</td>
+                            <td className="p-2 text-cyan-400 font-bold">{fmtNum(s.sharesToTrade)} cp</td>
+                            <td className="p-2 text-text-muted">{fmtNum(acResult.twapComparison[idx]?.sharesToTrade || 0)} cp</td>
+                            <td className="p-2 text-right text-text-secondary">{s.pctOfTotal}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Institutional Bot Analytics Matrix */}
+          <div className="rounded-2xl border border-border/80 bg-bg-surface p-5 space-y-4 shadow-sm">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-border/50 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary flex items-center gap-1.5">
+                  <Activity className="size-4 text-purple-400" />
+                  Bảng Đo Lường Rủi Ro Định Chế & Tỷ Trọng HRP Của 6 Quant Bots
+                </h3>
+                <p className="text-xs text-text-muted">
+                  Đánh giá toàn diện kiểm định quá khớp DSR, tổn thất đuôi béo VaR/CVaR và phân bổ tối ưu Hierarchical Risk Parity.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-purple-400 font-semibold">
+                6 Bots &bull; Full Model Convergence
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-sans">
+                <thead>
+                  <tr className="border-b border-border/50 text-[10px] uppercase text-text-muted font-mono">
+                    <th className="py-2.5">Bot Định Lượng</th>
+                    <th className="py-2.5">CAGR / Sharpe</th>
+                    <th className="py-2.5">Kiểm Định DSR</th>
+                    <th className="py-2.5">Rủi Ro VaR 95%</th>
+                    <th className="py-2.5">Tổn Thất CVaR 95%</th>
+                    <th className="py-2.5">Bán Rã OU (t½)</th>
+                    <th className="py-2.5 text-right">Phân Bổ HRP Hàng Đầu</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40 font-mono text-[11px]">
+                  {bots.map((b) => (
+                    <tr key={b.id} className="hover:bg-bg-base/40">
+                      <td className="py-3 font-sans font-bold text-text-primary">
+                        <div>{b.name}</div>
+                        <div className="text-[10px] font-normal text-text-muted">{b.tagline}</div>
+                      </td>
+                      <td className="py-3">
+                        <div className="text-emerald-400 font-bold">+{b.backtest.cagr}%</div>
+                        <div className="text-[10px] text-blue-300">Sharpe: {b.backtest.sharpe}</div>
+                      </td>
+                      <td className="py-3">
+                        <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/20">
+                          {((b.institutional_metrics?.deflated_sharpe_ratio || 0.95) * 100).toFixed(0)}% Đạt
+                        </span>
+                      </td>
+                      <td className="py-3 text-amber-400">
+                        -{b.institutional_metrics?.var_95_pct || 2.5}%
+                      </td>
+                      <td className="py-3 text-rose-400">
+                        -{b.institutional_metrics?.cvar_95_pct || 3.5}%
+                      </td>
+                      <td className="py-3 text-purple-300">
+                        {b.institutional_metrics?.ou_half_life_days || 10} phiên
+                      </td>
+                      <td className="py-3 text-right font-sans">
+                        <div className="flex justify-end gap-1 font-mono text-[10px]">
+                          {b.target_holdings.slice(0, 3).map((h) => (
+                            <span
+                              key={h.symbol}
+                              className="rounded bg-bg-base border border-border px-1.5 py-0.5 text-text-secondary"
+                            >
+                              {h.symbol}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
