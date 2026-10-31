@@ -65,7 +65,8 @@
   color: color-mix(in oklab, var(--text-muted, #94a3b8) 100%, transparent);
 }
 .bd-col-rows {
-  max-height: min(70vh, 560px);
+  max-height: calc(100vh - 170px);
+  min-height: 480px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;

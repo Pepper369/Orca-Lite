@@ -186,19 +186,17 @@ export default function VnMarketCenterPage() {
       ) : (
         <>
           {viewMode === "dien" ? (
-            <Panel title="Bảng điện thông minh" pad={false}>
-              <div className="p-2 sm:p-3">
-                {!(data?.quotes?.length) ? (
-                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-center text-[12px] text-amber-200">
-                    Đang tải lại bảng giá… giữ tab này mở, hệ thống tự kết nối lại trong vài giây.
-                  </p>
-                ) : null}
-                <BangDienBoard
-                  quotes={data?.quotes ?? []}
-                  indices={data?.indices ?? []}
-                />
-              </div>
-            </Panel>
+            <div className="w-full">
+              {!(data?.quotes?.length) ? (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-center text-[12px] text-amber-200">
+                  Đang tải lại bảng giá… giữ tab này mở, hệ thống tự kết nối lại trong vài giây.
+                </p>
+              ) : null}
+              <BangDienBoard
+                quotes={quotes}
+                indices={data?.indices ?? []}
+              />
+            </div>
           ) : null}
 
           {viewMode === "table" ? (

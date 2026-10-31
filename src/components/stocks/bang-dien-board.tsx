@@ -1,13 +1,14 @@
 "use client";
 
 import "./bang-dien.css";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { SectorCompareChart } from "@/components/stocks/sector-compare-chart";
 import { SectorScrollRail, SectorColumnShell } from "@/components/stocks/sector-scroll-rail";
 import { sectorOf, VN_SECTOR_MAP } from "@/lib/vn/master";
 import type { IndexQuote, Quote } from "@/lib/types";
 import { useApi } from "@/lib/hooks";
 import { Chg, fmtCompact, fmtNum } from "@/components/ui";
+import { BarChart2, ChevronDown, ChevronUp } from "lucide-react";
 
 const PRIORITY_SECTORS = [
   "Ngân hàng",
@@ -248,9 +249,18 @@ function ImbalanceBar({ imbalance, buyVol, sellVol, compact }: { imbalance: numb
   );
 }
 
-function IndexStrip({ indices, quotes }: { indices: IndexQuote[]; quotes: Quote[] }) {
+function IndexStrip({
+  indices,
+  quotes,
+  showAnalytics,
+  onToggleAnalytics,
+}: {
+  indices: IndexQuote[];
+  quotes: Quote[];
+  showAnalytics: boolean;
+  onToggleAnalytics: () => void;
+}) {
   const list = indices.slice(0, 4);
-  if (!list.length && !quotes.length) return null;
   let up = 0, down = 0, flat = 0;
   for (const q of quotes) {
     const p = q.changePercent;
@@ -258,28 +268,35 @@ function IndexStrip({ indices, quotes }: { indices: IndexQuote[]; quotes: Quote[
     if (p > 0.05) up++; else if (p < -0.05) down++; else flat++;
   }
   return (
-    <div className="flex flex-wrap gap-2">
-      {list.map((idx) => {
-        return (
-          <div
-            key={idx.code}
-            className="min-w-[120px] flex-1 rounded-lg border border-border-subtle bg-surface-elevated/50 px-2.5 py-1.5 shadow-sm"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-text-secondary">{idx.code}</span>
-              <Chg value={idx.changePercent} arrow={false} className="text-[11px]" />
-            </div>
-            <div className="num mt-0.5 text-[15px] font-semibold tabular-nums">{fmtNum(idx.value, 2)}</div>
-            {idx === list[0] ? (
-              <div className="mt-1 flex flex-wrap gap-x-2 text-[9px] text-text-muted">
-                <span className="text-up">▲ {up}</span>
-                <span className="text-amber-300">● {flat}</span>
-                <span className="text-down">▼ {down}</span>
-              </div>
-            ) : null}
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface-elevated/40 px-2.5 py-1.5 shadow-xs">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3.5 divide-x divide-border-subtle/60 overflow-x-auto no-scrollbar">
+        {list.map((idx, i) => (
+          <div key={idx.code} className={`flex items-baseline gap-1.5 ${i > 0 ? "pl-2 sm:pl-3" : ""}`}>
+            <span className="text-[11px] font-bold text-text-primary">{idx.code}</span>
+            <span className="num text-[12px] font-semibold tabular-nums text-text-primary">{fmtNum(idx.value, 2)}</span>
+            <Chg value={idx.changePercent} arrow={false} className="text-[10.5px] font-medium" />
           </div>
-        );
-      })}
+        ))}
+        <div className="pl-2 sm:pl-3 flex items-center gap-2 text-[10px] text-text-muted">
+          <span className="text-up font-medium">▲ {up}</span>
+          <span className="text-amber-300 font-medium">● {flat}</span>
+          <span className="text-down font-medium">▼ {down}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggleAnalytics}
+        className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
+          showAnalytics
+            ? "bg-accent-primary/20 text-accent-primary font-semibold"
+            : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+        }`}
+      >
+        <BarChart2 className="size-3 text-accent-primary" />
+        <span>{showAnalytics ? "Thu gọn phân tích" : "Tâm lý & So sánh ngành"}</span>
+        {showAnalytics ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+      </button>
     </div>
   );
 }
@@ -340,6 +357,7 @@ const SectorColumn = memo(
 );
 
 export function BangDienBoard({ quotes, indices }: { quotes: Quote[]; indices: IndexQuote[] }) {
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const { data: intel } = useApi<IntelLite>("/api/v1/market/intel", { refreshInterval: 60_000 });
   const columns = useMemo(() => buildColumns(quotes), [quotes]);
   const fallbackIntel = useMemo((): IntelLite | null => {
@@ -375,14 +393,24 @@ export function BangDienBoard({ quotes, indices }: { quotes: Quote[]; indices: I
   }
 
   return (
-    <div className="space-y-2.5">
-      <IndexStrip indices={indices} quotes={quotes} />
-      <SentimentGauge intel={fallbackIntel} />
-      <SectorCompareChart cols={columns} />
-      <div className="flex items-center justify-between gap-2 px-0.5">
-        <p className="text-[11px] text-text-muted">Bảng điện theo ngành · cuộn ngang · click mã mở chi tiết · cột nổi = ngành ưu tiên</p>
-        <span className="hidden shrink-0 text-[11px] text-text-muted sm:inline">{quotes.length} mã · {columns.length} ngành</span>
-      </div>
+    <div className="space-y-2">
+      {/* 1. Dải chỉ số thị trường thanh mảnh + Nút mở rộng phân tích */}
+      <IndexStrip
+        indices={indices}
+        quotes={quotes}
+        showAnalytics={showAnalytics}
+        onToggleAnalytics={() => setShowAnalytics((v) => !v)}
+      />
+
+      {/* 2. Khối phân tích tâm lý & bản đồ so sánh ngành (Mặc định thu gọn để ưu tiên bảng giá cổ phiếu) */}
+      {showAnalytics && (
+        <div className="grid gap-2.5 lg:grid-cols-2 pt-0.5 pb-1 animate-fadeIn">
+          <SentimentGauge intel={fallbackIntel} />
+          <SectorCompareChart cols={columns} />
+        </div>
+      )}
+
+      {/* 3. BẢNG ĐIỆN CỔ PHIẾU THEO NGÀNH (TRỌNG TÂM TRỰC TIẾP TRÊN TOÀN KHUNG HÌNH) */}
       <SectorScrollRail itemCount={columns.length}>
         {columns.map((col) => (
           <SectorColumnShell key={col.name}>
