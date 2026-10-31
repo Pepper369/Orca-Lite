@@ -143,6 +143,8 @@ export type ScreenerResponseData = {
     valuationProviders: string[];
     failoverCount: number;
     healthStatus: "OPTIMAL" | "HIGH_AVAILABILITY" | "DEGRADED";
+    latencies?: Record<string, number>;
+    conflictCount?: number;
   };
   meta: Meta;
 };
@@ -627,8 +629,15 @@ function detectPresets(item: {
 
 /**
  * Fetch and aggregate master stock screener snapshot.
- * Runs multi-source parallel race for quotes and 3-tier cascade for valuation.
+ * Runs multi-source parallel race for quotes and 3-tier cascade for valuation with L1 in-memory caching.
  */
+type ValuationCacheEntry = {
+  v: VndValuationRatios | null;
+  vc: VietcapProfile | null;
+  exp: number;
+};
+const valuationL1Cache = new Map<string, ValuationCacheEntry>();
+
 async function fetchValuationBatch(symbols: string[]): Promise<{
   valMap: Map<string, VndValuationRatios>;
   vietcapMap: Map<string, VietcapProfile>;
@@ -637,30 +646,53 @@ async function fetchValuationBatch(symbols: string[]): Promise<{
   const valMap = new Map<string, VndValuationRatios>();
   const vietcapMap = new Map<string, VietcapProfile>();
   let failoverCount = 0;
+  const now = Date.now();
+  const needFetch: string[] = [];
 
-  await mapPool(symbols, 12, async (sym) => {
-    try {
-      // Tier 1: VNDirect ratios
-      const v = await getVndValuationRatios(sym);
-      if (v && (v.pe != null || v.pb != null)) {
-        valMap.set(sym, v);
-      } else {
-        // Tier 2: Vietcap IQ failover
-        const vc = await getVietcapCompany(sym).catch(() => null);
+  // Fast-path: Check L1 memory cache first (15-min TTL)
+  for (const sym of symbols) {
+    const entry = valuationL1Cache.get(sym);
+    if (entry && now < entry.exp) {
+      if (entry.v) valMap.set(sym, entry.v);
+      if (entry.vc) vietcapMap.set(sym, entry.vc);
+    } else {
+      needFetch.push(sym);
+    }
+  }
+
+  if (needFetch.length > 0) {
+    await mapPool(needFetch, 16, async (sym) => {
+      let v: VndValuationRatios | null = null;
+      let vc: VietcapProfile | null = null;
+      try {
+        // Tier 1: VNDirect ratios
+        v = await getVndValuationRatios(sym);
+        if (v && (v.pe != null || v.pb != null)) {
+          valMap.set(sym, v);
+        } else {
+          // Tier 2: Vietcap IQ failover
+          vc = await getVietcapCompany(sym).catch(() => null);
+          if (vc) {
+            vietcapMap.set(sym, vc);
+            failoverCount++;
+          }
+        }
+      } catch {
+        // Tier 2 catch fallback
+        vc = await getVietcapCompany(sym).catch(() => null);
         if (vc) {
           vietcapMap.set(sym, vc);
           failoverCount++;
         }
       }
-    } catch {
-      // Tier 2 catch fallback
-      const vc = await getVietcapCompany(sym).catch(() => null);
-      if (vc) {
-        vietcapMap.set(sym, vc);
-        failoverCount++;
-      }
-    }
-  });
+
+      valuationL1Cache.set(sym, {
+        v,
+        vc,
+        exp: Date.now() + 15 * 60_000,
+      });
+    });
+  }
 
   return { valMap, vietcapMap, failoverCount };
 }
@@ -673,6 +705,8 @@ type MasterSnapshotPayload = {
     valuationProviders: string[];
     failoverCount: number;
     healthStatus: "OPTIMAL" | "HIGH_AVAILABILITY" | "DEGRADED";
+    latencies?: Record<string, number>;
+    conflictCount?: number;
   };
   meta: Meta;
 };
@@ -744,13 +778,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           vietcapMap: new Map<string, VietcapProfile>(),
           failoverCount: 0,
         })),
-        // 4. Batch OHLCV technical moving averages (6 concurrent workers)
+        // 4. Batch OHLCV technical moving averages (8 concurrent workers, priority VN100, resilient multi-source)
         batchVnOhlcv(symbols, {
           bars: 65,
-          concurrency: 6,
-          perSymbolMs: 600,
-          deadlineMs: 3_000,
-          resilient: false,
+          concurrency: 8,
+          perSymbolMs: 500,
+          deadlineMs: 8_000,
+          priority: [...VN100],
+          resilient: true,
         }).catch(() => new Map()),
       ]);
 
@@ -939,6 +974,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           valuationProviders,
           failoverCount,
           healthStatus: quoteProviders.length >= 2 ? ("OPTIMAL" as const) : ("HIGH_AVAILABILITY" as const),
+          latencies: multiQuotesRes.latencies ?? {},
+          conflictCount: multiQuotesRes.conflicts ?? 0,
         },
       };
     },
@@ -952,6 +989,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       valuationProviders: string[];
       failoverCount: number;
       healthStatus: "OPTIMAL" | "HIGH_AVAILABILITY" | "DEGRADED";
+      latencies?: Record<string, number>;
+      conflictCount?: number;
     };
   };
 
@@ -963,6 +1002,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       valuationProviders: ["vndirect-finfo", "vietcap-iq", "ratio-engine"],
       failoverCount: 0,
       healthStatus: "OPTIMAL",
+      latencies: {},
+      conflictCount: 0,
     },
     meta: buildMeta({
       source: (snapshotData?.sourcesUsed ?? ["vps", "vndirect", "ssi", "vietcap"]).join("+"),

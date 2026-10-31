@@ -1,11 +1,12 @@
 import "server-only";
 import { cached } from "../cache";
 import { buildMeta } from "../freshness";
-import { BOOTSTRAP_VN30_QUOTES } from "../bootstrap-data";
-import { getVpsQuotes, getVpsForeignFlow } from "../providers/vps";
+import { getVpsForeignFlow } from "../providers/vps";
 import { getStockAnalyticReports } from "./stock-reports";
 import { getStockShareholders } from "./stock-shareholders";
-import { getStockComprehensiveRatios } from "./stock-comprehensive-ratios";
+import { getMasterScreenerSnapshot } from "./screener-snapshot-service";
+import { mapPool } from "./screener-ohlcv";
+import { VN30_BOARD } from "../providers/public-vn-feed";
 import type { Meta } from "../types";
 
 export interface MultiSourceStockItem {
@@ -23,7 +24,7 @@ export interface MultiSourceStockItem {
   institutionOwnershipPct: number | null;
   leadershipOwnershipPct: number | null;
   majorHoldersCount: number;
-  // Giai đoạn 3: VNDirect 166 Ratios
+  // Giai đoạn 3: VNDirect Ratios & Valuation
   pe: number | null;
   pb: number | null;
   pe3yAvg: number | null;
@@ -35,109 +36,136 @@ export interface MultiSourceStockItem {
   foreignNetVolume: number | null;
   foreignNetValue: number | null;
   foreignRoom: number | null;
+  // Giai đoạn 6: Ưu thế Quant Trading & Hội tụ
+  quantEdgeScore?: number | null;
+  ouZScore?: number | null;
+  ouHalfLife?: number | null;
+  tripleBarrierRiskReward?: number | null;
+  quantAnomalyTag?: string | null;
+  confluenceScore?: number | null;
+  confluenceBadge?: string | null;
 }
 
-const TTL_MS = 30_000; // 30s cache cho screener realtime
+const TTL_MS = 30_000; // 30s fresh cache cho screener realtime
 const STALE_MS = 10 * 60_000;
 
 export async function getMultiSourceScreenerData(): Promise<{
   data: MultiSourceStockItem[];
   meta: Meta;
 }> {
-  const cacheKey = "screener:multi-source:pro-v2";
+  const cacheKey = "screener:multi-source:pro-v3";
 
   const res = await cached(cacheKey, {
     ttlMs: TTL_MS,
     staleMs: STALE_MS,
     producer: async () => {
-      const topSymbols = BOOTSTRAP_VN30_QUOTES.slice(0, 20).map((q) => q.symbol);
-      const quotes = await getVpsQuotes(topSymbols);
-      const quoteMap = new Map(quotes.map((q) => [q.symbol, q]));
+      // 1. Lấy dữ liệu nền tảng đã đồng bộ từ Master Screener Snapshot
+      const masterSnapshot = await getMasterScreenerSnapshot();
+      const allItems = masterSnapshot.items ?? [];
+      const itemMap = new Map(allItems.map((it) => [it.symbol, it]));
 
-      // Tải song song dữ liệu đa nguồn từ các engine giai đoạn 1, 2, 3, 5
-      const enrichedItems = await Promise.all(
-        topSymbols.map(async (symbol): Promise<MultiSourceStockItem> => {
-          const baseQuote = quoteMap.get(symbol) || BOOTSTRAP_VN30_QUOTES.find((b) => b.symbol === symbol);
-          const price = baseQuote?.price ?? 0;
-          const boot = BOOTSTRAP_VN30_QUOTES.find((b) => b.symbol === symbol);
-
-          // Lấy song song: VPS Foreign, VNDirect Reports, Vietcap Shareholders, VNDirect Ratios
-          const [foreignRes, reportsRes, shareholdersRes, ratiosRes] = await Promise.allSettled([
-            getVpsForeignFlow(symbol),
-            getStockAnalyticReports(symbol, 5),
-            getStockShareholders(symbol),
-            getStockComprehensiveRatios(symbol),
-          ]);
-
-          // 1. VPS Foreign Flow
-          const foreign = foreignRes.status === "fulfilled" ? foreignRes.value : null;
-
-          // 2. VNDirect Research Reports
-          const repData = reportsRes.status === "fulfilled" ? reportsRes.value?.data : null;
-          const targetPrice = repData?.latestTargetPrice ?? null;
-          const targetUpsidePct =
-            targetPrice && price > 0
-              ? Math.round(((targetPrice - (price > 1000 ? price : price * 1000)) / (price > 1000 ? price : price * 1000)) * 10000) / 100
-              : null;
-          const rating = repData?.latestRating ?? null;
-          const reportCount = repData?.total ?? 0;
-
-          // 3. Vietcap Shareholders
-          const shData = shareholdersRes.status === "fulfilled" ? shareholdersRes.value?.data : null;
-          const shList = shData?.shareholders ?? [];
-          const instPct = shData
-            ? Math.round((shData.structure.corporatePct + shData.structure.foreignPct) * 10) / 10
-            : null;
-          const leaderPct = shList.length
-            ? Math.round(
-                shList
-                  .filter((item) => Boolean(item.positionName))
-                  .reduce((acc, l) => acc + (l.percentage || 0), 0) * 10
-              ) / 10
-            : null;
-          const majorHoldersCount = shData?.majorHoldersCount ?? shList.length;
-
-          // 4. VNDirect Comprehensive Ratios
-          const cr = ratiosRes.status === "fulfilled" ? ratiosRes.value?.data : null;
-
-          return {
-            symbol,
-            name: boot?.name || symbol,
-            price: price > 0 ? (price > 1000 ? price / 1000 : price) : 0,
-            changePercent: baseQuote?.changePercent ?? 0,
-            volume: baseQuote?.volume ?? 0,
-            targetPrice,
-            targetUpsidePct,
-            rating,
-            reportCount,
-            institutionOwnershipPct: instPct,
-            leadershipOwnershipPct: leaderPct,
-            majorHoldersCount,
-            pe: cr?.pe ?? null,
-            pb: cr?.pb ?? null,
-            pe3yAvg: cr?.peAvg3y ?? null,
-            beta: cr?.beta ?? null,
-            high52w: cr?.high52w ?? null,
-            low52w: cr?.low52w ?? null,
-            foreignBuyRatioPct: foreign?.buyRatioPct ?? 50,
-            foreignNetVolume: foreign?.netVolume ?? null,
-            foreignNetValue: foreign?.netValue ?? null,
-            foreignRoom: foreign?.foreignRoom ?? null,
-          };
+      // 2. Lựa chọn Universe thanh khoản cao (~50 mã: VN30 + top khối lượng)
+      const vn30Set = new Set<string>(VN30_BOARD.map((s) => s.toUpperCase()));
+      const prioritySymbols = allItems
+        .filter((it) => vn30Set.has(it.symbol) || (it.volume != null && it.volume >= 200_000))
+        .sort((a, b) => {
+          const aVn30 = vn30Set.has(a.symbol) ? 1 : 0;
+          const bVn30 = vn30Set.has(b.symbol) ? 1 : 0;
+          if (aVn30 !== bVn30) return bVn30 - aVn30;
+          return (b.volume ?? 0) - (a.volume ?? 0);
         })
-      );
+        .slice(0, 50)
+        .map((it) => it.symbol);
 
-      return enrichedItems;
+      const targetSymbols: string[] = prioritySymbols.length > 0 ? prioritySymbols : [...VN30_BOARD];
+
+      // 3. Tải song song dữ liệu chuyên sâu đa nguồn qua mapPool (VNDirect Research + Vietcap Ownership + VPS Foreign)
+      const enrichedItems: MultiSourceStockItem[] = [];
+
+      await mapPool(targetSymbols, 8, async (symbol: string) => {
+        const snap = itemMap.get(symbol);
+        const price = snap?.price ?? 0;
+
+        // Truy vấn 3 nguồn chuyên biệt
+        const [foreignRes, reportsRes, shareholdersRes] = await Promise.allSettled([
+          getVpsForeignFlow(symbol),
+          getStockAnalyticReports(symbol, 5),
+          getStockShareholders(symbol),
+        ]);
+
+        // 1. VPS Foreign Flow
+        const foreign = foreignRes.status === "fulfilled" ? foreignRes.value : null;
+
+        // 2. VNDirect Research Reports
+        const repData = reportsRes.status === "fulfilled" ? reportsRes.value?.data : null;
+        const targetPrice = repData?.latestTargetPrice ?? null;
+        const targetUpsidePct =
+          targetPrice && price > 0
+            ? Math.round(((targetPrice - (price > 1000 ? price : price * 1000)) / (price > 1000 ? price : price * 1000)) * 10000) / 100
+            : null;
+        const rating = repData?.latestRating ?? null;
+        const reportCount = repData?.total ?? 0;
+
+        // 3. Vietcap Shareholders
+        const shData = shareholdersRes.status === "fulfilled" ? shareholdersRes.value?.data : null;
+        const shList = shData?.shareholders ?? [];
+        const instPct = shData
+          ? Math.round((shData.structure.corporatePct + shData.structure.foreignPct) * 10) / 10
+          : null;
+        const leaderPct = shList.length
+          ? Math.round(
+              shList
+                .filter((item) => Boolean(item.positionName))
+                .reduce((acc, l) => acc + (l.percentage || 0), 0) * 10
+            ) / 10
+          : null;
+        const majorHoldersCount = shData?.majorHoldersCount ?? shList.length;
+
+        enrichedItems.push({
+          symbol,
+          name: snap?.name || symbol,
+          price: price > 0 ? (price > 1000 ? price / 1000 : price) : 0,
+          changePercent: snap?.changePercent ?? 0,
+          volume: snap?.volume ?? 0,
+          targetPrice,
+          targetUpsidePct,
+          rating,
+          reportCount,
+          institutionOwnershipPct: instPct,
+          leadershipOwnershipPct: leaderPct,
+          majorHoldersCount,
+          pe: snap?.pe ?? null,
+          pb: snap?.pb ?? null,
+          pe3yAvg: null,
+          beta: snap?.beta ?? null,
+          high52w: null,
+          low52w: null,
+          foreignBuyRatioPct: foreign?.buyRatioPct ?? 50,
+          foreignNetVolume: foreign?.netVolume ?? null,
+          foreignNetValue: foreign?.netValue ?? null,
+          foreignRoom: foreign?.foreignRoom ?? null,
+          quantEdgeScore: snap?.quantEdgeScore ?? null,
+          ouZScore: snap?.ouZScore ?? null,
+          ouHalfLife: snap?.ouHalfLife ?? null,
+          tripleBarrierRiskReward: snap?.tripleBarrierRiskReward ?? null,
+          quantAnomalyTag: snap?.quantAnomalyTag ?? null,
+          confluenceScore: snap?.confluenceScore ?? null,
+          confluenceBadge: snap?.confluenceBadge ?? null,
+        });
+      });
+
+      // Sắp xếp mặc định theo Vốn hóa & Thanh khoản
+      return enrichedItems.sort((a, b) => b.volume - a.volume);
     },
   });
 
   const meta = buildMeta({
-    source: "multi-source-composite-screener",
+    source: "multi-source-composite-screener (VPS + SSI + VNDirect + Vietcap + OQuant)",
     sourceTimestampMs: Date.now(),
     hasData: res.value.length > 0,
     cached: res.cached,
     stale: res.stale,
-    note: "Dữ liệu sàng lọc đa nguồn chuẩn hóa bởi Orca Multi-Source Composite Engine.",
+    note: `Bộ lọc đa nguồn toàn diện (${res.value.length} mã) - Hợp nhất Giá Realtime, Khối ngoại, Báo cáo phân tích và Ưu thế Quant.`,
     slas: { liveSlaMs: 5_000, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
   });
 

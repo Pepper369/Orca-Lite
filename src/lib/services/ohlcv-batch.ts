@@ -93,7 +93,7 @@ export type OhlcvBatchOpts = {
   deadlineMs?: number;
   perSymbolMs?: number;
   resilient?: boolean;
-  priority?: string[];
+  priority?: readonly string[] | string[];
   skipCache?: boolean;
 };
 

@@ -523,6 +523,40 @@ export function VnScreener({
         }
         pad={false}
       >
+        {/* Multi-Source Redundancy Telemetry Banner */}
+        {data?.redundancyInfo && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-panel-3/50 border-b border-line text-[11px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Đa Nguồn HA Active:
+              </span>
+              {data.redundancyInfo.quoteProviders?.map((p) => {
+                const lat = data.redundancyInfo?.latencies?.[p];
+                return (
+                  <span
+                    key={p}
+                    className="inline-flex items-center gap-1 rounded bg-panel-2 px-2 py-0.5 border border-line/60 text-[10px] text-text-secondary"
+                  >
+                    <span className="size-1 rounded-full bg-emerald-400" />
+                    <span className="uppercase font-medium">{p}</span>
+                    {lat != null && <span className="text-text-muted font-mono">{lat}ms</span>}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-3 text-[10px] text-text-muted">
+              <span>Đồng bộ: <strong className="text-emerald-400 font-medium">{data.redundancyInfo.healthStatus}</strong></span>
+              {data.redundancyInfo.conflictCount != null && data.redundancyInfo.conflictCount > 0 && (
+                <span>Khử lệch: {data.redundancyInfo.conflictCount} mã</span>
+              )}
+              <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-0.2 border border-emerald-500/20">
+                HA Failover: {data.redundancyInfo.failoverCount > 0 ? `${data.redundancyInfo.failoverCount} lần` : "Sẵn sàng"}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Quick Filter Bar */}
         <div className="flex flex-wrap items-end gap-2 border-b border-line p-3 bg-panel-2/40">
           <label>
