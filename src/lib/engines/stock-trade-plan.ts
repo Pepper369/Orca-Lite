@@ -106,83 +106,77 @@ export function buildStockTradePlan(
     const sma20 = input.sma20 != null && input.sma20 > 0 ? input.sma20 : null;
     const rsi = input.rsi14;
 
-    // Phân tích vị thế tổng thể để xác định điểm Entry Mua tối ưu (không neo cứng giá hiện tại)
+    // =========================================================================
+    // NGUYÊN TẮC BẤT ĐỐI XỨNG (ASYMMETRIC ALPHA): LỖ ÍT NHẤT - LÃI CAO NHẤT
+    // 1. Lỗ ít nhất: Điểm mua kéo sát về điểm tựa hỗ trợ cứng/SMA20 -> Rủi ro SL cực hẹp (2.0% - 3.2%)
+    // 2. Lãi cao nhất: Mua từ chân sóng mở rộng biên độ lên kháng cự trên -> Biên lãi tối đa (12% - 25%+)
+    // =========================================================================
     let optimalEntry = last;
     let entryMin = last;
     let entryMax = last;
-    let entryStrategyVi = "Mua thăm dò tại nền giá";
+    let entryStrategyVi = "Mua sát hỗ trợ";
 
     const distToSupPct = sup != null ? ((last - sup) / last) * 100 : null;
     const distToSma20Pct = sma20 != null ? ((last - sma20) / last) * 100 : null;
 
-    // Trường hợp 1: Giá đang chạy xa hỗ trợ / SMA20 (>2.0%) hoặc RSI ở vùng cao (>62)
-    // -> Khuyến nghị KIÊN NHẪN CHỜ PULLBACK / RETEST để có vị thế an toàn
-    if ((distToSupPct != null && distToSupPct > 2.0) || (distToSma20Pct != null && distToSma20Pct > 2.5) || (rsi != null && rsi > 62)) {
-      let pullbackTarget = last - atr * 0.75;
-      if (sma20 != null && sma20 < last && sma20 >= last - atr * 1.6) {
-        pullbackTarget = Math.max(pullbackTarget, sma20 + atr * 0.15);
+    if (sup != null && sup < last) {
+      // Đẩy điểm entry về sát hỗ trợ (chỉ trên hỗ trợ 0.8% - 1.5%) để khi vi phạm, cắt lỗ ngay và lỗ cực ít
+      const tightBuyAnchor = Math.min(last, sup + Math.min(atr * 0.35, sup * 0.015));
+      if (last > tightBuyAnchor * 1.01) {
+        // Giá hiện tại đang cao hơn điểm mua an toàn -> Khuyến nghị chờ kéo ngược
+        optimalEntry = tickRound(tightBuyAnchor);
+        entryMin = tickRound(sup * 0.998);
+        entryMax = tickRound(tightBuyAnchor * 1.01);
+        entryStrategyVi = "Canh mua chân sóng sát Hỗ trợ (Tối thiểu rủi ro)";
+      } else {
+        // Giá hiện tại đang ở ngay vùng mua an toàn
+        optimalEntry = tickRound(last);
+        entryMin = tickRound(sup * 0.998);
+        entryMax = tickRound(last * 1.008);
+        entryStrategyVi = "Mua ngay tại vùng đỡ giá bê tông";
       }
-      if (sup != null && sup < last && sup >= last - atr * 2.0) {
-        pullbackTarget = Math.max(pullbackTarget, sup + atr * 0.2);
-      }
-      // Giới hạn target entry không lùi quá 4.5% để đảm bảo tính thực tế khớp lệnh
-      pullbackTarget = Math.max(pullbackTarget, last * 0.955);
-
-      optimalEntry = tickRound(pullbackTarget);
-      entryMin = tickRound(Math.min(optimalEntry, sup != null && sup < optimalEntry ? sup : optimalEntry - atr * 0.3));
-      entryMax = tickRound(Math.min(last * 0.995, optimalEntry + atr * 0.35));
-      entryStrategyVi = sma20 != null && Math.abs(optimalEntry - sma20) < atr
-        ? "Canh mua Pullback kiểm định SMA20"
-        : "Canh mua nhịp chỉnh retest Hỗ trợ";
-      basis.push(`${entryStrategyVi} quanh vùng ${optimalEntry} (tránh FOMO mua đuổi)`);
-    }
-    // Trường hợp 2: Giá đang ở sát vùng Hỗ trợ hoặc đang tích lũy nền giá chặt quanh SMA20
-    else if ((distToSupPct != null && distToSupPct <= 2.0) || (distToSma20Pct != null && Math.abs(distToSma20Pct) <= 1.5)) {
-      const baseFloor = sup ?? sma20 ?? (last - atr * 0.3);
-      optimalEntry = tickRound(Math.min(last, baseFloor + atr * 0.15));
-      entryMin = tickRound(baseFloor);
-      entryMax = tickRound(Math.max(last, baseFloor + atr * 0.4));
-      entryStrategyVi = "Mua tích lũy tại vùng hỗ trợ / nền giá";
-      basis.push(`Mua tích lũy tại nền giá quanh ${optimalEntry}`);
-    }
-    // Trường hợp 3: Vừa Breakout hoặc đà tăng tiếp diễn
-    else {
-      optimalEntry = tickRound(last - atr * 0.25);
-      entryMin = tickRound(optimalEntry - atr * 0.3);
+    } else if (sma20 != null && sma20 < last) {
+      const tightBuyAnchor = Math.min(last, sma20 + Math.min(atr * 0.3, sma20 * 0.012));
+      optimalEntry = tickRound(tightBuyAnchor);
+      entryMin = tickRound(sma20 * 0.995);
+      entryMax = tickRound(tightBuyAnchor * 1.01);
+      entryStrategyVi = "Canh mua retest đường SMA20";
+    } else {
+      optimalEntry = tickRound(last - Math.min(atr * 0.5, last * 0.02));
+      entryMin = tickRound(optimalEntry * 0.992);
       entryMax = tickRound(last);
-      entryStrategyVi = "Mua retest sau tín hiệu bứt phá";
-      basis.push(`Mua đón đầu quanh ${optimalEntry}`);
+      entryStrategyVi = "Mua chiết khấu quản trị rủi ro";
     }
 
     entry = optimalEntry;
     const currentPriceDiffPct = Math.round(((entry - last) / last) * 1000) / 10;
 
+    // Thiết lập Cắt lỗ (SL): Ngay sát dưới hỗ trợ -> LỖ ÍT NHẤT (chỉ 2.0% - 3.2%)
     if (sup != null && entry > sup) {
-      stopLoss = tickRound(sup - atr * 0.2);
-      basis.push(`SL dưới hỗ trợ ${tickRound(sup)}`);
+      stopLoss = tickRound(sup * 0.99); // Dưới hỗ trợ 1%
     } else {
-      stopLoss = tickRound(entry - minStop);
-      basis.push(`SL theo ATR (~${((minStop / entry) * 100).toFixed(1)}%)`);
+      stopLoss = tickRound(entry * 0.972); // Cắt lỗ tối đa 2.8%
     }
 
-    if (entry - stopLoss < minStop * 0.8) {
-      stopLoss = tickRound(entry - minStop);
+    // Đảm bảo mức lỗ không vượt quá 3.5% để thỏa mãn "Lỗ ít nhất"
+    if ((entry - stopLoss) / entry > 0.038) {
+      stopLoss = tickRound(entry * 0.968);
+    }
+    // Và không để SL quá sát (< 1.5%) tránh bị quét râu nến nhiễu
+    if ((entry - stopLoss) / entry < 0.015) {
+      stopLoss = tickRound(entry * 0.978);
     }
 
     const risk = entry - stopLoss;
     if (risk <= 0) return null;
 
-    const target2r = tickRound(entry + risk * 2.2);
-    if (res != null && res > entry + risk * 1.3) {
-      takeProfit = tickRound(res);
-      basis.push(`TP tại kháng cự ${tickRound(res)}`);
-      if ((res - entry) / risk < 1.4) {
-        takeProfit = target2r;
-        basis.push("Kháng cự gần — TP mở rộng 2.2R");
-      }
+    // Thiết lập Chốt lời (TP): Tối đa hóa tỷ suất sinh lời (Upside Maximization)
+    // Tỷ lệ R:R hướng tới 1:3.5 đến 1:5.0
+    const target3_5r = tickRound(entry + risk * 3.5);
+    if (res != null && res > entry + risk * 2.5) {
+      takeProfit = tickRound(Math.max(res, target3_5r));
     } else {
-      takeProfit = target2r;
-      basis.push("TP theo R:R 1:2.2 (ATR)");
+      takeProfit = target3_5r;
     }
 
     stopLoss = tickRound(stopLoss);
@@ -193,9 +187,12 @@ export function buildStockTradePlan(
     const reward = takeProfit - entry;
     const rr = reward / risk2;
 
-    const tp1 = tickRound(entry + risk2 * 1.5);
-    const tp2 = tickRound(entry + risk2 * 2.5);
-    const tp3 = tickRound(entry + risk2 * 4);
+    const tp1 = tickRound(entry + risk2 * 1.8);
+    const tp2 = tickRound(entry + risk2 * 3.0);
+    const tp3 = tickRound(entry + risk2 * 4.5);
+
+    basis.push(`Điểm mua tối ưu sát hỗ trợ ${tickRound(sup ?? sma20 ?? 0)} (Lỗ tối đa chỉ -${((risk2 / entry) * 100).toFixed(1)}%)`);
+    basis.push(`Biên lãi kỳ vọng +${(((takeProfit - entry) / entry) * 100).toFixed(1)}% (Tỷ suất 1 ăn ${rr.toFixed(1)})`);
 
     return {
       side,

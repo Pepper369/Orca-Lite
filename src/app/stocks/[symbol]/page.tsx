@@ -359,16 +359,10 @@ const DecisionStrip = memo(function DecisionStrip({
         {plan && signal !== "QUAN SÁT" ? (
           <span className="stock-plan-group" role="group" aria-label="Kế hoạch giao dịch">
             <MetricChip
-              label={signal === "MUA" ? "Entry Mua" : "Entry Bán"}
+              label={signal === "MUA" ? "Mua tối ưu" : "Bán tối ưu"}
               value={fmt(plan.entry)}
               emphasis
             />
-            {plan.entryZone && (
-              <MetricChip
-                label="Vùng gom"
-                value={`${fmt(plan.entryZone[0])}–${fmt(plan.entryZone[1])}`}
-              />
-            )}
             {plan.currentPriceDiffPct != null && plan.currentPriceDiffPct < -0.3 && (
               <MetricChip
                 label="Chờ chỉnh"
@@ -376,9 +370,9 @@ const DecisionStrip = memo(function DecisionStrip({
                 tone="up"
               />
             )}
-            <MetricChip label="SL" value={fmt(plan.stopLoss)} tone="down" />
-            <MetricChip label="TP" value={fmt(plan.takeProfit)} tone="up" />
-            <MetricChip label="R:R" value={`1:${plan.riskReward.toFixed(1)}`} emphasis />
+            <MetricChip label="Lỗ tối đa (SL)" value={`-${plan.riskPct}%`} tone="down" />
+            <MetricChip label="Lãi kỳ vọng (TP)" value={`+${plan.rewardPct}%`} tone="up" />
+            <MetricChip label="Tỷ suất R:R" value={`1 ăn ${plan.riskReward.toFixed(1)}`} emphasis />
           </span>
         ) : (
           <MetricChip label="Setup" value="Chờ xác nhận" muted />
