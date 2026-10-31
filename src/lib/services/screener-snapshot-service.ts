@@ -12,7 +12,7 @@ import { mapPool } from "../financial/snapshots";
 import type { Meta } from "../types";
 
 import { batchVnOhlcv } from "./ohlcv-batch";
-import { sma, adx, ttmSqueeze, superTrend } from "../engines/oscillators";
+import { sma, adx, ttmSqueeze, superTrend, rsi } from "../engines/oscillators";
 import { detectChartPatterns } from "../engines/chart-patterns";
 import {
   estimateOrnsteinUhlenbeck,
@@ -327,10 +327,17 @@ function analyzeTechFeatures(
 
   // 3. Volume & Momentum Squeeze Pillar (max 25)
   let momScore = 0;
-  if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.2) momScore += 10;
-  else if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.0) momScore += 5;
-  if (sqState === "fired_bull") momScore += 15;
-  else if (sqState === "squeeze_on") momScore += 10;
+  if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.2) momScore += 7;
+  else if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.0) momScore += 4;
+  if (sqState === "fired_bull") momScore += 12;
+  else if (sqState === "squeeze_on") momScore += 8;
+
+  if (n >= 20) {
+    const rsiArr = rsi(closes, 14);
+    const curRsi = rsiArr[n - 1];
+    if (curRsi != null && curRsi >= 48 && curRsi <= 68) momScore += 6;
+  }
+  momScore = Math.min(25, momScore);
 
   // 4. Fundamental Pillar (max 25)
   const fundScore = Math.min(25, Math.round(compositeScore * 0.25));

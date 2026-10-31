@@ -18,6 +18,9 @@ type ScreenPayload = {
 
 const SCENARIOS = [
   { id: "all", label: "Tất cả kịch bản", shortLabel: "Tất cả" },
+  { id: "SMC_SWEEP_RECLAIM", label: "🧲 Quét rũ thanh khoản (SMC Spring)", shortLabel: "🧲 Quét SMC" },
+  { id: "VSA_NO_SUPPLY_TEST", label: "🧪 Test cung cạn kiệt (No Supply)", shortLabel: "🧪 Test VSA" },
+  { id: "EMA_RIBBON_ALIGN", label: "🎗️ Hợp lưu dải EMA Ribbon", shortLabel: "🎗️ EMA Ribbon" },
   { id: "MA50_BOUNCE", label: "🛡️ Nảy hỗ trợ MA50 (Tổ chức)", shortLabel: "🛡️ Nảy MA50" },
   { id: "MA20_BOUNCE", label: "🎯 Nảy hỗ trợ MA20 (Sóng tăng)", shortLabel: "🎯 Nảy MA20" },
   { id: "MA200_RECLAIM", label: "👑 Lấy lại MA200 (Thoát đáy)", shortLabel: "👑 Lấy MA200" },
@@ -45,6 +48,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [minScoreThreshold, setMinScoreThreshold] = useState<number>(55);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [volumeOnly, setVolumeOnly] = useState<boolean>(false);
+  const [foreignOnly, setForeignOnly] = useState<boolean>(false);
+  const [leaderOnly, setLeaderOnly] = useState<boolean>(false);
   const [freshOnly, setFreshOnly] = useState<boolean>(false); // T+0 only
   const [highRrOnly, setHighRrOnly] = useState<boolean>(false); // R:R >= 2.0
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -100,6 +105,16 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
       list = list.filter((r) => (r.volRatio ?? 0) >= 1.2 || r.confluenceTags.some((t) => t.includes("Vol")));
     }
 
+    // 5b. Foreign Accumulation Only
+    if (foreignOnly) {
+      list = list.filter((r) => Boolean(r.foreignAccumulating));
+    }
+
+    // 5c. Relative Strength Leader Only (Outperforming VN-Index)
+    if (leaderOnly) {
+      list = list.filter((r) => Boolean(r.isMarketLeader || (r.rsRating20 != null && r.rsRating20 > 0)));
+    }
+
     // 6. Fresh T+0 only
     if (freshOnly) {
       list = list.filter((r) => r.patternAgeBars === 0);
@@ -147,6 +162,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     selectedQuality,
     minScoreThreshold,
     volumeOnly,
+    foreignOnly,
+    leaderOnly,
     freshOnly,
     highRrOnly,
     searchQuery,
@@ -198,6 +215,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     setMinScoreThreshold(55);
     setSearchQuery("");
     setVolumeOnly(false);
+    setForeignOnly(false);
+    setLeaderOnly(false);
     setFreshOnly(false);
     setHighRrOnly(false);
   }, []);
@@ -382,6 +401,30 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 className="rounded"
               />
               <span>Dòng tiền lớn (Vol &gt; 1.2x)</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
+              <input
+                type="checkbox"
+                checked={foreignOnly}
+                onChange={(e) => setForeignOnly(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-emerald-400 font-medium">Khối ngoại gom ròng</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
+              <input
+                type="checkbox"
+                checked={leaderOnly}
+                onChange={(e) => setLeaderOnly(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-cyan-400 font-medium">Khỏe hơn VN-Index</span>
             </label>
 
             <span className="text-text-muted">|</span>
@@ -621,7 +664,7 @@ function ConfluenceRowItem({
       >
         {/* Symbol & Sector */}
         <td className="px-3.5 py-2.5 align-top">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <Link
               href={`/stocks/${row.symbol}`}
               onClick={(e) => e.stopPropagation()}
@@ -637,6 +680,16 @@ function ConfluenceRowItem({
             {row.setupQuality === "A" && (
               <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.2 text-[9px] font-semibold">
                 A
+              </span>
+            )}
+            {row.isMarketLeader && (
+              <span className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1 py-0.2 text-[9px] font-semibold" title={`Khỏe hơn VN-Index: ${row.rsRating20 ? `+${row.rsRating20}%` : ''}`}>
+                RS Leader
+              </span>
+            )}
+            {row.foreignAccumulating && (
+              <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.2 text-[9px] font-semibold" title={`Khối ngoại mua ròng ${row.foreignNetVal ? `${row.foreignNetVal} tỷ` : ''}`}>
+                NN Gom
               </span>
             )}
             {row.alertWorthy && <Badge tone="bull">Alert</Badge>}
@@ -689,6 +742,28 @@ function ConfluenceRowItem({
 
           {/* Confluence Tags */}
           <div className="flex flex-wrap gap-1 mt-1">
+            {row.foreignNetVal != null && row.foreignNetVal !== 0 && (
+              <span
+                className={`rounded px-1 py-0.2 text-[9px] font-semibold border ${
+                  row.foreignNetVal > 0
+                    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                    : "bg-rose-500/15 text-rose-300 border-rose-500/30"
+                }`}
+              >
+                NN {row.foreignNetVal > 0 ? `+${row.foreignNetVal} tỷ` : `${row.foreignNetVal} tỷ`}
+              </span>
+            )}
+            {row.rsRating20 != null && (
+              <span
+                className={`rounded px-1 py-0.2 text-[9px] font-semibold border ${
+                  row.rsRating20 >= 0
+                    ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/30"
+                    : "bg-surface-elevated text-text-muted border-line/40"
+                }`}
+              >
+                RS {row.rsRating20 >= 0 ? `+${row.rsRating20}%` : `${row.rsRating20}%`}
+              </span>
+            )}
             {row.confluenceTags.slice(0, 3).map((tag, i) => (
               <span
                 key={i}
@@ -828,6 +903,70 @@ function ConfluenceRowItem({
                 </div>
               </div>
             </div>
+
+            {/* 5-Pillars Confluence Quantitative Breakdown */}
+            <div className="mt-3 rounded-lg border border-line/60 bg-surface-elevated/70 p-3 space-y-2 text-[11px]">
+              <div className="font-semibold text-text-primary flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span>⚡ Phân Tích 5 Trụ Cột Hợp Lưu Đa Nguồn</span>
+                  {row.setupQuality === "A+" && (
+                    <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.2 rounded font-bold">
+                      ⭐ SIÊU HỢP LƯU (Top Setup)
+                    </span>
+                  )}
+                </span>
+                <span className="text-accent-primary font-bold">{row.confluenceScore} / 100 điểm</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10.5px]">
+                <div className="rounded bg-surface-base/80 p-2 border border-line/40">
+                  <div className="text-text-muted text-[9.5px]">1. Xu Hướng &amp; MA</div>
+                  <div className="font-bold text-text-primary mt-0.5">{row.pillars?.trend ?? 20} / 25đ</div>
+                  <div className="text-[9.5px] text-text-muted truncate mt-0.5">Neo {row.anchorMa}</div>
+                </div>
+
+                <div className="rounded bg-surface-base/80 p-2 border border-line/40">
+                  <div className="text-text-muted text-[9.5px]">2. Nến Đảo Chiều</div>
+                  <div className="font-bold text-text-primary mt-0.5">{row.pillars?.candle ?? 20} / 25đ</div>
+                  <div className="text-[9.5px] text-emerald-400 truncate mt-0.5">{row.candleNameVi}</div>
+                </div>
+
+                <div className="rounded bg-surface-base/80 p-2 border border-line/40">
+                  <div className="text-text-muted text-[9.5px]">3. Động Lượng RSI/MACD</div>
+                  <div className="font-bold text-text-primary mt-0.5">{row.pillars?.momentum ?? 12} / 20đ</div>
+                  <div className="text-[9.5px] text-cyan-400 truncate mt-0.5">
+                    {row.rsi14 ? `RSI: ${row.rsi14}` : "RSI chuẩn"} {row.macdHist ? `· Hist: ${row.macdHist}` : ""}
+                  </div>
+                </div>
+
+                <div className="rounded bg-surface-base/80 p-2 border border-line/40">
+                  <div className="text-text-muted text-[9.5px]">4. Dòng Tiền &amp; Khối Ngoại</div>
+                  <div className="font-bold text-text-primary mt-0.5">{row.pillars?.flow ?? 10} / 20đ</div>
+                  <div className="text-[9.5px] text-text-muted truncate mt-0.5">
+                    {row.foreignNetVal ? (
+                      <span className={row.foreignNetVal >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                        NN: {row.foreignNetVal >= 0 ? `+${row.foreignNetVal}` : row.foreignNetVal} tỷ
+                      </span>
+                    ) : (
+                      `Vol ${row.volRatio ?? 1}x`
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded bg-surface-base/80 p-2 border border-line/40">
+                  <div className="text-text-muted text-[9.5px]">5. RS vs VN-Index</div>
+                  <div className="font-bold text-text-primary mt-0.5">{row.pillars?.rs ?? 6} / 10đ</div>
+                  <div className="text-[9.5px] text-text-muted truncate mt-0.5">
+                    {row.rsRating20 != null ? (
+                      <span className={row.rsRating20 >= 0 ? "text-cyan-400 font-semibold" : "text-text-muted"}>
+                        {row.rsRating20 >= 0 ? `+${row.rsRating20}%` : `${row.rsRating20}%`}
+                      </span>
+                    ) : (
+                      "Tương quan tốt"
+                    )}
+                  </div>
+                </div>
+              </div>
           </td>
         </tr>
       )}

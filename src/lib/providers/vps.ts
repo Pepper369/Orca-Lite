@@ -172,3 +172,81 @@ export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow 
   };
 }
 
+/**
+ * Lấy dòng tiền khối ngoại hàng loạt theo danh sách mã từ VPS datafeed.
+ * Chia chunk 40 mã/request để quét toàn bộ Universe chỉ trong 2-3 requests siêu tốc.
+ */
+export async function getVpsBatchForeignFlow(
+  symbols: string[],
+): Promise<Map<string, VpsForeignFlow>> {
+  const uniq = [...new Set(symbols.map((s) => s.toUpperCase().trim()).filter(Boolean))];
+  if (!uniq.length) return new Map();
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < uniq.length; i += CHUNK) {
+    chunks.push(uniq.slice(i, i + CHUNK));
+  }
+
+  const result = new Map<string, VpsForeignFlow>();
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const res = await httpJson<Array<VpsRow & { rightInfos?: Array<{ contentVi: string; contentEn?: string }> }>>(
+          `${BASE}/getliststockdata/${chunk.join(",")}`,
+          {
+            provider: "vps",
+            timeoutMs: 5_500,
+            retries: 1,
+            headers: {
+              Accept: "application/json",
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+            },
+          },
+        );
+
+        if (!res.ok || !Array.isArray(res.data)) return;
+
+        for (const r of res.data) {
+          const code = String(r.sym ?? r.stock_code ?? r.stockCode ?? "").toUpperCase();
+          if (!code) continue;
+
+          const buyVol = num(r.fBVol);
+          const fBVal = num(r.fBValue);
+          const sellVol = num(r.fSVolume);
+          const fSVal = num(r.fSValue);
+          const room = num(r.fRoom);
+
+          const buyVal = fBVal != null ? fBVal * 1000 : null;
+          const sellVal = fSVal != null ? fSVal * 1000 : null;
+          const netVol = buyVol != null && sellVol != null ? buyVol - sellVol : null;
+          const netVal = buyVal != null && sellVal != null ? buyVal - sellVal : null;
+
+          const totalVol = (buyVol ?? 0) + (sellVol ?? 0);
+          const buyRatioPct = totalVol > 0 ? Math.round(((buyVol ?? 0) / totalVol) * 10000) / 100 : 50;
+
+          result.set(code, {
+            symbol: code,
+            buyVolume: buyVol,
+            buyValue: buyVal,
+            sellVolume: sellVol,
+            sellValue: sellVal,
+            netVolume: netVol,
+            netValue: netVal,
+            foreignRoom: room,
+            buyRatioPct,
+            rightInfos: Array.isArray(r.rightInfos) ? r.rightInfos : [],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // Soft timeout fallback
+      }
+    }),
+  );
+
+  return result;
+}
+
+

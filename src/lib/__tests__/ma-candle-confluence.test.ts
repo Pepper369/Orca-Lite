@@ -80,6 +80,46 @@ test("MA & Candle Confluence: Identifies MA200 Reclaim (Cycle Bottom Escape)", (
   assert.ok(result.setupQuality === "A+" || result.setupQuality === "A" || result.setupQuality === "B");
 });
 
+test("MA & Candle Confluence: Identifies SMC Sweep & Reclaim with Foreign Flow and RS Leader", () => {
+  const bars: OhlcvBar[] = [];
+  for (let i = 0; i < 35; i++) {
+    const base = 40 + i * 0.35;
+    bars.push(bar(base, base + 0.8, base - 0.5, base + 0.3, 1000));
+  }
+  bars.push(bar(52, 52.5, 51, 51.2, 800));
+  bars.push(bar(51.2, 51.5, 50.1, 50.3, 600));
+  bars.push(bar(50.3, 50.6, 49.8, 50.0, 500));
+  bars.push(bar(50.0, 50.2, 49.5, 49.7, 800));
+  // Sweep Hammer bar at MA20: Open 50.0, High 50.5, Low 48.6 (sweeps below MA20 ~ 50), Close 50.4 (body 0.4, lower 1.4, upper 0.1)
+  bars.push(bar(50.0, 50.5, 48.6, 50.4, 2800));
+
+  // Simulated VN-Index bars (flat or lagging)
+  const indexBars: OhlcvBar[] = Array.from({ length: 45 }, () => bar(1250, 1255, 1245, 1250, 50000));
+
+  const result = analyzeMaCandleRow("TEST_SMC", bars, undefined, {
+    foreign: {
+      buyVolume: 450_000,
+      sellVolume: 120_000,
+      netVolume: 330_000,
+      netValue: 19_200_000_000, // 19.2 tỷ
+      buyRatioPct: 78.9,
+    },
+    indexBars,
+  });
+
+  assert.ok(result, "Should successfully detect SMC confluence setup");
+  assert.equal(result.scenario, "SMC_SWEEP_RECLAIM");
+  assert.equal(result.foreignAccumulating, true);
+  assert.equal(result.foreignNetVal, 19.2);
+  assert.ok(result.isMarketLeader, "Should be market leader vs flat index");
+  assert.ok(result.pillars, "Should have 5-pillars breakdown");
+  assert.ok(result.pillars.trend > 0);
+  assert.ok(result.pillars.candle > 0);
+  assert.ok(result.pillars.flow > 0);
+  assert.ok(result.pillars.rs > 0);
+  assert.equal(result.setupQuality, "A+");
+});
+
 test("MA & Candle Confluence: Edge cases with short or corrupted series are safe", () => {
   assert.equal(analyzeMaCandleRow("SHORT", []), null);
   assert.equal(analyzeMaCandleRow("SHORT_10", [bar(10, 11, 9, 10)]), null);

@@ -14,6 +14,9 @@ export async function GET(req: Request) {
   const scenario = (url.searchParams.get("scenario") ?? "all").toUpperCase();
   const allowedScenarios = new Set([
     "ALL",
+    "SMC_SWEEP_RECLAIM",
+    "VSA_NO_SUPPLY_TEST",
+    "EMA_RIBBON_ALIGN",
     "MA50_BOUNCE",
     "MA20_BOUNCE",
     "MA200_RECLAIM",
@@ -37,6 +40,8 @@ export async function GET(req: Request) {
 
   const sector = url.searchParams.get("sector") ?? undefined;
   const volumeOnly = url.searchParams.get("volumeOnly") === "1";
+  const foreignOnly = url.searchParams.get("foreignOnly") === "1";
+  const leaderOnly = url.searchParams.get("leaderOnly") === "1" || url.searchParams.get("rsOnly") === "1";
   const rawQuality = url.searchParams.get("qualityOnly");
   const qualityOnly: "A+" | "A" | "all" =
     rawQuality === "A+" || rawQuality === "A" ? rawQuality : "all";
@@ -65,6 +70,8 @@ export async function GET(req: Request) {
         sector,
         qualityOnly,
         volumeOnly,
+        foreignOnly,
+        leaderOnly,
         symbols,
       });
       if (!r) return null;
