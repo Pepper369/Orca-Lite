@@ -6,26 +6,60 @@ import { RefreshCw, TrendingUp, Sparkles, AlertTriangle, Filter, Search, Zap, Ch
 import { useApi } from "@/lib/hooks";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import { Badge, Chg, fmtCompact, fmtNum, Loading, MetaLine, Panel } from "@/components/ui";
-import type { MaScreenRow, MaRegime } from "@/lib/services/ma-screener";
+import type {
+  MaScreenRow,
+  MaRegime,
+  MaClassification,
+  MaSignalCategory,
+  MaTimeHorizon,
+  MaActionGrade,
+} from "@/lib/services/ma-screener";
 
 type SignalFilter =
   | "ALL"
   | "GOLDEN_CROSS"
   | "PULLBACK_RETEST"
+  | "BREAKOUT_RECLAIM"
   | "BULLISH_ALIGN"
-  | "BULLISH"
   | "MA_SQUEEZE"
+  | "SLOPE_BULLISH"
+  | "OVEREXTENDED"
   | "DEATH_CROSS";
 
 const SIGNAL_TABS: { id: SignalFilter; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "ALL", label: "Tất cả tín hiệu", icon: <Sparkles className="size-3.5 text-accent-primary" />, desc: "Toàn bộ cổ phiếu" },
   { id: "GOLDEN_CROSS", label: "Giao cắt Vàng (Golden Cross)", icon: <TrendingUp className="size-3.5 text-amber-400" />, desc: "Tối ưu tín hiệu mới nhất hôm nay, T-1..T-3 và giao cắt kinh điển" },
-  { id: "PULLBACK_RETEST", label: "Test lại MA hỗ trợ", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Kiểm định MA20/50 rút chân (Điểm mua chuẩn)" },
-  { id: "BULLISH_ALIGN", label: "Trật tự xu hướng tăng", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Giá > MA10 > MA20 > MA50 > MA200" },
-  { id: "BULLISH", label: "Tất cả đà tăng", icon: <TrendingUp className="size-3.5 text-blue-400" />, desc: "Mọi tín hiệu tăng giá MA" },
-  { id: "MA_SQUEEZE", label: "Nén chặt chờ nổ", icon: <Zap className="size-3.5 text-purple-400" />, desc: "MA co thắt nén chuẩn bị bung" },
-  { id: "DEATH_CROSS", label: "Giao cắt Tử thần", icon: <AlertTriangle className="size-3.5 text-rose-400" />, desc: "MA ngắn cắt xuống MA dài" },
+  { id: "PULLBACK_RETEST", label: "Kiểm định Hỗ trợ (Retest)", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Kiểm định MA20/50/200 rút chân (Điểm mua chuẩn R:R)" },
+  { id: "BREAKOUT_RECLAIM", label: "Vượt cản MA (Reclaim)", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Bứt phá lấy lại MA20, MA50 hoặc MA200 dài hạn" },
+  { id: "BULLISH_ALIGN", label: "Trật tự MA Ribbon", icon: <CheckCircle2 className="size-3.5 text-emerald-400" />, desc: "Giá > MA10 > MA20 > MA50 > MA200 (Kênh tăng mạnh nhất)" },
+  { id: "MA_SQUEEZE", label: "Nén chặt chờ nổ", icon: <Zap className="size-3.5 text-purple-400" />, desc: "MA co thắt nén biên độ chuẩn bị bung nổ biến động" },
+  { id: "SLOPE_BULLISH", label: "Gia tốc dốc mạnh", icon: <TrendingUp className="size-3.5 text-blue-400" />, desc: "MA20 & MA50 dốc tăng thuận xu hướng gia tốc" },
+  { id: "OVEREXTENDED", label: "Kéo căng quá mua", icon: <AlertTriangle className="size-3.5 text-amber-400" />, desc: "Giá vượt MA20 > 8.5% (Cảnh báo rủi ro rung lắc)" },
+  { id: "DEATH_CROSS", label: "Giao cắt Tử thần", icon: <AlertTriangle className="size-3.5 text-rose-400" />, desc: "MA ngắn cắt xuống MA dài (Cảnh báo bán phòng vệ)" },
 ];
+
+function ActionGradeBadge({ classification }: { classification?: MaClassification }) {
+  if (!classification) return null;
+  const { action, actionLabel, actionBadgeColor } = classification;
+  const colorMap = {
+    emerald: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
+    cyan: "bg-cyan-500/20 text-cyan-300 border-cyan-500/40",
+    blue: "bg-blue-500/20 text-blue-300 border-blue-500/40",
+    purple: "bg-purple-500/20 text-purple-300 border-purple-500/40",
+    amber: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+    rose: "bg-rose-500/20 text-rose-300 border-rose-500/40",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap shadow-sm ${
+        colorMap[actionBadgeColor] ?? colorMap.blue
+      }`}
+    >
+      {action === "STRONG_BUY" && <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+      {actionLabel}
+    </span>
+  );
+}
 
 function RegimeBadge({ row }: { row: MaScreenRow }) {
   const { regime, criteria, metrics } = row;
@@ -51,6 +85,12 @@ function RegimeBadge({ row }: { row: MaScreenRow }) {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[11px] font-bold text-emerald-300 whitespace-nowrap shadow-sm">
           Test MA Hỗ trợ
+        </span>
+      );
+    case "BREAKOUT_RECLAIM":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[11px] font-bold text-cyan-400 whitespace-nowrap shadow-sm">
+          Vượt cản MA
         </span>
       );
     case "GOLDEN_CROSS":
@@ -102,6 +142,8 @@ function RegimeBadge({ row }: { row: MaScreenRow }) {
 
 export function MaScreener({ defaultSector }: { defaultSector?: string | null }) {
   const [signal, setSignal] = useState<SignalFilter>("ALL");
+  const [horizon, setHorizon] = useState<string>("ALL");
+  const [actionFilter, setActionFilter] = useState<string>("ALL");
   const [sector, setSector] = useState(defaultSector ?? "");
   const [search, setSearch] = useState("");
   const [minPrice, setMinPrice] = useState("8");
@@ -110,12 +152,14 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
   const queryString = useMemo(() => {
     const p = new URLSearchParams();
     if (signal !== "ALL") p.set("signal", signal);
+    if (horizon !== "ALL") p.set("horizon", horizon);
+    if (actionFilter !== "ALL") p.set("action", actionFilter);
     if (sector) p.set("sector", sector);
     if (minPrice) p.set("minPrice", minPrice);
     if (minVol) p.set("minVol", String(Number(minVol) * 1_000_000));
     p.set("limit", "80");
     return p.toString();
-  }, [signal, sector, minPrice, minVol]);
+  }, [signal, horizon, actionFilter, sector, minPrice, minVol]);
 
   const { data, meta, isLoading, isValidating, mutate } = useApi<{
     rows: MaScreenRow[];
@@ -125,12 +169,14 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
     timeoutMs: 12_000,
   });
 
-  // Filter local search
+  // Filter local search and extra controls
   const filteredRows = useMemo(() => {
-    const rows = data?.rows ?? [];
-    if (!search.trim()) return rows;
-    const q = search.trim().toUpperCase();
-    return rows.filter((r) => r.symbol.includes(q) || (r.name && r.name.toUpperCase().includes(q)));
+    let rows = data?.rows ?? [];
+    if (search.trim()) {
+      const q = search.trim().toUpperCase();
+      rows = rows.filter((r) => r.symbol.includes(q) || (r.name && r.name.toUpperCase().includes(q)));
+    }
+    return rows;
   }, [data?.rows, search]);
 
   return (
@@ -203,7 +249,7 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="FPT, HPG, VCB…"
-              className="input !w-36 !py-1 text-[12px]"
+              className="input !w-32 !py-1 text-[12px]"
             />
           </label>
 
@@ -212,7 +258,7 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
             <select
               value={sector}
               onChange={(e) => setSector(e.target.value)}
-              className="input !w-40 !py-1 text-[12px]"
+              className="input !w-36 !py-1 text-[12px]"
             >
               <option value="">Tất cả ngành</option>
               {VN_SECTOR_MAP.map((s) => (
@@ -224,23 +270,55 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
           </label>
 
           <label>
+            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Khung thời gian</span>
+            <select
+              value={horizon}
+              onChange={(e) => setHorizon(e.target.value)}
+              className="input !w-36 !py-1 text-[12px]"
+            >
+              <option value="ALL">Tất cả khung TG</option>
+              <option value="LONG_TERM">Dài hạn (MA200)</option>
+              <option value="MEDIUM_TERM">Trung hạn (MA50)</option>
+              <option value="SHORT_TERM">Ngắn hạn (MA20)</option>
+              <option value="MULTI_HORIZON">Đa khung (Ribbon)</option>
+            </select>
+          </label>
+
+          <label>
+            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Khuyến nghị</span>
+            <select
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              className="input !w-36 !py-1 text-[12px]"
+            >
+              <option value="ALL">Tất cả hành động</option>
+              <option value="STRONG_BUY">Điểm mua Kim cương</option>
+              <option value="BUY_ENTRY">Điểm mua Chuẩn</option>
+              <option value="HOLD">Nắm giữ theo Sóng</option>
+              <option value="WATCH">Chờ bùng nổ (Watch)</option>
+              <option value="TAKE_PROFIT">Cảnh báo chốt lời</option>
+              <option value="SELL_WARNING">Bán phòng vệ</option>
+            </select>
+          </label>
+
+          <label>
             <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Giá min (k)</span>
             <input
               value={minPrice}
               onChange={(e) => setMinPrice(e.target.value)}
               placeholder="8"
-              className="input !w-20 !py-1 text-[12px]"
+              className="input !w-16 !py-1 text-[12px]"
               inputMode="decimal"
             />
           </label>
 
           <label>
-            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Vol min (triệu cp)</span>
+            <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Vol min (tr cp)</span>
             <input
               value={minVol}
               onChange={(e) => setMinVol(e.target.value)}
               placeholder="0.1"
-              className="input !w-24 !py-1 text-[12px]"
+              className="input !w-20 !py-1 text-[12px]"
               inputMode="decimal"
             />
           </label>
@@ -252,13 +330,15 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
 
         {/* 3. MA Data Table */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[850px] text-[12px]">
+          <table className="w-full min-w-[950px] text-[12px]">
             <thead>
               <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-text-muted bg-panel-2/40">
                 <th className="px-3.5 py-2.5 font-medium">Mã CK</th>
                 <th className="py-2.5 font-medium">Ngành</th>
                 <th className="py-2.5 text-right font-medium">Giá</th>
                 <th className="py-2.5 text-right font-medium">± %</th>
+                <th className="py-2.5 text-center font-medium">Khuyến nghị & Tín hiệu</th>
+                <th className="py-2.5 text-center font-medium">Khung TG</th>
                 <th className="py-2.5 text-right font-semibold text-text-primary">MA10</th>
                 <th className="py-2.5 text-right font-semibold text-text-primary">MA20</th>
                 <th className="py-2.5 text-right font-semibold text-blue-400">MA50</th>
@@ -266,20 +346,19 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
                 <th className="py-2.5 text-right font-semibold text-amber-400">MA200</th>
                 <th className="py-2.5 text-right font-medium">Giá vs MA200</th>
                 <th className="py-2.5 text-right font-medium">Vol / TB20</th>
-                <th className="py-2.5 text-center font-medium">Trạng thái kỹ thuật</th>
                 <th className="py-2.5 pr-3.5 text-right font-medium">Điểm MA</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={14} className="px-3.5 py-8 text-center text-text-muted">
                     <Loading rows={4} />
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={14} className="px-3.5 py-8 text-center text-text-muted">
                     Không có mã nào thỏa mãn điều kiện lọc đường MA hiện tại. Hãy thử chọn &quot;Tất cả tín hiệu&quot; hoặc nới lỏng ngành.
                   </td>
                 </tr>
@@ -319,6 +398,26 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
 
                     <td className="py-2.5 text-right">
                       <Chg value={row.changePercent} arrow={false} />
+                    </td>
+
+                    <td className="py-2.5 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <ActionGradeBadge classification={row.classification} />
+                        <div className="flex items-center gap-1 text-[10px]">
+                          <RegimeBadge row={row} />
+                          {row.metrics.crossType && (
+                            <span className="font-semibold text-accent-primary">
+                              {row.metrics.crossType}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="py-2.5 text-center">
+                      <span className="rounded bg-panel-2 border border-line/70 px-1.5 py-0.5 text-[10px] font-medium text-text-secondary whitespace-nowrap">
+                        {row.classification?.horizonLabel ?? "Đa khung"}
+                      </span>
                     </td>
 
                     <td className="num py-2.5 text-right text-text-primary font-medium">
@@ -371,22 +470,6 @@ export function MaScreener({ defaultSector }: { defaultSector?: string | null })
                       ) : (
                         "—"
                       )}
-                    </td>
-
-                    <td className="py-2.5 text-center">
-                      <div className="flex flex-col items-center gap-0.5">
-                        <RegimeBadge row={row} />
-                        <div className="flex items-center gap-1 text-[10px] text-text-muted">
-                          {row.metrics.crossType && (
-                            <span className="font-semibold text-accent-primary/90">{row.metrics.crossType}</span>
-                          )}
-                          {row.metrics.crossBarsAgo != null ? (
-                            <span>
-                              • {row.metrics.crossBarsAgo === 0 ? "Hôm nay" : `T-${row.metrics.crossBarsAgo}`}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
                     </td>
 
                     <td className="num py-2.5 pr-3.5 text-right">

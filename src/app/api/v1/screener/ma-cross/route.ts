@@ -34,13 +34,19 @@ export async function GET(req: Request) {
     | "ALL"
     | "BULLISH"
     | "GOLDEN_CROSS"
-    | "BULLISH_ALIGN"
     | "PULLBACK_RETEST"
-    | "FRESH_CROSS"
-    | "SLOPE_BULLISH"
+    | "BREAKOUT_RECLAIM"
+    | "BULLISH_ALIGN"
     | "MA_SQUEEZE"
+    | "SLOPE_BULLISH"
+    | "OVEREXTENDED"
     | "BEARISH"
-    | "DEATH_CROSS";
+    | "DEATH_CROSS"
+    | "FRESH_CROSS";
+
+  const category = (url.searchParams.get("category")?.toUpperCase() || undefined) as any;
+  const horizon = (url.searchParams.get("horizon")?.toUpperCase() || undefined) as any;
+  const action = (url.searchParams.get("action")?.toUpperCase() || undefined) as any;
 
   const sector = url.searchParams.get("sector")?.trim() || undefined;
   const minPrice = num(url.searchParams.get("minPrice"));
@@ -58,6 +64,9 @@ export async function GET(req: Request) {
       const res = await screenMovingAverages({
         symbols,
         signal,
+        category,
+        horizon,
+        action,
         sector,
         minPrice,
         minVol,

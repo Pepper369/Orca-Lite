@@ -57,10 +57,18 @@ export interface MaCriteria {
   isTodayCross: boolean;     // Golden cross ngay trong phiên hiện tại (BarsAgo = 0)
   crossType: string | null;   // Cặp đường MA vừa cắt nhau
   crossBarsAgo: number | null;
-  isPullbackRetest: boolean; // Giá test lại MA20/MA50 hỗ trợ với vol cạn rồi nảy
+  isPullbackRetest: boolean; // Giá test lại MA hỗ trợ với vol cạn rồi nảy
   isSlopeBullish: boolean;   // MA20 & MA50 đều dốc lên thuận xu hướng
   isOverextended: boolean;   // Giá vượt MA20 > 8.5% (quá mua, rủi ro điều chỉnh)
   isAccelerating: boolean;   // Động lượng dốc tăng gia tốc
+
+  // Bứt phá & Vượt cản kỹ thuật (Breakout & Reclaim)
+  reclaimMa200: boolean;     // Bứt phá vượt cản MA200 dài hạn (Tổ chức xác nhận)
+  reclaimMa50: boolean;      // Vượt cản MA50 trung hạn
+  reclaimMa20: boolean;      // Lấy lại MA20 ngắn hạn
+  retestMa200: boolean;      // Kiểm định hỗ trợ MA200 dài hạn thành công
+  retestMa50: boolean;       // Kiểm định hỗ trợ MA50 trung hạn thành công
+  retestMa20: boolean;       // Kiểm định hỗ trợ MA20 ngắn hạn thành công
 
   // Bearish Crossovers (Xác suất đảo chiều giảm cao)
   ma10CrossDownMa20: boolean;
@@ -76,16 +84,40 @@ export interface MaCriteria {
 }
 
 export type MaRegime =
-  | "PULLBACK_RETEST"    // Test lại MA20/MA50 hỗ trợ thành công (Điểm mua tối ưu)
+  | "PULLBACK_RETEST"    // Test lại MA20/MA50/MA200 hỗ trợ thành công (Điểm mua tối ưu)
   | "FRESH_CROSS"        // Vừa xuất hiện Golden Cross (0-3 phiên)
   | "GOLDEN_CROSS"       // Vừa có MA20 cắt lên MA50/100/200
-  | "BULLISH_ALIGNMENT"  // Kênh tăng trật tự hoàn hảo
-  | "BULLISH_MOMENTUM"   // MA10 cắt lên MA20/MA50
+  | "BREAKOUT_RECLAIM"   // Bứt phá vượt cản MA (Reclaim MA20/50/200)
+  | "BULLISH_ALIGNMENT"  // Kênh tăng trật tự hoàn hảo (MA Ribbon)
+  | "BULLISH_MOMENTUM"   // MA10 cắt lên MA20/MA50 / Đà tăng gia tốc
   | "MA_SQUEEZE"         // Nén chặt chuẩn bị bùng nổ
   | "OVEREXTENDED"       // Kéo căng quá xa MA (rủi ro điều chỉnh)
   | "DEATH_CROSS"        // Vừa có MA20/50 cắt xuống
   | "BEARISH_ALIGNMENT"  // Kênh giảm trật tự
   | "NEUTRAL";
+
+export type MaSignalCategory =
+  | "CROSSOVER"          // Giao cắt đường MA (Golden Cross, Death Cross)
+  | "RETEST"             // Kiểm định hỗ trợ (Pullback & Retest)
+  | "BREAKOUT_RECLAIM"   // Bứt phá vượt cản MA (Reclaim MA20/50/200)
+  | "TREND_RIBBON"       // Trật tự xu hướng dải ruy băng (MA Ribbon)
+  | "COMPRESSION"        // Co thắt nén chặt biến động (MA Squeeze)
+  | "MOMENTUM"           // Gia tốc & Động lượng MA
+  | "OVEREXTENDED";      // Kéo căng quá mua (Cảnh báo rủi ro)
+
+export type MaTimeHorizon = "SHORT_TERM" | "MEDIUM_TERM" | "LONG_TERM" | "MULTI_HORIZON";
+
+export type MaActionGrade = "STRONG_BUY" | "BUY_ENTRY" | "HOLD" | "WATCH" | "TAKE_PROFIT" | "SELL_WARNING";
+
+export interface MaClassification {
+  category: MaSignalCategory;
+  categoryLabel: string;
+  horizon: MaTimeHorizon;
+  horizonLabel: string;
+  action: MaActionGrade;
+  actionLabel: string;
+  actionBadgeColor: "emerald" | "blue" | "cyan" | "purple" | "amber" | "rose";
+}
 
 export interface MaScreenRow {
   symbol: string;
@@ -97,6 +129,7 @@ export interface MaScreenRow {
   volume: number | null;
   regime: MaRegime;
   regimeLabel: string;
+  classification: MaClassification;
   bullScore: number;     // 0-100 score representing bullish strength
   criteria: MaCriteria;
   metrics: MaMetrics;
@@ -239,22 +272,42 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   const isAccelerating = slopeMa20 > 0.5 && slopeMa20 > slopeMa50;
   const isOverextended = distMa20Pct != null && distMa20Pct >= 8.5;
 
-  // 3. Trạng thái kiểm định lại (Pullback / Retest MA20 & MA50 Hỗ trợ)
+  // 3. Phân loại Bứt phá & Vượt cản MA (Breakout & Reclaim)
+  const prevClose = closes.length >= 2 ? closes[closes.length - 2] : null;
+  const reclaimMa200 = Boolean(sma200 != null && prevSma200Val != null && prevClose != null && prevClose <= prevSma200Val && close > sma200);
+  const reclaimMa50 = Boolean(sma50 != null && prevSma50Val != null && prevClose != null && prevClose <= prevSma50Val && close > sma50);
+  const reclaimMa20 = Boolean(sma20 != null && prevSma20Val != null && prevClose != null && prevClose <= prevSma20Val && close > sma20);
+
+  // 4. Trạng thái kiểm định lại đa khung (Pullback / Retest MA Hỗ trợ)
   let isPullbackRetest = false;
+  let retestMa200 = false;
+  let retestMa50 = false;
+  let retestMa20 = false;
   let retestNote = "";
-  if (sma20 != null && (close >= sma20 * 0.98 || (sma50 != null && close >= sma50 * 0.98))) {
-    const recentBars = bars.slice(-3);
-    for (const rb of recentBars) {
-      const touchMa20 = Math.abs(rb.low - sma20) / sma20 <= 0.018;
-      const touchMa50 = sma50 != null && Math.abs(rb.low - sma50) / sma50 <= 0.018;
-      if (touchMa20 || touchMa50) {
-        const heldAbove = (touchMa20 && close >= sma20 * 0.995) || (touchMa50 && sma50 != null && close >= sma50 * 0.995);
-        if (heldAbove) {
-          isPullbackRetest = true;
-          retestNote = touchMa20 ? "Kiểm định MA20 rút chân" : "Kiểm định MA50 rút chân";
-          break;
-        }
-      }
+
+  const recentBars = bars.slice(-3);
+  for (const rb of recentBars) {
+    const touchMa200 = sma200 != null && Math.abs(rb.low - sma200) / sma200 <= 0.018;
+    const touchMa50 = sma50 != null && Math.abs(rb.low - sma50) / sma50 <= 0.018;
+    const touchMa20 = sma20 != null && Math.abs(rb.low - sma20) / sma20 <= 0.018;
+
+    if (touchMa200 && sma200 != null && close >= sma200 * 0.995) {
+      retestMa200 = true;
+      isPullbackRetest = true;
+      retestNote = "Kiểm định MA200 rút chân (Hỗ trợ Kim cương)";
+      break;
+    }
+    if (touchMa50 && sma50 != null && close >= sma50 * 0.995) {
+      retestMa50 = true;
+      isPullbackRetest = true;
+      if (!retestNote) retestNote = "Kiểm định MA50 rút chân (Hỗ trợ Trung hạn)";
+      break;
+    }
+    if (touchMa20 && sma20 != null && close >= sma20 * 0.995) {
+      retestMa20 = true;
+      isPullbackRetest = true;
+      if (!retestNote) retestNote = "Kiểm định MA20 rút chân (Hỗ trợ Ngắn hạn)";
+      break;
     }
   }
 
@@ -327,6 +380,12 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     isSlopeBullish,
     isOverextended,
     isAccelerating,
+    reclaimMa200,
+    reclaimMa50,
+    reclaimMa20,
+    retestMa200,
+    retestMa50,
+    retestMa20,
     ma10CrossDownMa20,
     ma10CrossDownMa50,
     ma20CrossDownMa50,
@@ -362,7 +421,13 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   };
 
   const signals: string[] = [];
-  if (isPullbackRetest) signals.push(`Retest MA hỗ trợ thành công (${retestNote})`);
+  if (retestMa200) signals.push("🛡️ Test MA200 dài hạn rút chân thành công (Hỗ trợ Kim cương)");
+  if (reclaimMa200) signals.push("🚀 Vừa vượt cản MA200 dài hạn (Tổ chức xác nhận)");
+  if (retestMa50) signals.push("🛡️ Test MA50 trung hạn giữ vững nhịp tăng");
+  if (reclaimMa50) signals.push("⚡ Lấy lại MA50 trung hạn sau nhịp rũ");
+  if (retestMa20) signals.push("🎯 Test MA20 ngắn hạn rút chân");
+  if (reclaimMa20) signals.push("📈 Vượt cản MA20 ngắn hạn");
+
   if (recentGoldenCross && crossBarsAgo !== null && crossType) {
     if (crossBarsAgo === 0) {
       signals.push(`🔥 Vừa Golden Cross HÔM NAY (${crossType})`);
@@ -397,9 +462,16 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   let regime: MaRegime = "NEUTRAL";
   let regimeLabel = "Đi ngang / Tích lũy";
 
-  if (isPullbackRetest && (bullishAlignment || priceAboveMa50 || priceAboveMa200)) {
+  if (retestMa200 || (isPullbackRetest && (bullishAlignment || priceAboveMa50 || priceAboveMa200))) {
     regime = "PULLBACK_RETEST";
-    regimeLabel = "Test lại MA hỗ trợ (Điểm mua chuẩn)";
+    regimeLabel = retestMa200
+      ? "Test MA200 hỗ trợ dài hạn"
+      : retestMa50
+      ? "Test MA50 hỗ trợ trung hạn"
+      : "Test MA20 hỗ trợ ngắn hạn";
+  } else if (reclaimMa200 || reclaimMa50) {
+    regime = "BREAKOUT_RECLAIM";
+    regimeLabel = reclaimMa200 ? "Vượt cản dài hạn MA200" : "Vượt cản trung hạn MA50";
   } else if (isFreshCross) {
     regime = "FRESH_CROSS";
     regimeLabel = crossBarsAgo === 0
@@ -413,10 +485,10 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     regimeLabel = `Kéo căng MA20 (+${distMa20Pct}%)`;
   } else if (bullishAlignment) {
     regime = "BULLISH_ALIGNMENT";
-    regimeLabel = "Trật tự xu hướng tăng";
-  } else if (ma10CrossUpMa20 || ma10CrossUpMa50) {
+    regimeLabel = "Trật tự xu hướng tăng (Ribbon)";
+  } else if (ma10CrossUpMa20 || ma10CrossUpMa50 || isAccelerating) {
     regime = "BULLISH_MOMENTUM";
-    regimeLabel = "Đà tăng ngắn hạn";
+    regimeLabel = "Đà tăng gia tốc";
   } else if (maSqueeze) {
     regime = "MA_SQUEEZE";
     regimeLabel = "Nén chặt chuẩn bị bùng nổ";
@@ -427,6 +499,133 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     regime = "BEARISH_ALIGNMENT";
     regimeLabel = "Kênh giảm điểm";
   }
+
+  // Xây dựng Phân loại Tín hiệu Toàn diện (Signal Classification Model)
+  let category: MaSignalCategory = "CROSSOVER";
+  let categoryLabel = "Giao cắt MA";
+  let horizon: MaTimeHorizon = "MEDIUM_TERM";
+  let horizonLabel = "Trung hạn";
+  let action: MaActionGrade = "WATCH";
+  let actionLabel = "Theo dõi";
+  let actionBadgeColor: "emerald" | "blue" | "cyan" | "purple" | "amber" | "rose" = "blue";
+
+  if (isOverextended) {
+    category = "OVEREXTENDED";
+    categoryLabel = "Kéo căng Quá mua";
+    horizon = "SHORT_TERM";
+    horizonLabel = "Ngắn hạn";
+    action = "TAKE_PROFIT";
+    actionLabel = "Cảnh báo chốt lời";
+    actionBadgeColor = "amber";
+  } else if (recentDeathCross || ma50CrossDownMa200 || ma20CrossDownMa50 || bearishAlignment) {
+    category = "CROSSOVER";
+    categoryLabel = "Giao cắt Giảm";
+    horizon = ma50CrossDownMa200 ? "LONG_TERM" : "MEDIUM_TERM";
+    horizonLabel = ma50CrossDownMa200 ? "Dài hạn (MA200)" : "Trung hạn (MA50)";
+    action = "SELL_WARNING";
+    actionLabel = "Bán phòng vệ";
+    actionBadgeColor = "rose";
+  } else if (retestMa200 || retestMa50 || retestMa20 || isPullbackRetest) {
+    category = "RETEST";
+    categoryLabel = "Kiểm định Hỗ trợ";
+    if (retestMa200) {
+      horizon = "LONG_TERM";
+      horizonLabel = "Dài hạn (MA200)";
+      action = "STRONG_BUY";
+      actionLabel = "Điểm mua Kim cương";
+      actionBadgeColor = "emerald";
+    } else if (retestMa50) {
+      horizon = "MEDIUM_TERM";
+      horizonLabel = "Trung hạn (MA50)";
+      action = "BUY_ENTRY";
+      actionLabel = "Điểm mua Chuẩn";
+      actionBadgeColor = "emerald";
+    } else {
+      horizon = "SHORT_TERM";
+      horizonLabel = "Ngắn hạn (MA20)";
+      action = "BUY_ENTRY";
+      actionLabel = "Điểm mua Lướt sóng";
+      actionBadgeColor = "cyan";
+    }
+  } else if (reclaimMa200 || reclaimMa50 || reclaimMa20) {
+    category = "BREAKOUT_RECLAIM";
+    categoryLabel = "Vượt cản Kỹ thuật";
+    if (reclaimMa200) {
+      horizon = "LONG_TERM";
+      horizonLabel = "Dài hạn (Vượt MA200)";
+      action = "STRONG_BUY";
+      actionLabel = "Vượt cản Dài hạn";
+      actionBadgeColor = "emerald";
+    } else if (reclaimMa50) {
+      horizon = "MEDIUM_TERM";
+      horizonLabel = "Trung hạn (Vượt MA50)";
+      action = "BUY_ENTRY";
+      actionLabel = "Lấy lại xu hướng";
+      actionBadgeColor = "cyan";
+    } else {
+      horizon = "SHORT_TERM";
+      horizonLabel = "Ngắn hạn (Vượt MA20)";
+      action = "BUY_ENTRY";
+      actionLabel = "Bứt phá MA20";
+      actionBadgeColor = "blue";
+    }
+  } else if (isFreshCross || recentGoldenCross || ma50CrossUpMa200 || ma20CrossUpMa50) {
+    category = "CROSSOVER";
+    categoryLabel = "Giao cắt Vàng";
+    if (ma50CrossUpMa200 || crossType === "MA50 x MA200") {
+      horizon = "LONG_TERM";
+      horizonLabel = "Dài hạn (MA50x200)";
+      action = "STRONG_BUY";
+      actionLabel = "Siêu chu kỳ tăng";
+      actionBadgeColor = "emerald";
+    } else if (crossType === "MA20 x MA50" || ma20CrossUpMa50) {
+      horizon = "MEDIUM_TERM";
+      horizonLabel = "Trung hạn (MA20x50)";
+      action = volumeSurge || isTodayCross ? "STRONG_BUY" : "BUY_ENTRY";
+      actionLabel = isTodayCross ? "Golden Cross Hôm nay" : "Golden Cross Chuẩn";
+      actionBadgeColor = isTodayCross ? "emerald" : "cyan";
+    } else {
+      horizon = "SHORT_TERM";
+      horizonLabel = "Ngắn hạn";
+      action = "BUY_ENTRY";
+      actionLabel = "Xung lực mới";
+      actionBadgeColor = "blue";
+    }
+  } else if (maSqueeze) {
+    category = "COMPRESSION";
+    categoryLabel = "Co thắt Biến động";
+    horizon = "SHORT_TERM";
+    horizonLabel = "Ngắn-Trung hạn";
+    action = "WATCH";
+    actionLabel = "Nén chặt chờ nổ";
+    actionBadgeColor = "purple";
+  } else if (bullishAlignment) {
+    category = "TREND_RIBBON";
+    categoryLabel = "Trật tự Dải MA";
+    horizon = "MULTI_HORIZON";
+    horizonLabel = "Đa khung thời gian";
+    action = "HOLD";
+    actionLabel = "Nắm giữ theo Trend";
+    actionBadgeColor = "emerald";
+  } else if (isSlopeBullish || isAccelerating) {
+    category = "MOMENTUM";
+    categoryLabel = "Gia tốc Động lượng";
+    horizon = "SHORT_TERM";
+    horizonLabel = "Ngắn hạn";
+    action = "BUY_ENTRY";
+    actionLabel = "Đà tăng bứt tốc";
+    actionBadgeColor = "blue";
+  }
+
+  const classification: MaClassification = {
+    category,
+    categoryLabel,
+    horizon,
+    horizonLabel,
+    action,
+    actionLabel,
+    actionBadgeColor,
+  };
 
   // Calculate Bull Score (0 - 100)
   let score = 50;
@@ -444,7 +643,12 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   else if (isFreshCross) score += 18; // Mới T-2, T-3
   else if (ma20CrossUpMa50 || ma50CrossUpMa200 || recentGoldenCross) score += 15;
 
-  if (isPullbackRetest) score += 18;
+  if (retestMa200) score += 20;
+  else if (isPullbackRetest) score += 18;
+
+  if (reclaimMa200) score += 18;
+  else if (reclaimMa50) score += 12;
+
   if (isSlopeBullish) score += 12;
   if (volumeSurge) score += 10;
 
@@ -466,6 +670,7 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
     volume,
     regime,
     regimeLabel,
+    classification,
     bullScore,
     criteria,
     metrics,
@@ -479,13 +684,18 @@ export async function screenMovingAverages(args?: {
     | "ALL"
     | "BULLISH"
     | "GOLDEN_CROSS"
-    | "BULLISH_ALIGN"
     | "PULLBACK_RETEST"
-    | "FRESH_CROSS"
-    | "SLOPE_BULLISH"
+    | "BREAKOUT_RECLAIM"
+    | "BULLISH_ALIGN"
     | "MA_SQUEEZE"
+    | "SLOPE_BULLISH"
+    | "OVEREXTENDED"
     | "BEARISH"
-    | "DEATH_CROSS";
+    | "DEATH_CROSS"
+    | "FRESH_CROSS";
+  category?: MaSignalCategory | "ALL";
+  horizon?: MaTimeHorizon | "ALL";
+  action?: MaActionGrade | "ALL";
   sector?: string;
   minPrice?: number;
   minVol?: number;
@@ -522,10 +732,15 @@ export async function screenMovingAverages(args?: {
     const row = analyzeMaRow(sym, bars, q);
     if (!row) continue;
 
-    // Filters
+    // Filters cơ bản
     if (args?.sector && row.sector !== args.sector) continue;
     if (args?.minPrice != null && (row.price == null || row.price < args.minPrice)) continue;
     if (args?.minVol != null && (row.volume == null || row.volume < args.minVol)) continue;
+
+    // Phân loại Tín hiệu Nâng cao: Category, Horizon, Action
+    if (args?.category && args.category !== "ALL" && row.classification.category !== args.category) continue;
+    if (args?.horizon && args.horizon !== "ALL" && row.classification.horizon !== args.horizon) continue;
+    if (args?.action && args.action !== "ALL" && row.classification.action !== args.action) continue;
 
     const sig = args?.signal ?? "ALL";
     if (sig === "BULLISH") {
@@ -534,12 +749,15 @@ export async function screenMovingAverages(args?: {
         row.regime !== "BULLISH_ALIGNMENT" &&
         row.regime !== "BULLISH_MOMENTUM" &&
         row.regime !== "PULLBACK_RETEST" &&
+        row.regime !== "BREAKOUT_RECLAIM" &&
         row.regime !== "FRESH_CROSS"
       ) {
         continue;
       }
     } else if (sig === "PULLBACK_RETEST") {
       if (!row.criteria.isPullbackRetest && row.regime !== "PULLBACK_RETEST") continue;
+    } else if (sig === "BREAKOUT_RECLAIM") {
+      if (!row.criteria.reclaimMa200 && !row.criteria.reclaimMa50 && !row.criteria.reclaimMa20 && row.regime !== "BREAKOUT_RECLAIM") continue;
     } else if (sig === "GOLDEN_CROSS" || sig === "FRESH_CROSS") {
       // GỘP CHUNG GIAO CẮT VÀNG & GOLDEN CROSS MỚI:
       // Bao gồm tất cả các trường hợp Golden Cross mới (0-3 phiên), Golden Cross hôm nay và các cấu trúc Golden Cross kinh điển
@@ -555,7 +773,9 @@ export async function screenMovingAverages(args?: {
         row.criteria.ma10CrossUpMa20;
       if (!isGc) continue;
     } else if (sig === "SLOPE_BULLISH") {
-      if (!row.criteria.isSlopeBullish) continue;
+      if (!row.criteria.isSlopeBullish && !row.criteria.isAccelerating) continue;
+    } else if (sig === "OVEREXTENDED") {
+      if (!row.criteria.isOverextended && row.regime !== "OVEREXTENDED") continue;
     } else if (sig === "BULLISH_ALIGN") {
       if (row.regime !== "BULLISH_ALIGNMENT" && !row.criteria.bullishAlignment) continue;
     } else if (sig === "MA_SQUEEZE") {
