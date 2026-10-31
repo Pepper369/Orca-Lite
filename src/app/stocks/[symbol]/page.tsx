@@ -506,125 +506,8 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
   const chg = quote?.changePercent ?? 0;
   const isCeil = quote?.ceilingPrice && quote?.price && Math.abs(quote.price - quote.ceilingPrice) <= 0.051;
   const isFloor = quote?.floorPrice && quote?.price && Math.abs(quote.price - quote.floorPrice) <= 0.051;
-  const priceTone = isCeil
-    ? "text-purple-400"
-    : isFloor
-      ? "text-sky-400"
-      : chg > 0
-        ? "text-positive"
-        : chg < 0
-          ? "text-negative"
-          : "text-amber-300";
-
-  const priceVal = quote?.price != null ? quote.price.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : "—";
-  const chgVal = quote?.change != null ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}` : "—";
-  const chgPctVal = quote?.changePercent != null ? `${quote.changePercent > 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%` : "—";
-  const refVal = quote?.referencePrice != null ? quote.referencePrice.toFixed(2) : "—";
-  const ceilVal = quote?.ceilingPrice != null ? quote.ceilingPrice.toFixed(2) : "—";
-  const floorVal = quote?.floorPrice != null ? quote.floorPrice.toFixed(2) : "—";
-
-  const estValVnd = quote?.price && quote?.volume ? (quote.price * quote.volume * 1000) : null;
-  const estValFormatted = estValVnd != null ? `${(estValVnd / 1e9).toFixed(1)} Tỷ` : "—";
-
-  const fBuy = (quote as any)?.foreignBuyVolume ?? 0;
-  const fSell = (quote as any)?.foreignSellVolume ?? 0;
-  const fNet = ((quote as any)?.foreignBuyVolume != null && (quote as any)?.foreignSellVolume != null) ? (fBuy - fSell) : null;
-  const fNetTone = fNet == null ? "text-text-muted" : fNet > 0 ? "text-positive" : fNet < 0 ? "text-negative" : "text-text-secondary";
-  const fNetFormatted = fNet == null ? "—" : `${fNet > 0 ? "+" : ""}${fmtCompact(fNet)} CP`;
-
   return (
-    <div className="space-y-2.5 pb-8">
-      {/* 1. FireAnt Pro Stock Station Header */}
-      <div className="fireant-hero p-3 sm:p-3.5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Left: Ticker, Name, Badges & Price */}
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1">
-              <Link
-                href="/stocks"
-                className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors pr-1"
-                title="Quay lại Bảng điện VN"
-              >
-                <ArrowLeft className="size-3.5" />
-                <span className="hidden sm:inline">Bảng điện</span>
-              </Link>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-text-primary font-mono">
-                {detail.symbol}
-              </h1>
-              <Badge tone="accent">{detail.profile?.floor ?? sec?.exchange ?? "HOSE"}</Badge>
-              {sec?.sector && (
-                <Badge tone="neutral">{sec.sector}</Badge>
-              )}
-              <span className="text-xs text-text-muted truncate max-w-xs hidden md:inline">
-                {detail.profile?.vnName ?? sec?.name ?? detail.name}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-baseline gap-2.5 sm:gap-3.5 mt-1">
-              <span className={`text-2xl sm:text-3xl font-black font-mono tabular-nums ${priceTone}`}>
-                {priceVal}
-              </span>
-              <span className={`inline-flex items-center text-sm sm:text-base font-bold font-mono ${priceTone}`}>
-                {chgVal} ({chgPctVal})
-              </span>
-              <div className="flex items-center gap-1.5 text-xs">
-                <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 font-mono font-semibold" title="Giá tham chiếu">
-                  TC: {refVal}
-                </span>
-                <span className="px-1.5 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-300 font-mono font-semibold" title="Giá trần">
-                  Trần: {ceilVal}
-                </span>
-                <span className="px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 font-mono font-semibold" title="Giá sàn">
-                  Sàn: {floorVal}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Key Session Stats & Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-xs">
-              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
-                <div className="text-[10px] uppercase tracking-wider text-text-muted">Tổng KL</div>
-                <div className="font-mono font-bold text-text-primary mt-0.5">{fmtCompact(quote?.volume ?? 0)}</div>
-              </div>
-              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
-                <div className="text-[10px] uppercase tracking-wider text-text-muted">Cao / Thấp</div>
-                <div className="font-mono font-bold text-text-primary mt-0.5">
-                  <span className="text-positive">{fmtNum(quote?.high, 1)}</span> / <span className="text-negative">{fmtNum(quote?.low, 1)}</span>
-                </div>
-              </div>
-              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
-                <div className="text-[10px] uppercase tracking-wider text-text-muted">Giá trị GD</div>
-                <div className="font-mono font-bold text-text-primary mt-0.5">{estValFormatted}</div>
-              </div>
-              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
-                <div className="text-[10px] uppercase tracking-wider text-text-muted">Ngoại Net</div>
-                <div className={`font-mono font-bold mt-0.5 ${fNetTone}`}>{fNetFormatted}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 ml-auto lg:ml-0">
-              <AddToWatchlist symbol={detail.symbol} assetType="stock" />
-              <button
-                type="button"
-                onClick={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("orca:open-ai-widget", {
-                      detail: { prompt: `Phân tích toàn diện cổ phiếu ${detail.symbol}: tài chính, kỹ thuật, dòng tiền và định giá` },
-                    }),
-                  );
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-accent-primary/40 bg-accent-primary/15 text-accent-primary text-xs font-semibold hover:bg-accent-primary/25 transition-all active:scale-95 shadow-xs"
-              >
-                <Bot className="size-3.5" />
-                <span>Hỏi AI</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <div className="space-y-3 pb-8">
       {meta?.freshness && (meta.freshness === "DELAYED" || meta.freshness === "STALE" || meta.degraded) && (
         <FreshnessAlertBanner
           state={meta.freshness === "STALE" ? "stale" : meta.degraded ? "degraded" : "delayed"}
@@ -634,6 +517,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           className="mb-1"
         />
       )}
+
+      {/* Decision Strip */}
+      <DecisionStrip quote={detail.quote} technical={detail.technical} meta={meta ?? null} />
 
       {/* 2. Above-the-fold FireAnt Workstation (Split Pane: Chart 65% + Micro Station 35%) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
@@ -683,7 +569,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
               onClick={() => setMicroTab("decision")}
               className="fireant-micro-tab-btn"
             >
-              Tín hiệu & Setup
+              Độ rộng sàn
             </button>
           </div>
 
@@ -705,7 +591,6 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
             )}
             {microTab === "decision" && (
               <div className="space-y-2.5">
-                <DecisionStrip quote={detail.quote} technical={detail.technical} meta={meta ?? null} />
                 <ErrorBoundary name="breadth" resetKey={detail.symbol}>
                   <MarketBreadthCard />
                 </ErrorBoundary>
