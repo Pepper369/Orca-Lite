@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import type { CryptoMarketRow, IndexQuote } from "@/lib/types";
@@ -243,7 +243,7 @@ export function VnScreener({
 
   // Applied params
   const [applied, setApplied] = useState({
-    preset: "all" as ScreenerPreset,
+    preset: defaultPreset,
     exchange: "ALL",
     sector: defaultSector ?? "",
     q: "",
@@ -261,6 +261,18 @@ export function VnScreener({
     minMarketCap: "",
   });
 
+  // Synchronize when parent changes preset/view/sector
+  useEffect(() => {
+    setPreset(defaultPreset);
+    setViewTab(defaultView);
+    setSector(defaultSector ?? "");
+    setApplied((prev) => ({
+      ...prev,
+      preset: defaultPreset,
+      sector: defaultSector ?? "",
+    }));
+  }, [defaultPreset, defaultView, defaultSector]);
+
   // Query string builder
   const queryString = useMemo(() => {
     const p = new URLSearchParams();
@@ -271,7 +283,12 @@ export function VnScreener({
     if (applied.maSignal && applied.maSignal !== "ALL") p.set("maSignal", applied.maSignal);
     if (applied.minChg) p.set("minChg", applied.minChg);
     if (applied.maxChg) p.set("maxChg", applied.maxChg);
-    if (applied.minVol) p.set("minVol", String(Number(applied.minVol) * 1_000_000));
+    if (applied.minVol) {
+      const v = Number(applied.minVol);
+      if (Number.isFinite(v) && v > 0) {
+        p.set("minTradingValue", String(v));
+      }
+    }
     if (applied.minPe) p.set("minPe", applied.minPe);
     if (applied.maxPe) p.set("maxPe", applied.maxPe);
     if (applied.minPb) p.set("minPb", applied.minPb);
@@ -290,7 +307,7 @@ export function VnScreener({
     `/api/v1/stocks/screener?${queryString}`,
     {
       refreshInterval: 30_000,
-      timeoutMs: 10_000,
+      timeoutMs: 25_000,
       keepPreviousData: true,
     },
   );
@@ -1047,13 +1064,13 @@ export function VnScreener({
             <tbody>
               {isLoading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "confluence" ? 10 : 8} className="px-3.5 py-8 text-center text-text-muted">
                     <Loading rows={4} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "confluence" ? 10 : 8} className="px-3.5 py-8 text-center text-text-muted">
                     Không có mã nào thỏa mãn tiêu chí bộ lọc. Hãy thử nới lỏng các điều kiện lọc.
                   </td>
                 </tr>

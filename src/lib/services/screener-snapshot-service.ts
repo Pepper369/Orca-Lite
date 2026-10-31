@@ -14,6 +14,7 @@ import type { Meta } from "../types";
 import { batchVnOhlcv } from "./ohlcv-batch";
 import { sma, adx, ttmSqueeze, superTrend, rsi } from "../engines/oscillators";
 import { detectChartPatterns } from "../engines/chart-patterns";
+import { detectCandlePatterns } from "../engines/candlestick-patterns";
 import {
   estimateOrnsteinUhlenbeck,
   calculateTripleBarrierLevels,
@@ -103,6 +104,7 @@ export type ScreenerFilterParams = {
   maxChg?: number;
   minVol?: number;
   maxVol?: number;
+  minTradingValue?: number; // Minimum trading turnover in Billion VND
   minMarketCap?: number;
   maxMarketCap?: number;
   minPe?: number;
@@ -312,49 +314,71 @@ function analyzeTechFeatures(
   const chartPatterns = detectChartPatterns(ohlcvBars);
   const topPattern = chartPatterns[0] ?? null;
 
+  // Multi-tier Candlestick pattern detection (recent 3 bars)
+  const candlePatterns = detectCandlePatterns(ohlcvBars, { recentBars: 3, reversalOnly: false });
+  const topCandle = candlePatterns.find((c) => c.type === "bullish") ?? null;
+
   // 1. Trend Pillar (max 25)
   let trendScore = 0;
   if (maRes.maSignal === "GOLDEN_CROSS" || maRes.maSignal === "BULLISH_ALIGN") trendScore += 14;
-  else if (currentPrice && maRes.ma20 && currentPrice > maRes.ma20) trendScore += 7;
-  if (lastAdx != null && lastAdx >= 25 && plusDi != null && minusDi != null && plusDi > minusDi) trendScore += 6;
+  else if (currentPrice && maRes.ma20 && currentPrice > maRes.ma20) trendScore += 8;
+  if (currentPrice && maRes.ma50 && currentPrice > maRes.ma50) trendScore += 5;
+  if (lastAdx != null && lastAdx >= 20 && plusDi != null && minusDi != null && plusDi > minusDi) trendScore += 6;
   if (stDir === "up") trendScore += 5;
+  trendScore = Math.min(25, trendScore);
 
   // 2. Pattern & VSA Pillar (max 25)
   let patternScore = 0;
+  let patternLabel: string | null = null;
   if (topPattern && topPattern.type === "bullish") {
     patternScore = Math.min(25, Math.round(topPattern.score * 0.26));
+    patternLabel = topPattern.nameVi;
+  } else if (topCandle) {
+    patternScore = Math.min(20, Math.round((topCandle.score || 70) * 0.22));
+    patternLabel = topCandle.nameVi;
+  } else if (currentPrice && maRes.ma20 && currentPrice >= maRes.ma20 * 0.98) {
+    // Giá giữ vững hỗ trợ MA20
+    patternScore = 12;
+    patternLabel = "Nền hỗ trợ MA20";
+  } else {
+    patternScore = 6;
   }
+  patternScore = Math.min(25, patternScore);
 
   // 3. Volume & Momentum Squeeze Pillar (max 25)
   let momScore = 0;
-  if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.2) momScore += 7;
-  else if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.0) momScore += 4;
+  if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.2) momScore += 8;
+  else if (maRes.volRatio20 != null && maRes.volRatio20 >= 1.0) momScore += 5;
+  else if (maRes.volRatio20 != null && maRes.volRatio20 <= 0.75 && currentPrice && maRes.ma20 && currentPrice >= maRes.ma20 * 0.98) {
+    // VSA No Supply Test: cạn cung tại hỗ trợ MA
+    momScore += 6;
+  }
   if (sqState === "fired_bull") momScore += 12;
   else if (sqState === "squeeze_on") momScore += 8;
 
   if (n >= 20) {
     const rsiArr = rsi(closes, 14);
     const curRsi = rsiArr[n - 1];
-    if (curRsi != null && curRsi >= 48 && curRsi <= 68) momScore += 6;
+    if (curRsi != null && curRsi >= 45 && curRsi <= 68) momScore += 5;
   }
   momScore = Math.min(25, momScore);
 
   // 4. Fundamental Pillar (max 25)
-  const fundScore = Math.min(25, Math.round(compositeScore * 0.25));
+  const fundScore = Math.min(25, Math.max(8, Math.round(compositeScore * 0.25)));
 
-  const confluenceScore = Math.min(100, Math.max(5, trendScore + patternScore + momScore + fundScore));
+  const confluenceScore = Math.min(100, Math.max(15, trendScore + patternScore + momScore + fundScore));
 
   let confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" = "NONE";
-  if (confluenceScore >= 78) confluenceBadge = "SUPER_SETUP";
-  else if (confluenceScore >= 65) confluenceBadge = "POTENTIAL_BREAKOUT";
-  else if (confluenceScore >= 50) confluenceBadge = "WATCH";
+  if (confluenceScore >= 72) confluenceBadge = "SUPER_SETUP";
+  else if (confluenceScore >= 56) confluenceBadge = "POTENTIAL_BREAKOUT";
+  else if (confluenceScore >= 45) confluenceBadge = "WATCH";
 
   return {
     ...maRes,
     adx14: lastAdx != null ? Number(lastAdx.toFixed(1)) : null,
     squeezeState: sqState,
     superTrendDir: stDir,
-    chartPattern: topPattern ? `${topPattern.nameVi}` : null,
+    chartPattern: patternLabel,
     confluenceScore,
     confluenceBadge,
   };
@@ -633,8 +657,17 @@ function detectPresets(item: {
     passes.push("ma_cross");
   }
 
-  // 8. Confluence (Siêu hội tụ >= 65)
-  if (item.confluenceScore >= 65) {
+  // 8. Confluence (Siêu hội tụ >= 55 hoặc >= 45 kèm tín hiệu xác nhận)
+  if (
+    item.confluenceScore >= 55 ||
+    (item.confluenceScore >= 45 && (
+      item.squeezeState === "fired_bull" ||
+      item.squeezeState === "squeeze_on" ||
+      item.maSignal === "GOLDEN_CROSS" ||
+      item.maSignal === "BULLISH_ALIGN" ||
+      Boolean(item.chartPattern)
+    ))
+  ) {
     passes.push("confluence");
   }
 
@@ -696,18 +729,25 @@ async function fetchValuationBatch(symbols: string[]): Promise<{
       let v: VndValuationRatios | null = null;
       let vc: VietcapProfile | null = null;
       try {
-        // Tier 1: VNDirect ratios
-        v = await getVndValuationRatios(sym);
-        if (v && (v.pe != null || v.pb != null)) {
-          valMap.set(sym, v);
-        } else {
-          // Tier 2: Vietcap IQ failover
-          vc = await getVietcapCompany(sym).catch(() => null);
-          if (vc) {
-            vietcapMap.set(sym, vc);
-            failoverCount++;
+        const fetchPromise = (async () => {
+          // Tier 1: VNDirect ratios
+          v = await getVndValuationRatios(sym);
+          if (v && (v.pe != null || v.pb != null)) {
+            valMap.set(sym, v);
+          } else {
+            // Tier 2: Vietcap IQ failover
+            vc = await getVietcapCompany(sym).catch(() => null);
+            if (vc) {
+              vietcapMap.set(sym, vc);
+              failoverCount++;
+            }
           }
-        }
+        })();
+
+        await Promise.race([
+          fetchPromise,
+          new Promise((resolve) => setTimeout(resolve, 2_500)),
+        ]);
       } catch {
         // Tier 2 catch fallback
         vc = await getVietcapCompany(sym).catch(() => null);
@@ -726,6 +766,10 @@ async function fetchValuationBatch(symbols: string[]): Promise<{
   }
 
   return { valMap, vietcapMap, failoverCount };
+}
+
+export function getLastMasterSnapshot(): MasterSnapshotPayload | null {
+  return memoryMasterSnapshot?.payload ?? null;
 }
 
 type MasterSnapshotPayload = {
@@ -823,8 +867,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         batchVnOhlcv(symbols, {
           bars: 65,
           concurrency: 8,
-          perSymbolMs: 500,
-          deadlineMs: 8_000,
+          perSymbolMs: 400,
+          deadlineMs: 6_000,
           priority: [...VN100],
           resilient: true,
         }).catch(() => new Map()),
@@ -1117,7 +1161,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -1136,7 +1180,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const maSignalTarget = params.maSignal!;
 
   const {
-    minPrice, maxPrice, minChg, maxChg, minVol, maxVol,
+    minPrice, maxPrice, minChg, maxChg, minVol, maxVol, minTradingValue,
     minMarketCap, maxMarketCap, minPe, maxPe, minPb, maxPb,
     minRoe, maxRoe, minRoa, maxRoa, minDivYield, maxDivYield,
     maxDe, minQualityScore, minRevenueYoy, minNiYoy,
@@ -1165,7 +1209,19 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (maxPrice != null && (x.price == null || x.price > maxPrice)) continue;
     if (minChg != null && (x.changePercent == null || x.changePercent < minChg)) continue;
     if (maxChg != null && (x.changePercent == null || x.changePercent > maxChg)) continue;
-    if (minVol != null && (x.volume == null || x.volume < minVol)) continue;
+    if (minTradingValue != null) {
+      const valBillion = x.price && x.volume ? (x.price * x.volume) / 1_000_000 : 0;
+      if (valBillion < minTradingValue) continue;
+    }
+    if (minVol != null) {
+      if (minVol <= 500) {
+        // If user entered turnover in Billion VND (e.g. 5 means 5 Billion VND)
+        const valBillion = x.price && x.volume ? (x.price * x.volume) / 1_000_000 : 0;
+        if (valBillion < minVol) continue;
+      } else {
+        if (x.volume == null || x.volume < minVol) continue;
+      }
+    }
     if (maxVol != null && (x.volume == null || x.volume > maxVol)) continue;
     if (minMarketCap != null && (x.marketCap == null || x.marketCap < minMarketCap)) continue;
     if (maxMarketCap != null && (x.marketCap == null || x.marketCap > maxMarketCap)) continue;

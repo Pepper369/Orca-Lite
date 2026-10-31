@@ -1,4 +1,4 @@
-import { queryScreenerStocks, type ScreenerPreset } from "@/lib/services/screener-snapshot-service";
+import { queryScreenerStocks, getLastMasterSnapshot, type ScreenerPreset } from "@/lib/services/screener-snapshot-service";
 import { safeApi } from "@/lib/safe-api";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
 import { buildMeta } from "@/lib/freshness";
@@ -38,6 +38,7 @@ export async function GET(req: Request) {
     maxChg: num(url.searchParams.get("maxChg")),
     minVol: num(url.searchParams.get("minVol")),
     maxVol: num(url.searchParams.get("maxVol")),
+    minTradingValue: num(url.searchParams.get("minTradingValue")),
     minMarketCap: num(url.searchParams.get("minMarketCap")),
     maxMarketCap: num(url.searchParams.get("maxMarketCap")),
     minPe: num(url.searchParams.get("minPe")),
@@ -67,7 +68,7 @@ export async function GET(req: Request) {
   return safeApi({
     label: "stocks-screener-pro",
     guard: {
-      wallMs: WORKERS_BUDGET?.techScreenWallMs ?? 15_000,
+      wallMs: 25_000,
       maxSubrequests: 30,
       maxConcurrent: 4,
     },
@@ -81,24 +82,63 @@ export async function GET(req: Request) {
         },
       };
     },
-    fallback: async () => ({
-      data: {
-        items: [],
-        total: 0,
-        totalUniverse: 0,
-        offset: 0,
-        limit: filters.limit,
-        presetsCount: { all: 0, canslim: 0, dividend: 0, growth: 0, value: 0, breakout: 0 },
-        sectorsAvailable: [],
-        meta: buildMeta({
-          source: "screener-fallback",
-          sourceTimestampMs: Date.now(),
-          stale: true,
-          hasData: false,
-          note: "Đang làm ấm dữ liệu bộ lọc — vui lòng thử lại sau giây lát",
-        }),
-      },
-    }),
+    fallback: async () => {
+      // High-resilience fallback: Check if L1 in-memory master snapshot is available
+      const lastSnapshot = getLastMasterSnapshot();
+      if (lastSnapshot && lastSnapshot.items.length > 0) {
+        try {
+          const res = await queryScreenerStocks(filters);
+          return {
+            data: {
+              ...res,
+              meta: buildMeta({
+                source: "screener-ram-fallback",
+                sourceTimestampMs: Date.now(),
+                stale: true,
+                hasData: true,
+                note: "Phục vụ từ bộ nhớ đệm RAM dự phòng — đang làm mới nền",
+              }),
+            },
+          };
+        } catch {
+          // continue to basic fallback
+        }
+      }
+
+      return {
+        data: {
+          items: [],
+          total: 0,
+          totalUniverse: 0,
+          offset: 0,
+          limit: filters.limit,
+          presetsCount: {
+            all: 0,
+            quant_edge: 0,
+            quant_mean_revert: 0,
+            quant_low_beta: 0,
+            quant_asymmetric: 0,
+            confluence: 0,
+            vcp: 0,
+            ttm_squeeze: 0,
+            canslim: 0,
+            dividend: 0,
+            growth: 0,
+            value: 0,
+            breakout: 0,
+            ma_cross: 0,
+          },
+          sectorsAvailable: [],
+          meta: buildMeta({
+            source: "screener-fallback",
+            sourceTimestampMs: Date.now(),
+            stale: true,
+            hasData: false,
+            note: "Đang làm ấm dữ liệu bộ lọc — vui lòng thử lại sau giây lát",
+          }),
+        },
+      };
+    },
     unavailableSource: "stocks-screener-service",
     unavailableNote: "Hệ thống Screener Pro đang làm mới dữ liệu.",
   });
