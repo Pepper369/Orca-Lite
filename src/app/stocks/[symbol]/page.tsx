@@ -248,6 +248,17 @@ const ConsensusUpsideCard = dynamic(
   }
 );
 
+const StockEntryStrategyCard = dynamic(
+  () =>
+    import("@/components/stocks/stock-entry-strategy-card").then(
+      (m) => m.StockEntryStrategyCard
+    ),
+  {
+    ssr: false,
+    loading: () => <Loading rows={4} />,
+  }
+);
+
 
 const FIREANT_TABS = [
   { id: "overview", label: "Tổng quan & Kỹ thuật", icon: TrendingUp },
@@ -347,9 +358,25 @@ const DecisionStrip = memo(function DecisionStrip({
         )}
         {plan && signal !== "QUAN SÁT" ? (
           <span className="stock-plan-group" role="group" aria-label="Kế hoạch giao dịch">
-            <MetricChip label="Entry" value={fmt(plan.entry)} emphasis />
+            <MetricChip
+              label={signal === "MUA" ? "Entry Mua" : "Entry Bán"}
+              value={fmt(plan.entry)}
+              emphasis
+            />
+            {plan.entryZone && (
+              <MetricChip
+                label="Vùng gom"
+                value={`${fmt(plan.entryZone[0])}–${fmt(plan.entryZone[1])}`}
+              />
+            )}
+            {plan.currentPriceDiffPct != null && plan.currentPriceDiffPct < -0.3 && (
+              <MetricChip
+                label="Chờ chỉnh"
+                value={`-${Math.abs(plan.currentPriceDiffPct).toFixed(1)}%`}
+                tone="up"
+              />
+            )}
             <MetricChip label="SL" value={fmt(plan.stopLoss)} tone="down" />
-            <MetricChip label="TP1" value={fmt(plan.takeProfit1 ?? plan.takeProfit)} tone="up" />
             <MetricChip label="TP" value={fmt(plan.takeProfit)} tone="up" />
             <MetricChip label="R:R" value={`1:${plan.riskReward.toFixed(1)}`} emphasis />
           </span>
@@ -569,7 +596,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
               onClick={() => setMicroTab("decision")}
               className="fireant-micro-tab-btn"
             >
-              Độ rộng sàn
+              Kế hoạch Entry
             </button>
           </div>
 
@@ -591,8 +618,12 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
             )}
             {microTab === "decision" && (
               <div className="space-y-2.5">
-                <ErrorBoundary name="breadth" resetKey={detail.symbol}>
-                  <MarketBreadthCard />
+                <ErrorBoundary name="entry-strategy" resetKey={detail.symbol}>
+                  <StockEntryStrategyCard
+                    symbol={detail.symbol}
+                    quote={detail.quote}
+                    technical={detail.technical}
+                  />
                 </ErrorBoundary>
               </div>
             )}

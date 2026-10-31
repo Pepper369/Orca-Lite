@@ -423,6 +423,11 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
       support: sr.support,
       resistance: sr.resistance,
       volatility30d: vol,
+      sma20,
+      sma50,
+      rsi14,
+      bollinger: bb ? { upper: bb.upper, mid: bb.mid, lower: bb.lower } : null,
+      trendScore: score,
     });
   }
   const tradeSignal = { ...tradeSignalBase, plan };

@@ -327,6 +327,11 @@ export function computeStockTechReco(
       support: tech.support,
       resistance: tech.resistance,
       volatility30d: tech.volatility30d,
+      sma20: tech.sma?.sma20,
+      sma50: tech.sma?.sma50,
+      rsi14: tech.rsi14,
+      bollinger: tech.bollinger,
+      trendScore: tech.trend?.score,
     });
   }
 
@@ -342,6 +347,9 @@ export function computeStockTechReco(
         side: ts.action,
         sideVi: ts.action === "buy" ? "MUA" : "BÁN",
         entry: ts.plan.entry,
+        entryZone: ts.plan.entryZone,
+        entryStrategyVi: ts.plan.entryStrategyVi,
+        currentPriceDiffPct: ts.plan.currentPriceDiffPct,
         stopLoss: ts.plan.stopLoss,
         takeProfit: ts.plan.takeProfit,
         takeProfit1: ts.plan.takeProfit1,
