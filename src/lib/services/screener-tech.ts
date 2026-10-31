@@ -1,4 +1,3 @@
-import "server-only";
 import type { OhlcvBar } from "../types";
 import type { DetectedCandlePattern } from "../engines/candlestick-patterns";
 import { rsi as rsiSeries, sma, ema } from "../engines/oscillators";
@@ -122,11 +121,13 @@ export function extractTechContext(bars: OhlcvBar[]): TechContext {
 
   // 1. Khoảng cách tới đáy 20 phiên & 50 phiên
   const slice20 = bars.slice(-20);
-  const low20 = slice20.length ? Math.min(...slice20.map((b) => b.low)) : null;
+  const lows20 = slice20.map((b) => b.low).filter((v) => Number.isFinite(v) && v > 0);
+  const low20 = lows20.length ? Math.min(...lows20) : null;
   const distTo20dLowPct = low20 != null && low20 > 0 ? ((close - low20) / low20) * 100 : null;
 
   const slice50 = bars.slice(-50);
-  const low50 = slice50.length ? Math.min(...slice50.map((b) => b.low)) : null;
+  const lows50 = slice50.map((b) => b.low).filter((v) => Number.isFinite(v) && v > 0);
+  const low50 = lows50.length ? Math.min(...lows50) : null;
   const distTo50dLowPct = low50 != null && low50 > 0 ? ((close - low50) / low50) * 100 : null;
 
   // 2. Chạm dải Bollinger Bands (20, 2)

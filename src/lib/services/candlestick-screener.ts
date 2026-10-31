@@ -1,6 +1,11 @@
 import "server-only";
 import { buildMeta } from "../freshness";
-import { detectCandlePatterns, type DetectedCandlePattern } from "../engines/candlestick-patterns";
+import {
+  detectCandlePatterns,
+  buildCandleTradeSetup,
+  type DetectedCandlePattern,
+  type CandleTradeSetup,
+} from "../engines/candlestick-patterns";
 import { getSecurity, sectorOf } from "../vn/master";
 import { defaultTechnicalUniverse } from "../vn/vn100";
 import { getVnQuotes } from "./stocks";
@@ -9,16 +14,7 @@ import { rankPatternsWithContext, extractTechContext, type TechContext } from ".
 import { WORKERS_BUDGET } from "../data-engine/workers-budget";
 import type { Meta, OhlcvBar, Quote } from "../types";
 
-export type CandleTradeSetup = {
-  entryPrice: number;
-  stopLoss: number;
-  target1: number;
-  target2: number;
-  riskReward: number;
-  riskPercent: number;
-  rewardPercent: number;
-  setupQuality: "A+" | "A" | "B";
-};
+export { buildCandleTradeSetup, type CandleTradeSetup };
 
 export type CandleTechConfluence = {
   rsi14: number | null;
@@ -60,91 +56,6 @@ export type CandlestickScreenOpts = {
   bottomConfluenceOnly?: boolean;
   qualityOnly?: "A+" | "A" | "all";
 };
-
-function roundPrice(val: number, refPrice: number): number {
-  if (refPrice < 2) return +val.toFixed(4);
-  if (refPrice < 20) return +val.toFixed(3);
-  return +val.toFixed(2);
-}
-
-export function buildCandleTradeSetup(
-  pattern: DetectedCandlePattern,
-  bars: OhlcvBar[],
-  ctx?: TechContext,
-): CandleTradeSetup | null {
-  if (bars.length < 5) return null;
-  const isBull = pattern.type === "bullish";
-  const isBear = pattern.type === "bearish";
-  if (!isBull && !isBear) return null;
-
-  const lastBar = bars[bars.length - 1]!;
-  const entryPrice = lastBar.close;
-  if (!(entryPrice > 0)) return null;
-
-  const candleCount = Math.max(1, Math.min(pattern.candles || 2, 5));
-  const slice = bars.slice(-candleCount);
-  const patternLow = Math.min(...slice.map((b) => b.low));
-  const patternHigh = Math.max(...slice.map((b) => b.high));
-  const atrVal = ctx?.atrPct ? (ctx.atrPct / 100) * entryPrice : Math.max(patternHigh - patternLow, entryPrice * 0.02);
-  const buffer = Math.max(atrVal * 0.25, entryPrice * 0.003);
-
-  if (isBull) {
-    const stopLoss = Math.max(0.0001, patternLow - buffer);
-    const risk = entryPrice - stopLoss;
-    if (risk <= 0) return null;
-    const target1 = entryPrice + risk * 1.5;
-    const target2 = entryPrice + risk * 2.5;
-    const riskPercent = (risk / entryPrice) * 100;
-    const rewardPercent = ((target1 - entryPrice) / entryPrice) * 100;
-    const riskReward = +(rewardPercent / Math.max(riskPercent, 0.01)).toFixed(1);
-
-    const isAplus =
-      pattern.score >= 75 &&
-      pattern.volumeConfirmed &&
-      (Boolean(ctx?.rsiBullishDiv) ||
-        Boolean(ctx?.atLowerBb) ||
-        Boolean(ctx?.volClimax) ||
-        (ctx?.distTo20dLowPct != null && ctx.distTo20dLowPct <= 3.5));
-    const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : pattern.score >= 68 ? "A" : "B";
-
-    return {
-      entryPrice: roundPrice(entryPrice, entryPrice),
-      stopLoss: roundPrice(stopLoss, entryPrice),
-      target1: roundPrice(target1, entryPrice),
-      target2: roundPrice(target2, entryPrice),
-      riskReward,
-      riskPercent: +riskPercent.toFixed(1),
-      rewardPercent: +rewardPercent.toFixed(1),
-      setupQuality,
-    };
-  } else {
-    const stopLoss = patternHigh + buffer;
-    const risk = stopLoss - entryPrice;
-    if (risk <= 0) return null;
-    const target1 = Math.max(0.0001, entryPrice - risk * 1.5);
-    const target2 = Math.max(0.0001, entryPrice - risk * 2.5);
-    const riskPercent = (risk / entryPrice) * 100;
-    const rewardPercent = ((entryPrice - target1) / entryPrice) * 100;
-    const riskReward = +(rewardPercent / Math.max(riskPercent, 0.01)).toFixed(1);
-
-    const isAplus =
-      pattern.score >= 75 &&
-      pattern.volumeConfirmed &&
-      (Boolean(ctx?.rsiBearishDiv) || Boolean(ctx?.atUpperBb));
-    const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : pattern.score >= 68 ? "A" : "B";
-
-    return {
-      entryPrice: roundPrice(entryPrice, entryPrice),
-      stopLoss: roundPrice(stopLoss, entryPrice),
-      target1: roundPrice(target1, entryPrice),
-      target2: roundPrice(target2, entryPrice),
-      riskReward,
-      riskPercent: +riskPercent.toFixed(1),
-      rewardPercent: +rewardPercent.toFixed(1),
-      setupQuality,
-    };
-  }
-}
 
 const DEFAULT_MIN = 55;
 

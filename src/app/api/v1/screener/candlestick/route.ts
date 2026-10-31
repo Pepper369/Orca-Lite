@@ -42,14 +42,30 @@ export async function GET(req: Request) {
   if (!["stock", "crypto", "forex", "multi"].includes(asset)) {
     return badRequest("asset phải là stock|crypto|forex|multi");
   }
-  const minScore = Number(url.searchParams.get("minScore") ?? (asset === "stock" ? 55 : 48));
-  const limit = Number(url.searchParams.get("limit") ?? 40);
+  const rawMinScore = Number(url.searchParams.get("minScore"));
+  const minScore = Number.isFinite(rawMinScore)
+    ? Math.max(0, Math.min(100, Math.round(rawMinScore)))
+    : (asset === "stock" ? 55 : 48);
+
+  const rawLimit = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(80, Math.round(rawLimit)))
+    : 40;
+
   const volumeOnly = url.searchParams.get("volumeOnly") === "1";
   const bottomConfluenceOnly = url.searchParams.get("bottomConfluenceOnly") === "1";
-  const qualityOnly = (url.searchParams.get("qualityOnly") ?? "all") as "A+" | "A" | "all";
-  const symbolsRaw = url.searchParams.get("symbols") ?? "";
+  const rawQuality = url.searchParams.get("qualityOnly");
+  const qualityOnly: "A+" | "A" | "all" =
+    rawQuality === "A+" || rawQuality === "A" ? rawQuality : "all";
+
+  // Security bounds: cap symbols payload length and sanitize characters
+  const symbolsRaw = (url.searchParams.get("symbols") ?? "").slice(0, 1024);
   const symbols = symbolsRaw
-    ? symbolsRaw.split(/[,;\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+    ? symbolsRaw
+        .split(/[,;\s]+/)
+        .map((s) => s.trim().toUpperCase().replace(/[^A-Z0-9/._-]/g, ""))
+        .filter(Boolean)
+        .slice(0, 100)
     : undefined;
 
   return safeApi({
