@@ -88,8 +88,9 @@ function priorTrend(
   look = 5,
   soft = false,
 ): "up" | "down" | "sideways" | "unknown" {
-  if (endExclusive < look + 1) return "unknown";
-  const slice = bars.slice(endExclusive - look, endExclusive);
+  const actualLook = Math.min(look, endExclusive);
+  if (actualLook < 3) return "unknown";
+  const slice = bars.slice(endExclusive - actualLook, endExclusive);
   if (slice.length < 3) return "unknown";
   let up = 0;
   let down = 0;
@@ -102,10 +103,10 @@ function priorTrend(
   const netPct = first.close > 0 ? ((last.close - first.close) / first.close) * 100 : 0;
   const strong = soft ? 0.35 : 2.5;
   const mild = soft ? 0.12 : 0.8;
-  if (up >= look - 1 || (up >= 3 && down <= 1) || netPct >= strong) return "up";
-  if (down >= look - 1 || (down >= 3 && up <= 1) || netPct <= -strong) return "down";
-  if (up >= Math.ceil(look * 0.6) && netPct > mild) return "up";
-  if (down >= Math.ceil(look * 0.6) && netPct < -mild) return "down";
+  if (up >= actualLook - 1 || (up >= 3 && down <= 1) || netPct >= strong) return "up";
+  if (down >= actualLook - 1 || (down >= 3 && up <= 1) || netPct <= -strong) return "down";
+  if (up >= Math.ceil(actualLook * 0.6) && netPct > mild) return "up";
+  if (down >= Math.ceil(actualLook * 0.6) && netPct < -mild) return "down";
   return "sideways";
 }
 
@@ -239,7 +240,7 @@ export function detectCandlePatterns(
     out = out.filter((p) => (p.ageBars ?? 0) <= opts.maxAgeBars!);
   }
 
-  return out.slice(0, 8);
+  return out.slice(0, 10);
 }
 
 function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandlePattern[] {
@@ -426,6 +427,200 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
     }
   }
 
+  // Bullish / Bearish Belt Hold (Yorikiri)
+  if (cur.body >= ab * 1.25 && cur.body >= cur.range * 0.75) {
+    const t = trendBefore(1);
+    if (cur.bull && cur.lower <= cur.range * 0.05 && (t === "down" || t === "sideways")) {
+      push(out, {
+        name: "Bullish Belt Hold",
+        nameVi: "Belt Hold tăng (Yorikiri)",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "high",
+        candles: 1,
+        description: "Mở sát đáy, tăng mạnh dứt khoát không râu dưới.",
+        confirmation: "Nến sau giữ trên 50% thân Belt Hold",
+        volumeOk: volOk(i),
+        volumeStrong: volStrong(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else if (cur.bear && cur.upper <= cur.range * 0.05 && (t === "up" || t === "sideways")) {
+      push(out, {
+        name: "Bearish Belt Hold",
+        nameVi: "Belt Hold giảm",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "high",
+        candles: 1,
+        description: "Mở sát đỉnh, bán tháo dứt khoát không râu trên.",
+        confirmation: "Nến sau giữ dưới 50% thân Belt Hold",
+        volumeOk: volOk(i),
+        volumeStrong: volStrong(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  // Bullish / Bearish Harami & Harami Cross
+  if (p1.bear && p1.body >= ab * 0.75 && Math.max(cur.o, cur.c) < p1.o && Math.min(cur.o, cur.c) > p1.c) {
+    const t = trendBefore(2);
+    const isCross = cur.body <= cur.range * 0.12 || cur.body <= p1.body * 0.15;
+    const isSmall = cur.body <= p1.body * 0.55;
+    if (isCross) {
+      push(out, {
+        name: "Bullish Harami Cross",
+        nameVi: "Harami Cross tăng",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "very_high",
+        candles: 2,
+        description: "Doji nằm trọn trong thân nến giảm trước — cạn kiệt lực bán.",
+        confirmation: "Nến 3 vượt đỉnh nến giảm trước",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else if (isSmall) {
+      push(out, {
+        name: "Bullish Harami",
+        nameVi: "Harami tăng (Mẹ bồng con)",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "high",
+        candles: 2,
+        description: "Nến nhỏ nằm trọn trong thân nến giảm trước — đà giảm dừng lại.",
+        confirmation: "Nến sau đóng xanh vượt đỉnh Harami",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  } else if (p1.bull && p1.body >= ab * 0.75 && Math.max(cur.o, cur.c) < p1.c && Math.min(cur.o, cur.c) > p1.o) {
+    const t = trendBefore(2);
+    const isCross = cur.body <= cur.range * 0.12 || cur.body <= p1.body * 0.15;
+    const isSmall = cur.body <= p1.body * 0.55;
+    if (isCross) {
+      push(out, {
+        name: "Bearish Harami Cross",
+        nameVi: "Harami Cross giảm",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "very_high",
+        candles: 2,
+        description: "Doji nằm trọn trong thân nến tăng trước — cạn kiệt lực mua.",
+        confirmation: "Nến 3 thủng đáy nến tăng trước",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else if (isSmall) {
+      push(out, {
+        name: "Bearish Harami",
+        nameVi: "Harami giảm",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "high",
+        candles: 2,
+        description: "Nến nhỏ nằm trọn trong thân nến tăng trước.",
+        confirmation: "Nến sau đóng đỏ thủng đáy Harami",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  // Tweezer Bottom & Tweezer Top
+  const lowDiff = Math.abs(p1.l - cur.l);
+  const maxR = Math.max(p1.range, cur.range);
+  const lowPctDiff = p1.l > 0 ? lowDiff / p1.l : 1;
+  if ((lowDiff <= maxR * 0.08 || lowPctDiff <= 0.003) && p1.lower >= p1.range * 0.1 && cur.lower >= cur.range * 0.12) {
+    const t = trendBefore(2);
+    if (t === "down" || t === "sideways") {
+      push(out, {
+        name: "Tweezer Bottom",
+        nameVi: "Đáy nhíp (Tweezer Bottom)",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "high",
+        candles: 2,
+        description: "Hai nến liên tiếp giữ vững mức đáy chung — hỗ trợ cứng phản ứng.",
+        confirmation: "Nến sau đóng xanh bứt phá đỉnh cụm nhíp",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  const highDiff = Math.abs(p1.h - cur.h);
+  const highPctDiff = p1.h > 0 ? highDiff / p1.h : 1;
+  if ((highDiff <= maxR * 0.08 || highPctDiff <= 0.003) && p1.upper >= p1.range * 0.1 && cur.upper >= cur.range * 0.12) {
+    const t = trendBefore(2);
+    if (t === "up" || t === "sideways") {
+      push(out, {
+        name: "Tweezer Top",
+        nameVi: "Đỉnh nhíp (Tweezer Top)",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "high",
+        candles: 2,
+        description: "Hai nến liên tiếp chạm cùng mức đỉnh bị từ chối.",
+        confirmation: "Nến sau đóng đỏ thủng đáy cụm nhíp",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  // Bullish / Bearish Kicker
+  if (p1.bear && cur.bull && p1.body >= ab * 0.55 && cur.body >= ab * 0.55 && cur.o >= p1.o && cur.l >= p1.o * 0.998) {
+    const t = trendBefore(2);
+    push(out, {
+      name: "Bullish Kicker",
+      nameVi: "Kicker tăng (Đảo chiều sốc)",
+      type: "bullish",
+      category: "bullish_reversal",
+      baseReliability: "very_high",
+      candles: 2,
+      description: "Gap up vượt đỉnh nến đỏ trước — lực mua đảo ngược hoàn toàn.",
+      confirmation: "Duy trì trên mức gap nến 2",
+      volumeOk: volOk(i),
+      volumeStrong: volStrong(i),
+      trendOk: true,
+      trendContext: t,
+      barIndex: i,
+    });
+  } else if (p1.bull && cur.bear && p1.body >= ab * 0.55 && cur.body >= ab * 0.55 && cur.o <= p1.o && cur.h <= p1.o * 1.002) {
+    const t = trendBefore(2);
+    push(out, {
+      name: "Bearish Kicker",
+      nameVi: "Kicker giảm",
+      type: "bearish",
+      category: "bearish_reversal",
+      baseReliability: "very_high",
+      candles: 2,
+      description: "Gap down dưới đáy nến xanh trước — phe bán đảo ngược hoàn toàn.",
+      confirmation: "Duy trì dưới mức gap nến 2",
+      volumeOk: volOk(i),
+      volumeStrong: volStrong(i),
+      trendOk: true,
+      trendContext: t,
+      barIndex: i,
+    });
+  }
+
   if (p1.bear && cur.bull && cur.body > p1.body * 1.05 && cur.c >= p1.o && cur.o <= p1.c) {
     const t = trendBefore(2);
     push(out, {
@@ -494,35 +689,210 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
     });
   }
 
-  if (p2.bear && p2.body >= ab * 1.15 && p1.body <= ab * 0.55 && cur.bull && cur.body >= ab * 0.9 && cur.c > mid(p2)) {
+  // Morning Star / Morning Doji Star / Abandoned Baby
+  if (p2.bear && p2.body >= ab * 0.9 && p1.body <= Math.max(ab * 0.6, p2.body * 0.45) && cur.bull && cur.body >= ab * 0.8 && cur.c > mid(p2)) {
+    const t = trendBefore(3);
+    const isDoji = p1.body <= p1.range * 0.14 || p1.body <= ab * 0.25;
+    const isAbandonedGap = p1.h < p2.l && p1.h < cur.l;
+
+    if (isDoji && isAbandonedGap) {
+      push(out, {
+        name: "Bullish Abandoned Baby",
+        nameVi: "Abandoned Baby tăng",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "very_high",
+        candles: 3,
+        description: "Doji đáy tạo gap hoàn toàn cô lập — tín hiệu đảo chiều siêu mạnh.",
+        confirmation: "Duy trì vững trên mức gap của Abandoned Baby",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else if (isDoji) {
+      push(out, {
+        name: "Morning Doji Star",
+        nameVi: "Sao mai Doji",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "very_high",
+        candles: 3,
+        description: "Nến 2 là Doji gap xuống ở đáy — lưỡng lự kiệt cùng rồi nến 3 bứt phá.",
+        confirmation: "Nến 3 đóng trên 50% thân nến 1",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else {
+      push(out, {
+        name: "Morning Star",
+        nameVi: "Sao mai",
+        type: "bullish",
+        category: "bullish_reversal",
+        baseReliability: "high",
+        candles: 3,
+        description: "Giảm mạnh → lưỡng lự → tăng.",
+        confirmation: "Nến 3 đóng trên 50% thân nến 1",
+        volumeOk: volOk(i),
+        trendOk: t === "down",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  // Evening Star / Evening Doji Star / Abandoned Baby
+  if (p2.bull && p2.body >= ab * 0.9 && p1.body <= Math.max(ab * 0.6, p2.body * 0.45) && cur.bear && cur.body >= ab * 0.8 && cur.c < mid(p2)) {
+    const t = trendBefore(3);
+    const isDoji = p1.body <= p1.range * 0.14 || p1.body <= ab * 0.25;
+    const isAbandonedGap = p1.l > p2.h && p1.l > cur.h;
+
+    if (isDoji && isAbandonedGap) {
+      push(out, {
+        name: "Bearish Abandoned Baby",
+        nameVi: "Abandoned Baby giảm",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "very_high",
+        candles: 3,
+        description: "Doji đỉnh tạo gap hoàn toàn cô lập — áp lực bán tháo đỉnh cực mạnh.",
+        confirmation: "Duy trì dưới mức gap của Abandoned Baby",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else if (isDoji) {
+      push(out, {
+        name: "Evening Doji Star",
+        nameVi: "Sao hôm Doji",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "very_high",
+        candles: 3,
+        description: "Nến 2 là Doji gap lên ở đỉnh — phe mua kiệt sức trước khi đảo chiều.",
+        confirmation: "Nến 3 đóng dưới 50% thân nến 1",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    } else {
+      push(out, {
+        name: "Evening Star",
+        nameVi: "Sao hôm",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "high",
+        candles: 3,
+        description: "Tăng mạnh → lưỡng lự → giảm.",
+        confirmation: "Nến 3 đóng dưới 50% thân nến 1",
+        volumeOk: volOk(i),
+        trendOk: t === "up",
+        trendContext: t,
+        barIndex: i,
+      });
+    }
+  }
+
+  // Three Inside Up (Harami confirmed) & Three Inside Down
+  if (
+    p2.bear &&
+    p2.body >= ab * 0.75 &&
+    Math.max(p1.o, p1.c) < p2.o &&
+    Math.min(p1.o, p1.c) > p2.c &&
+    cur.bull &&
+    cur.c > Math.max(p1.h, mid(p2))
+  ) {
+    const t = trendBefore(3);
     push(out, {
-      name: "Morning Star",
-      nameVi: "Sao mai",
+      name: "Three Inside Up",
+      nameVi: "Three Inside Up (Harami xác nhận)",
       type: "bullish",
       category: "bullish_reversal",
       baseReliability: "high",
       candles: 3,
-      description: "Giảm mạnh → lưỡng lự → tăng.",
-      confirmation: "Nến 3 đóng trên 50% thân nến 1",
+      description: "Nến 3 bứt phá xác nhận thành công mẫu hình Harami đáy.",
+      confirmation: "Khối lượng nến 3 gia tăng vượt trung bình",
       volumeOk: volOk(i),
-      trendOk: trendBefore(3) === "down",
-      trendContext: trendBefore(3),
+      trendOk: t === "down",
+      trendContext: t,
       barIndex: i,
     });
-  }
-  if (p2.bull && p2.body >= ab * 1.15 && p1.body <= ab * 0.55 && cur.bear && cur.body >= ab * 0.9 && cur.c < mid(p2)) {
+  } else if (
+    p2.bull &&
+    p2.body >= ab * 0.75 &&
+    Math.max(p1.o, p1.c) < p2.c &&
+    Math.min(p1.o, p1.c) > p2.o &&
+    cur.bear &&
+    cur.c < Math.min(p1.l, mid(p2))
+  ) {
+    const t = trendBefore(3);
     push(out, {
-      name: "Evening Star",
-      nameVi: "Sao hôm",
+      name: "Three Inside Down",
+      nameVi: "Three Inside Down",
       type: "bearish",
       category: "bearish_reversal",
       baseReliability: "high",
       candles: 3,
-      description: "Tăng mạnh → lưỡng lự → giảm.",
-      confirmation: "Nến 3 đóng dưới 50% thân nến 1",
+      description: "Nến 3 giảm xác nhận thành công mẫu hình Harami đỉnh.",
+      confirmation: "Khối lượng nến 3 gia tăng",
       volumeOk: volOk(i),
-      trendOk: trendBefore(3) === "up",
-      trendContext: trendBefore(3),
+      trendOk: t === "up",
+      trendContext: t,
+      barIndex: i,
+    });
+  }
+
+  // Three Outside Up (Engulfing confirmed) & Three Outside Down
+  if (
+    p2.bear &&
+    p1.bull &&
+    p1.body > p2.body * 1.05 &&
+    p1.c >= p2.o &&
+    p1.o <= p2.c &&
+    cur.bull &&
+    cur.c > p1.c
+  ) {
+    const t = trendBefore(3);
+    push(out, {
+      name: "Three Outside Up",
+      nameVi: "Three Outside Up (Engulfing xác nhận)",
+      type: "bullish",
+      category: "bullish_reversal",
+      baseReliability: "very_high",
+      candles: 3,
+      description: "Nến 3 tiếp nối và xác nhận đà tăng mạnh mẽ sau Bullish Engulfing.",
+      confirmation: "Khối lượng nến 3 duy trì cao",
+      volumeOk: volOk(i),
+      trendOk: t === "down",
+      trendContext: t,
+      barIndex: i,
+    });
+  } else if (
+    p2.bull &&
+    p1.bear &&
+    p1.body > p2.body * 1.05 &&
+    p1.c <= p2.o &&
+    p1.o >= p2.c &&
+    cur.bear &&
+    cur.c < p1.c
+  ) {
+    const t = trendBefore(3);
+    push(out, {
+      name: "Three Outside Down",
+      nameVi: "Three Outside Down",
+      type: "bearish",
+      category: "bearish_reversal",
+      baseReliability: "very_high",
+      candles: 3,
+      description: "Nến 3 tiếp nối và xác nhận đà giảm mạnh mẽ sau Bearish Engulfing.",
+      confirmation: "Khối lượng nến 3 duy trì cao",
+      volumeOk: volOk(i),
+      trendOk: t === "up",
+      trendContext: t,
       barIndex: i,
     });
   }
@@ -565,7 +935,7 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
     const prev = byName.get(p.name);
     if (!prev || p.score > prev.score) byName.set(p.name, p);
   }
-  return [...byName.values()].sort((a, b) => b.score - a.score).slice(0, 6);
+  return [...byName.values()].sort((a, b) => b.score - a.score).slice(0, 10);
 }
 
 export function toLegacyCandlePatterns(

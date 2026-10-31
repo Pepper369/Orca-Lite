@@ -2,6 +2,8 @@ import "server-only";
 import type { OhlcvBar } from "../types";
 import type { DetectedCandlePattern } from "../engines/candlestick-patterns";
 import { rsi as rsiSeries, sma, ema } from "../engines/oscillators";
+import { bollinger } from "../technical";
+import { detectDivergences } from "../engines/divergence";
 
 export type TechContext = {
   rsi14: number | null;
@@ -12,6 +14,14 @@ export type TechContext = {
   atrPct: number | null;
   macdHist: number | null;
   bodyAtr: number | null;
+  distTo20dLowPct: number | null;
+  distTo50dLowPct: number | null;
+  atLowerBb: boolean;
+  atUpperBb: boolean;
+  volClimax: boolean;
+  volDryUp: boolean;
+  rsiBullishDiv: boolean;
+  rsiBearishDiv: boolean;
 };
 
 function lastFinite(arr: (number | null)[]): number | null {
@@ -52,6 +62,14 @@ export function extractTechContext(bars: OhlcvBar[]): TechContext {
       atrPct: null,
       macdHist: null,
       bodyAtr: null,
+      distTo20dLowPct: null,
+      distTo50dLowPct: null,
+      atLowerBb: false,
+      atUpperBb: false,
+      volClimax: false,
+      volDryUp: false,
+      rsiBullishDiv: false,
+      rsiBearishDiv: false,
     };
   }
   const closes = bars.map((b) => b.close);
@@ -102,7 +120,69 @@ export function extractTechContext(bars: OhlcvBar[]): TechContext {
     }
   }
 
-  return { rsi14, vsSma20Pct, vsSma50Pct, volRatio, trend, atrPct, macdHist, bodyAtr };
+  // 1. Khoảng cách tới đáy 20 phiên & 50 phiên
+  const slice20 = bars.slice(-20);
+  const low20 = slice20.length ? Math.min(...slice20.map((b) => b.low)) : null;
+  const distTo20dLowPct = low20 != null && low20 > 0 ? ((close - low20) / low20) * 100 : null;
+
+  const slice50 = bars.slice(-50);
+  const low50 = slice50.length ? Math.min(...slice50.map((b) => b.low)) : null;
+  const distTo50dLowPct = low50 != null && low50 > 0 ? ((close - low50) / low50) * 100 : null;
+
+  // 2. Chạm dải Bollinger Bands (20, 2)
+  let atLowerBb = false;
+  let atUpperBb = false;
+  if (closes.length >= 20) {
+    const { lower: bbLowerArr, upper: bbUpperArr } = bollinger(closes, 20, 2);
+    const bbLower = lastFinite(bbLowerArr);
+    const bbUpper = lastFinite(bbUpperArr);
+    if (bbLower != null) {
+      atLowerBb = close <= bbLower * 1.01 || last.low <= bbLower;
+    }
+    if (bbUpper != null) {
+      atUpperBb = close >= bbUpper * 0.99 || last.high >= bbUpper;
+    }
+  }
+
+  // 3. Khối lượng đột biến gom hàng (Climax) hoặc cạn kiệt cung (Dry-up)
+  const volClimax = volRatio != null && volRatio >= 1.8;
+  const volDryUp = volRatio != null && volRatio <= 0.65;
+
+  // 4. Phân kỳ động lượng (Divergence confluence)
+  let rsiBullishDiv = false;
+  let rsiBearishDiv = false;
+  if (bars.length >= 25) {
+    try {
+      const divs = detectDivergences(bars, { window: "short_3_4d", maxSignals: 4, maxAgeBarsFromEnd: 5 });
+      rsiBullishDiv = divs.some(
+        (d) => d.kind === "regular_bullish" && (d.oscillator === "rsi" || d.oscillator === "macd_hist"),
+      );
+      rsiBearishDiv = divs.some(
+        (d) => d.kind === "regular_bearish" && (d.oscillator === "rsi" || d.oscillator === "macd_hist"),
+      );
+    } catch {
+      // Safe fallback
+    }
+  }
+
+  return {
+    rsi14,
+    vsSma20Pct,
+    vsSma50Pct,
+    volRatio,
+    trend,
+    atrPct,
+    macdHist,
+    bodyAtr,
+    distTo20dLowPct,
+    distTo50dLowPct,
+    atLowerBb,
+    atUpperBb,
+    volClimax,
+    volDryUp,
+    rsiBullishDiv,
+    rsiBearishDiv,
+  };
 }
 
 export function contextBoostPattern(p: DetectedCandlePattern, ctx: TechContext): number {
@@ -117,6 +197,30 @@ export function contextBoostPattern(p: DetectedCandlePattern, ctx: TechContext):
     if (bear && ctx.trend === "up") s += 6;
     if (bull && ctx.trend === "up") s -= 4;
     if (bear && ctx.trend === "down") s -= 4;
+
+    // Confluence tăng cường cho Đảo chiều Tăng từ Đáy (Bullish Bottom Reversals)
+    if (bull) {
+      // Sát đáy 20 phiên
+      if (ctx.distTo20dLowPct != null && ctx.distTo20dLowPct <= 2.5) s += 6;
+      else if (ctx.distTo20dLowPct != null && ctx.distTo20dLowPct <= 5.0) s += 3;
+
+      // Phản ứng hỗ trợ dải dưới Bollinger Bands
+      if (ctx.atLowerBb) s += 5;
+
+      // Volume gom hàng cao trào hoặc cạn cung tại đáy
+      if (ctx.volClimax) s += 7;
+      else if (ctx.volDryUp && (p.name.includes("Harami") || p.name.includes("Doji") || p.name.includes("Tweezer"))) s += 5;
+
+      // Phân kỳ dương RSI / MACD đáy
+      if (ctx.rsiBullishDiv) s += 8;
+    }
+
+    // Confluence tăng cường cho Đảo chiều Giảm từ Đỉnh (Bearish Top Reversals)
+    if (bear) {
+      if (ctx.atUpperBb) s += 5;
+      if (ctx.volClimax) s += 4;
+      if (ctx.rsiBearishDiv) s += 8;
+    }
   } else if (p.category === "continuation") {
     if (bull && ctx.trend === "up") s += 5;
     if (bear && ctx.trend === "down") s += 5;
