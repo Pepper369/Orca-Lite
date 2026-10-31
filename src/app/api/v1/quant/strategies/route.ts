@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MiQuantEngine } from "@/lib/engines/miquant-quant-engine";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 60; // Cache 60s
 
 export async function GET(req: NextRequest) {

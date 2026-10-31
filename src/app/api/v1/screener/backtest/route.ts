@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runScreenerBacktest, StrategyType } from "@/lib/engines/screener-backtest-engine";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 300; // Cache for 5 mins
 
 export async function GET(req: NextRequest) {

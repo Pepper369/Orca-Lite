@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDerivativesArbitrageSignal } from "@/lib/engines/derivatives-arbitrage-engine";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 15; // Fast revalidation for derivatives (15s)
 
 export async function GET(req: NextRequest) {
