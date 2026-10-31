@@ -157,8 +157,46 @@ function getScreenerUniverse(): string[] {
   return Array.from(set);
 }
 
-function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPrice: number | null) {
-  if (!bars || bars.length < 15) {
+interface ParsedBars {
+  closes: number[];
+  highs: number[];
+  lows: number[];
+  vols: number[];
+  ohlcvBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
+}
+
+function parseBarArrays(bars?: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[]): ParsedBars {
+  const n = bars ? bars.length : 0;
+  const closes: number[] = [];
+  const highs: number[] = [];
+  const lows: number[] = [];
+  const vols: number[] = [];
+  const ohlcvBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const b = bars![i];
+    const c = b.close;
+    if (!Number.isFinite(c) || c <= 0) continue;
+    const h = b.high != null && Number.isFinite(b.high) && b.high > 0 ? b.high : c;
+    const l = b.low != null && Number.isFinite(b.low) && b.low > 0 ? b.low : c;
+    const o = b.open != null && Number.isFinite(b.open) && b.open > 0 ? b.open : c;
+    const v = b.volume ?? 0;
+    const t = b.time ?? i;
+
+    closes.push(c);
+    highs.push(h);
+    lows.push(l);
+    if (v > 0) vols.push(v);
+    ohlcvBars.push({ time: t, open: o, high: h, low: l, close: c, volume: v });
+  }
+
+  return { closes, highs, lows, vols, ohlcvBars };
+}
+
+function analyzeMaFeatures(parsed: ParsedBars, currentPrice: number | null) {
+  const closes = parsed.closes;
+  const len = closes.length;
+  if (len < 15) {
     return {
       ma10: null,
       ma20: null,
@@ -167,11 +205,7 @@ function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPri
       maSignal: "NEUTRAL" as const,
     };
   }
-  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
-  if (closes.length < 15) {
-    return { ma10: null, ma20: null, ma50: null, volRatio20: null, maSignal: "NEUTRAL" as const };
-  }
-  const len = closes.length;
+
   const sma10Series = sma(closes, 10);
   const sma20Series = sma(closes, 20);
   const sma50Series = sma(closes, 50);
@@ -185,10 +219,13 @@ function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPri
   const prevMa50 = len >= 2 ? sma50Series[len - 2] : null;
 
   // Vol ratio 20
-  const vols = bars.map((b) => b.volume).filter((v) => Number.isFinite(v) && v > 0);
+  const vols = parsed.vols;
   let volRatio20: number | null = null;
   if (vols.length >= 20) {
-    const avgVol = vols.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    let sum20 = 0;
+    const startIdx = vols.length - 20;
+    for (let i = startIdx; i < vols.length; i++) sum20 += vols[i];
+    const avgVol = sum20 / 20;
     const lastVol = vols[vols.length - 1];
     if (avgVol > 0 && lastVol > 0) {
       volRatio20 = Number((lastVol / avgVol).toFixed(2));
@@ -231,12 +268,14 @@ function analyzeMaFeatures(bars: { close: number; volume: number }[], currentPri
 }
 
 function analyzeTechFeatures(
-  bars: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[],
+  parsed: ParsedBars,
   currentPrice: number | null,
   compositeScore: number,
 ) {
-  const maRes = analyzeMaFeatures(bars, currentPrice);
-  if (!bars || bars.length < 15) {
+  const maRes = analyzeMaFeatures(parsed, currentPrice);
+  const { closes, highs, lows, ohlcvBars } = parsed;
+  const n = closes.length;
+  if (n < 15) {
     return {
       ...maRes,
       adx14: null,
@@ -247,11 +286,6 @@ function analyzeTechFeatures(
       confluenceBadge: "NONE" as const,
     };
   }
-
-  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
-  const highs = bars.map((b) => b.high ?? b.close).filter((h) => Number.isFinite(h) && h > 0);
-  const lows = bars.map((b) => b.low ?? b.close).filter((l) => Number.isFinite(l) && l > 0);
-  const n = closes.length;
 
   let lastAdx: number | null = null;
   let plusDi: number | null = null;
@@ -275,14 +309,6 @@ function analyzeTechFeatures(
     stDir = stData.direction[n - 1] ?? null;
   }
 
-  const ohlcvBars = bars.map((b, idx) => ({
-    time: b.time ?? idx,
-    open: b.open ?? b.close,
-    high: b.high ?? b.close,
-    low: b.low ?? b.close,
-    close: b.close,
-    volume: b.volume ?? 0,
-  }));
   const chartPatterns = detectChartPatterns(ohlcvBars);
   const topPattern = chartPatterns[0] ?? null;
 
@@ -328,7 +354,7 @@ function analyzeTechFeatures(
 }
 
 function analyzeQuantFeatures(
-  bars: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[],
+  parsed: ParsedBars,
   currentPrice: number | null,
   beta: number | null,
   qualityScore: number | null,
@@ -337,7 +363,8 @@ function analyzeQuantFeatures(
   volRatio20: number | null,
   compositeScore: number
 ) {
-  if (!bars || bars.length < 15) {
+  const { closes, highs, lows } = parsed;
+  if (closes.length < 15) {
     return {
       quantEdgeScore: compositeScore,
       quantBadge: "NEUTRAL" as const,
@@ -354,9 +381,6 @@ function analyzeQuantFeatures(
     };
   }
 
-  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
-  const highs = bars.map((b) => b.high ?? b.close).filter((h) => Number.isFinite(h) && h > 0);
-  const lows = bars.map((b) => b.low ?? b.close).filter((l) => Number.isFinite(l) && l > 0);
   const p = currentPrice ?? closes[closes.length - 1];
 
   // 1. Ornstein-Uhlenbeck (OU) Mean Reversion Estimation
@@ -709,6 +733,9 @@ type MasterSnapshotPayload = {
     conflictCount?: number;
   };
   meta: Meta;
+  presetsCount: Record<ScreenerPreset, number>;
+  sectorsAvailable: string[];
+  version: number;
 };
 
 // L1 Fast In-Memory RAM Cache with background SWR
@@ -718,6 +745,13 @@ let memoryMasterSnapshot: {
   staleUntil: number;
 } | null = null;
 let isRefreshingMaster = false;
+
+// High-speed L1 Query Cache for sub-millisecond repeated queries
+interface CachedQueryResult {
+  res: ScreenerResponseData;
+  exp: number;
+}
+const queryL1Cache = new Map<string, CachedQueryResult>();
 
 /**
  * Fetch and aggregate master stock screener snapshot.
@@ -869,12 +903,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
-        const ohlcvBars = ohlcvMap.get(sym)?.bars ?? [];
-        const techFeatures = analyzeTechFeatures(ohlcvBars, price, compositeScore);
+        const rawBars = ohlcvMap.get(sym)?.bars;
+        const parsed = parseBarArrays(rawBars);
+        const techFeatures = analyzeTechFeatures(parsed, price, compositeScore);
 
         const beta: number | null = null;
         const quantFeatures = analyzeQuantFeatures(
-          ohlcvBars,
+          parsed,
           price,
           beta,
           qualityScore,
@@ -966,6 +1001,36 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       const valuationProviders = ["vndirect-finfo", "vietcap-iq", "orca-ratio-engine"];
       const allSourcesUsed = Array.from(new Set([...quoteProviders, ...valuationProviders]));
 
+      // Precompute Presets Count & Sectors Available once during snapshot construction
+      const presetsCount: Record<ScreenerPreset, number> = {
+        all: items.length,
+        quant_edge: 0,
+        quant_mean_revert: 0,
+        quant_low_beta: 0,
+        quant_asymmetric: 0,
+        confluence: 0,
+        vcp: 0,
+        ttm_squeeze: 0,
+        canslim: 0,
+        dividend: 0,
+        growth: 0,
+        value: 0,
+        breakout: 0,
+        ma_cross: 0,
+      };
+
+      const sectorSet = new Set<string>();
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.sector) sectorSet.add(it.sector);
+        const pList = it.presetsPassed;
+        for (let j = 0; j < pList.length; j++) {
+          const p = pList[j];
+          if (p !== "all") presetsCount[p] = (presetsCount[p] ?? 0) + 1;
+        }
+      }
+      const sectorsAvailable = Array.from(sectorSet).sort();
+
       return {
         items,
         sourcesUsed: allSourcesUsed,
@@ -977,21 +1042,30 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           latencies: multiQuotesRes.latencies ?? {},
           conflictCount: multiQuotesRes.conflicts ?? 0,
         },
+        presetsCount,
+        sectorsAvailable,
+        version: Date.now(),
       };
     },
   });
 
-  const snapshotData = res.value as {
-    items: ScreenerStockItem[];
-    sourcesUsed: string[];
-    redundancyInfo: {
-      quoteProviders: string[];
-      valuationProviders: string[];
-      failoverCount: number;
-      healthStatus: "OPTIMAL" | "HIGH_AVAILABILITY" | "DEGRADED";
-      latencies?: Record<string, number>;
-      conflictCount?: number;
-    };
+  const snapshotData = res.value as MasterSnapshotPayload;
+
+  const defaultPresetsCount: Record<ScreenerPreset, number> = {
+    all: snapshotData?.items?.length ?? 0,
+    quant_edge: 0,
+    quant_mean_revert: 0,
+    quant_low_beta: 0,
+    quant_asymmetric: 0,
+    confluence: 0,
+    vcp: 0,
+    ttm_squeeze: 0,
+    canslim: 0,
+    dividend: 0,
+    growth: 0,
+    value: 0,
+    breakout: 0,
+    ma_cross: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -1012,6 +1086,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       stale: res.stale,
       note: `Multi-Source Screener (${snapshotData?.items?.length ?? 0} mã · ${snapshotData?.sourcesUsed?.length ?? 4} nguồn)`,
     }),
+    presetsCount: snapshotData?.presetsCount ?? defaultPresetsCount,
+    sectorsAvailable: snapshotData?.sectorsAvailable ?? [],
+    version: snapshotData?.version ?? Date.now(),
   };
 
   // Cache in L1 memory for sub-millisecond retrieval
@@ -1026,114 +1103,105 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
 /**
  * Filter, sort, and paginate stocks from the master screener snapshot.
+ * Highly optimized with single-pass predicate evaluation and sub-millisecond query cache.
  */
 export async function queryScreenerStocks(params: ScreenerFilterParams): Promise<ScreenerResponseData> {
-  const { items: allItems, sourcesUsed, redundancyInfo, meta } = await getMasterScreenerSnapshot();
+  const snapshot = await getMasterScreenerSnapshot();
+  const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
-  const presetsCount: Record<ScreenerPreset, number> = {
-    all: allItems.length,
-    quant_edge: 0,
-    quant_mean_revert: 0,
-    quant_low_beta: 0,
-    quant_asymmetric: 0,
-    confluence: 0,
-    vcp: 0,
-    ttm_squeeze: 0,
-    canslim: 0,
-    dividend: 0,
-    growth: 0,
-    value: 0,
-    breakout: 0,
-    ma_cross: 0,
-  };
+  // L1 Query Result Cache (normalized key)
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
-  const sectorSet = new Set<string>();
+  const cached = queryL1Cache.get(qKey);
+  if (cached && Date.now() < cached.exp) {
+    return cached.res;
+  }
 
-  for (const item of allItems) {
-    if (item.sector) sectorSet.add(item.sector);
-    for (const p of item.presetsPassed) {
-      if (p !== "all") presetsCount[p] += 1;
+  // Single-pass predicate extraction
+  const hasPreset = Boolean(params.preset && params.preset !== "all");
+  const presetTarget = params.preset!;
+  const qUpper = params.q ? params.q.trim().toUpperCase() : null;
+  const hasExchange = Boolean(params.exchange && params.exchange !== "ALL");
+  const exchangeTarget = params.exchange!;
+  const hasSector = Boolean(params.sector);
+  const sectorTarget = params.sector!;
+  const hasMaSignal = Boolean(params.maSignal && params.maSignal !== "ALL");
+  const maSignalTarget = params.maSignal!;
+
+  const {
+    minPrice, maxPrice, minChg, maxChg, minVol, maxVol,
+    minMarketCap, maxMarketCap, minPe, maxPe, minPb, maxPb,
+    minRoe, maxRoe, minRoa, maxRoa, minDivYield, maxDivYield,
+    maxDe, minQualityScore, minRevenueYoy, minNiYoy,
+    minQuantScore, maxOuZScore, minRiskReward,
+  } = params;
+
+  const filtered: ScreenerStockItem[] = [];
+  const n = allItems.length;
+
+  for (let i = 0; i < n; i++) {
+    const x = allItems[i];
+
+    // Discrete category checks (fail fast)
+    if (hasPreset && !x.presetsPassed.includes(presetTarget)) continue;
+    if (hasExchange && x.exchange !== exchangeTarget) continue;
+    if (hasSector && x.sector !== sectorTarget) continue;
+    if (hasMaSignal && x.maSignal !== maSignalTarget) continue;
+
+    // Text query check
+    if (qUpper && !x.symbol.includes(qUpper) && (!x.name || !x.name.toUpperCase().includes(qUpper))) {
+      continue;
     }
+
+    // Number range checks
+    if (minPrice != null && (x.price == null || x.price < minPrice)) continue;
+    if (maxPrice != null && (x.price == null || x.price > maxPrice)) continue;
+    if (minChg != null && (x.changePercent == null || x.changePercent < minChg)) continue;
+    if (maxChg != null && (x.changePercent == null || x.changePercent > maxChg)) continue;
+    if (minVol != null && (x.volume == null || x.volume < minVol)) continue;
+    if (maxVol != null && (x.volume == null || x.volume > maxVol)) continue;
+    if (minMarketCap != null && (x.marketCap == null || x.marketCap < minMarketCap)) continue;
+    if (maxMarketCap != null && (x.marketCap == null || x.marketCap > maxMarketCap)) continue;
+
+    if (minPe != null && (x.pe == null || x.pe < minPe)) continue;
+    if (maxPe != null && (x.pe == null || x.pe > maxPe)) continue;
+    if (minPb != null && (x.pb == null || x.pb < minPb)) continue;
+    if (maxPb != null && (x.pb == null || x.pb > maxPb)) continue;
+    if (minRoe != null && (x.roe == null || x.roe < minRoe)) continue;
+    if (maxRoe != null && (x.roe == null || x.roe > maxRoe)) continue;
+    if (minRoa != null && (x.roa == null || x.roa < minRoa)) continue;
+    if (maxRoa != null && (x.roa == null || x.roa > maxRoa)) continue;
+    if (minDivYield != null && (x.dividendYield == null || x.dividendYield < minDivYield)) continue;
+    if (maxDivYield != null && (x.dividendYield == null || x.dividendYield > maxDivYield)) continue;
+    if (maxDe != null && (x.debtEquity == null || x.debtEquity > maxDe)) continue;
+    if (minQualityScore != null && (x.qualityScore == null || x.qualityScore < minQualityScore)) continue;
+    if (minRevenueYoy != null && (x.revenueYoyPct == null || x.revenueYoyPct < minRevenueYoy)) continue;
+    if (minNiYoy != null && (x.niYoyPct == null || x.niYoyPct < minNiYoy)) continue;
+
+    // Quant features
+    if (minQuantScore != null && (x.quantEdgeScore == null || x.quantEdgeScore < minQuantScore)) continue;
+    if (maxOuZScore != null && (x.ouZScore == null || x.ouZScore > maxOuZScore)) continue;
+    if (minRiskReward != null && (x.tripleBarrierRiskReward == null || x.tripleBarrierRiskReward < minRiskReward)) continue;
+
+    filtered.push(x);
   }
 
-  let filtered = allItems;
-
-  // Filter: Preset
-  if (params.preset && params.preset !== "all") {
-    filtered = filtered.filter((x) => x.presetsPassed.includes(params.preset!));
-  }
-
-  // Filter: Search query
-  if (params.q) {
-    const qUpper = params.q.trim().toUpperCase();
-    filtered = filtered.filter(
-      (x) => x.symbol.includes(qUpper) || (x.name && x.name.toUpperCase().includes(qUpper)),
-    );
-  }
-
-  // Filter: Exchange
-  if (params.exchange && params.exchange !== "ALL") {
-    filtered = filtered.filter((x) => x.exchange === params.exchange);
-  }
-
-  // Filter: Sector
-  if (params.sector) {
-    filtered = filtered.filter((x) => x.sector === params.sector);
-  }
-
-  // Range filters
-  if (params.minPrice != null) filtered = filtered.filter((x) => x.price != null && x.price >= params.minPrice!);
-  if (params.maxPrice != null) filtered = filtered.filter((x) => x.price != null && x.price <= params.maxPrice!);
-  if (params.minChg != null) filtered = filtered.filter((x) => x.changePercent != null && x.changePercent >= params.minChg!);
-  if (params.maxChg != null) filtered = filtered.filter((x) => x.changePercent != null && x.changePercent <= params.maxChg!);
-  if (params.minVol != null) filtered = filtered.filter((x) => x.volume != null && x.volume >= params.minVol!);
-  if (params.maxVol != null) filtered = filtered.filter((x) => x.volume != null && x.volume <= params.maxVol!);
-
-  if (params.minMarketCap != null) filtered = filtered.filter((x) => x.marketCap != null && x.marketCap >= params.minMarketCap!);
-  if (params.maxMarketCap != null) filtered = filtered.filter((x) => x.marketCap != null && x.marketCap <= params.maxMarketCap!);
-
-  if (params.minPe != null) filtered = filtered.filter((x) => x.pe != null && x.pe >= params.minPe!);
-  if (params.maxPe != null) filtered = filtered.filter((x) => x.pe != null && x.pe <= params.maxPe!);
-  if (params.minPb != null) filtered = filtered.filter((x) => x.pb != null && x.pb >= params.minPb!);
-  if (params.maxPb != null) filtered = filtered.filter((x) => x.pb != null && x.pb <= params.maxPb!);
-
-  if (params.minRoe != null) filtered = filtered.filter((x) => x.roe != null && x.roe >= params.minRoe!);
-  if (params.maxRoe != null) filtered = filtered.filter((x) => x.roe != null && x.roe <= params.maxRoe!);
-  if (params.minRoa != null) filtered = filtered.filter((x) => x.roa != null && x.roa >= params.minRoa!);
-  if (params.maxRoa != null) filtered = filtered.filter((x) => x.roa != null && x.roa <= params.maxRoa!);
-
-  if (params.minDivYield != null) filtered = filtered.filter((x) => x.dividendYield != null && x.dividendYield >= params.minDivYield!);
-  if (params.maxDivYield != null) filtered = filtered.filter((x) => x.dividendYield != null && x.dividendYield <= params.maxDivYield!);
-
-  if (params.maxDe != null) filtered = filtered.filter((x) => x.debtEquity != null && x.debtEquity <= params.maxDe!);
-  if (params.minQualityScore != null) filtered = filtered.filter((x) => x.qualityScore != null && x.qualityScore >= params.minQualityScore!);
-  if (params.minRevenueYoy != null) filtered = filtered.filter((x) => x.revenueYoyPct != null && x.revenueYoyPct >= params.minRevenueYoy!);
-  if (params.minNiYoy != null) filtered = filtered.filter((x) => x.niYoyPct != null && x.niYoyPct >= params.minNiYoy!);
-
-  // Quant Edge filters
-  if (params.minQuantScore != null) filtered = filtered.filter((x) => x.quantEdgeScore != null && x.quantEdgeScore >= params.minQuantScore!);
-  if (params.maxOuZScore != null) filtered = filtered.filter((x) => x.ouZScore != null && x.ouZScore <= params.maxOuZScore!);
-  if (params.minRiskReward != null) filtered = filtered.filter((x) => x.tripleBarrierRiskReward != null && x.tripleBarrierRiskReward >= params.minRiskReward!);
-
-  // Filter: MA Signal
-  if (params.maSignal && params.maSignal !== "ALL") {
-    filtered = filtered.filter((x) => x.maSignal === params.maSignal);
-  }
-
-  // Sorting
+  // High-performance sorting comparator
   const sortKey = (params.sort ?? "marketCap") as keyof ScreenerStockItem;
   const isAsc = params.order === "asc";
 
   filtered.sort((a, b) => {
     const valA = a[sortKey];
     const valB = b[sortKey];
-    if (valA == null && valB == null) return 0;
+    if (valA === valB) return 0;
     if (valA == null) return 1;
     if (valB == null) return -1;
     if (typeof valA === "number" && typeof valB === "number") {
       return isAsc ? valA - valB : valB - valA;
     }
-    return isAsc ? String(valA).localeCompare(String(valB)) : String(valB).localeCompare(String(valA));
+    const sA = String(valA);
+    const sB = String(valB);
+    return isAsc ? (sA < sB ? -1 : 1) : (sA > sB ? -1 : 1);
   });
 
   const total = filtered.length;
@@ -1141,16 +1209,25 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const limit = Math.min(200, Math.max(1, params.limit ?? 50));
   const paginated = filtered.slice(offset, offset + limit);
 
-  return {
+  const response: ScreenerResponseData = {
     items: paginated,
     total,
     totalUniverse: allItems.length,
     offset,
     limit,
     presetsCount,
-    sectorsAvailable: Array.from(sectorSet).sort(),
+    sectorsAvailable,
     sourcesUsed,
     redundancyInfo,
     meta,
   };
+
+  // Keep L1 cache size controlled
+  if (queryL1Cache.size > 150) {
+    const oldestKey = queryL1Cache.keys().next().value;
+    if (oldestKey) queryL1Cache.delete(oldestKey);
+  }
+  queryL1Cache.set(qKey, { res: response, exp: Date.now() + 20_000 });
+
+  return response;
 }

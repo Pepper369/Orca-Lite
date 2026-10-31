@@ -76,6 +76,9 @@ export async function GET(req: Request) {
       return {
         data: res,
         meta: res.meta,
+        headers: {
+          "Cache-Control": "private, max-age=15, stale-while-revalidate=60",
+        },
       };
     },
     fallback: async () => ({

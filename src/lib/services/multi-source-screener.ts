@@ -49,6 +49,42 @@ export interface MultiSourceStockItem {
 const TTL_MS = 30_000; // 30s fresh cache cho screener realtime
 const STALE_MS = 10 * 60_000;
 
+// High-speed in-memory L1 caches with timeout protection
+const vpsForeignL1 = new Map<string, { val: Awaited<ReturnType<typeof getVpsForeignFlow>>; exp: number }>();
+const vndReportsL1 = new Map<string, { val: Awaited<ReturnType<typeof getStockAnalyticReports>>; exp: number }>();
+const vietcapShareholdersL1 = new Map<string, { val: Awaited<ReturnType<typeof getStockShareholders>>; exp: number }>();
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+async function fetchCachedVpsForeign(sym: string) {
+  const e = vpsForeignL1.get(sym);
+  if (e && Date.now() < e.exp) return e.val;
+  const res = await withTimeout(getVpsForeignFlow(sym), 2_000).catch(() => null);
+  if (res) vpsForeignL1.set(sym, { val: res, exp: Date.now() + 2 * 60_000 });
+  return res;
+}
+
+async function fetchCachedVndReports(sym: string) {
+  const e = vndReportsL1.get(sym);
+  if (e && Date.now() < e.exp) return e.val;
+  const res = await withTimeout(getStockAnalyticReports(sym, 5), 2_500).catch(() => null);
+  if (res) vndReportsL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  return res;
+}
+
+async function fetchCachedVietcapShareholders(sym: string) {
+  const e = vietcapShareholdersL1.get(sym);
+  if (e && Date.now() < e.exp) return e.val;
+  const res = await withTimeout(getStockShareholders(sym), 2_500).catch(() => null);
+  if (res) vietcapShareholdersL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  return res;
+}
+
 export async function getMultiSourceScreenerData(): Promise<{
   data: MultiSourceStockItem[];
   meta: Meta;
@@ -79,25 +115,22 @@ export async function getMultiSourceScreenerData(): Promise<{
 
       const targetSymbols: string[] = prioritySymbols.length > 0 ? prioritySymbols : [...VN30_BOARD];
 
-      // 3. Tải song song dữ liệu chuyên sâu đa nguồn qua mapPool (VNDirect Research + Vietcap Ownership + VPS Foreign)
+      // 3. Tải song song dữ liệu chuyên sâu đa nguồn qua mapPool 12 workers
       const enrichedItems: MultiSourceStockItem[] = [];
 
-      await mapPool(targetSymbols, 8, async (symbol: string) => {
+      await mapPool(targetSymbols, 12, async (symbol: string) => {
         const snap = itemMap.get(symbol);
         const price = snap?.price ?? 0;
 
-        // Truy vấn 3 nguồn chuyên biệt
-        const [foreignRes, reportsRes, shareholdersRes] = await Promise.allSettled([
-          getVpsForeignFlow(symbol),
-          getStockAnalyticReports(symbol, 5),
-          getStockShareholders(symbol),
+        // Truy vấn 3 nguồn chuyên biệt có L1 cache & timeout guard
+        const [foreign, reportsRes, shareholdersRes] = await Promise.all([
+          fetchCachedVpsForeign(symbol),
+          fetchCachedVndReports(symbol),
+          fetchCachedVietcapShareholders(symbol),
         ]);
 
-        // 1. VPS Foreign Flow
-        const foreign = foreignRes.status === "fulfilled" ? foreignRes.value : null;
-
         // 2. VNDirect Research Reports
-        const repData = reportsRes.status === "fulfilled" ? reportsRes.value?.data : null;
+        const repData = reportsRes?.data ?? null;
         const targetPrice = repData?.latestTargetPrice ?? null;
         const targetUpsidePct =
           targetPrice && price > 0
@@ -107,7 +140,7 @@ export async function getMultiSourceScreenerData(): Promise<{
         const reportCount = repData?.total ?? 0;
 
         // 3. Vietcap Shareholders
-        const shData = shareholdersRes.status === "fulfilled" ? shareholdersRes.value?.data : null;
+        const shData = shareholdersRes?.data ?? null;
         const shList = shData?.shareholders ?? [];
         const instPct = shData
           ? Math.round((shData.structure.corporatePct + shData.structure.foreignPct) * 10) / 10
