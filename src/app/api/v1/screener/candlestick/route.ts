@@ -45,6 +45,8 @@ export async function GET(req: Request) {
   const minScore = Number(url.searchParams.get("minScore") ?? (asset === "stock" ? 55 : 48));
   const limit = Number(url.searchParams.get("limit") ?? 40);
   const volumeOnly = url.searchParams.get("volumeOnly") === "1";
+  const bottomConfluenceOnly = url.searchParams.get("bottomConfluenceOnly") === "1";
+  const qualityOnly = (url.searchParams.get("qualityOnly") ?? "all") as "A+" | "A" | "all";
   const symbolsRaw = url.searchParams.get("symbols") ?? "";
   const symbols = symbolsRaw
     ? symbolsRaw.split(/[,;\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean)
@@ -63,6 +65,8 @@ export async function GET(req: Request) {
         minScore: Number.isFinite(minScore) ? minScore : 55,
         limit: Number.isFinite(limit) ? limit : 40,
         volumeOnly,
+        bottomConfluenceOnly,
+        qualityOnly,
         symbols,
         assetClass: (asset === "multi" ? "stock" : asset) as "stock" | "forex" | "crypto",
       };
