@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Loading, Panel } from "@/components/ui";
 import { FlatsIcon } from "@/components/screener-icons";
@@ -31,28 +31,65 @@ type Universe =
   | "macro-radar"
   | "alpha-beta";
 
-const UNIVERSE_TABS: { id: Universe; label: string }[] = [
-  { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine)" },
-  { id: "quant-edge", label: "Ưu Thế Quant (Statistical Alpha)" },
-  { id: "confluence", label: "Siêu Hội Tụ (Orca Confluence Pro)" },
-  { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế" },
-  { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
-  { id: "stocks", label: "Cổ phiếu VN" },
-  { id: "oquant-quant", label: "OQuant AI Bot & Quant" },
-  { id: "ma-cross", label: "Đường MA (Golden/Death Cross)" },
-  { id: "sector-flow", label: "Dòng tiền ngành" },
-  { id: "four-m", label: "Bộ lọc 4M" },
-  { id: "canslim", label: "CANSLIM" },
-  { id: "divergence", label: "Phân kỳ" },
-  { id: "alpha-beta", label: "Hệ số cổ phiếu" },
-  { id: "candlestick", label: "Mẫu nến" },
-  { id: "minervini", label: "Minervini" },
-  { id: "wyckoff", label: "Wyckoff" },
-  { id: "elliott", label: "Sóng Elliott" },
-  { id: "valuation", label: "Định giá P" },
-  { id: "fundamental", label: "Chỉ số cơ bản" },
-  { id: "crypto", label: "Tiền mã hóa" },
+export type ScreenerGroupId = "growth_trend" | "quant_alpha" | "macro_sector" | "fundamental_val";
+
+export const SCREENER_GROUPS: {
+  id: ScreenerGroupId;
+  title: string;
+  badge: string;
+  items: { id: Universe; label: string }[];
+}[] = [
+  {
+    id: "quant_alpha",
+    title: "Định lượng & Dòng tiền",
+    badge: "Quant Edge",
+    items: [
+      { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
+      { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
+      { id: "confluence", label: "Siêu Hội Tụ (Confluence)" },
+      { id: "oquant-quant", label: "OQuant AI Studio & Bots" },
+      { id: "ma-cross", label: "Đường MA (Golden/Death Cross)" },
+      { id: "divergence", label: "Phân kỳ (Divergence)" },
+      { id: "alpha-beta", label: "Hệ số Alpha / Beta" },
+    ],
+  },
+  {
+    id: "growth_trend",
+    title: "Tăng trưởng & Hành vi giá",
+    badge: "Trend & Patterns",
+    items: [
+      { id: "canslim", label: "CANSLIM" },
+      { id: "four-m", label: "Bộ lọc 4M (Phil Town)" },
+      { id: "minervini", label: "Minervini Trend Template" },
+      { id: "wyckoff", label: "Wyckoff VSA" },
+      { id: "elliott", label: "Sóng Elliott" },
+      { id: "candlestick", label: "Mẫu nến đảo chiều" },
+    ],
+  },
+  {
+    id: "macro_sector",
+    title: "Vĩ mô & Luân chuyển Ngành",
+    badge: "Macro & Flow",
+    items: [
+      { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ" },
+      { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
+      { id: "sector-flow", label: "Dòng tiền theo ngành" },
+      { id: "stocks", label: "Cổ phiếu VN Tổng hợp" },
+      { id: "crypto", label: "Tiền mã hóa Crypto" },
+    ],
+  },
+  {
+    id: "fundamental_val",
+    title: "Cơ bản & Định giá",
+    badge: "Valuation & Health",
+    items: [
+      { id: "valuation", label: "Định giá P/E & P/B" },
+      { id: "fundamental", label: "Chỉ số tài chính cơ bản" },
+    ],
+  },
 ];
+
+const UNIVERSE_TABS: { id: Universe; label: string }[] = SCREENER_GROUPS.flatMap((g) => g.items);
 
 function parseUniverse(raw: string | null): Universe {
   const allowed = new Set(UNIVERSE_TABS.map((t) => t.id));
@@ -173,6 +210,18 @@ function ScreenerInner() {
   const [showBacktest, setShowBacktest] = useState(false);
   const sector = params.get("sector");
 
+  const initialGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id ?? "quant_alpha";
+  const [selectedGroup, setSelectedGroup] = useState<ScreenerGroupId>(initialGroup);
+
+  useEffect(() => {
+    const parentGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id;
+    if (parentGroup && parentGroup !== selectedGroup) {
+      setSelectedGroup(parentGroup);
+    }
+  }, [universe, selectedGroup]);
+
+  const currentGroupItems = SCREENER_GROUPS.find((g) => g.id === selectedGroup)?.items ?? SCREENER_GROUPS[0].items;
+
   let body: React.ReactNode;
   switch (universe) {
     case "multi-source":
@@ -273,9 +322,39 @@ function ScreenerInner() {
               Backtest Mô Phỏng (OQuant)
             </button>
           </div>
-          <div className="seg-scroll mt-3">
-            <div className="seg" role="tablist" aria-label="Chọn bộ lọc">
-              {UNIVERSE_TABS.map((tab) => (
+          {/* Tier 1: 4 Strategy Groups */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-border-subtle/80">
+            {SCREENER_GROUPS.map((g) => {
+              const active = selectedGroup === g.id;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedGroup(g.id);
+                    if (!g.items.some((item) => item.id === universe)) {
+                      setUniverse(g.items[0].id);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    active
+                      ? "bg-accent-primary/20 text-accent-primary border border-accent-primary/40 shadow-xs"
+                      : "bg-surface-elevated/70 text-text-secondary border border-border-subtle hover:text-text-primary hover:bg-surface-elevated"
+                  }`}
+                >
+                  <span>{g.title}</span>
+                  <span className={`text-[10px] px-1 py-0.2 rounded font-mono ${active ? "bg-accent-primary/30 text-accent-primary" : "text-text-muted"}`}>
+                    {g.items.length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Tier 2: Sub-filters in selected group */}
+          <div className="seg-scroll mt-2">
+            <div className="seg" role="tablist" aria-label="Chọn bộ lọc chi tiết">
+              {currentGroupItems.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
@@ -284,7 +363,6 @@ function ScreenerInner() {
                   data-active={universe === tab.id}
                   onClick={() => setUniverse(tab.id)}
                   onMouseEnter={() => {
-                    // P5-A: warm screener API on tab hover
                     if (tab.id === "ma-cross") prefetchApi("/api/v1/screener/ma-cross", 10_000);
                     else if (tab.id === "fundamental") prefetchApi("/api/v1/screener/fundamental", 12_000);
                     else if (tab.id === "valuation") prefetchApi("/api/v1/screener/valuation", 12_000);

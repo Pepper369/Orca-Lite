@@ -258,14 +258,7 @@ export default function AgentPage() {
   const showSuggestions = messages.length <= 2;
 
   return (
-    <div
-      className="agent-shell mx-auto flex w-full max-w-3xl flex-col gap-2 overflow-x-clip"
-      style={{
-        height: "calc(100dvh - 9.5rem)",
-        maxHeight: "calc(100dvh - 9.5rem)",
-        minHeight: 0,
-      }}
-    >
+    <div className="agent-shell mx-auto flex h-full min-h-0 w-full max-w-4xl flex-1 flex-col gap-2 overflow-x-clip">
       <Panel pad={false} className="shrink-0">
         <div className="flex items-center justify-between gap-3 p-3 sm:p-4">
           <div className="min-w-0">

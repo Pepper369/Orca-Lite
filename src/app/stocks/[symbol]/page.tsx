@@ -1,17 +1,39 @@
 "use client";
 
 import { memo, useEffect, useMemo, useState, useRef, use } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useApi } from "@/lib/hooks";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import type { Meta } from "@/lib/types";
-import { FreshnessDot, Loading, Panel, Unavailable, ErrorState, FreshnessAlertBanner, SyncMetricBadge } from "@/components/ui";
+import {
+  FreshnessDot,
+  Loading,
+  Panel,
+  Unavailable,
+  ErrorState,
+  FreshnessAlertBanner,
+  SyncMetricBadge,
+  Badge,
+  fmtCompact,
+  fmtNum,
+} from "@/components/ui";
 import {
   Activity,
   ArrowDownRight,
   ArrowUpRight,
   ShieldCheck,
+  TrendingUp,
+  FileSpreadsheet,
+  Calculator,
+  Users,
+  Newspaper,
+  Bot,
+  BarChart3,
+  ArrowLeft,
+  Sparkles,
 } from "lucide-react";
+import { AddToWatchlist } from "@/components/watchlist-button";
 import { OrcaChart } from "@/components/orca-chart";
 import { StockNewsSentiment } from "@/components/stocks/news-sentiment-chip";
 import { CompanyNewsPanel } from "@/components/stocks/company-news-panel";
@@ -227,14 +249,15 @@ const ConsensusUpsideCard = dynamic(
 );
 
 
-const SECTION_NAV = [
-  { id: "sec-chart", label: "Biểu đồ" },
-  { id: "sec-signals", label: "Tín hiệu & cấu trúc" },
-  { id: "sec-quant", label: "Định lượng, BCTC & Cổ đông" },
-  { id: "sec-audit", label: "AI Quick Audit" },
-  { id: "sec-deep", label: "Báo cáo phân tích & Công văn ký số" },
+const FIREANT_TABS = [
+  { id: "overview", label: "Tổng quan & Kỹ thuật", icon: TrendingUp },
+  { id: "financials", label: "Báo cáo Tài chính", icon: FileSpreadsheet },
+  { id: "valuation", label: "Định giá & AI Quant", icon: Calculator },
+  { id: "shareholders", label: "Cổ đông & Ban LĐ", icon: Users },
+  { id: "news", label: "Tin tức & Báo cáo CTCK", icon: Newspaper },
 ] as const;
 
+type FireantTabId = (typeof FIREANT_TABS)[number]["id"];
 
 const TREND_VI: Record<string, string> = {
   "strong-up": "Tăng mạnh",
@@ -251,15 +274,6 @@ const MONEY_FLOW_VI: Record<string, string> = {
   outflow: "Ra",
   "strong-outflow": "Ra mạnh",
 };
-
-const ANCHOR_OFFSET =
-  "calc(var(--stock-sticky-h, 4.65rem) + var(--stock-nav-h, 2.2rem) + 0.45rem)";
-
-function scrollToSection(id: string) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "start" });
-}
 
 const DecisionStrip = memo(function DecisionStrip({
   quote,
@@ -397,20 +411,18 @@ const MetricChip = memo(function MetricChip({
 export default function StockDetailPage({ params }: { params: Promise<{ symbol: string }> }) {
   const resolvedParams = use(params);
   const symbol = resolvedParams.symbol.toUpperCase();
-  const [activeSection, setActiveSection] = useState<string>(SECTION_NAV[0].id);
-  const navRef = useRef<HTMLElement>(null);
+  const [activeTab, setActiveTab] = useState<FireantTabId>("overview");
+  const [microTab, setMicroTab] = useState<"orderbook" | "flow" | "decision">("orderbook");
 
   const { res, data, meta, isLoading, isValidating, mutate } = useApi<VnStockDetail>(
     symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}` : null,
     {
       refreshInterval: 15_000,
-      // P6-B: tighter client timeout; soft shell covers cold path
       timeoutMs: 12_000,
       keepPreviousData: true,
     },
   );
 
-  // P6-B: progressive — paint as soon as we have a price OR any bars (not wait for 20)
   const hasQuote = Boolean(data?.quote?.price && data.quote.price > 0);
   const hasBars = Boolean(data?.bars && data.bars.length >= 5);
   const isFull = Boolean(hasQuote && data?.bars && data.bars.length >= 20);
@@ -438,50 +450,6 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
     }, 400);
     return () => window.clearTimeout(t);
   }, [symbol, isLoading, isValidating, mutate, isFull, retried]);
-
-  useEffect(() => {
-    if (!data?.symbol) return;
-    const ids = SECTION_NAV.map((s) => s.id);
-    const els = ids.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
-    if (!els.length) return;
-
-    let raf = 0;
-    const io = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        const id = visible[0]?.target?.id;
-        if (!id) return;
-        cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => {
-          setActiveSection((prev) => (prev === id ? prev : id));
-        });
-      },
-      {
-        root: document.querySelector(".orca-main-scroll"),
-        rootMargin: "-18% 0px -50% 0px",
-        threshold: [0.12, 0.25, 0.45],
-      },
-    );
-    for (const el of els) io.observe(el);
-    return () => {
-      cancelAnimationFrame(raf);
-      io.disconnect();
-    };
-  }, [data?.symbol]);
-
-  useEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const btn = nav.querySelector<HTMLElement>(`[data-section="${activeSection}"]`);
-    if (!btn) return;
-    const navRect = nav.getBoundingClientRect();
-    const btnRect = btn.getBoundingClientRect();
-    const delta =
-      btnRect.left - navRect.left - (navRect.width - btnRect.width) / 2;
-    nav.scrollTo({ left: nav.scrollLeft + delta, behavior: "smooth" });
-  }, [activeSection]);
 
   const sec = useMemo(() => (symbol ? getSecurity(symbol) : null), [symbol]);
   const bootQuote = useMemo(() => {
@@ -528,31 +496,134 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
 
   if (!symbol) {
     return (
-      <div className="stock-workspace">
+      <div className="p-4">
         <Loading rows={3} label="Đang mở mã cổ phiếu…" />
       </div>
     );
   }
 
+  const quote = detail.quote;
+  const chg = quote?.changePercent ?? 0;
+  const isCeil = quote?.ceilingPrice && quote?.price && Math.abs(quote.price - quote.ceilingPrice) <= 0.051;
+  const isFloor = quote?.floorPrice && quote?.price && Math.abs(quote.price - quote.floorPrice) <= 0.051;
+  const priceTone = isCeil
+    ? "text-purple-400"
+    : isFloor
+      ? "text-sky-400"
+      : chg > 0
+        ? "text-positive"
+        : chg < 0
+          ? "text-negative"
+          : "text-amber-300";
+
+  const priceVal = quote?.price != null ? quote.price.toLocaleString("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 2 }) : "—";
+  const chgVal = quote?.change != null ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}` : "—";
+  const chgPctVal = quote?.changePercent != null ? `${quote.changePercent > 0 ? "+" : ""}${quote.changePercent.toFixed(2)}%` : "—";
+  const refVal = quote?.referencePrice != null ? quote.referencePrice.toFixed(2) : "—";
+  const ceilVal = quote?.ceilingPrice != null ? quote.ceilingPrice.toFixed(2) : "—";
+  const floorVal = quote?.floorPrice != null ? quote.floorPrice.toFixed(2) : "—";
+
+  const estValVnd = quote?.price && quote?.volume ? (quote.price * quote.volume * 1000) : null;
+  const estValFormatted = estValVnd != null ? `${(estValVnd / 1e9).toFixed(1)} Tỷ` : "—";
+
+  const fBuy = (quote as any)?.foreignBuyVolume ?? 0;
+  const fSell = (quote as any)?.foreignSellVolume ?? 0;
+  const fNet = ((quote as any)?.foreignBuyVolume != null && (quote as any)?.foreignSellVolume != null) ? (fBuy - fSell) : null;
+  const fNetTone = fNet == null ? "text-text-muted" : fNet > 0 ? "text-positive" : fNet < 0 ? "text-negative" : "text-text-secondary";
+  const fNetFormatted = fNet == null ? "—" : `${fNet > 0 ? "+" : ""}${fmtCompact(fNet)} CP`;
+
   return (
-    <div className="stock-workspace stock-page-body">
-      <nav ref={navRef} className="stock-section-nav" aria-label="Mục trang">
-        {SECTION_NAV.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            data-section={s.id}
-            data-active={activeSection === s.id ? "true" : "false"}
-            className="stock-section-nav-item"
-            onClick={() => {
-              setActiveSection(s.id);
-              scrollToSection(s.id);
-            }}
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
+    <div className="space-y-2.5 pb-8">
+      {/* 1. FireAnt Pro Stock Station Header */}
+      <div className="fireant-hero p-3 sm:p-3.5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Left: Ticker, Name, Badges & Price */}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1">
+              <Link
+                href="/stocks"
+                className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors pr-1"
+                title="Quay lại Bảng điện VN"
+              >
+                <ArrowLeft className="size-3.5" />
+                <span className="hidden sm:inline">Bảng điện</span>
+              </Link>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-text-primary font-mono">
+                {detail.symbol}
+              </h1>
+              <Badge tone="accent">{detail.profile?.floor ?? sec?.exchange ?? "HOSE"}</Badge>
+              {sec?.sector && (
+                <Badge tone="neutral">{sec.sector}</Badge>
+              )}
+              <span className="text-xs text-text-muted truncate max-w-xs hidden md:inline">
+                {detail.profile?.vnName ?? sec?.name ?? detail.name}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-baseline gap-2.5 sm:gap-3.5 mt-1">
+              <span className={`text-2xl sm:text-3xl font-black font-mono tabular-nums ${priceTone}`}>
+                {priceVal}
+              </span>
+              <span className={`inline-flex items-center text-sm sm:text-base font-bold font-mono ${priceTone}`}>
+                {chgVal} ({chgPctVal})
+              </span>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 font-mono font-semibold" title="Giá tham chiếu">
+                  TC: {refVal}
+                </span>
+                <span className="px-1.5 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-300 font-mono font-semibold" title="Giá trần">
+                  Trần: {ceilVal}
+                </span>
+                <span className="px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 font-mono font-semibold" title="Giá sàn">
+                  Sàn: {floorVal}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Key Session Stats & Quick Actions */}
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2 text-xs">
+              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-text-muted">Tổng KL</div>
+                <div className="font-mono font-bold text-text-primary mt-0.5">{fmtCompact(quote?.volume ?? 0)}</div>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-text-muted">Cao / Thấp</div>
+                <div className="font-mono font-bold text-text-primary mt-0.5">
+                  <span className="text-positive">{fmtNum(quote?.high, 1)}</span> / <span className="text-negative">{fmtNum(quote?.low, 1)}</span>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-text-muted">Giá trị GD</div>
+                <div className="font-mono font-bold text-text-primary mt-0.5">{estValFormatted}</div>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-surface-elevated/70 px-2.5 py-1">
+                <div className="text-[10px] uppercase tracking-wider text-text-muted">Ngoại Net</div>
+                <div className={`font-mono font-bold mt-0.5 ${fNetTone}`}>{fNetFormatted}</div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 ml-auto lg:ml-0">
+              <AddToWatchlist symbol={detail.symbol} assetType="stock" />
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("orca:open-ai-widget", {
+                      detail: { prompt: `Phân tích toàn diện cổ phiếu ${detail.symbol}: tài chính, kỹ thuật, dòng tiền và định giá` },
+                    }),
+                  );
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-accent-primary/40 bg-accent-primary/15 text-accent-primary text-xs font-semibold hover:bg-accent-primary/25 transition-all active:scale-95 shadow-xs"
+              >
+                <Bot className="size-3.5" />
+                <span>Hỏi AI</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {meta?.freshness && (meta.freshness === "DELAYED" || meta.freshness === "STALE" || meta.degraded) && (
         <FreshnessAlertBanner
@@ -560,153 +631,189 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
           ageMs={meta.ageMs}
           note={meta.note}
           source={meta.source}
-          className="mb-2"
+          className="mb-1"
         />
       )}
 
-      <DecisionStrip quote={detail.quote} technical={detail.technical} meta={meta ?? null} />
-
-      <section id="sec-chart" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
-        <div className="stock-section-heading">
-          <div>
-            <p className="stock-section-kicker">Depth · Chart · Breadth · Orca Live Flow</p>
-            <h2>Sổ lệnh · Biểu đồ · Dòng tiền ngoại & Độ rộng</h2>
+      {/* 2. Above-the-fold FireAnt Workstation (Split Pane: Chart 65% + Micro Station 35%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        {/* Left Column (65% width): Technical Chart */}
+        <div className="lg:col-span-8 flex flex-col rounded-xl border border-border-subtle bg-surface-primary overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-subtle/80 bg-surface-elevated/50">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                <BarChart3 className="size-3.5 text-accent-primary" />
+                Biểu đồ kỹ thuật
+              </span>
+              <span className="text-[11px] font-mono text-text-muted">
+                {detail.symbol} · {detail.quote?.price ? detail.quote.price.toFixed(2) : ""}
+              </span>
+            </div>
+            <FreshnessDot status={meta?.freshness} ageMs={meta?.ageMs} />
           </div>
-          <span className="stock-section-index">01</span>
-        </div>
-        <div className="mb-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <ErrorBoundary name="active-flow" resetKey={detail.symbol}>
-            <ActiveFlowCard symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="foreign-gauge" resetKey={detail.symbol}>
-            <ForeignPressureGauge symbol={detail.symbol} />
-          </ErrorBoundary>
-        </div>
-        <div className="stock-chart-trio-grid">
-          <div className="stock-side-depth">
-            <ErrorBoundary name="orderbook" resetKey={detail.symbol}>
-              <OrderBookPanel symbol={detail.symbol} compact />
-            </ErrorBoundary>
-          </div>
-          <div className="stock-chart-frame stock-chart-frame--compact">
+          <div className="flex-1 min-h-[380px] sm:min-h-[460px] p-1 bg-surface-primary">
             <ErrorBoundary name="chart" resetKey={detail.symbol}>
-              <OrcaChart symbol={detail.symbol} assetType="stock" title={detail.symbol} height={340} />
-            </ErrorBoundary>
-          </div>
-          <div className="stock-side-breadth">
-            <ErrorBoundary name="breadth" resetKey={detail.symbol}>
-              <MarketBreadthCard />
+              <OrcaChart symbol={detail.symbol} assetType="stock" title={detail.symbol} height={460} />
             </ErrorBoundary>
           </div>
         </div>
-      </section>
 
-      <section
-        id="sec-signals"
-        className="stock-section-card"
-        style={{ scrollMarginTop: ANCHOR_OFFSET }}
-        aria-labelledby="sec-signals-title"
-      >
-        <div className="stock-section-heading" id="sec-signals-title">
-          <div>
-            <p className="stock-section-kicker">Signals · Structure</p>
-            <h2>Tín hiệu & cấu trúc mẫu hình</h2>
+        {/* Right Column (35% width): Micro-Market Station with Inner Tabs */}
+        <div className="lg:col-span-4 flex flex-col rounded-xl border border-border-subtle bg-surface-primary overflow-hidden shadow-sm">
+          <div className="fireant-micro-tabs">
+            <button
+              type="button"
+              data-active={microTab === "orderbook"}
+              onClick={() => setMicroTab("orderbook")}
+              className="fireant-micro-tab-btn"
+            >
+              Sổ lệnh 3 giá
+            </button>
+            <button
+              type="button"
+              data-active={microTab === "flow"}
+              onClick={() => setMicroTab("flow")}
+              className="fireant-micro-tab-btn"
+            >
+              Dòng tiền & Ngoại
+            </button>
+            <button
+              type="button"
+              data-active={microTab === "decision"}
+              onClick={() => setMicroTab("decision")}
+              className="fireant-micro-tab-btn"
+            >
+              Tín hiệu & Setup
+            </button>
           </div>
-          <span className="stock-section-index">02</span>
-        </div>
-        <div className="grid gap-3 lg:grid-cols-2">
-          <ErrorBoundary name="tech-reco" resetKey={detail.symbol}>
-            <TechRecoPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="patterns" resetKey={detail.symbol}>
-            <PatternAnalysisHub symbol={detail.symbol} technical={detail.technical} patterns={detail.patterns} />
-          </ErrorBoundary>
-        </div>
-      </section>
 
-      <section
-        id="sec-quant"
-        className="stock-section-card"
-        style={{ scrollMarginTop: ANCHOR_OFFSET }}
-        aria-labelledby="sec-quant-title"
-      >
-        <div className="stock-section-heading" id="sec-quant-title">
-          <div>
-            <p className="stock-section-kicker">OQuant Quantitative · Orca IQ · Fair Value · Banking & Shareholders</p>
-            <h2>Dải định giá AI, Dòng tiền, Phân rã BCTC & Sổ cổ đông</h2>
+          <div className="flex-1 p-2 sm:p-2.5 overflow-y-auto max-h-[500px]">
+            {microTab === "orderbook" && (
+              <ErrorBoundary name="orderbook" resetKey={detail.symbol}>
+                <OrderBookPanel symbol={detail.symbol} compact />
+              </ErrorBoundary>
+            )}
+            {microTab === "flow" && (
+              <div className="space-y-2.5">
+                <ErrorBoundary name="active-flow" resetKey={detail.symbol}>
+                  <ActiveFlowCard symbol={detail.symbol} />
+                </ErrorBoundary>
+                <ErrorBoundary name="foreign-gauge" resetKey={detail.symbol}>
+                  <ForeignPressureGauge symbol={detail.symbol} />
+                </ErrorBoundary>
+              </div>
+            )}
+            {microTab === "decision" && (
+              <div className="space-y-2.5">
+                <DecisionStrip quote={detail.quote} technical={detail.technical} meta={meta ?? null} />
+                <ErrorBoundary name="breadth" resetKey={detail.symbol}>
+                  <MarketBreadthCard />
+                </ErrorBoundary>
+              </div>
+            )}
           </div>
-          <span className="stock-section-index">03</span>
         </div>
-        <div className="space-y-4">
-          <ErrorBoundary name="quant-flow" resetKey={detail.symbol}>
-            <StockQuantFlowValuationWidget symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="deep-financials" resetKey={detail.symbol}>
-            <DeepFinancialsPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="comprehensive-ratios" resetKey={detail.symbol}>
-            <ComprehensiveRatiosPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="shareholders" resetKey={detail.symbol}>
-            <ShareholdersPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="insider-trading" resetKey={detail.symbol}>
-            <InsiderTradingPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="business-goals" resetKey={detail.symbol}>
-            <BusinessGoalsPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="dividend-intelligence" resetKey={detail.symbol}>
-            <DividendIntelligencePanel symbol={detail.symbol} />
-          </ErrorBoundary>
-        </div>
-      </section>
+      </div>
 
-      <section
-        id="sec-audit"
-        className="stock-section-card"
-        style={{ scrollMarginTop: ANCHOR_OFFSET }}
-        aria-labelledby="sec-audit-title"
-      >
-        <div className="stock-section-heading" id="sec-audit-title">
-          <div>
-            <p className="stock-section-kicker">AI Valuation · 4M Phil Town · Orca Health</p>
-            <h2>AI Quick Audit BCTC & Định giá 1-Click</h2>
-          </div>
-          <span className="stock-section-index">04</span>
+      {/* 3. Deep Financial Intelligence: 5 FireAnt Station Tabs */}
+      <div className="rounded-xl border border-border-subtle bg-surface-primary overflow-hidden shadow-sm">
+        <div className="fireant-tab-nav">
+          {FIREANT_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                data-active={active ? "true" : "false"}
+                onClick={() => setActiveTab(tab.id)}
+                className="fireant-tab-btn"
+              >
+                <Icon className="size-4 opacity-90" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
-        <ErrorBoundary name="ai-financial" resetKey={detail.symbol}>
-          <AiFinancialPanel symbol={detail.symbol} />
-        </ErrorBoundary>
-      </section>
 
-      <section id="sec-deep" className="stock-section-card" style={{ scrollMarginTop: ANCHOR_OFFSET }}>
-        <div className="stock-section-heading">
-          <div>
-            <p className="stock-section-kicker">Orca Research & Official HOSE/HNX Disclosures</p>
-            <h2>Báo cáo phân tích, Văn bản ký số & Tin tức thị trường</h2>
-          </div>
-          <span className="stock-section-index">05</span>
-        </div>
-        <div className="space-y-4">
-          <ErrorBoundary name="consensus-upside" resetKey={detail.symbol}>
-            <ConsensusUpsideCard symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="analytic-reports" resetKey={detail.symbol}>
-            <AnalyticReportsPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="signed-disclosures" resetKey={detail.symbol}>
-            <SignedDisclosuresPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
-            <StockNewsSentiment symbol={detail.symbol} />
-          </ErrorBoundary>
-          <ErrorBoundary name="company-news" resetKey={detail.symbol}>
-            <CompanyNewsPanel symbol={detail.symbol} />
-          </ErrorBoundary>
-        </div>
-      </section>
+        <div className="p-3 sm:p-4">
+          {activeTab === "overview" && (
+            <div className="space-y-3.5">
+              <div className="grid gap-3 lg:grid-cols-2">
+                <ErrorBoundary name="tech-reco" resetKey={detail.symbol}>
+                  <TechRecoPanel symbol={detail.symbol} />
+                </ErrorBoundary>
+                <ErrorBoundary name="patterns" resetKey={detail.symbol}>
+                  <PatternAnalysisHub symbol={detail.symbol} technical={detail.technical} patterns={detail.patterns} />
+                </ErrorBoundary>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <ErrorBoundary name="consensus-upside" resetKey={detail.symbol}>
+                  <ConsensusUpsideCard symbol={detail.symbol} />
+                </ErrorBoundary>
+                <ErrorBoundary name="business-goals" resetKey={detail.symbol}>
+                  <BusinessGoalsPanel symbol={detail.symbol} />
+                </ErrorBoundary>
+              </div>
+            </div>
+          )}
 
+          {activeTab === "financials" && (
+            <div className="space-y-3.5">
+              <ErrorBoundary name="deep-financials" resetKey={detail.symbol}>
+                <DeepFinancialsPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="comprehensive-ratios" resetKey={detail.symbol}>
+                <ComprehensiveRatiosPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="dividend-intelligence" resetKey={detail.symbol}>
+                <DividendIntelligencePanel symbol={detail.symbol} />
+              </ErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === "valuation" && (
+            <div className="space-y-3.5">
+              <ErrorBoundary name="ai-financial" resetKey={detail.symbol}>
+                <AiFinancialPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="quant-flow" resetKey={detail.symbol}>
+                <StockQuantFlowValuationWidget symbol={detail.symbol} />
+              </ErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === "shareholders" && (
+            <div className="space-y-3.5">
+              <ErrorBoundary name="shareholders" resetKey={detail.symbol}>
+                <ShareholdersPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="insider-trading" resetKey={detail.symbol}>
+                <InsiderTradingPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === "news" && (
+            <div className="space-y-3.5">
+              <div className="grid gap-3 lg:grid-cols-2">
+                <ErrorBoundary name="company-news" resetKey={detail.symbol}>
+                  <CompanyNewsPanel symbol={detail.symbol} />
+                </ErrorBoundary>
+                <ErrorBoundary name="news-sent" resetKey={detail.symbol}>
+                  <StockNewsSentiment symbol={detail.symbol} />
+                </ErrorBoundary>
+              </div>
+              <ErrorBoundary name="signed-disclosures" resetKey={detail.symbol}>
+                <SignedDisclosuresPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="analytic-reports" resetKey={detail.symbol}>
+                <AnalyticReportsPanel symbol={detail.symbol} />
+              </ErrorBoundary>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

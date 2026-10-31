@@ -202,6 +202,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPersonalFinanceMode = pathname.startsWith("/personal-finance");
+  const isFullViewport = pathname === "/agent" || pathname === "/stocks";
   const activeNavSections = isPersonalFinanceMode ? PERSONAL_FINANCE_NAV : NAV_SECTIONS;
   const [activePersonalTab, setActivePersonalTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
@@ -546,13 +547,27 @@ export function ShellInner({ children }: { children: ReactNode }) {
               )}
             </div>
           </header>
-          <main className="orca-main-scroll min-h-0 flex-1 overflow-y-auto pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
-            <ErrorBoundary name="page" resetKey={pathname}>
-              <div key={pathname} className="orca-page-transition p-2.5 sm:p-4">
-                {children}
-              </div>
-            </ErrorBoundary>
-          </main>
+          <main
+            className={
+              "orca-main-scroll min-h-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0 " +
+              (isFullViewport ? "overflow-y-auto md:overflow-hidden flex flex-col" : "overflow-y-auto")
+            }
+          >
+              <ErrorBoundary name="page" resetKey={pathname}>
+                <div
+                  key={pathname}
+                  className={
+                    "orca-page-transition " +
+                    (isFullViewport
+                      ? "flex-1 min-h-0 flex flex-col p-1.5 sm:p-2.5"
+                      : "p-2 sm:p-3.5 max-w-[1600px] mx-auto w-full")
+                  }
+                >
+                  {children}
+                </div>
+              </ErrorBoundary>
+            </main>
+          );
         </div>
       </div>
       <MobileBottomNav
