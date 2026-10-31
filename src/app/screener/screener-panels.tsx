@@ -63,7 +63,38 @@ export function Field({
   );
 }
 
-type ViewTab = "overview" | "confluence" | "technical" | "valuation" | "profitability" | "health";
+type ViewTab = "overview" | "quant" | "confluence" | "technical" | "valuation" | "profitability" | "health";
+
+export function QuantBadge({
+  badge,
+  score,
+}: {
+  badge: "SUPER_QUANT" | "QUANT_EDGE" | "WATCH" | "NEUTRAL" | string | null | undefined;
+  score?: number | null;
+}) {
+  if (badge === "SUPER_QUANT") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold text-cyan-300 whitespace-nowrap shadow-sm">
+        <Zap className="size-3 text-cyan-300" /> SIÊU QUANT {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  if (badge === "QUANT_EDGE") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 whitespace-nowrap">
+        ƯU THẾ QUANT {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  if (badge === "WATCH") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 whitespace-nowrap">
+        Theo dõi {score ? `(${score}đ)` : ""}
+      </span>
+    );
+  }
+  return <span className="text-[10px] text-text-muted">{score ? `${score}đ` : "—"}</span>;
+}
 
 export function ConfluenceBadge({
   badge,
@@ -158,6 +189,10 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "quant_edge", label: "Ưu thế Quant Pro", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
+  { id: "quant_mean_revert", label: "Mean Reversion OU", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ t½" },
+  { id: "quant_low_beta", label: "Low-Beta Anomaly", icon: <ShieldCheck className="size-3.5 text-blue-400" />, desc: "Bất thường học thuyết AQR: Beta <= 0.88 & Chất lượng cao" },
+  { id: "quant_asymmetric", label: "Triple-Barrier R/R >= 2.0", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Tỷ lệ Lời/Lỗ tối ưu theo mô hình biến động Marcos López de Prado" },
   { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "vcp", label: "Mẫu hình VCP / Cốc", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
   { id: "ttm_squeeze", label: "Nén Squeeze", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
@@ -173,10 +208,12 @@ export function VnScreener({
   defaultSector,
   defaultPreset = "all",
   defaultView = "overview",
+  onOpenBacktest,
 }: {
   defaultSector: string | null;
   defaultPreset?: ScreenerPreset;
   defaultView?: ViewTab;
+  onOpenBacktest?: (symbol?: string) => void;
 }) {
   // Preset & Tab state
   const [preset, setPreset] = useState<ScreenerPreset>(defaultPreset);
@@ -606,6 +643,18 @@ export function VnScreener({
             </button>
             <button
               type="button"
+              onClick={() => setViewTab("quant")}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "quant"
+                  ? "bg-panel-3 text-cyan-400 font-semibold"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Zap className="size-3 text-cyan-400" />
+              Ưu thế Quant Trading
+            </button>
+            <button
+              type="button"
               onClick={() => setViewTab("confluence")}
               className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
                 viewTab === "confluence"
@@ -718,6 +767,62 @@ export function VnScreener({
                     >
                       Điểm Orca {sortKey === "compositeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                  </>
+                )}
+
+                {viewTab === "quant" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("changePercent")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("quantEdgeScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-cyan-400"
+                    >
+                      Ưu thế Quant {sortKey === "quantEdgeScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-left font-medium">Chiến lược / Dị biệt</th>
+                    <th
+                      onClick={() => handleSort("ouZScore")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-emerald-400"
+                    >
+                      OU Z-Score {sortKey === "ouZScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("ouHalfLife")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-emerald-400"
+                    >
+                      Bán rã t½ {sortKey === "ouHalfLife" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("tripleBarrierRiskReward")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-amber-400"
+                    >
+                      R/R Barrier {sortKey === "tripleBarrierRiskReward" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-right font-medium">Chốt lời / Dừng lỗ</th>
+                    <th
+                      onClick={() => handleSort("beta")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Beta {sortKey === "beta" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("cornishFisherVaR95")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-rose-400"
+                    >
+                      VaR 95% {sortKey === "cornishFisherVaR95" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 pr-3.5 text-center font-medium">Mô phỏng</th>
                   </>
                 )}
 
@@ -974,7 +1079,91 @@ export function VnScreener({
                       </>
                     )}
 
-                    {viewTab === "confluence" && (
+                    {viewTab === "quant" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "-"}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <QuantBadge badge={row.quantBadge} score={row.quantEdgeScore} />
+                        </td>
+                        <td className="py-2.5 text-left">
+                          {row.quantAnomalyTag ? (
+                            <span className="inline-block text-[11px] font-medium text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
+                              {row.quantAnomalyTag}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right">
+                          {row.ouZScore != null ? (
+                            <span
+                              className={`font-semibold ${
+                                row.ouZScore <= -1.4
+                                  ? "text-emerald-400"
+                                  : row.ouZScore >= 1.4
+                                  ? "text-rose-400"
+                                  : "text-text-primary"
+                              }`}
+                            >
+                              {row.ouZScore > 0 ? `+${row.ouZScore}` : row.ouZScore}σ
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.ouHalfLife != null ? `${row.ouHalfLife} phiên` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.tripleBarrierRiskReward != null ? (
+                            <span
+                              className={
+                                row.tripleBarrierRiskReward >= 2.0
+                                  ? "text-amber-400 font-bold"
+                                  : "text-text-primary"
+                              }
+                            >
+                              {fmtNum(row.tripleBarrierRiskReward, 2)}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right text-[11px]">
+                          {row.tripleBarrierUpper != null && row.tripleBarrierLower != null ? (
+                            <span className="text-text-muted">
+                              <span className="text-emerald-400 font-medium">{fmtNum(row.tripleBarrierUpper / 1000, 1)}</span>
+                              {" / "}
+                              <span className="text-rose-400 font-medium">{fmtNum(row.tripleBarrierLower / 1000, 1)}</span>
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.beta != null ? fmtNum(row.beta, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.cornishFisherVaR95 != null ? `-${fmtNum(row.cornishFisherVaR95, 1)}%` : "—"}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onOpenBacktest ? onOpenBacktest(row.symbol) : undefined}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[10px] font-semibold text-emerald-400 transition-colors"
+                          >
+                            <Zap className="size-2.5" /> Backtest
+                          </button>
+                        </td>
+                      </>
+                    )}
+
+                {viewTab === "confluence" && (
                       <>
                         <td className="num py-2.5 text-right font-semibold">
                           {row.price != null ? fmtNum(row.price, 2) : "—"}
@@ -1151,9 +1340,15 @@ export function VnScreener({
                   {row.maSignal && row.maSignal !== "NEUTRAL" && (
                     <MaSignalBadge signal={row.maSignal} />
                   )}
+                  {row.quantEdgeScore != null && row.quantEdgeScore >= 55 && (
+                    <QuantBadge badge={row.quantBadge} score={row.quantEdgeScore} />
+                  )}
                 </div>
                 <div className="truncate text-[11px] text-text-muted">{row.name}</div>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-text-secondary">
+                <div className="mt-1 flex items-center gap-2 text-[10px] text-text-secondary flex-wrap">
+                  {row.quantAnomalyTag && (
+                    <span className="text-[10px] text-cyan-400 font-medium">[{row.quantAnomalyTag}]</span>
+                  )}
                   <span>P/E: {row.pe != null ? fmtNum(row.pe, 1) : "—"}</span>
                   <span>·</span>
                   <span>ROE: {row.roe != null ? `${fmtNum(row.roe, 1)}%` : "—"}</span>

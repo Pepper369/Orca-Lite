@@ -10,6 +10,7 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "multi-source"
+  | "quant-edge"
   | "confluence"
   | "stocks"
   | "oquant-quant"
@@ -32,6 +33,7 @@ type Universe =
 
 const UNIVERSE_TABS: { id: Universe; label: string }[] = [
   { id: "multi-source", label: "Đa Nguồn Pro (Orca Multi-Source Engine)" },
+  { id: "quant-edge", label: "Ưu Thế Quant (Statistical Alpha)" },
   { id: "confluence", label: "Siêu Hội Tụ (Orca Confluence Pro)" },
   { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ Kinh Tế" },
   { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
@@ -176,8 +178,25 @@ function ScreenerInner() {
     case "multi-source":
       body = <MultiSourceScreener />;
       break;
+    case "quant-edge":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="quant_edge"
+          defaultView="quant"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
     case "confluence":
-      body = <VnScreener defaultSector={sector} defaultPreset="confluence" defaultView="confluence" />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="confluence"
+          defaultView="confluence"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "macro-radar":
       body = <MacroRadarCard />;
@@ -229,7 +248,7 @@ function ScreenerInner() {
       body = <FundamentalScreener defaultSector={sector} />;
       break;
     default:
-      body = <VnScreener defaultSector={sector} />;
+      body = <VnScreener defaultSector={sector} onOpenBacktest={() => setShowBacktest(true)} />;
   }
 
   return (

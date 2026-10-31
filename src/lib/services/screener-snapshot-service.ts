@@ -14,9 +14,18 @@ import type { Meta } from "../types";
 import { batchVnOhlcv } from "./ohlcv-batch";
 import { sma, adx, ttmSqueeze, superTrend } from "../engines/oscillators";
 import { detectChartPatterns } from "../engines/chart-patterns";
+import {
+  estimateOrnsteinUhlenbeck,
+  calculateTripleBarrierLevels,
+  calculateVaRAndCVaR,
+} from "../engines/advanced-quant-math";
 
 export type ScreenerPreset =
   | "all"
+  | "quant_edge"
+  | "quant_mean_revert"
+  | "quant_low_beta"
+  | "quant_asymmetric"
   | "confluence"
   | "vcp"
   | "ttm_squeeze"
@@ -66,6 +75,19 @@ export type ScreenerStockItem = {
   chartPattern: string | null;
   confluenceScore: number; // 0-100
   confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
+  // Quant Edge Engine Fields (Advanced Mathematical Statistics)
+  quantEdgeScore?: number; // 0-100
+  quantBadge?: "SUPER_QUANT" | "QUANT_EDGE" | "WATCH" | "NEUTRAL";
+  ouZScore?: number | null; // Ornstein-Uhlenbeck Z-score deviation from equilibrium mean
+  ouHalfLife?: number | null; // Mean reversion half-life in trading days (bars)
+  ouMu?: number | null; // Long-term mean price mu
+  tripleBarrierRiskReward?: number | null; // Dynamic volatility Risk/Reward ratio
+  tripleBarrierUpper?: number | null; // Dynamic Volatility Take-Profit (VND)
+  tripleBarrierLower?: number | null; // Dynamic Volatility Stop-Loss (VND)
+  cornishFisherVaR95?: number | null; // Non-normal 95% 1-day Value at Risk (%)
+  returnSkewness?: number | null; // Positive skewness indicates upside fat tails
+  quantAnomalyTag?: string | null; // e.g. "OU Mean Reversion", "Low-Beta Anomaly", "Asymmetric R/R"
+  beta?: number | null;
   presetsPassed: ScreenerPreset[];
   compositeScore: number; // 0-100
 };
@@ -98,6 +120,9 @@ export type ScreenerFilterParams = {
   minRevenueYoy?: number;
   minNiYoy?: number;
   maSignal?: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL" | string;
+  minQuantScore?: number;
+  maxOuZScore?: number;
+  minRiskReward?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -300,6 +325,161 @@ function analyzeTechFeatures(
   };
 }
 
+function analyzeQuantFeatures(
+  bars: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[],
+  currentPrice: number | null,
+  beta: number | null,
+  qualityScore: number | null,
+  roe: number | null,
+  debtEquity: number | null,
+  volRatio20: number | null,
+  compositeScore: number
+) {
+  if (!bars || bars.length < 15) {
+    return {
+      quantEdgeScore: compositeScore,
+      quantBadge: "NEUTRAL" as const,
+      ouZScore: null,
+      ouHalfLife: null,
+      ouMu: null,
+      tripleBarrierRiskReward: null,
+      tripleBarrierUpper: null,
+      tripleBarrierLower: null,
+      cornishFisherVaR95: null,
+      returnSkewness: null,
+      quantAnomalyTag: null,
+      beta: beta != null ? Number(beta.toFixed(2)) : null,
+    };
+  }
+
+  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
+  const highs = bars.map((b) => b.high ?? b.close).filter((h) => Number.isFinite(h) && h > 0);
+  const lows = bars.map((b) => b.low ?? b.close).filter((l) => Number.isFinite(l) && l > 0);
+  const p = currentPrice ?? closes[closes.length - 1];
+
+  // 1. Ornstein-Uhlenbeck (OU) Mean Reversion Estimation
+  const ouResult = estimateOrnsteinUhlenbeck(closes);
+  const ouZ = Number.isFinite(ouResult.currentZScore) ? Number(ouResult.currentZScore.toFixed(2)) : null;
+  const ouHalfLife = Number.isFinite(ouResult.halfLife) && ouResult.halfLife < 100 ? ouResult.halfLife : null;
+  const ouMu = Number.isFinite(ouResult.mu) ? Math.round(ouResult.mu) : null;
+
+  // 2. Daily Log Returns for Cornish-Fisher VaR & Kurtosis/Skewness
+  const returns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) {
+      returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+    }
+  }
+  const riskMetrics = calculateVaRAndCVaR(returns);
+
+  // 3. Dynamic Triple-Barrier Horizons (López de Prado AFML)
+  let trSum = 0;
+  const lookback = Math.min(14, closes.length - 1);
+  for (let i = closes.length - lookback; i < closes.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trSum += tr;
+  }
+  const atr = lookback > 0 ? trSum / lookback : (p * 0.025);
+  const atrPct = p > 0 ? (atr / p) * 100 : 2.5;
+
+  const tripleBarrier = calculateTripleBarrierLevels(p, atrPct, 3.0, 1.5, 10);
+
+  // 4. Quant Alpha Edge Score Synthesis (0-100)
+  // Pillar A: Mean Reversion Statistical Edge (0-25)
+  let mrScore = 0;
+  if (ouZ != null && ouZ <= -1.8 && ouHalfLife != null && ouHalfLife <= 25) {
+    mrScore += 25; // High confidence statistical oversold bounce
+  } else if (ouZ != null && ouZ <= -1.3 && ouHalfLife != null && ouHalfLife <= 35) {
+    mrScore += 20;
+  } else if (ouZ != null && ouZ <= -0.8 && ouResult.isStationary) {
+    mrScore += 14;
+  } else if (ouResult.isStationary) {
+    mrScore += 8;
+  }
+
+  // Estimate Beta from returns volatility relative to VN-Index (benchmark daily vol ~ 1.15%, correlation ~ 0.62)
+  let finalBeta = beta;
+  if (finalBeta == null && returns.length >= 15) {
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (returns.length - 1);
+    const stockVol = Math.sqrt(variance);
+    finalBeta = Number(Math.max(0.35, Math.min(2.4, (0.62 * stockVol) / 0.0115)).toFixed(2));
+  }
+
+  // Pillar B: Factor Anomaly: Low-Beta & High-Quality (AQR / Fama-French) (0-25)
+  let factorScore = 0;
+  const b = finalBeta ?? 1.0;
+  const q = qualityScore ?? 65;
+  const r = roe ?? 10;
+  if (b <= 0.85 && q >= 70 && r >= 12) {
+    factorScore += 25; // Strong low-beta anomaly
+  } else if (b <= 0.95 && q >= 65) {
+    factorScore += 18;
+  } else if (b <= 1.1 && q >= 60) {
+    factorScore += 12;
+  } else {
+    factorScore += 6;
+  }
+
+  // Pillar C: Asymmetric Payoff & Distribution Skew (0-25)
+  let payoffScore = 0;
+  if (tripleBarrier.riskRewardRatio >= 2.0) payoffScore += 15;
+  else if (tripleBarrier.riskRewardRatio >= 1.5) payoffScore += 10;
+  else payoffScore += 5;
+
+  if (riskMetrics.skewness > 0.3) payoffScore += 10; // Favorable positive skew
+  else if (riskMetrics.skewness >= -0.2) payoffScore += 6;
+
+  // Pillar D: Quantitative Flow & Volume Momentum (0-25)
+  let quantFlowScore = 0;
+  if (volRatio20 != null && volRatio20 >= 1.5) quantFlowScore += 15;
+  else if (volRatio20 != null && volRatio20 >= 1.1) quantFlowScore += 10;
+  else quantFlowScore += 5;
+
+  if (compositeScore >= 70) quantFlowScore += 10;
+  else if (compositeScore >= 55) quantFlowScore += 6;
+
+  const quantEdgeScore = Math.min(99, Math.max(5, mrScore + factorScore + payoffScore + quantFlowScore));
+
+  let quantBadge: "SUPER_QUANT" | "QUANT_EDGE" | "WATCH" | "NEUTRAL" = "NEUTRAL";
+  if (quantEdgeScore >= 75) quantBadge = "SUPER_QUANT";
+  else if (quantEdgeScore >= 60) quantBadge = "QUANT_EDGE";
+  else if (quantEdgeScore >= 48) quantBadge = "WATCH";
+
+  // Determine Primary Anomaly Tag
+  let quantAnomalyTag = "Định lượng Trung tính";
+  if (ouZ != null && ouZ <= -1.4 && ouHalfLife != null && ouHalfLife <= 25) {
+    quantAnomalyTag = `Mean Reversion (Z=${ouZ}, t½=${ouHalfLife}d)`;
+  } else if (b <= 0.88 && q >= 70) {
+    quantAnomalyTag = `Low-Beta Anomaly (β=${b.toFixed(2)}, Q=${q})`;
+  } else if (tripleBarrier.riskRewardRatio >= 2.0 && riskMetrics.skewness > 0) {
+    quantAnomalyTag = `Bất đối xứng (R/R=${tripleBarrier.riskRewardRatio}, Skew>0)`;
+  } else if (volRatio20 != null && volRatio20 >= 1.5) {
+    quantAnomalyTag = `Dòng tiền đột biến (${volRatio20}x TB20)`;
+  } else if (quantEdgeScore >= 65) {
+    quantAnomalyTag = "Hội tụ Đa Nhân tố Quant";
+  }
+
+  return {
+    quantEdgeScore,
+    quantBadge,
+    ouZScore: ouZ,
+    ouHalfLife,
+    ouMu,
+    tripleBarrierRiskReward: tripleBarrier.riskRewardRatio,
+    tripleBarrierUpper: tripleBarrier.upperBarrierPrice,
+    tripleBarrierLower: tripleBarrier.lowerBarrierPrice,
+    cornishFisherVaR95: riskMetrics.cornishFisherVaR95Pct,
+    returnSkewness: Number(riskMetrics.skewness.toFixed(2)),
+    quantAnomalyTag,
+    beta: finalBeta != null ? Number(finalBeta.toFixed(2)) : null,
+  };
+}
+
 function calculateCompositeScore(
   quality: number | null,
   roe: number | null,
@@ -351,10 +531,30 @@ function detectPresets(item: {
   chartPattern?: string | null;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   confluenceScore: number;
+  quantEdgeScore?: number;
+  ouZScore?: number | null;
+  ouHalfLife?: number | null;
+  beta?: number | null;
+  qualityScore?: number | null;
+  tripleBarrierRiskReward?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
-  // 1. CANSLIM
+  // 1. Quant Edge Presets (Institutional Statistical Models)
+  if (item.quantEdgeScore != null && item.quantEdgeScore >= 62) {
+    passes.push("quant_edge");
+  }
+  if (item.ouZScore != null && item.ouZScore <= -1.4 && item.ouHalfLife != null && item.ouHalfLife <= 35) {
+    passes.push("quant_mean_revert");
+  }
+  if (item.beta != null && item.beta <= 0.88 && item.qualityScore != null && item.qualityScore >= 68) {
+    passes.push("quant_low_beta");
+  }
+  if (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0) {
+    passes.push("quant_asymmetric");
+  }
+
+  // 2. CANSLIM
   const roeGood = item.roe != null && item.roe >= 14;
   const growthGood = (item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15);
   const priceHealthy = item.price != null && item.price >= 8;
@@ -362,7 +562,7 @@ function detectPresets(item: {
     passes.push("canslim");
   }
 
-  // 2. High Dividend
+  // 3. High Dividend
   const divGood = item.dividendYield != null && item.dividendYield >= 5;
   const deSafe = item.debtEquity == null || item.debtEquity <= 1.5;
   const peFair = item.pe == null || (item.pe > 0 && item.pe <= 16);
@@ -370,14 +570,14 @@ function detectPresets(item: {
     passes.push("dividend");
   }
 
-  // 3. High Growth
+  // 4. High Growth
   const niHigh = item.niYoyPct != null && item.niYoyPct >= 20;
   const revHigh = item.revenueYoyPct != null && item.revenueYoyPct >= 15;
   if ((niHigh || revHigh) && (item.roe == null || item.roe >= 12)) {
     passes.push("growth");
   }
 
-  // 4. Value
+  // 5. Value
   const peCheap = item.pe != null && item.pe > 0 && item.pe <= 11;
   const pbCheap = item.pb != null && item.pb > 0 && item.pb <= 1.3;
   const roePositive = item.roe == null || item.roe >= 8;
@@ -385,14 +585,14 @@ function detectPresets(item: {
     passes.push("value");
   }
 
-  // 5. Momentum Breakout
+  // 6. Momentum Breakout
   const chgStrong = item.changePercent != null && item.changePercent >= 2.0;
   const volActive = item.volume != null && item.volume >= 100_000;
   if (chgStrong && volActive) {
     passes.push("breakout");
   }
 
-  // 6. MA Crossover Strategy (Golden Cross / Bullish Alignment)
+  // 7. MA Crossover Strategy (Golden Cross / Bullish Alignment)
   const isMaBullish = item.maSignal === "GOLDEN_CROSS" || item.maSignal === "BULLISH_ALIGN";
   const volValid = item.volume != null && item.volume >= 80_000;
   const priceValid = item.price != null && item.price >= 8;
@@ -400,12 +600,12 @@ function detectPresets(item: {
     passes.push("ma_cross");
   }
 
-  // 7. Confluence (Siêu hội tụ >= 65)
+  // 8. Confluence (Siêu hội tụ >= 65)
   if (item.confluenceScore >= 65) {
     passes.push("confluence");
   }
 
-  // 8. VCP & Classic Patterns
+  // 9. VCP & Classic Patterns
   if (
     item.chartPattern &&
     (item.chartPattern.includes("VCP") ||
@@ -417,7 +617,7 @@ function detectPresets(item: {
     passes.push("vcp");
   }
 
-  // 9. TTM Squeeze
+  // 10. TTM Squeeze
   if (item.squeezeState === "squeeze_on" || item.squeezeState === "fired_bull") {
     passes.push("ttm_squeeze");
   }
@@ -637,6 +837,18 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         const ohlcvBars = ohlcvMap.get(sym)?.bars ?? [];
         const techFeatures = analyzeTechFeatures(ohlcvBars, price, compositeScore);
 
+        const beta: number | null = null;
+        const quantFeatures = analyzeQuantFeatures(
+          ohlcvBars,
+          price,
+          beta,
+          qualityScore,
+          roe,
+          debtEquity,
+          techFeatures.volRatio20,
+          compositeScore
+        );
+
         const presetsPassed = detectPresets({
           roe,
           revenueYoyPct,
@@ -653,6 +865,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           chartPattern: techFeatures.chartPattern,
           squeezeState: techFeatures.squeezeState,
           confluenceScore: techFeatures.confluenceScore,
+          quantEdgeScore: quantFeatures.quantEdgeScore,
+          ouZScore: quantFeatures.ouZScore,
+          ouHalfLife: quantFeatures.ouHalfLife,
+          beta: quantFeatures.beta,
+          qualityScore,
+          tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
         });
 
         items.push({
@@ -692,6 +910,18 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           chartPattern: techFeatures.chartPattern,
           confluenceScore: techFeatures.confluenceScore,
           confluenceBadge: techFeatures.confluenceBadge,
+          quantEdgeScore: quantFeatures.quantEdgeScore,
+          quantBadge: quantFeatures.quantBadge,
+          ouZScore: quantFeatures.ouZScore,
+          ouHalfLife: quantFeatures.ouHalfLife,
+          ouMu: quantFeatures.ouMu,
+          tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
+          tripleBarrierUpper: quantFeatures.tripleBarrierUpper,
+          tripleBarrierLower: quantFeatures.tripleBarrierLower,
+          cornishFisherVaR95: quantFeatures.cornishFisherVaR95,
+          returnSkewness: quantFeatures.returnSkewness,
+          quantAnomalyTag: quantFeatures.quantAnomalyTag,
+          beta: quantFeatures.beta,
           presetsPassed,
           compositeScore,
         });
@@ -761,6 +991,10 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
 
   const presetsCount: Record<ScreenerPreset, number> = {
     all: allItems.length,
+    quant_edge: 0,
+    quant_mean_revert: 0,
+    quant_low_beta: 0,
+    quant_asymmetric: 0,
     confluence: 0,
     vcp: 0,
     ttm_squeeze: 0,
@@ -834,6 +1068,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.minQualityScore != null) filtered = filtered.filter((x) => x.qualityScore != null && x.qualityScore >= params.minQualityScore!);
   if (params.minRevenueYoy != null) filtered = filtered.filter((x) => x.revenueYoyPct != null && x.revenueYoyPct >= params.minRevenueYoy!);
   if (params.minNiYoy != null) filtered = filtered.filter((x) => x.niYoyPct != null && x.niYoyPct >= params.minNiYoy!);
+
+  // Quant Edge filters
+  if (params.minQuantScore != null) filtered = filtered.filter((x) => x.quantEdgeScore != null && x.quantEdgeScore >= params.minQuantScore!);
+  if (params.maxOuZScore != null) filtered = filtered.filter((x) => x.ouZScore != null && x.ouZScore <= params.maxOuZScore!);
+  if (params.minRiskReward != null) filtered = filtered.filter((x) => x.tripleBarrierRiskReward != null && x.tripleBarrierRiskReward >= params.minRiskReward!);
 
   // Filter: MA Signal
   if (params.maSignal && params.maSignal !== "ALL") {

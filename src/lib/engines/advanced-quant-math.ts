@@ -299,9 +299,10 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   const b = (count * sumXY - sumX * sumY) / denominator;
   const a = (sumY - b * sumX) / count;
 
-  // Stationarity check: b must be negative for mean reversion
+  // Stationarity check: b must be negative for mean reversion (AR(1) coeff phi = 1 + b < 1)
   const isStationary = b < 0;
-  const theta = isStationary ? -Math.log(1.0 + b) / dt : 0;
+  const phi = Math.max(1e-4, 1.0 + b);
+  const theta = isStationary ? -Math.log(phi) / dt : 0;
   const mu = isStationary ? -a / b : series[n - 1];
   const halfLife = theta > 0 ? Number((Math.log(2.0) / theta).toFixed(2)) : Infinity;
 

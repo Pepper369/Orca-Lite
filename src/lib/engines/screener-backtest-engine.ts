@@ -1,7 +1,8 @@
 import { OhlcvBar } from "../types";
 import { batchVnOhlcv } from "../services/ohlcv-batch";
+import { estimateOrnsteinUhlenbeck } from "./advanced-quant-math";
 
-export type StrategyType = "breakout" | "canslim" | "ma_cross" | "value";
+export type StrategyType = "breakout" | "canslim" | "ma_cross" | "value" | "quant_edge";
 
 export interface BacktestRequest {
   strategy?: StrategyType;
@@ -71,6 +72,10 @@ const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = 
     name: "Value Dip-Buying (Bắt đáy giá trị hồi phục)",
     desc: "Chiến lược mua gom khi cổ phiếu chiết khấu sâu (RSI < 45) và bắt đầu có nến đảo chiều cắt lên trên EMA20.",
   },
+  quant_edge: {
+    name: "Ưu Thế Quant Mean Reversion (Ornstein-Uhlenbeck & Triple-Barrier)",
+    desc: "Mô hình định lượng OU: Bắt đáy thống kê khi độ lệch Z-Score <= -1.4, chu kỳ bán rã t½ trong khoảng 2-35 phiên và giá có nến xác nhận bật tăng.",
+  },
 };
 
 const DEFAULT_UNIVERSE = [
@@ -138,7 +143,7 @@ function formatBarDate(t: number): string {
 }
 
 export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<ScreenerBacktestResult> {
-  const validStrategies: StrategyType[] = ["breakout", "canslim", "ma_cross", "value"];
+  const validStrategies: StrategyType[] = ["breakout", "canslim", "ma_cross", "value", "quant_edge"];
   const strategy: StrategyType = validStrategies.includes(req.strategy as StrategyType)
     ? (req.strategy as StrategyType)
     : "breakout";
@@ -223,6 +228,21 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
           // Mean reversion oversold recovery: RSI was < 45, now crosses above EMA20
           if (rsi14[i - 1] < 45 && currentClose > ema20[i] && currentClose > closes[i - 1]) {
             signal = true;
+          }
+        } else if (strategy === "quant_edge") {
+          // Institutional Ornstein-Uhlenbeck (OU) Mean Reversion & Volatility Asymmetry
+          // Rolling OU fit on trailing 30 bars
+          if (i >= 30) {
+            const subCloses = closes.slice(i - 30, i + 1);
+            const ou = estimateOrnsteinUhlenbeck(subCloses);
+            if (
+              ou.currentZScore <= -1.35 &&
+              ou.halfLife >= 2 &&
+              ou.halfLife <= 35 &&
+              currentClose > closes[i - 1]
+            ) {
+              signal = true;
+            }
           }
         }
 
