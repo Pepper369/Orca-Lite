@@ -200,9 +200,9 @@ export function CryptoMarketPage() {
         </div>
 
         {/* Desktop Pro Table View */}
-        <div className="hidden overflow-x-auto md:block">
+        <div className="hidden overflow-x-auto md:block max-h-[calc(100vh-250px)] overflow-y-auto">
           <table className="w-full min-w-[720px] text-[12px]">
-            <thead>
+            <thead className="sticky top-0 bg-surface-base z-10 backdrop-blur-sm">
               <tr className="border-b border-border-subtle text-left text-[10px] uppercase tracking-wider text-text-muted">
                 <th className="px-4 py-2.5 font-medium">#</th>
                 <th className="py-2.5 font-medium">Cặp giao dịch</th>

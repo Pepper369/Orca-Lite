@@ -402,200 +402,204 @@ export function DerivativesDashboard() {
         )}
       </div>
 
-      {/* Live Arbitrage & Basis Intelligence (Phase 7) */}
-      {category === "VN_FUTURES" && (
-        <DerivativesBasisWidget symbol={selectedContract?.symbol ?? "VN30F1M"} />
-      )}
+      {/* 4. WORKSTATION TÁC CHIẾN PHÁI SINH (ABOVE-THE-FOLD SPLIT PANE: CHART 8 COLS + SCALPING 4 COLS) */}
+      <div className="grid gap-3.5 lg:grid-cols-12 items-stretch">
+        {/* Cột trái: Chart nến & Basis Widget */}
+        <div className="lg:col-span-8 flex flex-col gap-3 min-w-0">
+          <Panel
+            title={
+              <span className="flex items-center gap-2">
+                <BarChart3 className="size-4 text-accent-primary" />
+                Biểu đồ nến kỹ thuật · {selectedContract?.symbol ?? selectedSymbol}
+                <span className="rounded bg-accent-primary/20 text-accent-primary text-[10px] px-2 py-0.5 font-bold">
+                  {category === "VN_FUTURES" ? "HĐTL Việt Nam" : "Hàng hóa Quốc tế"}
+                </span>
+              </span>
+            }
+            subtitle="Chuỗi nến đa khung thời gian · Hỗ trợ EMA 9/21, VWAP, Bollinger Bands, Volume, RSI, MACD & S/R"
+          >
+            <div className="pt-1">
+              <OrcaChart
+                symbol={selectedContract?.symbol ?? selectedSymbol}
+                assetType={activeAssetType}
+                defaultTimeframe="5m"
+                height={460}
+                title={`${selectedContract?.symbol ?? selectedSymbol} — ${category === "VN_FUTURES" ? "Phái sinh HĐTL" : "Hàng hóa phái sinh"}`}
+              />
+            </div>
+          </Panel>
 
-      {/* 4. BIỂU ĐỒ NẾN KỸ THUẬT REALTIME CHO HỢP ĐỒNG ĐANG CHỌN (Interactive Candlestick Chart) */}
-      <Panel
-        title={
-          <span className="flex items-center gap-2">
-            <BarChart3 className="size-4 text-accent-primary" />
-            Biểu đồ nến kỹ thuật · {selectedContract?.symbol ?? selectedSymbol}
-            <span className="rounded bg-accent-primary/20 text-accent-primary text-[10px] px-2 py-0.5 font-bold">
-              {category === "VN_FUTURES" ? "HĐTL Việt Nam" : "Hàng hóa Quốc tế"}
-            </span>
-          </span>
-        }
-        subtitle="Chuỗi nến đa khung thời gian · Hỗ trợ EMA 9/21, VWAP, Bollinger Bands, Volume, RSI, MACD & S/R"
-      >
-        <div className="pt-1">
-          <OrcaChart
-            symbol={selectedContract?.symbol ?? selectedSymbol}
-            assetType={activeAssetType}
-            defaultTimeframe="5m"
-            height={430}
-            title={`${selectedContract?.symbol ?? selectedSymbol} — ${category === "VN_FUTURES" ? "Phái sinh HĐTL" : "Hàng hóa phái sinh"}`}
-          />
+          {/* Live Arbitrage & Basis Intelligence */}
+          {category === "VN_FUTURES" && (
+            <DerivativesBasisWidget symbol={selectedContract?.symbol ?? "VN30F1M"} />
+          )}
         </div>
-      </Panel>
 
-      {/* 5. Không gian làm việc Scalping & Chi tiết Hợp đồng (Scalping Workspace) */}
-      <div className="grid gap-4 lg:grid-cols-12 items-start">
-        {/* Cột trái: Scalping Intelligence Panel chuyên sâu cho HĐTL (7/12 cols) */}
-        <div className="lg:col-span-7 h-full">
+        {/* Cột phải: Scalping Intelligence Panel chuyên sâu cho HĐTL */}
+        <div className="lg:col-span-4 flex flex-col min-w-0">
           <DerivativeScalpPanel symbol={selectedContract?.symbol ?? selectedSymbol} />
         </div>
+      </div>
 
-        {/* Cột phải: Máy tính Ký quỹ & Vị thế HĐTL (5/12 cols) */}
-        <div className="lg:col-span-5 h-full">
+      {/* 5. TẦNG THỰC THI & QUẢN TRỊ VỊ THẾ (CALCULATOR + REGIME & CONTRACTS TABLE + ALERTS) */}
+      <div className="grid gap-3.5 lg:grid-cols-12 items-start">
+        {/* Cột trái: Máy tính Ký quỹ & Regime Thị trường (5/12 cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-3.5 min-w-0">
           <ContractCalculator
             symbol={selectedContract?.symbol ?? selectedSymbol}
             currentPrice={selectedContract?.quote?.last ?? (category === "COMMODITY_FUTURES" ? 2684.5 : 1312.5)}
             multiplier={selectedContract?.multiplier ?? (category === "COMMODITY_FUTURES" ? 100 : 100_000)}
           />
+
+          <Panel title="Chế độ thị trường (Regime)" subtitle={regime?.regime.titleVi ?? "—"}>
+            <div className={`text-xl font-bold ${tone}`}>{regime?.regime.kind ?? "insufficient"}</div>
+            <p className="mt-1 text-xs text-text-muted leading-relaxed">{regime?.regime.description ?? "Chưa đủ dữ liệu tổng quan"}</p>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-text-secondary border-t border-border-subtle pt-2">
+              <div>Front: <b className="text-text-primary">{regime?.frontSymbol ?? "VN30F1M"}</b></div>
+              <div>Basis: <b className="text-text-primary">{regime?.frontBasis != null ? fmt(regime.frontBasis, 1) : "—"}</b></div>
+              <div>Curve: <b className="text-text-primary">{regime?.curveShape ?? "Normal"}</b></div>
+              <div>Flow: <b className="text-text-primary capitalize">{regime?.flowKind?.replace(/_/g, " ") ?? "Neutral"}</b></div>
+            </div>
+          </Panel>
         </div>
-      </div>
 
-      {/* 6. Tổng quan Regime & Cảnh báo toàn thị trường */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Chế độ thị trường (Regime)" subtitle={regime?.regime.titleVi ?? "—"} className="lg:col-span-1">
-          <div className={`text-xl font-bold ${tone}`}>{regime?.regime.kind ?? "insufficient"}</div>
-          <p className="mt-1 text-xs text-text-muted leading-relaxed">{regime?.regime.description ?? "Chưa đủ dữ liệu tổng quan"}</p>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-text-secondary border-t border-border-subtle pt-2">
-            <div>Front: <b className="text-text-primary">{regime?.frontSymbol ?? "VN30F1M"}</b></div>
-            <div>Basis: <b className="text-text-primary">{regime?.frontBasis != null ? fmt(regime.frontBasis, 1) : "—"}</b></div>
-            <div>Curve: <b className="text-text-primary">{regime?.curveShape ?? "Normal"}</b></div>
-            <div>Flow: <b className="text-text-primary capitalize">{regime?.flowKind?.replace(/_/g, " ") ?? "Neutral"}</b></div>
-          </div>
-        </Panel>
-
-        <Panel title="Cảnh báo Phái sinh (Alerts)" subtitle="Basis · Dòng tiền · Ngưỡng rủi ro" className="lg:col-span-2">
-          {alerts.length === 0 ? (
-            <p className="text-xs text-text-muted py-2">
-              Chưa phát hiện cảnh báo rủi ro bất thường trên các hợp đồng tương lai VN30.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {alerts.map((a) => (
-                <li key={a.id} className="flex items-start gap-2 rounded-lg border border-border-subtle bg-surface-base p-2 text-xs">
-                  <ShieldAlert
-                    className={`mt-0.5 size-4 shrink-0 ${
-                      a.severity === "critical"
-                        ? "text-rose-400"
-                        : a.severity === "warning"
-                          ? "text-amber-400"
-                          : "text-sky-400"
-                    }`}
-                  />
-                  <div>
-                    <div className="font-semibold text-text-primary">{a.titleVi}</div>
-                    <div className="text-text-muted text-[11px]">{a.detail}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-
-      {/* 7. Bảng tổng hợp Hợp đồng Phái sinh (Nhấp vào dòng để chuyển biểu đồ & scalping) */}
-      <Panel
-        title={category === "VN_FUTURES" ? "Bảng giá Hợp đồng tương lai Việt Nam (VSDC / HNX)" : "Bảng giá Hàng hóa Phái sinh Quốc tế (MXV / CME)"}
-        subtitle="Nhấp vào từng dòng để mở biểu đồ nến & scalping cho hợp đồng đó"
-      >
-        <div className="table-scroll-wrap">
-          <table className="w-full min-w-[580px] text-xs">
-            <thead>
-              <tr className="text-left text-text-muted border-b border-border-subtle">
-                <th className="py-2.5 pr-2">Hợp đồng</th>
-                <th className="py-2.5 pr-2">Tên hợp đồng</th>
-                <th className="py-2.5 pr-2">Sàn giao dịch</th>
-                <th className="py-2.5 pr-2">Giá khớp</th>
-                <th className="py-2.5 pr-2">Thay đổi</th>
-                <th className="py-2.5 pr-2">Basis / Spread</th>
-                <th className="py-2.5 pr-2">Khối lượng (Vol)</th>
-                <th className="py-2.5 pr-2">Vị thế mở (OI)</th>
-                <th className="py-2.5 pr-2">Đáo hạn</th>
-                <th className="py-2.5 text-right">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeContractList.map((c) => {
-                const chg = c.quote?.changePercent;
-                const up = chg != null && chg >= 0;
-                const isSelected = (selectedContract?.symbol ?? selectedSymbol) === c.symbol;
-                return (
-                  <tr
-                    key={c.symbol}
-                    onClick={() => setSelectedSymbol(c.symbol)}
-                    className={`border-b border-border-subtle/50 cursor-pointer transition-colors ${
-                      isSelected
-                        ? "bg-accent-primary/10 font-medium"
-                        : "hover:bg-surface-elevated/70"
-                    }`}
-                  >
-                    <td className="py-2.5 pr-2 font-bold flex items-center gap-1.5">
-                      <span className="text-text-primary">{c.symbol}</span>
-                      {isSelected && (
-                        <span className="rounded bg-accent-primary/20 text-accent-primary text-[10px] px-1.5 py-0.2">
-                          Đang xem
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-2 text-text-secondary">
-                      {c.name ?? (c.symbol.startsWith("VN30") ? "HĐTL Chỉ số VN30" : c.symbol.startsWith("VN100") ? "HĐTL Chỉ số VN100" : c.symbol)}
-                    </td>
-                    <td className="py-2.5 pr-2 text-text-muted">
-                      {c.exchange ?? (category === "VN_FUTURES" ? "HNX / VSDC" : "MXV / CME")}
-                    </td>
-                    <td className="py-2.5 pr-2 font-semibold num text-text-primary">
-                      {fmt(c.quote?.last ?? null, c.quote?.last != null && c.quote.last < 10 ? 2 : 1)}
-                    </td>
-                    <td className="py-2.5 pr-2 num">
-                      <span
-                        className={`inline-flex items-center gap-0.5 ${
-                          chg == null ? "text-text-muted" : up ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"
+        {/* Cột phải: Bảng giá Hợp đồng tương lai & Cảnh báo (7/12 cols) */}
+        <div className="lg:col-span-7 flex flex-col gap-3.5 min-w-0">
+          <Panel
+            title={category === "VN_FUTURES" ? "Bảng giá Hợp đồng tương lai Việt Nam (VSDC / HNX)" : "Bảng giá Hàng hóa Phái sinh Quốc tế (MXV / CME)"}
+            subtitle="Nhấp vào từng dòng để mở biểu đồ nến & scalping cho hợp đồng đó"
+          >
+            <div className="table-scroll-wrap max-h-[360px] overflow-y-auto">
+              <table className="w-full min-w-[580px] text-xs">
+                <thead className="sticky top-0 bg-surface-base z-10">
+                  <tr className="text-left text-text-muted border-b border-border-subtle">
+                    <th className="py-2.5 pr-2">Hợp đồng</th>
+                    <th className="py-2.5 pr-2">Tên hợp đồng</th>
+                    <th className="py-2.5 pr-2">Sàn GD</th>
+                    <th className="py-2.5 pr-2">Giá khớp</th>
+                    <th className="py-2.5 pr-2">Thay đổi</th>
+                    <th className="py-2.5 pr-2">Basis</th>
+                    <th className="py-2.5 pr-2">Vol</th>
+                    <th className="py-2.5 pr-2">OI</th>
+                    <th className="py-2.5 pr-2">Đáo hạn</th>
+                    <th className="py-2.5 text-right">Xem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeContractList.map((c) => {
+                    const chg = c.quote?.changePercent;
+                    const up = chg != null && chg >= 0;
+                    const isSelected = (selectedContract?.symbol ?? selectedSymbol) === c.symbol;
+                    return (
+                      <tr
+                        key={c.symbol}
+                        onClick={() => setSelectedSymbol(c.symbol)}
+                        className={`border-b border-border-subtle/50 cursor-pointer transition-colors ${
+                          isSelected
+                            ? "bg-accent-primary/10 font-medium"
+                            : "hover:bg-surface-elevated/70"
                         }`}
                       >
-                        {chg != null && (up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />)}
-                        {chg == null ? "—" : `${up ? "+" : ""}${chg.toFixed(2)}%`}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-2 num">
-                      <span
-                        className={
-                          c.basis?.basis == null
-                            ? "text-text-muted"
-                            : c.basis.basis > 4
-                              ? "text-amber-400 font-medium"
-                              : c.basis.basis < -4
-                                ? "text-sky-400 font-medium"
-                                : "text-text-primary"
-                        }
-                      >
-                        {c.basis?.basis != null ? `${c.basis.basis >= 0 ? "+" : ""}${fmt(c.basis.basis, 1)}` : "—"}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-2 num text-text-secondary">
-                      {c.quote?.volume != null ? c.quote.volume.toLocaleString("vi-VN") : "—"}
-                    </td>
-                    <td className="py-2.5 pr-2 num text-text-secondary">
-                      {c.quote?.openInterest != null ? c.quote.openInterest.toLocaleString("vi-VN") : "—"}
-                    </td>
-                    <td className="py-2.5 text-text-muted">
-                      {c.daysToExpiry != null ? `${c.daysToExpiry} ngày` : "—"}
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedSymbol(c.symbol);
-                        }}
-                        className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-secondary hover:border-accent-primary hover:text-accent-primary transition-colors"
-                      >
-                        Chart & Scalp
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        <td className="py-2.5 pr-2 font-bold flex items-center gap-1.5">
+                          <span className="text-text-primary">{c.symbol}</span>
+                          {isSelected && (
+                            <span className="rounded bg-accent-primary/20 text-accent-primary text-[10px] px-1.5 py-0.2">
+                              Xem
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-2 text-text-secondary truncate max-w-[120px]" title={c.name}>
+                          {c.name ?? (c.symbol.startsWith("VN30") ? "HĐTL VN30" : c.symbol.startsWith("VN100") ? "HĐTL VN100" : c.symbol)}
+                        </td>
+                        <td className="py-2.5 pr-2 text-text-muted">
+                          {c.exchange ?? (category === "VN_FUTURES" ? "HNX" : "MXV")}
+                        </td>
+                        <td className="py-2.5 pr-2 font-semibold num text-text-primary">
+                          {fmt(c.quote?.last ?? null, c.quote?.last != null && c.quote.last < 10 ? 2 : 1)}
+                        </td>
+                        <td className="py-2.5 pr-2 num">
+                          <span
+                            className={`inline-flex items-center gap-0.5 ${
+                              chg == null ? "text-text-muted" : up ? "text-emerald-400 font-semibold" : "text-rose-400 font-semibold"
+                            }`}
+                          >
+                            {chg != null && (up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />)}
+                            {chg == null ? "—" : `${up ? "+" : ""}${chg.toFixed(2)}%`}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-2 num">
+                          <span
+                            className={
+                              c.basis?.basis == null
+                                ? "text-text-muted"
+                                : c.basis.basis > 4
+                                  ? "text-amber-400 font-medium"
+                                  : c.basis.basis < -4
+                                    ? "text-sky-400 font-medium"
+                                    : "text-text-primary"
+                            }
+                          >
+                            {c.basis?.basis != null ? `${c.basis.basis >= 0 ? "+" : ""}${fmt(c.basis.basis, 1)}` : "—"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pr-2 num text-text-secondary">
+                          {c.quote?.volume != null ? c.quote.volume.toLocaleString("vi-VN") : "—"}
+                        </td>
+                        <td className="py-2.5 pr-2 num text-text-secondary">
+                          {c.quote?.openInterest != null ? c.quote.openInterest.toLocaleString("vi-VN") : "—"}
+                        </td>
+                        <td className="py-2.5 text-text-muted text-[11px]">
+                          {c.daysToExpiry != null ? `${c.daysToExpiry}d` : "—"}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSymbol(c.symbol);
+                            }}
+                            className="rounded border border-border-subtle px-2 py-0.5 text-[11px] text-text-secondary hover:border-accent-primary hover:text-accent-primary transition-colors"
+                          >
+                            Chọn
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          <Panel title="Cảnh báo Phái sinh (Alerts)" subtitle="Basis · Dòng tiền · Ngưỡng rủi ro">
+            {alerts.length === 0 ? (
+              <p className="text-xs text-text-muted py-2">
+                Chưa phát hiện cảnh báo rủi ro bất thường trên các hợp đồng tương lai VN30.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {alerts.map((a) => (
+                  <li key={a.id} className="flex items-start gap-2 rounded-lg border border-border-subtle bg-surface-base p-2 text-xs">
+                    <ShieldAlert
+                      className={`mt-0.5 size-4 shrink-0 ${
+                        a.severity === "critical"
+                          ? "text-rose-400"
+                          : a.severity === "warning"
+                            ? "text-amber-400"
+                            : "text-sky-400"
+                      }`}
+                    />
+                    <div>
+                      <div className="font-semibold text-text-primary">{a.titleVi}</div>
+                      <div className="text-text-muted text-[11px]">{a.detail}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
         </div>
-      </Panel>
+      </div>
 
       {/* 8. Term Structure & Flow Engine */}
       <div className="grid gap-4 lg:grid-cols-2">

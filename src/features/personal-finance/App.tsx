@@ -27,7 +27,6 @@ import {
 } from './storage/financeStore.ts';
 import { generateQuantitativeAdvice } from './engines/adviceEngine.ts';
 import { Header } from './components/Header.tsx';
-import { Footer } from './components/Footer.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
 import { CheckinWizard } from './components/CheckinWizard.tsx';
 import { AnalyticsView } from './components/AnalyticsView.tsx';
@@ -222,7 +221,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#060b15] text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-background text-text-primary flex flex-col font-sans">
       {/* Institutional Top Header */}
       <Header
         currentPeriod={currentPeriod}
@@ -238,7 +237,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 pb-16">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 pb-12">
         {activeTab === 'dashboard' && (
           <DashboardView
             currentSnapshot={currentSnapshot}
@@ -338,8 +337,10 @@ export default function App() {
         onClose={() => setIsTestModalOpen(false)}
       />
 
-      {/* Institutional Fixed Footer */}
-      <Footer />
+      {/* Institutional Disclaimer Strip */}
+      <div className="border-t border-border-subtle/60 py-4 px-4 text-center text-[11px] text-text-muted">
+        Orca Personal Finance · Chuẩn Thuế TNCN & BHXH Việt Nam 2026 · Dữ liệu lưu trữ bảo mật cục bộ trên thiết bị của bạn (Local Storage)
+      </div>
     </div>
   );
 }
