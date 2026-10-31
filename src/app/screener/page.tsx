@@ -27,6 +27,7 @@ type Universe =
   | "valuation"
   | "fundamental"
   | "candlestick"
+  | "ma-confluence"
   | "divergence"
   | "macro-radar"
   | "alpha-beta";
@@ -64,6 +65,7 @@ export const SCREENER_GROUPS: {
       { id: "wyckoff", label: "Wyckoff VSA" },
       { id: "elliott", label: "Sóng Elliott" },
       { id: "candlestick", label: "Mẫu nến đảo chiều" },
+      { id: "ma-confluence", label: "Hợp lưu MA & Nến Đảo Chiều" },
     ],
   },
   {
@@ -130,6 +132,10 @@ const DivergenceScreener = dynamic(
 );
 const CandlestickScreener = dynamic(
   () => import("@/components/candlestick-screener").then((m) => m.CandlestickScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const MaCandleConfluenceScreener = dynamic(
+  () => import("@/components/ma-candle-confluence-screener").then((m) => m.MaCandleConfluenceScreener),
   { ssr: false, loading: PanelFallback },
 );
 const WyckoffScreener = dynamic(
@@ -277,6 +283,9 @@ function ScreenerInner() {
       break;
     case "candlestick":
       body = <CandlestickScreener defaultSector={sector} />;
+      break;
+    case "ma-confluence":
+      body = <MaCandleConfluenceScreener defaultSector={sector} />;
       break;
     case "wyckoff":
       body = <WyckoffScreener defaultSector={sector} />;
