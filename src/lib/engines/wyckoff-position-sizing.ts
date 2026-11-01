@@ -39,25 +39,30 @@ export interface PositionSizingResult {
 }
 
 export function calculatePositionSizing(input: PositionSizingInput): PositionSizingResult | null {
+  if (!input) return null;
   const { nav, maxRiskNavPct = 1.25 } = input;
-  if (!nav || nav <= 0) return null;
+  if (!Number.isFinite(nav) || nav <= 0) return null;
+
+  const safeRiskPct = Number.isFinite(maxRiskNavPct) && maxRiskNavPct > 0 ? Math.min(10, maxRiskNavPct) : 1.25;
+
+  if (!Number.isFinite(input.entryPrice) || !Number.isFinite(input.stopLossPrice)) return null;
 
   // Chuẩn hóa đơn vị giá (nếu giá dưới 1000 thì thường là đơn vị ngàn đồng của chứng khoán VN, quy đổi sang VNĐ)
   const normPrice = (p: number) => (p < 1000 ? p * 1000 : p);
 
   const entry = normPrice(input.entryPrice);
   const sl = normPrice(input.stopLossPrice);
-  if (entry <= 0 || sl <= 0 || sl >= entry) return null;
+  if (!Number.isFinite(entry) || !Number.isFinite(sl) || entry <= 0 || sl <= 0 || sl >= entry) return null;
 
-  const t1 = input.target1Price ? normPrice(input.target1Price) : entry * 1.15;
-  const t2 = input.target2Price ? normPrice(input.target2Price) : null;
+  const t1 = input.target1Price && Number.isFinite(input.target1Price) ? normPrice(input.target1Price) : entry * 1.15;
+  const t2 = input.target2Price && Number.isFinite(input.target2Price) ? normPrice(input.target2Price) : null;
 
   // 1. Tính toán rủi ro
   const riskPerShare = entry - sl;
   const riskPercent = Number(((riskPerShare / entry) * 100).toFixed(2));
 
   // 2. Tỷ trọng khuyến nghị: mualandau / RiskPer (từ RRR calculating.afl)
-  const rawWeightPct = Number(((maxRiskNavPct / riskPercent) * 100).toFixed(1));
+  const rawWeightPct = Number(((safeRiskPct / riskPercent) * 100).toFixed(1));
   // Giới hạn tỷ trọng an toàn: tối đa 35% NAV cho 1 mã đơn lẻ
   const cappedWeightPct = Math.min(35, Math.max(5, rawWeightPct));
 

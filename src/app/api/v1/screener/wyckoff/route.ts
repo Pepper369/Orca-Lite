@@ -32,6 +32,17 @@ const SETUPS = new Set<WyckoffSetup>([
   "watch",
 ]);
 
+const VALID_VSA_SIGNALS = new Set([
+  "NO_SUPPLY",
+  "NO_DEMAND",
+  "STOPPING_VOLUME",
+  "SHAKEOUT",
+  "UPTHRUST",
+  "EFFORT_TO_RISE",
+  "EFFORT_TO_RISE_FAILED",
+  "ABSORPTION",
+]);
+
 /** GET /api/v1/screener/wyckoff */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -39,24 +50,28 @@ export async function GET(req: Request) {
   const setupRaw = (url.searchParams.get("setup") ?? "all").toLowerCase();
   const phase = phaseRaw === "all" ? "all" : PHASES.has(phaseRaw as WyckoffPhase) ? (phaseRaw as WyckoffPhase) : "all";
   const setup = setupRaw === "all" ? "all" : SETUPS.has(setupRaw as WyckoffSetup) ? (setupRaw as WyckoffSetup) : "all";
-  const minConfidence = url.searchParams.get("minConfidence") != null ? Number(url.searchParams.get("minConfidence")) : 40;
-  const sector = url.searchParams.get("sector") || undefined;
-  const trModelRaw = (url.searchParams.get("trModel") ?? "all");
+  const rawConf = Number(url.searchParams.get("minConfidence"));
+  const minConfidence = Number.isFinite(rawConf) ? Math.max(0, Math.min(rawConf, 100)) : 40;
+  const sector = (url.searchParams.get("sector") || "").slice(0, 50) || undefined;
+  const trModelRaw = url.searchParams.get("trModel") ?? "all";
   const trModel = trModelRaw === "Base" || trModelRaw === "Top" ? trModelRaw : "all";
-  const vsaTagRaw = (url.searchParams.get("vsaTag") ?? "all");
+  const vsaTagRaw = url.searchParams.get("vsaTag") ?? "all";
   const vsaTag = vsaTagRaw === "ultra-high" || vsaTagRaw === "high" || vsaTagRaw === "low" || vsaTagRaw === "normal" ? vsaTagRaw : "all";
-  const channelPosRaw = (url.searchParams.get("channelPos") ?? "all");
+  const channelPosRaw = url.searchParams.get("channelPos") ?? "all";
   const channelPos = channelPosRaw === "ice" || channelPosRaw === "mid" || channelPosRaw === "creek" || channelPosRaw === "breakout" ? channelPosRaw : "all";
-  const minCauseWeeks = url.searchParams.get("minCauseWeeks") ? Number(url.searchParams.get("minCauseWeeks")) : undefined;
-  const minRr1 = url.searchParams.get("minRr1") ? Number(url.searchParams.get("minRr1")) : undefined;
+  const rawCause = Number(url.searchParams.get("minCauseWeeks"));
+  const minCauseWeeks = Number.isFinite(rawCause) && rawCause > 0 ? Math.min(520, rawCause) : undefined;
+  const rawRr = Number(url.searchParams.get("minRr1"));
+  const minRr1 = Number.isFinite(rawRr) && rawRr > 0 ? Math.min(100, rawRr) : undefined;
   const onlyLeaders = url.searchParams.get("onlyLeaders") === "true";
   const vsaSignalRaw = url.searchParams.get("vsaSignal") ?? "all";
-  const vsaSignal = vsaSignalRaw === "all" ? "all" : (vsaSignalRaw as any);
+  const vsaSignal = VALID_VSA_SIGNALS.has(vsaSignalRaw) ? (vsaSignalRaw as any) : "all";
   const symbols = (url.searchParams.get("symbols") ?? "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? 40) || 40, 60);
+    .filter((s) => /^[A-Z0-9]{2,10}$/.test(s));
+  const rawLimit = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 60)) : 40;
 
   return safeApi({
     label: "screener-wyckoff",

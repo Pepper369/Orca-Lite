@@ -139,7 +139,6 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   const smcLineBag = useRef<SmcLineBag>({ lines: [] });
   const [wyckoffOn, setWyckoffOn] = useState(false);
   const wyckoffLineBag = useRef<SmcLineBag>({ lines: [] });
-  const [wyckoffSnap, setWyckoffSnap] = useState<WyckoffSnapshot | null>(null);
   const [mtfBias, setMtfBias] = useState<MtfBiasResult | null>(null);
   useEffect(() => {
     extraLevelsRef.current = extraLevels;
@@ -343,38 +342,36 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
     }
   }, [data, smcOn, engineReady, tf]);
 
+  const wyckoffOverlay = useMemo(() => {
+    if (!wyckoffOn || !data?.candles?.length) return null;
+    const bars: OhlcvBar[] = data.candles.map((c) => ({
+      time: c.time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+    }));
+    return buildWyckoffOverlay(bars);
+  }, [data, wyckoffOn]);
+
+  const wyckoffSnap = wyckoffOverlay?.snapshot ?? null;
+
   useEffect(() => {
     const mgr = mgrRef.current;
-    if (!engineReady || !mgr || !data?.candles?.length) return;
-    if (data.timeframe && data.timeframe.toLowerCase() !== tf.toLowerCase()) return;
+    if (!engineReady || !mgr) return;
     try {
       const series = mgr.getCandleSeries?.() ?? null;
-      if (!wyckoffOn) {
+      if (!wyckoffOn || !wyckoffOverlay) {
         applySmcPriceLines(series, wyckoffLineBag.current, []);
-        setWyckoffSnap(null);
         return;
       }
-      const bars: OhlcvBar[] = data.candles.map((c) => ({
-        time: c.time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-        volume: c.volume ?? 0,
-      }));
-      const overlay = buildWyckoffOverlay(bars);
-      if (overlay) {
-        applySmcPriceLines(series, wyckoffLineBag.current, overlay.levels);
-        if (overlay.markers.length) mgr.applyMarkers(overlay.markers as any);
-        setWyckoffSnap(overlay.snapshot);
-      } else {
-        applySmcPriceLines(series, wyckoffLineBag.current, []);
-        setWyckoffSnap(null);
-      }
+      applySmcPriceLines(series, wyckoffLineBag.current, wyckoffOverlay.levels);
+      if (wyckoffOverlay.markers.length) mgr.applyMarkers(wyckoffOverlay.markers as any);
     } catch {
       /* */
     }
-  }, [data, wyckoffOn, engineReady, tf]);
+  }, [wyckoffOverlay, wyckoffOn, engineReady]);
 
   const companions = companionTimeframes(tf, tfs);
   const shouldRunMtf = Boolean(symbol && companions.length >= 2);
