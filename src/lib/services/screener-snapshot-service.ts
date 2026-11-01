@@ -3,6 +3,7 @@ import "server-only";
 import { cached } from "../cache";
 import { buildMeta } from "../freshness";
 import { getMultiQuotes } from "./multi-quote";
+import { getVpsBatchForeignFlow } from "../providers/vps";
 import { getFundamentalSnapshots, type FundamentalSnapshot } from "../financial/snapshots";
 import { getVndValuationRatios, type VndValuationRatios } from "../providers/vndirect-company";
 import { getVietcapCompany, type VietcapProfile } from "../providers/vietcap";
@@ -76,6 +77,10 @@ export type ScreenerStockItem = {
   chartPattern: string | null;
   confluenceScore: number; // 0-100
   confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
+  foreignNetVal?: number | null; // in Billion VND
+  foreignAccumulating?: boolean;
+  rsRating20?: number | null;
+  isMarketLeader?: boolean;
   // Quant Edge Engine Fields (Advanced Mathematical Statistics)
   quantEdgeScore?: number; // 0-100
   quantBadge?: "SUPER_QUANT" | "QUANT_EDGE" | "WATCH" | "NEUTRAL";
@@ -273,6 +278,8 @@ function analyzeTechFeatures(
   parsed: ParsedBars,
   currentPrice: number | null,
   compositeScore: number,
+  foreignAccumulating = false,
+  rsPerf20: number | null = null,
 ) {
   const maRes = analyzeMaFeatures(parsed, currentPrice);
   const { closes, highs, lows, ohlcvBars } = parsed;
@@ -334,14 +341,14 @@ function analyzeTechFeatures(
     patternScore = Math.min(25, Math.round(topPattern.score * 0.26));
     patternLabel = topPattern.nameVi;
   } else if (topCandle) {
-    patternScore = Math.min(20, Math.round((topCandle.score || 70) * 0.22));
+    patternScore = Math.min(22, Math.round((topCandle.score || 75) * 0.24));
     patternLabel = topCandle.nameVi;
   } else if (currentPrice && maRes.ma20 && currentPrice >= maRes.ma20 * 0.98) {
     // Giá giữ vững hỗ trợ MA20
-    patternScore = 12;
+    patternScore = 14;
     patternLabel = "Nền hỗ trợ MA20";
   } else {
-    patternScore = 6;
+    patternScore = 8;
   }
   patternScore = Math.min(25, patternScore);
 
@@ -363,15 +370,18 @@ function analyzeTechFeatures(
   }
   momScore = Math.min(25, momScore);
 
-  // 4. Fundamental Pillar (max 25)
-  const fundScore = Math.min(25, Math.max(8, Math.round(compositeScore * 0.25)));
+  // 4. Flow, RS Leader & Fundamental Pillar (max 25)
+  let flowRsScore = Math.min(14, Math.max(5, Math.round(compositeScore * 0.14)));
+  if (foreignAccumulating) flowRsScore += 6;
+  if (rsPerf20 != null && rsPerf20 > 0) flowRsScore += 5;
+  flowRsScore = Math.min(25, flowRsScore);
 
-  const confluenceScore = Math.min(100, Math.max(15, trendScore + patternScore + momScore + fundScore));
+  const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore));
 
   let confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" = "NONE";
-  if (confluenceScore >= 72) confluenceBadge = "SUPER_SETUP";
-  else if (confluenceScore >= 56) confluenceBadge = "POTENTIAL_BREAKOUT";
-  else if (confluenceScore >= 45) confluenceBadge = "WATCH";
+  if (confluenceScore >= 70) confluenceBadge = "SUPER_SETUP";
+  else if (confluenceScore >= 52) confluenceBadge = "POTENTIAL_BREAKOUT";
+  else if (confluenceScore >= 42) confluenceBadge = "WATCH";
 
   return {
     ...maRes,
@@ -657,10 +667,10 @@ function detectPresets(item: {
     passes.push("ma_cross");
   }
 
-  // 8. Confluence (Siêu hội tụ >= 55 hoặc >= 45 kèm tín hiệu xác nhận)
+  // 8. Confluence (Siêu hội tụ >= 50 hoặc >= 40 kèm tín hiệu xác nhận)
   if (
-    item.confluenceScore >= 55 ||
-    (item.confluenceScore >= 45 && (
+    item.confluenceScore >= 50 ||
+    (item.confluenceScore >= 40 && (
       item.squeezeState === "fired_bull" ||
       item.squeezeState === "squeeze_on" ||
       item.maSignal === "GOLDEN_CROSS" ||
@@ -725,7 +735,8 @@ async function fetchValuationBatch(symbols: string[]): Promise<{
   }
 
   if (needFetch.length > 0) {
-    await mapPool(needFetch, 16, async (sym) => {
+    const targetFetch = needFetch.slice(0, 36);
+    await mapPool(targetFetch, 12, async (sym) => {
       let v: VndValuationRatios | null = null;
       let vc: VietcapProfile | null = null;
       try {
@@ -746,7 +757,7 @@ async function fetchValuationBatch(symbols: string[]): Promise<{
 
         await Promise.race([
           fetchPromise,
-          new Promise((resolve) => setTimeout(resolve, 2_500)),
+          new Promise((resolve) => setTimeout(resolve, 1_200)),
         ]);
       } catch {
         // Tier 2 catch fallback
@@ -845,33 +856,61 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
     producer: async () => {
       const symbols = getScreenerUniverse();
 
-      // PARALLEL QUAD-CORE PRODUCER: Run all 4 independent data sources simultaneously!
-      const [multiQuotesRes, fundResult, valResult, ohlcvMap] = await Promise.all([
-        // 1. Realtime multi-source quote race (VPS + SSI + VNDirect + Vietcap)
-        getMultiQuotes(symbols).catch(() => ({
-          quotes: [],
-          sources: ["vps-fallback"],
-          sourceTs: Date.now(),
-          latencies: {},
-          conflicts: 0,
-        })),
-        // 2. Fundamental balance sheet snapshots (10 concurrent workers)
-        getFundamentalSnapshots(symbols, { concurrency: 10 }).catch(() => ({ snapshots: [] })),
-        // 3. Valuation multiples (12 concurrent workers with 3-tier cascade)
-        fetchValuationBatch(symbols).catch(() => ({
-          valMap: new Map<string, VndValuationRatios>(),
-          vietcapMap: new Map<string, VietcapProfile>(),
-          failoverCount: 0,
-        })),
-        // 4. Batch OHLCV technical moving averages (8 concurrent workers, priority VN100, resilient multi-source)
-        batchVnOhlcv(symbols, {
-          bars: 65,
-          concurrency: 8,
-          perSymbolMs: 400,
-          deadlineMs: 6_000,
-          priority: [...VN100],
-          resilient: true,
-        }).catch(() => new Map()),
+      // PARALLEL PENTACAST PRODUCER: Quotes + Foreign Flow + Valuation + Quick Fundamentals + OHLCV
+      const quotesTask = getMultiQuotes(symbols).catch(() => ({
+        quotes: [],
+        sources: ["vps-fallback"],
+        sourceTs: Date.now(),
+        latencies: {},
+        conflicts: 0,
+      }));
+
+      const foreignTask = Promise.race([
+        getVpsBatchForeignFlow(symbols),
+        new Promise<Map<string, any>>((resolve) => setTimeout(() => resolve(new Map()), 1_800)),
+      ]).catch(() => new Map());
+
+      const valTask = Promise.race([
+        fetchValuationBatch(symbols),
+        new Promise<any>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                valMap: new Map<string, VndValuationRatios>(),
+                vietcapMap: new Map<string, VietcapProfile>(),
+                failoverCount: 0,
+              }),
+            2_500,
+          ),
+        ),
+      ]).catch(() => ({
+        valMap: new Map<string, VndValuationRatios>(),
+        vietcapMap: new Map<string, VietcapProfile>(),
+        failoverCount: 0,
+      }));
+
+      const fundTask = Promise.race([
+        getFundamentalSnapshots(symbols, { concurrency: 6 }),
+        new Promise<{ snapshots: FundamentalSnapshot[] }>((resolve) =>
+          setTimeout(() => resolve({ snapshots: [] }), 1_500),
+        ),
+      ]).catch(() => ({ snapshots: [] }));
+
+      const ohlcvTask = batchVnOhlcv([...symbols, "VNINDEX"], {
+        bars: 65,
+        concurrency: 8,
+        perSymbolMs: 300,
+        deadlineMs: 4_500,
+        priority: [...VN100, "VNINDEX"],
+        resilient: true,
+      }).catch(() => new Map());
+
+      const [multiQuotesRes, foreignMap, valResult, fundResult, ohlcvMap] = await Promise.all([
+        quotesTask,
+        foreignTask,
+        valTask,
+        fundTask,
+        ohlcvTask,
       ]);
 
       const quotesMap = new Map<string, { price: number; change: number; changePercent: number; volume: number; name?: string }>();
@@ -893,6 +932,15 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
       const { valMap, vietcapMap } = valResult;
       let failoverCount = valResult.failoverCount;
+
+      // Index benchmark performance for RS Rating
+      const indexBars = ohlcvMap.get("VNINDEX")?.bars ?? [];
+      let indexPerf20: number | null = null;
+      if (indexBars.length >= 20) {
+        const i0 = indexBars[indexBars.length - 20].close;
+        const i1 = indexBars[indexBars.length - 1].close;
+        if (i0 > 0) indexPerf20 = ((i1 - i0) / i0) * 100;
+      }
 
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
@@ -954,9 +1002,25 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
+        const foreignRow = foreignMap.get(sym);
+        const foreignNetVal = foreignRow?.netValue ? Math.round((foreignRow.netValue / 1_000_000_000) * 100) / 100 : null; // in Billion VND
+        const foreignAccumulating = foreignNetVal != null && foreignNetVal > 0.5;
+
         const rawBars = ohlcvMap.get(sym)?.bars;
         const parsed = parseBarArrays(rawBars);
-        const techFeatures = analyzeTechFeatures(parsed, price, compositeScore);
+
+        let rsRating20: number | null = null;
+        if (parsed.closes.length >= 20 && indexPerf20 != null) {
+          const s0 = parsed.closes[parsed.closes.length - 20];
+          const s1 = parsed.closes[parsed.closes.length - 1];
+          if (s0 > 0) {
+            const stockPerf20 = ((s1 - s0) / s0) * 100;
+            rsRating20 = Number((stockPerf20 - indexPerf20).toFixed(1));
+          }
+        }
+        const isMarketLeader = rsRating20 != null && rsRating20 > 5.0;
+
+        const techFeatures = analyzeTechFeatures(parsed, price, compositeScore, foreignAccumulating, rsRating20);
 
         const beta: number | null = null;
         const quantFeatures = analyzeQuantFeatures(
@@ -1031,6 +1095,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           chartPattern: techFeatures.chartPattern,
           confluenceScore: techFeatures.confluenceScore,
           confluenceBadge: techFeatures.confluenceBadge,
+          foreignNetVal,
+          foreignAccumulating,
+          rsRating20,
+          isMarketLeader,
           quantEdgeScore: quantFeatures.quantEdgeScore,
           quantBadge: quantFeatures.quantBadge,
           ouZScore: quantFeatures.ouZScore,

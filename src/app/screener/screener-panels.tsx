@@ -238,7 +238,8 @@ export function VnScreener({
   const [minMarketCap, setMinMarketCap] = useState("");
 
   // Sort state
-  const [sortKey, setSortKey] = useState<string>("marketCap");
+  const initialSortKey = defaultPreset === "confluence" || defaultView === "confluence" ? "confluenceScore" : "marketCap";
+  const [sortKey, setSortKey] = useState<string>(initialSortKey);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Applied params
@@ -266,6 +267,10 @@ export function VnScreener({
     setPreset(defaultPreset);
     setViewTab(defaultView);
     setSector(defaultSector ?? "");
+    if (defaultPreset === "confluence" || defaultView === "confluence") {
+      setSortKey("confluenceScore");
+      setSortOrder("desc");
+    }
     setApplied((prev) => ({
       ...prev,
       preset: defaultPreset,
@@ -401,6 +406,15 @@ export function VnScreener({
 
   const handleSelectPreset = (p: ScreenerPreset) => {
     setPreset(p);
+    if (p === "confluence") {
+      setViewTab("confluence");
+      setSortKey("confluenceScore");
+      setSortOrder("desc");
+    } else if (p === "quant_edge" || p === "quant_mean_revert" || p === "quant_low_beta" || p === "quant_asymmetric") {
+      setViewTab("quant");
+      setSortKey("quantEdgeScore");
+      setSortOrder("desc");
+    }
     setApplied((prev) => ({ ...prev, preset: p }));
   };
 
@@ -1238,13 +1252,27 @@ export function VnScreener({
                           <SuperTrendBadge dir={row.superTrendDir} />
                         </td>
                         <td className="py-2.5 text-left">
-                          {row.chartPattern ? (
-                            <span className="inline-block rounded bg-accent-primary/10 border border-accent-primary/20 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
-                              {row.chartPattern}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-text-muted">—</span>
-                          )}
+                          <div className="flex flex-col gap-1 items-start">
+                            {row.chartPattern ? (
+                              <span className="inline-block rounded bg-accent-primary/10 border border-accent-primary/20 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
+                                {row.chartPattern}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-text-muted">—</span>
+                            )}
+                            <div className="flex flex-wrap gap-1 items-center">
+                              {row.foreignAccumulating && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 text-[9px] font-bold text-emerald-400">
+                                  NN Gom {row.foreignNetVal ? `+${row.foreignNetVal}tỷ` : ""}
+                                </span>
+                              )}
+                              {row.isMarketLeader && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.2 text-[9px] font-bold text-purple-300">
+                                  RS Leader {row.rsRating20 ? `+${row.rsRating20}%` : ""}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </td>
                         <td className="num py-2.5 text-right font-bold text-accent-primary">
                           {row.confluenceScore}
