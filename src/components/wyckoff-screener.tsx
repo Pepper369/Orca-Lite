@@ -274,13 +274,41 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                         <div className="text-[10px] text-text-muted">{r.sector ?? "—"}</div>
                       </td>
                       <td className="py-2">
-                        <Badge tone={phaseTone(r.phase)}>
-                          {r.phaseVi}
-                          {r.subPhase ? ` · ${r.subPhase}` : ""}
-                        </Badge>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge tone={phaseTone(r.phase)}>
+                            {r.phaseVi}
+                            {r.subPhase ? ` · ${r.subPhase}` : ""}
+                          </Badge>
+                          {r.trModel ? (
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 rounded font-medium border ${
+                                r.trModel === "Base"
+                                  ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                                  : "border-rose-500/40 text-rose-400 bg-rose-500/10"
+                              }`}
+                            >
+                              {r.trModel === "Base" ? "Base TR" : "Top TR"}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="py-2 text-ink-2">
-                        <div className="font-medium text-text-primary">{r.setupVi}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-text-primary">{r.setupVi}</span>
+                          {r.vsaTag === "ultra-high" ? (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                              Ultra Vol
+                            </span>
+                          ) : r.vsaTag === "high" ? (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                              High Vol
+                            </span>
+                          ) : r.vsaTag === "low" ? (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                              Kiệt Vol
+                            </span>
+                          ) : null}
+                        </div>
                         {r.transitionVi ? (
                           <div className="mt-0.5 text-[10px] text-accent-primary">{r.transitionVi}</div>
                         ) : null}
@@ -290,13 +318,36 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                       <td className="py-2 text-right">
                         <Chg value={r.changePercent} arrow={false} />
                       </td>
-                      <td className="max-w-[280px] py-2 pr-3.5 text-[11px] leading-snug text-ink-2">
+                      <td className="max-w-[320px] py-2 pr-3.5 text-[11px] leading-snug text-ink-2">
                         <div>{r.events[0] ?? r.notes[0] ?? "—"}</div>
                         {r.range ? (
                           <div className="mt-0.5 text-[10px] text-text-muted">
-                            Range: {fmtNum(r.range.low, 1)} – {fmtNum(r.range.high, 1)}
-                            {r.springTested ? <span className="ml-1 text-emerald-400 font-semibold">(Spring Tested)</span> : null}
-                            {r.lpsConfirmed ? <span className="ml-1 text-cyan-400 font-semibold">(LPS Support)</span> : null}
+                            Ice: {fmtNum(r.range.low, 1)} – Creek: {fmtNum(r.range.high, 1)}
+                            {r.channelPosPct != null ? (
+                              <span className="ml-1 text-ink-2 font-mono">({r.channelPosPct}%)</span>
+                            ) : null}
+                            {r.causeWeeks != null ? (
+                              <span className="ml-1 text-text-muted">· {r.causeWeeks}w</span>
+                            ) : null}
+                            {r.springTested ? (
+                              <span className="ml-1 text-emerald-400 font-semibold">(Spring Tested)</span>
+                            ) : null}
+                            {r.lpsConfirmed ? (
+                              <span className="ml-1 text-cyan-400 font-semibold">(LPS Support)</span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {r.stopLoss != null || r.target1 != null ? (
+                          <div className="mt-0.5 text-[10px] flex items-center gap-2 font-mono">
+                            {r.stopLoss != null ? (
+                              <span className="text-rose-400">SL: {fmtNum(r.stopLoss, 1)}</span>
+                            ) : null}
+                            {r.target1 != null ? (
+                              <span className="text-emerald-400">T1: {fmtNum(r.target1, 1)}</span>
+                            ) : null}
+                            {r.target2 != null ? (
+                              <span className="text-cyan-400">T2: {fmtNum(r.target2, 1)}</span>
+                            ) : null}
                           </div>
                         ) : null}
                       </td>

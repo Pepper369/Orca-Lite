@@ -58,6 +58,14 @@ export interface WyckoffSnapshot {
   creekLevel?: number | null;
   iceLevel?: number | null;
   testVolumeRatio?: number | null;
+  // v2 additions (Wyckoff VSA Master fields)
+  trModel?: "Base" | "Top" | null;       // auto Base Accumulation vs Top Distribution
+  channelPosPct?: number | null;         // % vị trí giá trong kênh Ice-Creek (0-100)
+  causeWeeks?: number | null;            // số tuần tích lũy (Cause & Effect)
+  target1?: number | null;              // mục tiêu 1 (Creek + 0.5× height)
+  target2?: number | null;              // mục tiêu 2 (theo CauseWeeks)
+  stopLoss?: number | null;             // cắt lỗ dưới Ice
+  vsaTag?: "ultra-high" | "high" | "low" | "normal";  // VSA volume classification
 }
 
 export interface ElliottSnapshot {
@@ -103,6 +111,10 @@ function avg(xs: number[]) {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
+function fmtNum(n: number, d = 1): string {
+  return Number.isFinite(n) ? n.toFixed(d) : "—";
+}
+
 export function findPivots(bars: OhlcvBar[], w = 3): StructurePivot[] {
   const out: StructurePivot[] = [];
   if (bars.length < w * 2 + 3) return out;
@@ -145,6 +157,13 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     notes,
     transitionStatus: "NEUTRAL",
     transitionVi: "Chưa xác định",
+    trModel: null,
+    channelPosPct: null,
+    causeWeeks: null,
+    target1: null,
+    target2: null,
+    stopLoss: null,
+    vsaTag: "normal",
   };
 }
 
@@ -152,307 +171,510 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
   const events: string[] = [];
   const eventCodes: string[] = [];
   const notes: string[] = [];
-  if (bars.length < 40) {
-    return emptySnap(["Cần ≥40 nến để đọc Wyckoff"]);
+  if (bars.length < 30) {
+    return emptySnap(["Cần ≥30 nến để đọc cấu trúc Wyckoff"]);
   }
 
-  const slice = bars.slice(-90);
-  const n = slice.length;
-  const closes = slice.map((b) => b.close);
-  const highs = slice.map((b) => b.high);
-  const lows = slice.map((b) => b.low);
-  const vols = slice.map((b) => b.volume || 0);
-  const last = closes[n - 1]!;
-  const first = closes[0]!;
-  const ret = (last / first - 1) * 100;
-  const hi = Math.max(...highs);
-  const lo = Math.min(...lows);
-  const span = hi - lo + 1e-12;
-  const rangePct = (span / Math.max(lo, 1e-9)) * 100;
-  const vt = volumeTrend(slice);
-  const mid = Math.floor(n / 2);
-  const firstHalfRet = closes[mid]! / closes[0]! - 1;
-  const secondHalfRet = last / closes[mid]! - 1;
-  const avgVol = avg(vols.filter((v) => v > 0)) || 1;
+  const n = bars.length;
+  const lastBar = bars[n - 1]!;
+  const prevBar = bars[n - 2] ?? lastBar;
+  const curClose = lastBar.close;
 
-  // Core range from the middle 60% of bars (ignore early trend + last climax)
-  const coreStart = Math.floor(n * 0.2);
-  const coreEnd = Math.max(coreStart + 8, n - 8);
-  const core = slice.slice(coreStart, coreEnd);
-  const rangeHigh = Math.max(...core.map((b) => b.high));
-  const rangeLow = Math.min(...core.map((b) => b.low));
-  const rangeSpan = rangeHigh - rangeLow + 1e-12;
-  const lastBar = slice[n - 1]!;
-  const posInRange = (lastBar.close - rangeLow) / rangeSpan;
+  // 1. PHÂN TÍCH VOLUME VSA & BIÊN ĐỘ NẾN (SPREAD)
+  const volWindow = Math.min(20, n);
+  const volMa20 = avg(bars.slice(-volWindow).map((b) => b.volume || 0)) || 1;
+  const lastVol = lastBar.volume || 0;
+  const isUltraVol = lastVol >= 1.8 * volMa20;
+  const isHighVol = lastVol >= 1.25 * volMa20 && !isUltraVol;
+  const isLowVol = lastVol <= 0.75 * volMa20;
+  const vsaTag: WyckoffSnapshot["vsaTag"] = isUltraVol
+    ? "ultra-high"
+    : isHighVol
+      ? "high"
+      : isLowVol
+        ? "low"
+        : "normal";
 
-  const recent = slice.slice(-15);
-  let upVol = 0;
-  let downVol = 0;
-  for (const b of recent) {
-    if (b.close >= b.open) upVol += b.volume || 0;
-    else downVol += b.volume || 0;
+  // 2. QUÉT SWING HIGHS / SWING LOWS
+  const swWin = n >= 90 ? 4 : 3;
+  const isSwLow: boolean[] = new Array(n).fill(false);
+  const isSwHigh: boolean[] = new Array(n).fill(false);
+
+  for (let i = swWin; i < n - swWin; i++) {
+    let isMin = true;
+    let isMax = true;
+    const curLow = bars[i]!.low;
+    const curHigh = bars[i]!.high;
+    for (let k = i - swWin; k <= i + swWin; k++) {
+      if (bars[k]!.low < curLow) isMin = false;
+      if (bars[k]!.high > curHigh) isMax = false;
+    }
+    if (isMin) isSwLow[i] = true;
+    if (isMax) isSwHigh[i] = true;
   }
 
-  const recentLow = Math.min(...recent.map((b) => b.low));
-  const recentHigh = Math.max(...recent.map((b) => b.high));
-  const recentLowBar = recent.reduce((a, b) => (b.low <= a.low ? b : a));
-  const recentHighBar = recent.reduce((a, b) => (b.high >= a.high ? b : a));
+  // 3. ĐỊNH VỊ CẤU TRÚC VĨ MÔ: ĐÁY CHU KỲ (SC) vs ĐỈNH PHÂN PHỐI (TOP TR)
+  // Quét tìm đáy chu kỳ (SC candidate) trong khoảng đầu/giữa dữ liệu
+  const scanLimitSC = Math.min(n - swWin, Math.floor(n * 0.65));
+  let scCandidateIdx = 0;
+  let scCandidatePrice = Infinity;
 
-  const spring =
-    recentLow < rangeLow * 0.998 &&
-    lastBar.close > rangeLow &&
-    lastBar.close > recentLowBar.close &&
-    lastBar.close > (recentLowBar.high + recentLowBar.low) / 2;
-  const utad =
-    recentHigh > rangeHigh * 1.002 &&
-    lastBar.close < rangeHigh &&
-    lastBar.close < recentHighBar.close &&
-    lastBar.close < (recentHighBar.high + recentHighBar.low) / 2;
+  for (let i = swWin; i <= scanLimitSC; i++) {
+    if (isSwLow[i] && bars[i]!.low < scCandidatePrice) {
+      scCandidatePrice = bars[i]!.low;
+      scCandidateIdx = i;
+    }
+  }
+  if (!Number.isFinite(scCandidatePrice)) {
+    for (let i = 0; i <= scanLimitSC; i++) {
+      if (bars[i]!.low < scCandidatePrice) {
+        scCandidatePrice = bars[i]!.low;
+        scCandidateIdx = i;
+      }
+    }
+  }
 
-  const sos =
-    lastBar.close > rangeHigh &&
-    lastBar.close > lastBar.open &&
-    (lastBar.volume || 0) > avgVol * 1.15 &&
-    secondHalfRet > 0;
-  const sow =
-    lastBar.close < rangeLow &&
-    lastBar.close < lastBar.open &&
-    (lastBar.volume || 0) > avgVol * 1.15 &&
-    secondHalfRet < 0;
+  // Tìm đỉnh cao nhất sau đáy chu kỳ:
+  let postScHighIdx = scCandidateIdx;
+  let postScHigh = -Infinity;
+  for (let i = scCandidateIdx; i < n; i++) {
+    if (bars[i]!.high > postScHigh) {
+      postScHigh = bars[i]!.high;
+      postScHighIdx = i;
+    }
+  }
 
-  // Climaxes in first half of window
-  const early = slice.slice(0, mid);
-  const maxEarlyVol = Math.max(...early.map((b) => b.volume || 0), 0);
-  const scBar = early.reduce((a, b) => ((b.volume || 0) >= (a.volume || 0) && b.close < b.open ? b : a), early[0]!);
-  const bcBar = early.reduce((a, b) => ((b.volume || 0) >= (a.volume || 0) && b.close > b.open ? b : a), early[0]!);
-  const sc =
-    firstHalfRet < -0.03 &&
-    (scBar.volume || 0) > avgVol * 1.6 &&
-    scBar.close < scBar.open &&
-    (scBar.high - scBar.low) / Math.max(scBar.close, 1e-9) > 0.02;
-  const bc =
-    firstHalfRet > 0.03 &&
-    (bcBar.volume || 0) > avgVol * 1.6 &&
-    bcBar.close > bcBar.open &&
-    (bcBar.high - bcBar.low) / Math.max(bcBar.close, 1e-9) > 0.02;
+  const gainFromSc = (postScHigh - scCandidatePrice) / Math.max(0.01, scCandidatePrice);
+  const barsSincePeak = n - 1 - postScHighIdx;
 
-  // Kiểm tra Spring & Test of Spring (Xác minh Pha C)
-  let springTested = false;
-  let testVolumeRatio: number | null = null;
-  if (spring) {
-    const lowIdx = recent.indexOf(recentLowBar);
-    if (lowIdx >= 0 && lowIdx < recent.length - 1) {
-      const subsequent = recent.slice(lowIdx + 1);
-      for (const sb of subsequent) {
-        const distToLow = Math.abs(sb.low - recentLowBar.low) / Math.max(recentLowBar.low, 1e-9);
-        const sbVol = sb.volume || 0;
-        const lowVol = recentLowBar.volume || 1;
-        if (distToLow <= 0.025 && sbVol < lowVol * 0.88 && sb.close >= sb.open) {
-          springTested = true;
-          testVolumeRatio = Number((sbVol / lowVol).toFixed(2));
-          break;
+  // Tiêu chuẩn Wyckoff phân biệt Base Accumulation vs Top Distribution:
+  // Cổ phiếu tăng mạnh từ đáy (>= 75%), đã qua đỉnh >= 20 phiên,
+  // và thị giá hiện tại vẫn neo giữ được >= 50% nhịp tăng trước đó -> Top Distribution/Re-accumulation.
+  const isTopDist =
+    gainFromSc >= 0.75 &&
+    barsSincePeak >= 20 &&
+    curClose >= scCandidatePrice + (postScHigh - scCandidatePrice) * 0.5;
+
+  const trModel: "Base" | "Top" = isTopDist ? "Top" : "Base";
+
+  // 4. XÂY DỰNG KÊNH GIÁ THOẢI ICE & CREEK VÀ NHẬN DIỆN SỰ KIỆN
+  let trStartIdx = 0;
+  let scIdx = 0;
+  let scPrice = 0;
+  let bcIdx = 0;
+  let bcPrice = 0;
+  let arIdx = 0;
+  let arPrice = 0;
+  let stIdx = 0;
+  let stPrice = 0;
+  let springIdx = 0;
+  let springIsBreak = false;
+  let utIdx = 0;
+  let sosIdx = 0;
+  let sowIdx = 0;
+  let bestSlope = 0;
+
+  if (isTopDist) {
+    // === TOP DISTRIBUTION / TOP TR ===
+    trStartIdx = postScHighIdx;
+    bcIdx = postScHighIdx;
+    bcPrice = bars[bcIdx]!.high;
+
+    // Tìm Automatic Reaction (AR): Đáy rơi tự động sau BC
+    arIdx = Math.min(n - 1, bcIdx + 1);
+    arPrice = Infinity;
+    const arLimit = Math.min(n - 1, bcIdx + 45);
+    for (let i = bcIdx + 1; i <= arLimit; i++) {
+      if (isSwLow[i] && bars[i]!.low < arPrice) {
+        arPrice = bars[i]!.low;
+        arIdx = i;
+      }
+    }
+    if (!Number.isFinite(arPrice)) {
+      for (let i = bcIdx + 1; i <= arLimit; i++) {
+        if (bars[i]!.low < arPrice) {
+          arPrice = bars[i]!.low;
+          arIdx = i;
+        }
+      }
+    }
+
+    // Secondary Test (ST Phase A)
+    const stLimit = Math.min(n - 1, arIdx + 40);
+    stIdx = 0;
+    stPrice = -Infinity;
+    for (let i = arIdx + 1; i <= stLimit; i++) {
+      if (isSwHigh[i] && bars[i]!.high > stPrice) {
+        stPrice = bars[i]!.high;
+        stIdx = i;
+      }
+    }
+    if (stIdx === 0) {
+      stIdx = Math.min(n - 1, arIdx + 5);
+      stPrice = bars[stIdx]!.high;
+    }
+
+    // UT / UTAD detection (Phân phối)
+    for (let i = stIdx + 1; i < n; i++) {
+      if (bars[i]!.high >= bcPrice * 0.98) {
+        const spread = Math.max(0.01, bars[i]!.high - bars[i]!.low);
+        const rejected = bars[i]!.close <= bcPrice * 1.01 || (bars[i]!.high - bars[i]!.close) >= 0.25 * spread;
+        if (rejected) utIdx = i;
+      }
+      if (bars[i]!.close < arPrice * 0.985 && (bars[i]!.volume || 0) >= 1.25 * volMa20) {
+        sowIdx = i;
+      }
+    }
+  } else {
+    // === BASE ACCUMULATION TR ===
+    trStartIdx = scCandidateIdx;
+    scIdx = scCandidateIdx;
+    scPrice = bars[scIdx]!.low;
+
+    // Automatic Rally (AR): Đỉnh hồi phục đầu tiên sau SC
+    arIdx = Math.min(n - 1, scIdx + 1);
+    arPrice = -Infinity;
+    const arLimit = Math.min(n - 1, scIdx + 45);
+    for (let i = scIdx + 1; i <= arLimit; i++) {
+      if (isSwHigh[i] && bars[i]!.high > arPrice) {
+        arPrice = bars[i]!.high;
+        arIdx = i;
+      }
+    }
+    if (!Number.isFinite(arPrice)) {
+      for (let i = scIdx + 1; i <= arLimit; i++) {
+        if (bars[i]!.high > arPrice) {
+          arPrice = bars[i]!.high;
+          arIdx = i;
+        }
+      }
+    }
+
+    // Secondary Test (ST Phase A)
+    const stLimit = Math.min(n - 1, arIdx + 40);
+    stIdx = 0;
+    stPrice = Infinity;
+    for (let i = arIdx + 1; i <= stLimit; i++) {
+      if (isSwLow[i]) {
+        stIdx = i;
+        stPrice = bars[i]!.low;
+        break;
+      }
+    }
+    if (stIdx === 0) {
+      stIdx = Math.min(n - 1, arIdx + 5);
+      stPrice = bars[stIdx]!.low;
+    }
+
+    // Best gentle slope cho kênh tích lũy
+    let maxScore = -1e9;
+    for (let idx = scIdx + 1; idx <= n - 3; idx++) {
+      if (isSwLow[idx]) {
+        const candSlope = (bars[idx]!.low - scPrice) / Math.max(1, idx - scIdx);
+        if (candSlope >= -0.003 && candSlope <= 0.008) {
+          let score = 0;
+          for (let k = scIdx; k < n; k++) {
+            const testSup = scPrice + candSlope * (k - scIdx);
+            if (bars[k]!.close >= testSup * 0.96) score++;
+          }
+          if (score > maxScore) {
+            maxScore = score;
+            bestSlope = candSlope;
+          }
         }
       }
     }
   }
 
-  const isRange = rangePct < 22 && Math.abs(ret) < 14;
+  // Tính Ice (Support) & Creek (Resistance) tại thanh nến hiện tại
+  let curSup: number;
+  let curRes: number;
 
-  // Kiểm tra LPS (Last Point of Support trong Pha D)
+  if (isTopDist) {
+    curRes = bcPrice;
+    curSup = arPrice;
+  } else {
+    curSup = scPrice + bestSlope * (n - 1 - scIdx);
+    curRes = arPrice + bestSlope * (n - 1 - arIdx);
+  }
+
+  if (curRes <= curSup) {
+    curRes = curSup * 1.15;
+  }
+
+  const channelHeight = Math.max(0.1, curRes - curSup);
+  const channelPosPct = Math.min(150, Math.max(-50, Math.round(((curClose - curSup) / channelHeight) * 100)));
+
+  // 5. NHẬN DIỆN CÁC SỰ KIỆN WYCKOFF NÂNG CAO (SPRING, LPS, SOS, UTAD, SOW)
+  let springTested = false;
+  let testVolumeRatio: number | null = null;
   let lpsConfirmed = false;
-  if (isRange && posInRange >= 0.48 && posInRange <= 0.88 && secondHalfRet >= 0) {
-    const last3 = recent.slice(-3);
-    const min3Low = Math.min(...last3.map((b) => b.low));
-    const avg3Vol = avg(last3.map((b) => b.volume || 0));
-    const midRange = (rangeHigh + rangeLow) / 2;
-    if (min3Low >= midRange * 0.985 && avg3Vol < avgVol * 1.05 && lastBar.close >= lastBar.open) {
-      lpsConfirmed = true;
+
+  const recentWindow = Math.min(25, n - trStartIdx);
+  const recent = bars.slice(-recentWindow);
+  const recentLow = Math.min(...recent.map((b) => b.low));
+  const recentLowBar = recent.reduce((a, b) => (b.low <= a.low ? b : a), recent[0]!);
+  const recentHigh = Math.max(...recent.map((b) => b.high));
+
+  // Base Accumulation Events
+  let spring = false;
+  let sos = false;
+
+  if (!isTopDist) {
+    // Spring: Thủng sàn Ice (Low < Support * 0.99) rồi nhanh chóng kéo ngược đóng trong TR
+    if (recentLow < curSup * 0.995 && curClose >= curSup * 0.99) {
+      spring = true;
+      springIdx = bars.indexOf(recentLowBar);
+      springIsBreak = true;
+    }
+
+    // Spring Test verification:
+    if (spring) {
+      const lowIdxInRecent = recent.indexOf(recentLowBar);
+      if (lowIdxInRecent >= 0 && lowIdxInRecent < recent.length - 1) {
+        const subSeq = recent.slice(lowIdxInRecent + 1);
+        const lowVol = recentLowBar.volume || 1;
+        for (const sb of subSeq) {
+          const distToLow = Math.abs(sb.low - recentLowBar.low) / Math.max(recentLowBar.low, 1e-9);
+          const sbVol = sb.volume || 0;
+          if (distToLow <= 0.03 && sbVol <= lowVol * 0.9 && sb.close >= sb.open) {
+            springTested = true;
+            testVolumeRatio = Number((sbVol / lowVol).toFixed(2));
+            break;
+          }
+        }
+      }
+    }
+
+    // LPS (Last Point of Support trong Phase D):
+    // Giá giữ vững ở nửa trên biên tích lũy (>= 45%), vol cạn kiệt, tạo nền phẳng trước khi nổ
+    if (channelPosPct >= 45 && channelPosPct <= 95) {
+      const last5 = bars.slice(-5);
+      const minLast5 = Math.min(...last5.map((b) => b.low));
+      const avgVol5 = avg(last5.map((b) => b.volume || 0));
+      if (minLast5 >= (curSup + curRes) / 2 * 0.98 && avgVol5 <= volMa20 * 1.1) {
+        lpsConfirmed = true;
+      }
+    }
+
+    // SOS (Sign of Strength / Jump Across Creek):
+    // Giá vượt Creek hoặc tiệm cận với nến tăng kèm khối lượng lớn
+    if (curClose > curRes || (lastBar.high >= curRes * 0.97 && (lastVol >= 1.25 * volMa20 || isUltraVol) && curClose >= lastBar.open)) {
+      sos = true;
+      sosIdx = n - 1;
     }
   }
 
-  if (sc) {
-    eventCodes.push("SC");
-    events.push("SC — bán cao điểm đầu cửa sổ, nghi dừng xuống");
-  }
-  if (bc) {
-    eventCodes.push("BC");
-    events.push("BC — mua cao điểm đầu cửa sổ, nghi dừng lên");
-  }
-  if (springTested) {
-    eventCodes.push("SPRING_TESTED");
-    events.push(`Spring Tested — đã test cạn cung (${testVolumeRatio ?? 0.7}x vol đáy)`);
-  } else if (spring) {
-    eventCodes.push("SPRING");
-    events.push("Spring — thủng hỗ trợ rồi thu hồi vào range");
-  }
-  if (lpsConfirmed && !sos) {
-    eventCodes.push("LPS");
-    events.push("LPS — Điểm tựa cuối giữ vững trên nửa trên range, vol cạn kiệt");
-  }
-  if (utad) {
-    eventCodes.push("UTAD");
-    events.push("UTAD — xuyên kháng cự rồi bị đẩy xuống");
-  }
-  if (sos) {
-    eventCodes.push("SOS");
-    events.push("SOS — đóng trên range kèm khối lượng");
-  }
-  if (sow) {
-    eventCodes.push("SOW");
-    events.push("SOW — đóng dưới range kèm khối lượng");
-  }
-  if (upVol > downVol * 1.25 && secondHalfRet > 0 && !sos) {
-    events.push("Nỗ lực tăng: KL nến tăng > nến giảm");
-  }
-  if (downVol > upVol * 1.25 && secondHalfRet < 0 && !sow) {
-    events.push("Nỗ lực giảm: KL nến giảm chiếm ưu thế");
+  // Top Distribution Events
+  let utad = false;
+  let sow = false;
+
+  if (isTopDist) {
+    if (recentHigh > curRes * 0.99 && curClose < curRes * 1.01) {
+      utad = true;
+      utIdx = n - 1;
+    }
+    if (curClose < curSup * 0.99 || (sowIdx > 0 && curClose <= curSup * 1.02)) {
+      sow = true;
+    }
   }
 
-  const strongUp = ret > 12 || (firstHalfRet > 0.03 && secondHalfRet > 0.03);
-  const strongDown = ret < -12 || (firstHalfRet < -0.03 && secondHalfRet < -0.03);
+  // 6. GẮN NHÃN SỰ KIỆN VÀ MÃ CODES
+  if (isTopDist) {
+    if (bcIdx > 0) {
+      eventCodes.push("BC");
+      events.push(`BC — Mua cao trào phân phối đỉnh (${fmtNum(bcPrice, 1)})`);
+    }
+    if (arIdx > 0) {
+      eventCodes.push("AR");
+      events.push(`AR — Nhịp rơi tự động kiểm định sàn Ice (${fmtNum(arPrice, 1)})`);
+    }
+    if (utad) {
+      eventCodes.push("UTAD");
+      events.push("UTAD — Bẫy giá vượt đỉnh cản vùng phân phối");
+    }
+    if (sow) {
+      eventCodes.push("SOW");
+      events.push("SOW — Thủng sàn hỗ trợ Ice kèm thanh khoản suy yếu");
+    }
+  } else {
+    if (scIdx > 0) {
+      eventCodes.push("SC");
+      events.push(`SC — Bán tháo cao trào đáy chu kỳ (${fmtNum(scPrice, 1)})`);
+    }
+    if (arIdx > 0) {
+      eventCodes.push("AR");
+      events.push(`AR — Sóng hồi phục tự động lập trần Creek (${fmtNum(arPrice, 1)})`);
+    }
+    if (springTested) {
+      eventCodes.push("SPRING_TESTED");
+      events.push(`Spring Tested — Rũ bỏ đã test cạn cung (${testVolumeRatio ?? 0.7}x vol đáy)`);
+    } else if (spring) {
+      eventCodes.push("SPRING");
+      events.push(`Spring — Rũ bỏ thủng sàn Ice rồi rút chân hồi phục`);
+    }
+    if (lpsConfirmed && !sos) {
+      eventCodes.push("LPS");
+      events.push("LPS — Điểm tựa cuối giữ vững trên nửa trên TR, vol cạn");
+    }
+    if (sos) {
+      eventCodes.push("SOS");
+      events.push(`SOS / JAC — Bứt phá trần Creek (${fmtNum(curRes, 1)}) kèm dòng tiền`);
+    }
+  }
 
+  // 7. XÁC ĐỊNH GIAI ĐOẠN WYCKOFF (PHASES A -> E)
   let phase: WyckoffPhase = "unknown";
   let subPhase: WyckoffSubPhase = null;
-  let confidence = 35;
   let bias: WyckoffSnapshot["bias"] = "neutral";
   let transitionStatus: WyckoffTransitionStatus = "NEUTRAL";
   let transitionVi = "Chưa xác định";
+  let confidence = 45;
 
-  if (sos && (firstHalfRet < 0 || isRange)) {
-    phase = firstHalfRet < -0.04 ? "markup" : "re-accumulation";
-    subPhase = "E";
-    bias = "bullish";
-    confidence = 72;
-    transitionStatus = "PHASE_E_MARKUP";
-    transitionVi = "Chuyển pha E: SOS Bứt phá Trading Range (Markup)";
-    notes.push("SOS rời range — Phase E markup nghiêng tích lũy");
-  } else if (sow && (firstHalfRet > 0 || isRange)) {
-    phase = firstHalfRet > 0.04 ? "markdown" : "re-distribution";
-    subPhase = "E";
-    bias = "bearish";
-    confidence = 72;
-    transitionStatus = "PHASE_E_MARKDOWN";
-    transitionVi = "Chuyển pha E: SOW Thủng đáy Range (Markdown)";
-    notes.push("SOW rời range — Phase E markdown nghiêng phân phối");
-  } else if (lpsConfirmed && isRange) {
-    phase = "accumulation";
-    subPhase = "D";
-    bias = "bullish";
-    confidence = 75;
-    transitionStatus = "PHASE_D_LPS";
-    transitionVi = "Chuyển pha D: LPS Điểm tựa cuối kiểm định hỗ trợ";
-    notes.push("Phase D LPS — Điểm vào lệnh tối ưu kiểm định cung trước SOS");
-  } else if (springTested && isRange) {
-    phase = firstHalfRet < 0 ? "accumulation" : "re-accumulation";
-    subPhase = "C";
-    bias = "bullish";
-    confidence = 78;
-    transitionStatus = "PHASE_C_VERIFIED";
-    transitionVi = "Pha C hoàn thành: Spring đã Test cạn cung thành công";
-    notes.push("Phase C Spring Tested — kiểm định cạn cung hoàn tất, sẵn sàng chuyển pha D");
-  } else if (spring && isRange) {
-    phase = firstHalfRet < 0 ? "accumulation" : "re-accumulation";
-    subPhase = "C";
-    bias = "bullish";
-    confidence = 70;
-    transitionStatus = "PHASE_C_TESTING";
-    transitionVi = "Pha C: Vừa xuất hiện Spring, đang chờ phiên Test";
-    notes.push("Phase C Spring — test nguồn cung còn lại");
-  } else if (utad && isRange) {
-    phase = firstHalfRet > 0 ? "distribution" : "re-distribution";
-    subPhase = "C";
-    bias = "bearish";
-    confidence = 70;
-    transitionStatus = "PHASE_C_TESTING";
-    transitionVi = "Pha C Phân phối: Upthrust / UTAD bẫy cầu";
-    notes.push("Phase C UTAD — test nhu cầu còn lại");
-  } else if (isRange && firstHalfRet < -0.04) {
-    phase = "accumulation";
-    bias = "bullish";
-    if (sc) {
-      subPhase = "A";
-      confidence = 55;
-      transitionStatus = "PHASE_A_STOPPING";
-      transitionVi = "Pha A: SC/AR đang chặn đà rơi";
-      notes.push("Phase A — SC/AR đang dừng xuống");
-    } else if (posInRange > 0.62 && upVol > downVol) {
+  if (isTopDist) {
+    if (sow && curClose < curSup) {
+      phase = "markdown";
+      subPhase = "E";
+      bias = "bearish";
+      transitionStatus = "PHASE_E_MARKDOWN";
+      transitionVi = "Pha E: Markdown — Rơi tự do sau khi gãy Ice";
+      notes.push("Phân phối đỉnh hoàn tất, chuyển sang sóng giảm Markdown");
+      confidence = 78;
+    } else if (sow) {
+      phase = "distribution";
       subPhase = "D";
-      confidence = 62;
+      bias = "bearish";
       transitionStatus = "PHASE_D_SOS";
-      transitionVi = "Pha D: Nỗ lực bứt phá nửa trên range";
-      notes.push("Phase D — giá ở nửa trên range, nghi SOS sắp tới");
-    } else {
-      subPhase = "B";
-      confidence = 48;
-      transitionStatus = "PHASE_B_BUILDING";
-      transitionVi = "Pha B: Đi ngang tích tụ nguyên nhân trong Range";
-      notes.push("Phase B — đi ngang sau giảm, đang xây nguyên nhân");
-    }
-  } else if (isRange && firstHalfRet > 0.04) {
-    phase = "distribution";
-    bias = "bearish";
-    if (bc) {
+      transitionVi = "Pha D: SOW — Thủng hỗ trợ kiểm định xu hướng giảm";
+      notes.push("Xuất hiện dấu hiệu suy yếu SOW gần sàn Ice");
+      confidence = 74;
+    } else if (utad) {
+      phase = "distribution";
+      subPhase = "C";
+      bias = "bearish";
+      transitionStatus = "PHASE_C_TESTING";
+      transitionVi = "Pha C: UTAD — Bẫy vượt đỉnh gom xả cuối cùng";
+      notes.push("Bẫy cầu UTAD kiểm định lượng cầu đỉnh");
+      confidence = 72;
+    } else if (n - 1 <= stIdx + 12) {
+      phase = "distribution";
       subPhase = "A";
-      confidence = 55;
+      bias = "bearish";
       transitionStatus = "PHASE_A_STOPPING";
-      transitionVi = "Pha A: BC/AR đang chặn đà tăng";
-      notes.push("Phase A — BC/AR đang dừng lên");
-    } else if (posInRange < 0.38 && downVol > upVol) {
-      subPhase = "D";
-      confidence = 62;
-      transitionStatus = "PHASE_D_SOS";
-      transitionVi = "Pha D: Áp lực giảm nửa dưới range";
-      notes.push("Phase D — giá ở nửa dưới range, nghi SOW sắp tới");
+      transitionVi = "Pha A: BC/AR — Chặn đứng đà tăng nóng";
+      notes.push("Phase A — Tạo đỉnh cao trào BC và hồi phục AR");
+      confidence = 58;
     } else {
+      phase = "distribution";
       subPhase = "B";
-      confidence = 48;
+      bias = "neutral";
       transitionStatus = "PHASE_B_BUILDING";
-      transitionVi = "Pha B: Đi ngang phân phối trong Range";
-      notes.push("Phase B — đi ngang sau tăng, đang xây nguyên nhân");
+      transitionVi = "Pha B: Giằng co phân phối đỉnh / tái tích lũy";
+      notes.push("Phase B — Dao động giằng co trong biên độ đỉnh");
+      confidence = 52;
     }
-  } else if (strongUp && !isRange) {
-    phase = secondHalfRet > 0.02 && firstHalfRet > 0.02 ? "markup" : "re-accumulation";
-    subPhase = phase === "markup" ? "E" : "B";
-    bias = "bullish";
-    confidence = 60;
-    transitionStatus = "PHASE_E_MARKUP";
-    transitionVi = "Pha E: Xu hướng tăng Mark-up dốc";
-    notes.push("Đà tăng chiếm ưu thế — markup / tái tích lũy");
-  } else if (strongDown && !isRange) {
-    phase = secondHalfRet < -0.02 && firstHalfRet < -0.02 ? "markdown" : "re-distribution";
-    subPhase = phase === "markdown" ? "E" : "B";
-    bias = "bearish";
-    confidence = 60;
-    transitionStatus = "PHASE_E_MARKDOWN";
-    transitionVi = "Pha E: Xu hướng giảm Mark-down dốc";
-    notes.push("Đà giảm chiếm ưu thế — markdown / tái phân phối");
-  } else if (ret > 3) {
-    phase = "markup";
-    subPhase = "E";
-    bias = "bullish";
-    confidence = 45;
-    transitionStatus = "PHASE_E_MARKUP";
-    transitionVi = "Pha E: Nhịp tăng ngắn hạn";
-  } else if (ret < -3) {
-    phase = "markdown";
-    subPhase = "E";
-    bias = "bearish";
-    confidence = 45;
-    transitionStatus = "PHASE_E_MARKDOWN";
-    transitionVi = "Pha E: Nhịp giảm ngắn hạn";
   } else {
-    transitionStatus = "PHASE_B_BUILDING";
-    transitionVi = "Pha B: Dao động cân bằng";
-    notes.push("Biên độ hẹp / hỗn hợp — chờ phá vỡ kèm khối lượng");
+    // Base Accumulation
+    if (curClose > curRes * 1.01) {
+      phase = "markup";
+      subPhase = "E";
+      bias = "bullish";
+      transitionStatus = "PHASE_E_MARKUP";
+      transitionVi = "Pha E: Markup — Đại sóng tăng giá bứt phá Kênh TR";
+      notes.push("Thoát khỏi Trading Range, bước vào chu kỳ tăng trưởng Mark-up");
+      confidence = 82;
+    } else if (sos) {
+      phase = "accumulation";
+      subPhase = "D";
+      bias = "bullish";
+      transitionStatus = "PHASE_D_SOS";
+      transitionVi = "Pha D: SOS — Bứt phá vượt trần Creek kèm khối lượng lớn";
+      notes.push("Dòng tiền lớn bứt phá Creek, chuẩn bị vào Pha E");
+      confidence = 78;
+    } else if (lpsConfirmed) {
+      phase = "accumulation";
+      subPhase = "D";
+      bias = "bullish";
+      transitionStatus = "PHASE_D_LPS";
+      transitionVi = "Pha D: LPS — Điểm tựa cuối kiểm định hỗ trợ thành công";
+      notes.push("Điểm vào lệnh tối ưu LPS trước thềm bứt phá");
+      confidence = 75;
+    } else if (springTested) {
+      phase = "accumulation";
+      subPhase = "C";
+      bias = "bullish";
+      transitionStatus = "PHASE_C_VERIFIED";
+      transitionVi = "Pha C: Spring Tested — Kiểm định cạn cung hoàn tất";
+      notes.push("Rũ bỏ cạn cung thành công, xác nhận chân sóng");
+      confidence = 80;
+    } else if (spring) {
+      phase = "accumulation";
+      subPhase = "C";
+      bias = "bullish";
+      transitionStatus = "PHASE_C_TESTING";
+      transitionVi = "Pha C: Spring — Rũ bỏ thủng sàn Ice, đang chờ Test";
+      notes.push("Xuất hiện rũ bỏ rũ hàng, theo dõi nhịp test cạn vol");
+      confidence = 70;
+    } else if (n - 1 <= stIdx + 12) {
+      phase = "accumulation";
+      subPhase = "A";
+      bias = "neutral";
+      transitionStatus = "PHASE_A_STOPPING";
+      transitionVi = "Pha A: SC/AR — Chặn đà rơi hoảng loạn";
+      notes.push("Phase A — Tạo đáy cao trào SC và hồi phục AR");
+      confidence = 58;
+    } else {
+      phase = "accumulation";
+      subPhase = "B";
+      bias = "neutral";
+      transitionStatus = "PHASE_B_BUILDING";
+      transitionVi = "Pha B: Gom hàng xây nguyên nhân (Cause)";
+      notes.push("Phase B — Smart money âm thầm hấp thụ nguồn cung");
+      confidence = 52;
+    }
   }
 
-  if (vt === "rising" && (phase === "markup" || phase === "markdown")) confidence = Math.min(85, confidence + 8);
-  if (vt === "falling" && (phase === "accumulation" || phase === "distribution")) {
-    confidence = Math.min(80, confidence + 5);
-    notes.push("Khối lượng co trong biên — đặc trưng giai đoạn cân bằng");
+  // 8. TÍNH TOÁN QUẢN TRỊ RỦI RO, CAUSE & EFFECT (R:R)
+  const barsInRange = Math.max(10, n - 1 - trStartIdx);
+  const causeWeeks = Math.max(1, Math.round(barsInRange / 5));
+
+  // StopLoss theo AFL:
+  const recentCandleLow = Math.min(lastBar.low, prevBar.low);
+  let stopLossVal = recentCandleLow * 0.985;
+  if (stopLossVal >= curClose || (curClose - stopLossVal) / curClose > 0.15) {
+    stopLossVal = curClose * 0.93;
   }
-  if (spring || utad) confidence = Math.min(85, confidence + 6);
-  if (springTested) confidence = Math.min(88, confidence + 5);
+  const stopLoss = Number(stopLossVal.toFixed(2));
+
+  // Targets theo Cause & Effect (Villahermosa & AFL Master):
+  let target1: number;
+  let target2: number;
+
+  if (isTopDist) {
+    target1 = Number(curSup.toFixed(2));
+    target2 = Number((curSup - channelHeight * 0.5).toFixed(2));
+  } else {
+    if (curClose >= curRes) {
+      target1 = Number((curRes + channelHeight * 1.0).toFixed(2));
+      target2 = Number((curRes + channelHeight * 2.0).toFixed(2));
+    } else {
+      target1 = Number(curRes.toFixed(2));
+      if (causeWeeks >= 20) {
+        target2 = Number((curRes + channelHeight * 1.0).toFixed(2));
+      } else if (causeWeeks >= 10) {
+        target2 = Number((curRes + channelHeight * 0.75).toFixed(2));
+      } else {
+        target2 = Number((curRes + channelHeight * 0.5).toFixed(2));
+      }
+    }
+  }
+
+  // Điều chỉnh điểm tin cậy multi-factor
+  const vt = volumeTrend(bars.slice(-30));
+  if (vt === "rising" && (phase === "markup" || phase === "markdown")) confidence = Math.min(92, confidence + 6);
+  if (vt === "falling" && (phase === "accumulation" || phase === "distribution")) confidence = Math.min(88, confidence + 5);
+  if (isUltraVol) confidence = Math.min(92, confidence + 4);
+  if (springTested || sos) confidence = Math.min(92, confidence + 4);
 
   return {
     phase,
@@ -463,15 +685,22 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     events: events.slice(0, 4),
     eventCodes: [...new Set(eventCodes)].slice(0, 6),
     volumeTrend: vt,
-    range: { high: rangeHigh, low: rangeLow },
+    range: { high: Number(curRes.toFixed(2)), low: Number(curSup.toFixed(2)) },
     notes: notes.slice(0, 4),
     transitionStatus,
     transitionVi,
     springTested,
     lpsConfirmed,
-    creekLevel: rangeHigh,
-    iceLevel: rangeLow,
+    creekLevel: Number(curRes.toFixed(2)),
+    iceLevel: Number(curSup.toFixed(2)),
     testVolumeRatio,
+    trModel,
+    channelPosPct,
+    causeWeeks,
+    target1,
+    target2,
+    stopLoss,
+    vsaTag,
   };
 }
 

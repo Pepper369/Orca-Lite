@@ -390,16 +390,72 @@ function WyckoffDetail({
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={biasTone(w.bias)}>{w.confidence}%</Badge>
         <span className="text-[13px] font-semibold text-text-primary">{w.phaseVi}</span>
+        {w.trModel ? (
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded font-medium border ${
+              w.trModel === "Base"
+                ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                : "border-rose-500/40 text-rose-400 bg-rose-500/10"
+            }`}
+          >
+            {w.trModel === "Base" ? "Base Accumulation TR" : "Top Distribution TR"}
+          </span>
+        ) : null}
+        {w.vsaTag === "ultra-high" ? (
+          <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30">
+            Ultra High Volume
+          </span>
+        ) : w.vsaTag === "high" ? (
+          <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            High Volume
+          </span>
+        ) : w.vsaTag === "low" ? (
+          <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-sky-500/15 text-sky-400 border border-sky-500/30">
+            Low Volume (Kiệt cung)
+          </span>
+        ) : null}
       </div>
       <div className="text-[12px] text-text-muted">
         Khối lượng: {VOL_VI[w.volumeTrend] ?? w.volumeTrend}
         {w.range && (
           <span className="num">
             {" "}
-            · Range {w.range.low.toLocaleString("vi-VN")} – {w.range.high.toLocaleString("vi-VN")}
+            · Ice: {w.range.low.toLocaleString("vi-VN")} – Creek: {w.range.high.toLocaleString("vi-VN")}
+            {w.channelPosPct != null ? ` (${w.channelPosPct}% biên)` : ""}
           </span>
         )}
+        {w.causeWeeks != null ? <span className="ml-1.5 text-text-muted">· Tích lũy: {w.causeWeeks} tuần</span> : null}
       </div>
+
+      {(w.stopLoss != null || w.target1 != null) && (
+        <div className="grid grid-cols-3 gap-2 text-[12px] pt-1">
+          {w.stopLoss != null && (
+            <div className="rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-1.5">
+              <div className="text-[10px] uppercase text-rose-400 font-semibold">Cắt lỗ (SL)</div>
+              <div className="num mt-0.5 font-medium text-rose-400">
+                {w.stopLoss.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
+              </div>
+            </div>
+          )}
+          {w.target1 != null && (
+            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1.5">
+              <div className="text-[10px] uppercase text-emerald-400 font-semibold">Mục tiêu 1 (T1)</div>
+              <div className="num mt-0.5 font-medium text-emerald-400">
+                {w.target1.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
+              </div>
+            </div>
+          )}
+          {w.target2 != null && (
+            <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5">
+              <div className="text-[10px] uppercase text-cyan-400 font-semibold">Mục tiêu 2 (T2)</div>
+              <div className="num mt-0.5 font-medium text-cyan-400">
+                {w.target2.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {w.events.length > 0 && (
         <ul className="space-y-1">
           {w.events.map((ev, i) => (

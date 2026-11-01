@@ -137,7 +137,7 @@ export const StockStructurePanel = memo(function StockStructurePanel({ symbol }:
           <div className="rounded-lg border border-border-subtle bg-background-secondary/40 p-2.5">
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                Wyckoff
+                Wyckoff {w.trModel ? `(${w.trModel === "Base" ? "Base TR" : "Top TR"})` : ""}
               </span>
               <Badge tone={biasTone(w.bias)}>{w.confidence}%</Badge>
             </div>
@@ -147,10 +147,18 @@ export const StockStructurePanel = memo(function StockStructurePanel({ symbol }:
               {w.range && (
                 <span className="num">
                   {" "}
-                  · biên {w.range.low.toLocaleString("vi-VN")} – {w.range.high.toLocaleString("vi-VN")}
+                  · Ice {w.range.low.toLocaleString("vi-VN")} – Creek {w.range.high.toLocaleString("vi-VN")}
+                  {w.channelPosPct != null ? ` (${w.channelPosPct}%)` : ""}
                 </span>
               )}
             </div>
+            {(w.stopLoss != null || w.target1 != null) && (
+              <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] num">
+                {w.stopLoss != null && <span className="text-rose-400">SL: {w.stopLoss.toLocaleString("vi-VN")}</span>}
+                {w.target1 != null && <span className="text-emerald-400">T1: {w.target1.toLocaleString("vi-VN")}</span>}
+                {w.target2 != null && <span className="text-cyan-400">T2: {w.target2.toLocaleString("vi-VN")}</span>}
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-border-subtle bg-background-secondary/40 p-2.5">

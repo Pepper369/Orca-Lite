@@ -44,6 +44,13 @@ export interface WyckoffScreenRow {
   lpsConfirmed?: boolean;
   creekLevel?: number | null;
   iceLevel?: number | null;
+  trModel?: "Base" | "Top" | null;
+  channelPosPct?: number | null;
+  causeWeeks?: number | null;
+  target1?: number | null;
+  target2?: number | null;
+  stopLoss?: number | null;
+  vsaTag?: "ultra-high" | "high" | "low" | "normal";
 }
 
 const SETUP_VI: Record<WyckoffSetup, string> = {
@@ -95,7 +102,7 @@ export async function screenWyckoff(args?: {
 
   let skipped = 0;
   const analyzed = await mapPool(uniq, 8, async (symbol) => {
-    const { bars } = await fetchOhlcvResilient(symbol, 100);
+    const { bars } = await fetchOhlcvResilient(symbol, 160);
     if (bars.length < 30) {
       skipped += 1;
       return null;
@@ -128,6 +135,13 @@ export async function screenWyckoff(args?: {
       lpsConfirmed: w.lpsConfirmed,
       creekLevel: w.creekLevel,
       iceLevel: w.iceLevel,
+      trModel: w.trModel,
+      channelPosPct: w.channelPosPct,
+      causeWeeks: w.causeWeeks,
+      target1: w.target1,
+      target2: w.target2,
+      stopLoss: w.stopLoss,
+      vsaTag: w.vsaTag,
     };
     return row;
   });
