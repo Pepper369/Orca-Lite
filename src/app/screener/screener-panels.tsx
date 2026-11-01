@@ -189,11 +189,12 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "bottom_confluence", label: "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)", icon: <Sparkles className="size-3.5 text-cyan-400" />, desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
+  { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "quant_edge", label: "Ưu thế Quant Pro", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
   { id: "quant_mean_revert", label: "Mean Reversion OU", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ t½" },
   { id: "quant_low_beta", label: "Low-Beta Anomaly", icon: <ShieldCheck className="size-3.5 text-blue-400" />, desc: "Bất thường học thuyết AQR: Beta <= 0.88 & Chất lượng cao" },
   { id: "quant_asymmetric", label: "Triple-Barrier R/R >= 2.0", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Tỷ lệ Lời/Lỗ tối ưu theo mô hình biến động Marcos López de Prado" },
-  { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "vcp", label: "Mẫu hình VCP / Cốc", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
   { id: "ttm_squeeze", label: "Nén Squeeze", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
   { id: "ma_cross", label: "Giao cắt MA", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Golden Cross & Trật tự MA tăng" },
@@ -406,7 +407,7 @@ export function VnScreener({
 
   const handleSelectPreset = (p: ScreenerPreset) => {
     setPreset(p);
-    if (p === "confluence") {
+    if (p === "confluence" || p === "bottom_confluence") {
       setViewTab("confluence");
       setSortKey("confluenceScore");
       setSortOrder("desc");
@@ -1261,6 +1262,11 @@ export function VnScreener({
                               <span className="text-[10px] text-text-muted">—</span>
                             )}
                             <div className="flex flex-wrap gap-1 items-center">
+                              {row.hasBullishDivergence && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
+                                  ⚡ {row.divergenceSummary || "Phân kỳ dương"}
+                                </span>
+                              )}
                               {row.foreignAccumulating && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 text-[9px] font-bold text-emerald-400">
                                   NN Gom {row.foreignNetVal ? `+${row.foreignNetVal}tỷ` : ""}

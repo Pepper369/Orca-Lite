@@ -18,6 +18,7 @@ type ScreenPayload = {
 
 const SCENARIOS = [
   { id: "all", label: "Tất cả kịch bản", shortLabel: "Tất cả" },
+  { id: "BOTTOM_BULLISH_DIVERGENCE", label: "🌟 Hợp lưu Đáy: MA + Nến + Phân kỳ dương", shortLabel: "🌟 Phân Kỳ Đáy" },
   { id: "SMC_SWEEP_RECLAIM", label: "🧲 Quét rũ thanh khoản (SMC Spring)", shortLabel: "🧲 Quét SMC" },
   { id: "VSA_NO_SUPPLY_TEST", label: "🧪 Test cung cạn kiệt (No Supply)", shortLabel: "🧪 Test VSA" },
   { id: "EMA_RIBBON_ALIGN", label: "🎗️ Hợp lưu dải EMA Ribbon", shortLabel: "🎗️ EMA Ribbon" },
@@ -48,6 +49,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [minScoreThreshold, setMinScoreThreshold] = useState<number>(55);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [volumeOnly, setVolumeOnly] = useState<boolean>(false);
+  const [divergenceOnly, setDivergenceOnly] = useState<boolean>(false);
   const [foreignOnly, setForeignOnly] = useState<boolean>(false);
   const [leaderOnly, setLeaderOnly] = useState<boolean>(false);
   const [freshOnly, setFreshOnly] = useState<boolean>(false); // T+0 only
@@ -110,7 +112,12 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
       list = list.filter((r) => Boolean(r.foreignAccumulating));
     }
 
-    // 5c. Relative Strength Leader Only (Outperforming VN-Index)
+    // 5c. Bullish Divergence Only
+    if (divergenceOnly) {
+      list = list.filter((r) => Boolean(r.divergenceSignal || r.divergenceSummary || r.scenario === "BOTTOM_BULLISH_DIVERGENCE"));
+    }
+
+    // 5d. Relative Strength Leader Only (Outperforming VN-Index)
     if (leaderOnly) {
       list = list.filter((r) => Boolean(r.isMarketLeader || (r.rsRating20 != null && r.rsRating20 > 0)));
     }
@@ -215,6 +222,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     setMinScoreThreshold(55);
     setSearchQuery("");
     setVolumeOnly(false);
+    setDivergenceOnly(false);
     setForeignOnly(false);
     setLeaderOnly(false);
     setFreshOnly(false);
@@ -401,6 +409,18 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 className="rounded"
               />
               <span>Dòng tiền lớn (Vol &gt; 1.2x)</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
+              <input
+                type="checkbox"
+                checked={divergenceOnly}
+                onChange={(e) => setDivergenceOnly(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-cyan-400 font-medium">⚡ Phân kỳ dương</span>
             </label>
 
             <span className="text-text-muted">|</span>
@@ -680,6 +700,11 @@ function ConfluenceRowItem({
             {row.setupQuality === "A" && (
               <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.2 text-[9px] font-semibold">
                 A
+              </span>
+            )}
+            {row.divergenceSummary && (
+              <span className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1 py-0.2 text-[9px] font-semibold" title={row.divergenceSummary}>
+                ⚡ {row.divergenceSummary}
               </span>
             )}
             {row.isMarketLeader && (

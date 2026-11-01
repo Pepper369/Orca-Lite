@@ -16,6 +16,7 @@ import { batchVnOhlcv } from "./ohlcv-batch";
 import { sma, adx, ttmSqueeze, superTrend, rsi } from "../engines/oscillators";
 import { detectChartPatterns } from "../engines/chart-patterns";
 import { detectCandlePatterns } from "../engines/candlestick-patterns";
+import { detectDivergences, SHORT_3_4D } from "../engines/divergence";
 import {
   estimateOrnsteinUhlenbeck,
   calculateTripleBarrierLevels,
@@ -24,6 +25,7 @@ import {
 
 export type ScreenerPreset =
   | "all"
+  | "bottom_confluence"
   | "quant_edge"
   | "quant_mean_revert"
   | "quant_low_beta"
@@ -77,6 +79,8 @@ export type ScreenerStockItem = {
   chartPattern: string | null;
   confluenceScore: number; // 0-100
   confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
+  hasBullishDivergence?: boolean;
+  divergenceSummary?: string | null;
   foreignNetVal?: number | null; // in Billion VND
   foreignAccumulating?: boolean;
   rsRating20?: number | null;
@@ -291,6 +295,8 @@ function analyzeTechFeatures(
       squeezeState: null,
       superTrendDir: null,
       chartPattern: null,
+      hasBullishDivergence: false,
+      divergenceSummary: null,
       confluenceScore: compositeScore,
       confluenceBadge: "NONE" as const,
     };
@@ -368,6 +374,32 @@ function analyzeTechFeatures(
     const curRsi = rsiArr[n - 1];
     if (curRsi != null && curRsi >= 45 && curRsi <= 68) momScore += 5;
   }
+
+  // Bullish Divergence Detection (RSI / MACD / Stoch)
+  let hasBullishDivergence = false;
+  let divergenceSummary: string | null = null;
+  if (ohlcvBars && ohlcvBars.length >= 18) {
+    try {
+      const divSignals = detectDivergences(ohlcvBars, {
+        ...SHORT_3_4D,
+        lookback: Math.min(ohlcvBars.length, 50),
+      });
+      const bull = divSignals.find(
+        (s) =>
+          s.kind.includes("bullish") &&
+          s.status !== "invalidated" &&
+          (s.barsAgo == null || s.barsAgo <= 8),
+      );
+      if (bull) {
+        hasBullishDivergence = true;
+        divergenceSummary = `Phân kỳ ${bull.oscillator.toUpperCase()}${bull.barsAgo != null ? ` (T+${bull.barsAgo})` : ""}`;
+        momScore = Math.min(25, momScore + 8);
+      }
+    } catch {
+      // safe
+    }
+  }
+
   momScore = Math.min(25, momScore);
 
   // 4. Flow, RS Leader & Fundamental Pillar (max 25)
@@ -389,6 +421,8 @@ function analyzeTechFeatures(
     squeezeState: sqState,
     superTrendDir: stDir,
     chartPattern: patternLabel,
+    hasBullishDivergence,
+    divergenceSummary,
     confluenceScore,
     confluenceBadge,
   };
@@ -595,7 +629,10 @@ function detectPresets(item: {
   netMargin: number | null;
   volume: number | null;
   maSignal: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL";
+  ma10?: number | null;
+  ma20?: number | null;
   chartPattern?: string | null;
+  hasBullishDivergence?: boolean;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   confluenceScore: number;
   quantEdgeScore?: number;
@@ -679,6 +716,23 @@ function detectPresets(item: {
     ))
   ) {
     passes.push("confluence");
+  }
+
+  // 8b. Bottom Confluence (Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương)
+  const hasCandleReversal = Boolean(item.chartPattern && !item.chartPattern.includes("Nền"));
+  const hasMaSupport =
+    item.ma10 != null &&
+    item.price != null &&
+    ((item.ma20 != null && item.price >= item.ma20 * 0.95) ||
+      item.price >= item.ma10 * 0.98 ||
+      item.maSignal === "GOLDEN_CROSS" ||
+      item.maSignal === "BULLISH_ALIGN");
+
+  if (
+    item.hasBullishDivergence &&
+    (hasCandleReversal || hasMaSupport || item.confluenceScore >= 48)
+  ) {
+    passes.push("bottom_confluence");
   }
 
   // 9. VCP & Classic Patterns
@@ -1047,7 +1101,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           netMargin,
           volume,
           maSignal: techFeatures.maSignal,
+          ma10: techFeatures.ma10,
+          ma20: techFeatures.ma20,
           chartPattern: techFeatures.chartPattern,
+          hasBullishDivergence: techFeatures.hasBullishDivergence,
           squeezeState: techFeatures.squeezeState,
           confluenceScore: techFeatures.confluenceScore,
           quantEdgeScore: quantFeatures.quantEdgeScore,
@@ -1093,6 +1150,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           squeezeState: techFeatures.squeezeState,
           superTrendDir: techFeatures.superTrendDir,
           chartPattern: techFeatures.chartPattern,
+          hasBullishDivergence: techFeatures.hasBullishDivergence,
+          divergenceSummary: techFeatures.divergenceSummary,
           confluenceScore: techFeatures.confluenceScore,
           confluenceBadge: techFeatures.confluenceBadge,
           foreignNetVal,
@@ -1123,6 +1182,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        bottom_confluence: 0,
         quant_edge: 0,
         quant_mean_revert: 0,
         quant_low_beta: 0,
@@ -1172,6 +1232,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    bottom_confluence: 0,
     quant_edge: 0,
     quant_mean_revert: 0,
     quant_low_beta: 0,

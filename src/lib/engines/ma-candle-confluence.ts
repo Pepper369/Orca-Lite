@@ -1,11 +1,13 @@
 import { detectCandlePatterns, type DetectedCandlePattern } from "./candlestick-patterns";
 import { sma } from "../technical";
 import { ema, rsi, macd } from "./oscillators";
+import { detectDivergences, SHORT_3_4D } from "./divergence";
 import { getSecurity, sectorOf } from "../vn/master";
-import type { OhlcvBar, Quote } from "../types";
+import type { OhlcvBar, Quote, DivergenceSignal } from "../types";
 
 export type MaCandleScenario =
   | "ALL"
+  | "BOTTOM_BULLISH_DIVERGENCE" // Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương
   | "SMC_SWEEP_RECLAIM"    // Quét thanh khoản & rút chân hỗ trợ (SMC Shakeout)
   | "VSA_NO_SUPPLY_TEST"   // Test cung cạn kiệt thanh khoản tại MA (Wyckoff/VSA)
   | "EMA_RIBBON_ALIGN"     // Retest dải EMA Ribbon đa chu kỳ
@@ -55,6 +57,11 @@ export interface MaCandleConfluenceRow {
   candleReliability: string;
   patternAgeBars: number;
   confirmation: string;
+
+  // Divergence Engine Integration
+  divergenceSignal?: DivergenceSignal | null;
+  divergenceSummary?: string | null;
+  isBottomReversal?: boolean;
 
   // Confluence Score & Quality
   confluenceScore: number;
@@ -251,7 +258,62 @@ export function analyzeMaCandleRow(
     (patternLow <= ema10 * 1.01 || patternLow <= ema20 * 1.01) &&
     close >= ema10 * 0.995;
 
-  if (testedBelow200 && reclaimed200) {
+  // Check Bullish Divergence (RSI / MACD / Stoch)
+  let bestBullDiv: DivergenceSignal | null = null;
+  if (bars.length >= 18) {
+    try {
+      const divSignals = detectDivergences(bars, {
+        ...SHORT_3_4D,
+        lookback: Math.min(bars.length, 60),
+      });
+      const bullDivs = divSignals.filter(
+        (s) =>
+          s.kind.includes("bullish") &&
+          s.status !== "invalidated" &&
+          (s.barsAgo == null || s.barsAgo <= 10),
+      );
+      if (bullDivs.length > 0) {
+        bestBullDiv = bullDivs[0]!;
+      } else {
+        const fullDivs = detectDivergences(bars, {
+          pivotLeft: 3,
+          pivotRight: 2,
+          minBarsBetween: 3,
+          maxBarsBetween: 40,
+          lookback: Math.min(bars.length, 80),
+        });
+        const bullFull = fullDivs.filter(
+          (s) =>
+            s.kind.includes("bullish") &&
+            s.status !== "invalidated" &&
+            (s.barsAgo == null || s.barsAgo <= 25),
+        );
+        if (bullFull.length > 0) bestBullDiv = bullFull[0]!;
+      }
+    } catch {
+      // resilient
+    }
+  }
+
+  const isBottomDivergence =
+    bestBullDiv != null &&
+    (near20 ||
+      near50 ||
+      testedBelow200 ||
+      reclaimed200 ||
+      isSmcSweep ||
+      (sma10 != null && close >= sma10 * 0.98) ||
+      (sma20 != null && close >= sma20 * 0.94) ||
+      close >= patternLow);
+
+  if (isBottomDivergence) {
+    scenario = "BOTTOM_BULLISH_DIVERGENCE";
+    scenarioLabel = "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)";
+    scenarioBadgeTone = "cyan";
+    anchorMa = near50 ? "MA50" : testedBelow200 ? "MA200" : sma20 ? "MA20" : "MA10";
+    anchorMaPrice = near50 ? sma50 : testedBelow200 ? sma200 : sma20 ?? sma10;
+    confluenceTags.push(`Phân kỳ ${bestBullDiv!.oscillator.toUpperCase()}${bestBullDiv!.barsAgo != null ? ` (T+${bestBullDiv!.barsAgo})` : ""}`);
+  } else if (testedBelow200 && reclaimed200) {
     scenario = "MA200_RECLAIM";
     scenarioLabel = "Lấy Lại MA200 (Thoát Đáy)";
     scenarioBadgeTone = "purple";
@@ -366,6 +428,14 @@ export function analyzeMaCandleRow(
       }
     }
   }
+
+  // Bullish Divergence Supercharge for Momentum
+  if (bestBullDiv != null) {
+    momentumScore = bestBullDiv.status === "confirmed" ? 20 : 18;
+    momentumStatus = "MOMENTUM_REVERSAL";
+    confluenceTags.push("Phân kỳ động lượng dương");
+  }
+
   momentumScore = Math.min(20, momentumScore);
 
   // 5. Volume & Foreign Flow Confluence (Pillar 4, max 20)
@@ -435,7 +505,8 @@ export function analyzeMaCandleRow(
 
   // 7. Trend Pillar (max 25)
   let trendScore = 16;
-  if (scenario === "MA200_RECLAIM") trendScore = 24;
+  if (scenario === "BOTTOM_BULLISH_DIVERGENCE") trendScore = 25;
+  else if (scenario === "MA200_RECLAIM") trendScore = 24;
   else if (scenario === "SMC_SWEEP_RECLAIM") trendScore = 23;
   else if (scenario === "MA50_BOUNCE") trendScore = 22;
   else if (scenario === "GOLDEN_CROSS_CONFIRM") trendScore = 22;
@@ -492,9 +563,10 @@ export function analyzeMaCandleRow(
 
   // Setup Quality Classification
   const isAplus =
-    confluenceScore >= 78 &&
-    ((volRatio ?? 0) >= 1.15 || foreignAccumulating || isMarketLeader) &&
-    (scenario === "SMC_SWEEP_RECLAIM" ||
+    confluenceScore >= 75 &&
+    ((volRatio ?? 0) >= 1.15 || foreignAccumulating || isMarketLeader || bestBullDiv != null) &&
+    (scenario === "BOTTOM_BULLISH_DIVERGENCE" ||
+      scenario === "SMC_SWEEP_RECLAIM" ||
       scenario === "MA50_BOUNCE" ||
       scenario === "MA200_RECLAIM" ||
       scenario === "GOLDEN_CROSS_CONFIRM" ||
@@ -531,6 +603,12 @@ export function analyzeMaCandleRow(
     candleReliability: topPattern.reliability,
     patternAgeBars: topPattern.ageBars ?? 0,
     confirmation: topPattern.confirmation,
+
+    divergenceSignal: bestBullDiv,
+    divergenceSummary: bestBullDiv
+      ? `${bestBullDiv.kind === "regular_bullish" ? "Phân kỳ thường" : "Phân kỳ ẩn"} ${bestBullDiv.oscillator.toUpperCase()}${bestBullDiv.barsAgo != null ? ` (T+${bestBullDiv.barsAgo})` : ""}`
+      : null,
+    isBottomReversal: Boolean(bestBullDiv || scenario === "BOTTOM_BULLISH_DIVERGENCE" || scenario === "MA200_RECLAIM"),
 
     confluenceScore,
     setupQuality,

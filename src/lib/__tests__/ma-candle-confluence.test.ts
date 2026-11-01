@@ -131,3 +131,30 @@ test("MA & Candle Confluence: Edge cases with short or corrupted series are safe
     assert.equal(res, null); // No reversal pattern in flat series
   });
 });
+
+test("MA & Candle Confluence: Identifies Triple Confluence (Bottom Bullish Divergence + Reversal Candle + MA)", () => {
+  const bars: OhlcvBar[] = [];
+  const t0 = 1_700_000_000_000;
+  let p = 100;
+  for (let i = 0; i < 78; i++) {
+    if (i < 25) p = 100 - i * 0.8;
+    else if (i < 40) p = 80 + (i - 25) * 0.9;
+    else if (i < 55) p = 93.5 - (i - 40) * 1.1;
+    else p = 77 + (i - 55) * 0.6;
+    const noise = Math.sin(i / 2) * 0.15;
+    const c = p + noise;
+    bars.push({ time: t0 + i * 86400000, open: c * 0.998, high: c * 1.008, low: c * 0.992, close: c, volume: 1000 });
+  }
+  const lastC = bars[bars.length - 1].close;
+  bars.push({ time: t0 + 78 * 86400000, open: lastC, high: lastC * 1.002, low: lastC * 0.985, close: lastC * 0.988, volume: 800 });
+  bars.push({ time: t0 + 79 * 86400000, open: lastC * 0.985, high: lastC * 1.03, low: lastC * 0.982, close: lastC * 1.025, volume: 2500 });
+
+  const result = analyzeMaCandleRow("TEST_DIV_CONFLUENCE", bars);
+  assert.ok(result, "Should successfully detect confluence");
+  assert.ok(result.topPattern, "Should have bullish pattern");
+  assert.equal(result.scenario, "BOTTOM_BULLISH_DIVERGENCE");
+  assert.ok(result.divergenceSignal != null, "Should have divergence signal");
+  assert.ok(result.confluenceScore >= 70, `Score ${result.confluenceScore} should be >= 70`);
+  assert.equal(result.isBottomReversal, true);
+  assert.ok(result.stopLoss < result.entryPrice, "Stop loss below entry");
+});
