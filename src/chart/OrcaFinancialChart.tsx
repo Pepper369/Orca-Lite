@@ -728,6 +728,17 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
               {wyckoffSnap.isLeaderITF ? " ⭐ Leader ITF" : ""}
             </span>
           )}
+          {wyckoffSnap.marketRoro && (
+            <span
+              className={`rounded px-1.5 py-0.2 font-bold ${
+                wyckoffSnap.marketRoro.environment === "RISK_ON"
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                  : "bg-rose-500/20 text-rose-400 border border-rose-500/40"
+              }`}
+            >
+              VN-Index: {wyckoffSnap.marketRoro.environment === "RISK_ON" ? "Risk-On 🟢" : "Risk-Off 🔴"}
+            </span>
+          )}
         </div>
       )}
       {readout && (

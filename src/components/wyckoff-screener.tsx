@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import type { WyckoffScreenRow } from "@/lib/services/wyckoff-screener";
+import type { MarketRoroStatus } from "@/lib/engines/wyckoff-elliott";
 import { Badge, Chg, fmtNum, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
 import { Play } from "@/components/screener-icons";
 
@@ -27,7 +28,7 @@ function FilterChip({
   );
 }
 
-type WyckoffData = { rows: WyckoffScreenRow[]; scanned: number; skipped: number };
+type WyckoffData = { rows: WyckoffScreenRow[]; scanned: number; skipped: number; roro?: MarketRoroStatus | null };
 
 const WYCKOFF_PHASES = [
   { v: "all", l: "Mọi phase" },
@@ -192,6 +193,40 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
   return (
     <div className="space-y-3">
       <Panel title="Bộ lọc Wyckoff — rổ thanh khoản VN">
+        {data?.roro && (
+          <div
+            className={`mb-3.5 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${
+              data.roro.environment === "RISK_ON"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span
+                className={`flex size-2.5 rounded-full ${
+                  data.roro.environment === "RISK_ON"
+                    ? "bg-emerald-400 shadow-[0_0_8px_#34d399]"
+                    : "bg-rose-400 shadow-[0_0_8px_#f43f5e]"
+                }`}
+              />
+              <div>
+                <div className="flex items-center gap-2 font-bold text-[13px]">
+                  <span>Môi trường VN-Index: {data.roro.environment === "RISK_ON" ? "RISK-ON (Mở vị thế thuận lợi)" : "RISK-OFF (Phòng thủ & Bảo toàn vốn)"}</span>
+                  <span className="font-mono text-[11px] opacity-80">
+                    ({data.roro.roroValue > 0 ? `+${data.roro.roroValue}` : data.roro.roroValue} pts)
+                  </span>
+                </div>
+                <div className="text-[11px] opacity-90 leading-snug mt-0.5">{data.roro.summaryVi}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] font-mono opacity-80 ml-auto">
+              <span>Xung lực: <b>{data.roro.strength}%</b></span>
+              <span>· MA49: <b>{data.roro.strengthMa49}%</b></span>
+              <span>· Xu hướng: <b>{data.roro.trend === "improving" ? "Cải thiện ↗" : data.roro.trend === "deteriorating" ? "Suy giảm ↘" : "Đi ngang →"}</b></span>
+            </div>
+          </div>
+        )}
+
         <p className="mb-3 text-[12px] leading-relaxed text-text-muted">
           Đọc chu kỳ Composite Man trên nến ngày. Gõ mã để lọc nhanh kết quả; đổi phase/setup/ngành rồi bấm{" "}
           <strong>Tìm kiếm</strong> để quét lại toàn rổ.

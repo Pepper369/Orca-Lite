@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzeWyckoff, computeWyckoffRS } from "../engines/wyckoff-elliott";
+import { analyzeWyckoff, computeWyckoffRS, computeMarketRoro } from "../engines/wyckoff-elliott";
 import type { OhlcvBar } from "../types";
 
 test("analyzeWyckoff trả về unknown khi dưới 30 nến", () => {
@@ -148,4 +148,42 @@ test("computeWyckoffRS & Cá Mập Leader ITF", () => {
   assert.ok(res.rsScore != null && res.rsScore > 0);
   assert.equal(res.isRsAboveMa49, true);
   assert.equal(res.isLeaderITF, true);
+  assert.ok(res.marketRoro);
+  assert.ok(res.marketRoro.environment === "RISK_ON" || res.marketRoro.environment === "RISK_OFF");
+});
+
+test("computeMarketRoro nhận diện chính xác trạng thái Risk-On và Risk-Off", () => {
+  // Kịch bản Index tăng tốc mạnh (Risk-On)
+  const bullIndex: OhlcvBar[] = [];
+  for (let i = 0; i < 80; i++) {
+    bullIndex.push({
+      time: 1700000000 + i * 86400,
+      open: 1000 + i * 5,
+      high: 1005 + i * 5,
+      low: 995 + i * 5,
+      close: 1002 + i * 5,
+      volume: 600000,
+    });
+  }
+  const bullRoro = computeMarketRoro(bullIndex);
+  assert.ok(bullRoro);
+  assert.equal(bullRoro.environment, "RISK_ON");
+  assert.ok(bullRoro.roroValue >= 0);
+
+  // Kịch bản Index cắm đầu giảm (Risk-Off)
+  const bearIndex: OhlcvBar[] = [];
+  for (let i = 0; i < 80; i++) {
+    bearIndex.push({
+      time: 1700000000 + i * 86400,
+      open: 1500 - i * 6,
+      high: 1505 - i * 6,
+      low: 1490 - i * 6,
+      close: 1492 - i * 6,
+      volume: 800000,
+    });
+  }
+  const bearRoro = computeMarketRoro(bearIndex);
+  assert.ok(bearRoro);
+  assert.equal(bearRoro.environment, "RISK_OFF");
+  assert.ok(bearRoro.roroValue <= 0);
 });

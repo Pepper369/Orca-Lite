@@ -1,6 +1,6 @@
 import "server-only";
 import { buildMeta } from "../freshness";
-import { analyzeWyckoff, type WyckoffPhase, type WyckoffSnapshot } from "../engines/wyckoff-elliott";
+import { analyzeWyckoff, computeMarketRoro, type WyckoffPhase, type WyckoffSnapshot, type MarketRoroStatus } from "../engines/wyckoff-elliott";
 import { getVnQuotes, getVnOhlcv } from "./stocks";
 import { LIQUID_BOARD } from "../providers/public-vn-feed";
 import { fetchOhlcvResilient, mapPool } from "./screener-ohlcv";
@@ -19,6 +19,14 @@ export type WyckoffSetup =
   | "markup"
   | "markdown"
   | "watch";
+
+export interface WyckoffScreenResult {
+  rows: WyckoffScreenRow[];
+  scanned: number;
+  skipped: number;
+  roro: MarketRoroStatus | null;
+  meta: Meta;
+}
 
 export interface WyckoffScreenRow {
   symbol: string;
@@ -103,7 +111,7 @@ export async function screenWyckoff(args?: {
   minConfidence?: number;
   sector?: string;
   limit?: number;
-}): Promise<{ rows: WyckoffScreenRow[]; scanned: number; skipped: number; meta: Meta }> {
+}): Promise<WyckoffScreenResult> {
   const uniq = [
     ...new Set((args?.symbols?.length ? args.symbols : LIQUID_BOARD).map((s) => s.toUpperCase()).filter(Boolean)),
   ].slice(0, 90);
@@ -211,10 +219,13 @@ export async function screenWyckoff(args?: {
   const limit = Math.min(args?.limit ?? 40, 80);
   rows = rows.slice(0, limit);
 
+  const roro = computeMarketRoro(indexBars);
+
   return {
     rows,
     scanned: uniq.length,
     skipped,
+    roro,
     meta: buildMeta({
       source: quotesPack?.meta?.source ?? "vndirect+ohlcv",
       sourceTimestampMs: Date.now(),

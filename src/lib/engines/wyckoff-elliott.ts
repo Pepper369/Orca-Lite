@@ -80,6 +80,16 @@ export interface WyckoffSnapshot {
   rsMa49?: number | null;               // Đường trung bình MA49 của RS
   isRsAboveMa49?: boolean;              // true nếu RS nằm trên MA49
   isLeaderITF?: boolean;                // true nếu là siêu cổ phiếu dẫn dắt do Cá Mập ITF đẩy giá
+  marketRoro?: MarketRoroStatus | null; // Môi trường thị trường chung (Risk-On / Risk-Off)
+}
+
+export interface MarketRoroStatus {
+  environment: "RISK_ON" | "RISK_OFF";
+  roroValue: number;         // Strength - MA49 (điểm)
+  strength: number;          // Xung lực thị trường chung (%)
+  strengthMa49: number;      // MA49 của Strength
+  trend: "improving" | "deteriorating" | "neutral";
+  summaryVi: string;         // Khuyến nghị hành động
 }
 
 export interface ElliottSnapshot {
@@ -185,6 +195,70 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     rsMa49: null,
     isRsAboveMa49: false,
     isLeaderITF: false,
+    marketRoro: null,
+  };
+}
+
+/**
+ * Tính toán Thước đo Môi trường Thị trường Risk-On / Risk-Off (RORO) từ VNINDEX
+ * Chuẩn công thức Risk On Risk Off Environment.afl & Khóa học Wyckoff VSA
+ */
+export function computeMarketRoro(indexBars: OhlcvBar[]): MarketRoroStatus | null {
+  const n = indexBars?.length ?? 0;
+  if (n < 20) return null;
+
+  const calcIndexStrength = (idx: number): number => {
+    const cur = indexBars[idx]!.close;
+    if (cur <= 0) return 0;
+    const roc = (lookback: number) => {
+      if (idx < lookback) {
+        const base = indexBars[0]!.close;
+        return base > 0 ? ((cur - base) / base) * 100 : 0;
+      }
+      const prev = indexBars[idx - lookback]!.close;
+      return prev > 0 ? ((cur - prev) / prev) * 100 : 0;
+    };
+
+    if (idx >= 252) {
+      return roc(63) * 0.4 + roc(126) * 0.2 + roc(189) * 0.2 + roc(252) * 0.2;
+    } else if (idx >= 126) {
+      return roc(63) * 0.6 + roc(126) * 0.4;
+    } else if (idx >= 63) {
+      return roc(63);
+    } else {
+      return roc(Math.min(20, idx));
+    }
+  };
+
+  const pointsToCompute = Math.min(60, n);
+  const strengthLine: number[] = [];
+  for (let k = n - pointsToCompute; k < n; k++) {
+    strengthLine.push(calcIndexStrength(k));
+  }
+
+  const latestStrength = strengthLine[strengthLine.length - 1] ?? 0;
+  const maLen = Math.min(49, strengthLine.length);
+  const slice = strengthLine.slice(-maLen);
+  const strengthMa49 = slice.length > 0 ? avg(slice) : latestStrength;
+  const roroValue = Number((latestStrength - strengthMa49).toFixed(2));
+  const environment: "RISK_ON" | "RISK_OFF" = roroValue > 0 ? "RISK_ON" : "RISK_OFF";
+
+  const prevStrength = strengthLine.length >= 6 ? strengthLine[strengthLine.length - 6]! : strengthLine[0] ?? latestStrength;
+  const trend: "improving" | "deteriorating" | "neutral" =
+    latestStrength > prevStrength + 0.3 ? "improving" : latestStrength < prevStrength - 0.3 ? "deteriorating" : "neutral";
+
+  const summaryVi =
+    environment === "RISK_ON"
+      ? "Thị trường chung thuận lợi (Risk-On) — Dòng tiền lan tỏa tích cực, ưu tiên giải ngân các mã Phase D / Leader ITF."
+      : "Thị trường chung phòng thủ (Risk-Off) — Rủi ro điều chỉnh cao, hạn chế mở mới vị thế, ưu tiên bảo toàn vốn.";
+
+  return {
+    environment,
+    roroValue,
+    strength: Number(latestStrength.toFixed(2)),
+    strengthMa49: Number(strengthMa49.toFixed(2)),
+    trend,
+    summaryVi,
   };
 }
 
@@ -823,6 +897,7 @@ export function analyzeWyckoff(
   const rr2 = riskVal > 0 ? Number((reward2Val / riskVal).toFixed(2)) : null;
 
   // 9. RELATIVE STRENGTH (RS) & PHÁT HIỆN CÁ MẬP DẪN DẮT (INSTITUTIONAL TREND FOLLOWERS - ITF)
+  const marketRoro = options?.benchmarkBars ? computeMarketRoro(options.benchmarkBars) : null;
   const rsMetrics = computeWyckoffRS(bars, options?.benchmarkBars);
   const isLeaderITF = Boolean(
     rsMetrics.isRsAboveMa49 &&
@@ -880,6 +955,7 @@ export function analyzeWyckoff(
     rsMa49: rsMetrics.rsMa49,
     isRsAboveMa49: rsMetrics.isRsAboveMa49,
     isLeaderITF,
+    marketRoro,
   };
 }
 

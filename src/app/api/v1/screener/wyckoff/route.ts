@@ -76,7 +76,7 @@ export async function GET(req: Request) {
       });
       if (!r) return null;
       return {
-        data: { universe: "wyckoff", rows: r.rows, scanned: r.scanned, skipped: r.skipped },
+        data: { universe: "wyckoff", rows: r.rows, scanned: r.scanned, skipped: r.skipped, roro: r.roro },
         meta: r.meta,
       };
     },
