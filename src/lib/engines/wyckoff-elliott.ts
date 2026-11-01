@@ -75,6 +75,11 @@ export interface WyckoffSnapshot {
     price: number;
     kind: "above" | "below";
   }>;
+  // v3 additions (Khóa học Wyckoff VSA: Sức mạnh tương đối RS & Cá mập ITF)
+  rsScore?: number | null;              // Điểm RS hiện tại so với VNINDEX (%)
+  rsMa49?: number | null;               // Đường trung bình MA49 của RS
+  isRsAboveMa49?: boolean;              // true nếu RS nằm trên MA49
+  isLeaderITF?: boolean;                // true nếu là siêu cổ phiếu dẫn dắt do Cá Mập ITF đẩy giá
 }
 
 export interface ElliottSnapshot {
@@ -176,10 +181,96 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     rr2: null,
     vsaTag: "normal",
     keyEvents: [],
+    rsScore: null,
+    rsMa49: null,
+    isRsAboveMa49: false,
+    isLeaderITF: false,
   };
 }
 
-export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
+/**
+ * Tính toán Relative Strength (RS) theo chuẩn Wyckoff & Kakata RS:
+ * RSS = ROC(C,63)*0.4 + ROC(C,126)*0.2 + ROC(C,189)*0.2 + ROC(C,252)*0.2
+ * So sánh với VNINDEX và chu kỳ Gann MA49.
+ */
+export function computeWyckoffRS(
+  stockBars: OhlcvBar[],
+  benchmarkBars?: OhlcvBar[],
+): {
+  rsScore: number | null;
+  rsMa49: number | null;
+  isRsAboveMa49: boolean;
+  rsSlope: "rising" | "falling" | "flat";
+} {
+  const n = stockBars.length;
+  if (n < 20) {
+    return { rsScore: null, rsMa49: null, isRsAboveMa49: false, rsSlope: "flat" };
+  }
+
+  const calcWeightedRoc = (bars: OhlcvBar[], idx: number): number => {
+    const cur = bars[idx]!.close;
+    if (cur <= 0) return 0;
+    const roc = (lookback: number) => {
+      if (idx < lookback) {
+        const base = bars[0]!.close;
+        return base > 0 ? ((cur - base) / base) * 100 : 0;
+      }
+      const prev = bars[idx - lookback]!.close;
+      return prev > 0 ? ((cur - prev) / prev) * 100 : 0;
+    };
+
+    if (idx >= 252) {
+      return roc(63) * 0.4 + roc(126) * 0.2 + roc(189) * 0.2 + roc(252) * 0.2;
+    } else if (idx >= 126) {
+      return roc(63) * 0.6 + roc(126) * 0.4;
+    } else if (idx >= 63) {
+      return roc(63);
+    } else {
+      return roc(Math.min(20, idx));
+    }
+  };
+
+  const rsLine: number[] = [];
+  const pointsToCompute = Math.min(60, n);
+
+  if (benchmarkBars && benchmarkBars.length >= 20) {
+    const benchN = benchmarkBars.length;
+    for (let k = n - pointsToCompute; k < n; k++) {
+      const sRoc = calcWeightedRoc(stockBars, k);
+      const bIdx = Math.min(benchN - 1, Math.max(0, benchN - 1 - (n - 1 - k)));
+      const bRoc = calcWeightedRoc(benchmarkBars, bIdx);
+      rsLine.push(sRoc - bRoc);
+    }
+  } else {
+    for (let k = n - pointsToCompute; k < n; k++) {
+      rsLine.push(calcWeightedRoc(stockBars, k));
+    }
+  }
+
+  const latestRs = rsLine[rsLine.length - 1] ?? 0;
+  const maLen = Math.min(49, rsLine.length);
+  const rsSlice = rsLine.slice(-maLen);
+  const rsMa49 = rsSlice.length > 0 ? Number((avg(rsSlice)).toFixed(2)) : null;
+  const isRsAboveMa49 = rsMa49 != null ? latestRs > rsMa49 : latestRs > 0;
+
+  const prevRs = rsLine.length >= 6 ? rsLine[rsLine.length - 6]! : rsLine[0] ?? latestRs;
+  const rsSlope: "rising" | "falling" | "flat" =
+    latestRs > prevRs + 0.5 ? "rising" : latestRs < prevRs - 0.5 ? "falling" : "flat";
+
+  return {
+    rsScore: Number(latestRs.toFixed(2)),
+    rsMa49,
+    isRsAboveMa49,
+    rsSlope,
+  };
+}
+
+export function analyzeWyckoff(
+  bars: OhlcvBar[],
+  options?: {
+    benchmarkBars?: OhlcvBar[];
+  },
+): WyckoffSnapshot {
   const events: string[] = [];
   const eventCodes: string[] = [];
   const notes: string[] = [];
@@ -731,6 +822,25 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
   const rr1 = riskVal > 0 ? Number((reward1Val / riskVal).toFixed(2)) : null;
   const rr2 = riskVal > 0 ? Number((reward2Val / riskVal).toFixed(2)) : null;
 
+  // 9. RELATIVE STRENGTH (RS) & PHÁT HIỆN CÁ MẬP DẪN DẮT (INSTITUTIONAL TREND FOLLOWERS - ITF)
+  const rsMetrics = computeWyckoffRS(bars, options?.benchmarkBars);
+  const isLeaderITF = Boolean(
+    rsMetrics.isRsAboveMa49 &&
+    (rsMetrics.rsScore ?? 0) > 0 &&
+    (subPhase === "D" || subPhase === "E" || (subPhase === "C" && springTested))
+  );
+
+  if (isLeaderITF) {
+    confidence = Math.min(96, confidence + 8);
+    eventCodes.push("ITF_LEADER");
+    events.unshift(`Cá Mập ITF gom đẩy giá (Leader RS ${rsMetrics.rsScore}% > MA49)`);
+    notes.unshift("Cổ phiếu dẫn dắt (Leader) được dòng tiền tổ chức ITF bảo trợ trong Phase D/E");
+  } else if (rsMetrics.isRsAboveMa49) {
+    notes.push(`Sức mạnh RS tốt: nằm trên MA49 (${rsMetrics.rsScore}%)`);
+  } else if (rsMetrics.rsScore != null && rsMetrics.rsScore < 0) {
+    notes.push(`RS dưới MA49 (${rsMetrics.rsScore}%): yếu hơn thị trường chung, cẩn trọng`);
+  }
+
   // Điều chỉnh điểm tin cậy multi-factor
   const vt = volumeTrend(bars.slice(-30));
   if (vt === "rising" && (phase === "markup" || phase === "markdown")) confidence = Math.min(92, confidence + 6);
@@ -766,6 +876,10 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     rr2,
     vsaTag,
     keyEvents,
+    rsScore: rsMetrics.rsScore,
+    rsMa49: rsMetrics.rsMa49,
+    isRsAboveMa49: rsMetrics.isRsAboveMa49,
+    isLeaderITF,
   };
 }
 

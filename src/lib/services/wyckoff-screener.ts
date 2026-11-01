@@ -1,7 +1,7 @@
 import "server-only";
 import { buildMeta } from "../freshness";
 import { analyzeWyckoff, type WyckoffPhase, type WyckoffSnapshot } from "../engines/wyckoff-elliott";
-import { getVnQuotes } from "./stocks";
+import { getVnQuotes, getVnOhlcv } from "./stocks";
 import { LIQUID_BOARD } from "../providers/public-vn-feed";
 import { fetchOhlcvResilient, mapPool } from "./screener-ohlcv";
 import { getSecurity, sectorOf } from "../vn/master";
@@ -53,6 +53,9 @@ export interface WyckoffScreenRow {
   rr1?: number | null;
   rr2?: number | null;
   vsaTag?: "ultra-high" | "high" | "low" | "normal";
+  rsScore?: number | null;
+  isRsAboveMa49?: boolean;
+  isLeaderITF?: boolean;
 }
 
 const SETUP_VI: Record<WyckoffSetup, string> = {
@@ -96,6 +99,7 @@ export async function screenWyckoff(args?: {
   channelPos?: "ice" | "mid" | "creek" | "breakout" | "all";
   minCauseWeeks?: number;
   minRr1?: number;
+  onlyLeaders?: boolean;
   minConfidence?: number;
   sector?: string;
   limit?: number;
@@ -104,8 +108,12 @@ export async function screenWyckoff(args?: {
     ...new Set((args?.symbols?.length ? args.symbols : LIQUID_BOARD).map((s) => s.toUpperCase()).filter(Boolean)),
   ].slice(0, 90);
 
-  const quotesPack = await getVnQuotes(uniq).catch(() => null);
+  const [quotesPack, indexPack] = await Promise.all([
+    getVnQuotes(uniq).catch(() => null),
+    getVnOhlcv("VNINDEX", 260).catch(() => null),
+  ]);
   const quoteMap = new Map<string, Quote>((quotesPack?.quotes ?? []).map((q) => [q.symbol, q]));
+  const indexBars = indexPack?.bars ?? [];
 
   let skipped = 0;
   const analyzed = await mapPool(uniq, 8, async (symbol) => {
@@ -114,7 +122,7 @@ export async function screenWyckoff(args?: {
       skipped += 1;
       return null;
     }
-    const w = analyzeWyckoff(bars);
+    const w = analyzeWyckoff(bars, { benchmarkBars: indexBars });
     const q = quoteMap.get(symbol);
     const sec = getSecurity(symbol);
     const setup = pickSetup(w);
@@ -151,6 +159,9 @@ export async function screenWyckoff(args?: {
       rr1: w.rr1,
       rr2: w.rr2,
       vsaTag: w.vsaTag,
+      rsScore: w.rsScore,
+      isRsAboveMa49: w.isRsAboveMa49,
+      isLeaderITF: w.isLeaderITF,
     };
     return row;
   });
@@ -191,6 +202,9 @@ export async function screenWyckoff(args?: {
   }
   if (args?.minRr1 != null && args.minRr1 > 0) {
     rows = rows.filter((r) => (r.rr1 ?? 0) >= args.minRr1!);
+  }
+  if (args?.onlyLeaders) {
+    rows = rows.filter((r) => r.isLeaderITF === true || (r.isRsAboveMa49 && (r.rsScore ?? 0) > 0));
   }
 
   rows.sort((a, b) => b.confidence - a.confidence || (b.volume ?? 0) - (a.volume ?? 0));

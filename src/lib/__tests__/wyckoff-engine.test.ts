@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzeWyckoff } from "../engines/wyckoff-elliott";
+import { analyzeWyckoff, computeWyckoffRS } from "../engines/wyckoff-elliott";
 import type { OhlcvBar } from "../types";
 
 test("analyzeWyckoff trả về unknown khi dưới 30 nến", () => {
@@ -119,4 +119,33 @@ test("analyzeWyckoff nhận diện Top Distribution khi cổ phiếu tăng mạn
   const res = analyzeWyckoff(bars);
   assert.equal(res.trModel, "Top");
   assert.ok(res.bias === "neutral" || res.bias === "bearish");
+});
+
+test("computeWyckoffRS & Cá Mập Leader ITF", () => {
+  const stockBars: OhlcvBar[] = [];
+  const indexBars: OhlcvBar[] = [];
+  for (let i = 0; i < 100; i++) {
+    const t = 1700000000 + i * 86400;
+    indexBars.push({
+      time: t,
+      open: 1200 - i * 0.5,
+      high: 1205 - i * 0.5,
+      low: 1195 - i * 0.5,
+      close: 1200 - i * 0.5,
+      volume: 500000,
+    });
+    stockBars.push({
+      time: t,
+      open: 20 + i * 0.2,
+      high: 20.5 + i * 0.2,
+      low: 19.8 + i * 0.2,
+      close: 20.3 + i * 0.2,
+      volume: 10000,
+    });
+  }
+
+  const res = analyzeWyckoff(stockBars, { benchmarkBars: indexBars });
+  assert.ok(res.rsScore != null && res.rsScore > 0);
+  assert.equal(res.isRsAboveMa49, true);
+  assert.equal(res.isLeaderITF, true);
 });

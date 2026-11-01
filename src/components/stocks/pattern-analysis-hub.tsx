@@ -414,6 +414,11 @@ function WyckoffDetail({
             Low Volume (Kiệt cung)
           </span>
         ) : null}
+        {w.isLeaderITF ? (
+          <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            ⭐ Cá Mập ITF (Leader)
+          </span>
+        ) : null}
       </div>
       <div className="text-[12px] text-text-muted">
         Khối lượng: {VOL_VI[w.volumeTrend] ?? w.volumeTrend}
@@ -425,6 +430,11 @@ function WyckoffDetail({
           </span>
         )}
         {w.causeWeeks != null ? <span className="ml-1.5 text-text-muted">· Tích lũy: {w.causeWeeks} tuần</span> : null}
+        {w.rsScore != null && (
+          <span className={`ml-1.5 font-mono ${w.isRsAboveMa49 ? "text-emerald-400 font-semibold" : "text-text-muted"}`}>
+            · RS: {w.rsScore > 0 ? `+${w.rsScore}` : w.rsScore}% {w.isRsAboveMa49 ? "(trên MA49)" : "(dưới MA49)"}
+          </span>
+        )}
       </div>
 
       {(w.stopLoss != null || w.target1 != null) && (

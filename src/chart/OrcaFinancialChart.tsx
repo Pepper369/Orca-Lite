@@ -722,6 +722,12 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
               · T2: <b>{wyckoffSnap.target2}</b>{wyckoffSnap.rr2 ? ` (R:R 1:${wyckoffSnap.rr2})` : ""}
             </span>
           )}
+          {wyckoffSnap.rsScore != null && (
+            <span className={wyckoffSnap.isRsAboveMa49 ? "font-mono text-emerald-400 font-semibold" : "font-mono text-text-muted"}>
+              · RS: <b>{wyckoffSnap.rsScore > 0 ? `+${wyckoffSnap.rsScore}` : wyckoffSnap.rsScore}%</b>
+              {wyckoffSnap.isLeaderITF ? " ⭐ Leader ITF" : ""}
+            </span>
+          )}
         </div>
       )}
       {readout && (

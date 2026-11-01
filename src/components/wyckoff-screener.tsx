@@ -85,6 +85,7 @@ function buildQs(opts: {
   vsaTag: string;
   channelPos: string;
   minRr1: string;
+  onlyLeaders: boolean;
   minConf: string;
   sector: string;
   symbols: string;
@@ -100,6 +101,7 @@ function buildQs(opts: {
   if (opts.vsaTag && opts.vsaTag !== "all") qs.set("vsaTag", opts.vsaTag);
   if (opts.channelPos && opts.channelPos !== "all") qs.set("channelPos", opts.channelPos);
   if (opts.minRr1) qs.set("minRr1", opts.minRr1);
+  if (opts.onlyLeaders) qs.set("onlyLeaders", "true");
   if (opts.sector) qs.set("sector", opts.sector);
   const symbols = opts.symbols
     .split(/[\s,;]+/)
@@ -117,6 +119,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
   const [vsaTag, setVsaTag] = useState("all");
   const [channelPos, setChannelPos] = useState("all");
   const [minRr1, setMinRr1] = useState("");
+  const [onlyLeaders, setOnlyLeaders] = useState(false);
   const [minConf, setMinConf] = useState("40");
   const [sector, setSector] = useState(defaultSector ?? "");
   const [symbols, setSymbols] = useState("");
@@ -128,6 +131,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
       vsaTag: "all",
       channelPos: "all",
       minRr1: "",
+      onlyLeaders: false,
       minConf: "40",
       sector: defaultSector ?? "",
       symbols: "",
@@ -150,6 +154,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
         vsaTag,
         channelPos,
         minRr1,
+        onlyLeaders,
         minConf,
         sector,
         symbols,
@@ -158,7 +163,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
     );
     void mutate();
     window.setTimeout(() => setPressed(false), 180);
-  }, [phase, setup, trModel, vsaTag, channelPos, minRr1, minConf, sector, symbols, mutate]);
+  }, [phase, setup, trModel, vsaTag, channelPos, minRr1, onlyLeaders, minConf, sector, symbols, mutate]);
 
   useEffect(() => {
     if (!flash) return;
@@ -281,6 +286,19 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
               className="num input !w-full !px-2 !py-1.5 text-[12px]"
             />
           </FilterChip>
+          <FilterChip title="Cá Mập ITF" className="min-w-[9rem]">
+            <button
+              type="button"
+              onClick={() => setOnlyLeaders((v) => !v)}
+              className={`w-full rounded px-2 py-1.5 text-[11px] font-semibold transition border ${
+                onlyLeaders
+                  ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                  : "bg-surface-elevated text-text-muted border-border-subtle hover:text-text-primary"
+              }`}
+            >
+              {onlyLeaders ? "⭐ Chỉ Leader (Bật)" : "Tất cả mã"}
+            </button>
+          </FilterChip>
         </div>
 
         <div className="flex flex-wrap items-end gap-2 border-t border-line/50 pt-3">
@@ -383,10 +401,24 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                   rows.map((r) => (
                     <tr key={r.symbol} className="row-hover border-b border-line/40 align-top">
                       <td className="px-3.5 py-2">
-                        <Link href={`/stocks/${r.symbol}`} className="font-semibold hover:text-accent">
-                          {r.symbol}
-                        </Link>
-                        <div className="text-[10px] text-text-muted">{r.sector ?? "—"}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link href={`/stocks/${r.symbol}`} className="font-semibold hover:text-accent">
+                            {r.symbol}
+                          </Link>
+                          {r.isLeaderITF ? (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              ⭐ Leader ITF
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="text-[10px] text-text-muted flex items-center gap-1.5 mt-0.5">
+                          <span>{r.sector ?? "—"}</span>
+                          {r.rsScore != null ? (
+                            <span className={`font-mono ${r.isRsAboveMa49 ? "text-emerald-400 font-semibold" : "text-text-muted"}`}>
+                              · RS: {r.rsScore > 0 ? `+${r.rsScore}` : r.rsScore}%
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="py-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
