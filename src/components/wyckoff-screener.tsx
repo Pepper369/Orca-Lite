@@ -7,6 +7,7 @@ import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import type { WyckoffScreenRow } from "@/lib/services/wyckoff-screener";
 import type { MarketRoroStatus } from "@/lib/engines/wyckoff-elliott";
 import { Badge, Chg, fmtNum, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
+import { WyckoffPositionCalculator } from "@/components/stocks/wyckoff-position-calculator";
 import { Play } from "@/components/screener-icons";
 
 function FilterChip({
@@ -122,6 +123,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
   const [minRr1, setMinRr1] = useState("");
   const [onlyLeaders, setOnlyLeaders] = useState(false);
   const [minConf, setMinConf] = useState("40");
+  const [calcRow, setCalcRow] = useState<WyckoffScreenRow | null>(null);
   const [sector, setSector] = useState(defaultSector ?? "");
   const [symbols, setSymbols] = useState("");
   const [query, setQuery] = useState(() =>
@@ -543,6 +545,13 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                                 R:R 1:{r.rr1}
                               </span>
                             ) : null}
+                            <button
+                              type="button"
+                              onClick={() => setCalcRow(r)}
+                              className="rounded bg-accent-primary/10 border border-accent-primary/30 text-accent-primary px-1.5 py-0.2 text-[9px] font-semibold hover:bg-accent-primary hover:text-white transition flex items-center gap-1 ml-auto"
+                            >
+                              ⚡ Đi tiền
+                            </button>
                           </div>
                         ) : null}
                       </td>
@@ -556,6 +565,21 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
             <MetaLine meta={meta} />
           </div>
         </Panel>
+      )}
+
+      {calcRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="max-w-2xl w-full">
+            <WyckoffPositionCalculator
+              symbol={calcRow.symbol}
+              entryPrice={calcRow.price ?? calcRow.creekLevel ?? 30000}
+              stopLossPrice={calcRow.stopLoss}
+              target1Price={calcRow.target1}
+              target2Price={calcRow.target2}
+              onClose={() => setCalcRow(null)}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

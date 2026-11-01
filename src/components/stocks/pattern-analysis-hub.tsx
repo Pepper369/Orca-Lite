@@ -8,6 +8,7 @@ import type { StructureAnalysis } from "@/lib/engines/wyckoff-elliott";
 import type { CandlePattern, TechnicalSnapshot } from "@/lib/types";
 import { Badge, FreshnessDot, Panel } from "@/components/ui";
 import {
+  Calculator,
   CheckCircle2,
   ChevronRight,
   GitBranch,
@@ -16,6 +17,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { WyckoffPositionCalculator } from "@/components/stocks/wyckoff-position-calculator";
 
 type ItemKey = "canslim" | "wyckoff" | "elliott" | "minervini" | "patterns";
 type StructureData = StructureAnalysis & { symbol: string };
@@ -216,7 +218,7 @@ export function PatternAnalysisHub({
             />
           )}
           {open === "wyckoff" && structure && (
-            <WyckoffDetail w={structure.wyckoff} summary={structure.summary} />
+            <WyckoffDetail symbol={symbol} w={structure.wyckoff} summary={structure.summary} />
           )}
           {open === "wyckoff" && !structure && (
             <p className="text-[12px] text-text-muted">
@@ -378,12 +380,15 @@ function CriteriaDetail({
 }
 
 function WyckoffDetail({
+  symbol,
   w,
   summary,
 }: {
+  symbol?: string;
   w: StructureAnalysis["wyckoff"];
   summary: string;
 }) {
+  const [showCalc, setShowCalc] = useState(false);
   return (
     <div className="space-y-3">
       <p className="text-[12px] leading-relaxed text-text-secondary">{summary}</p>
@@ -469,6 +474,34 @@ function WyckoffDetail({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={() => setShowCalc((v) => !v)}
+          className={`w-full rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition flex items-center justify-center gap-1.5 ${
+            showCalc
+              ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+              : "border-border-subtle bg-surface-elevated text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <Calculator className="size-3.5 text-emerald-400" />
+          {showCalc ? "Đóng Máy tính Đi tiền" : "⚡ Mở Máy tính Đi tiền & Quản trị Vốn (1.25% NAV)"}
+        </button>
+      </div>
+
+      {showCalc && (
+        <div className="pt-1">
+          <WyckoffPositionCalculator
+            symbol={symbol ?? "CP"}
+            entryPrice={w.creekLevel ?? w.range?.high ?? 30000}
+            stopLossPrice={w.stopLoss}
+            target1Price={w.target1}
+            target2Price={w.target2}
+            onClose={() => setShowCalc(false)}
+          />
         </div>
       )}
 
