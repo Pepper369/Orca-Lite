@@ -1,4 +1,5 @@
 import type { OhlcvBar } from "../types";
+import { analyzeVsaBars, type VsaAnalysisResult, type VsaBarSignal } from "./vsa-engine";
 
 /** Deterministic Wyckoff + Elliott heuristics from OHLCV. Research only. */
 
@@ -81,6 +82,7 @@ export interface WyckoffSnapshot {
   isRsAboveMa49?: boolean;              // true nếu RS nằm trên MA49
   isLeaderITF?: boolean;                // true nếu là siêu cổ phiếu dẫn dắt do Cá Mập ITF đẩy giá
   marketRoro?: MarketRoroStatus | null; // Môi trường thị trường chung (Risk-On / Risk-Off)
+  vsaAnalysis?: VsaAnalysisResult;      // Kết quả giải mã nến VSA chuyên sâu
 }
 
 export interface MarketRoroStatus {
@@ -196,6 +198,7 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     isRsAboveMa49: false,
     isLeaderITF: false,
     marketRoro: null,
+    vsaAnalysis: { latestSignal: null, recentSignals: [], summaryVi: "" },
   };
 }
 
@@ -896,7 +899,41 @@ export function analyzeWyckoff(
   const rr1 = riskVal > 0 ? Number((reward1Val / riskVal).toFixed(2)) : null;
   const rr2 = riskVal > 0 ? Number((reward2Val / riskVal).toFixed(2)) : null;
 
-  // 9. RELATIVE STRENGTH (RS) & PHÁT HIỆN CÁ MẬP DẪN DẮT (INSTITUTIONAL TREND FOLLOWERS - ITF)
+  // 9. GIẢI MÃ NẾN VSA CHUYÊN SÂU (TOM WILLIAMS & FILTER 6 AFL)
+  const vsaAnalysis = analyzeVsaBars(bars);
+  if (vsaAnalysis.latestSignal) {
+    eventCodes.push(vsaAnalysis.latestSignal.code);
+    events.push(vsaAnalysis.latestSignal.nameVi);
+  }
+
+  // Cắm thêm markers cho các nến VSA đặc biệt gần nhất
+  if (vsaAnalysis.recentSignals.length) {
+    for (const sig of vsaAnalysis.recentSignals.slice(-3)) {
+      const isUp = sig.nature === "BULLISH";
+      keyEvents.push({
+        code: sig.code,
+        label:
+          sig.code === "NO_SUPPLY"
+            ? "No Supply"
+            : sig.code === "NO_DEMAND"
+              ? "No Demand"
+              : sig.code === "STOPPING_VOLUME"
+                ? "Stopping Vol"
+                : sig.code === "SHAKEOUT"
+                  ? "Shakeout"
+                  : sig.code === "UPTHRUST"
+                    ? "Upthrust"
+                    : sig.code === "ABSORPTION"
+                      ? "Absorption"
+                      : sig.nameVi,
+        time: sig.time,
+        price: isUp ? bars[sig.index]!.low : bars[sig.index]!.high,
+        kind: isUp ? "below" : "above",
+      });
+    }
+  }
+
+  // 10. RELATIVE STRENGTH (RS) & PHÁT HIỆN CÁ MẬP DẪN DẮT (INSTITUTIONAL TREND FOLLOWERS - ITF)
   const marketRoro = options?.benchmarkBars ? computeMarketRoro(options.benchmarkBars) : null;
   const rsMetrics = computeWyckoffRS(bars, options?.benchmarkBars);
   const isLeaderITF = Boolean(
@@ -956,6 +993,7 @@ export function analyzeWyckoff(
     isRsAboveMa49: rsMetrics.isRsAboveMa49,
     isLeaderITF,
     marketRoro,
+    vsaAnalysis,
   };
 }
 

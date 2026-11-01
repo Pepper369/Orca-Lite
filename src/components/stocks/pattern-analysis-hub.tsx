@@ -505,6 +505,35 @@ function WyckoffDetail({
         </div>
       )}
 
+      {w.vsaAnalysis?.recentSignals?.length ? (
+        <div className="space-y-1.5 rounded-lg border border-border-subtle/80 bg-surface-elevated/40 p-2.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted flex items-center justify-between">
+            <span>Tín hiệu Nến VSA gần nhất (Tom Williams)</span>
+            <span className="font-normal text-[9px] text-accent-primary">VSA Bar Tracker</span>
+          </div>
+          <div className="space-y-1">
+            {w.vsaAnalysis.recentSignals.slice(-3).map((sig, idx) => (
+              <div key={idx} className="flex items-center justify-between text-[11px] border-b border-border-subtle/40 pb-0.5 last:border-none">
+                <span
+                  className={`font-semibold ${
+                    sig.nature === "BULLISH"
+                      ? "text-emerald-400"
+                      : sig.nature === "BEARISH"
+                        ? "text-rose-400"
+                        : "text-text-primary"
+                  }`}
+                >
+                  ▸ {sig.nameVi}
+                </span>
+                <span className="text-[10px] text-text-muted truncate max-w-[200px]" title={sig.descriptionVi}>
+                  {sig.descriptionVi}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {w.events.length > 0 && (
         <ul className="space-y-1">
           {w.events.map((ev, i) => (

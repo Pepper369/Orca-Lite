@@ -74,6 +74,16 @@ const CHANNEL_POSITIONS = [
   { v: "breakout", l: "Vượt đỉnh Creek (> 100%)" },
 ] as const;
 
+const VSA_SIGNALS = [
+  { v: "all", l: "Mọi nến VSA" },
+  { v: "NO_SUPPLY", l: "No Supply (Cạn cung)" },
+  { v: "NO_DEMAND", l: "No Demand (Cạn cầu)" },
+  { v: "STOPPING_VOLUME", l: "Stopping Vol (Chặn đà)" },
+  { v: "SHAKEOUT", l: "Shakeout (Rũ bỏ)" },
+  { v: "UPTHRUST", l: "Upthrust (Bẫy giá)" },
+  { v: "ABSORPTION", l: "Absorption (Hấp thụ)" },
+] as const;
+
 function phaseTone(phase: string): "up" | "down" | "warn" | "neutral" {
   if (phase === "accumulation" || phase === "re-accumulation" || phase === "markup") return "up";
   if (phase === "distribution" || phase === "re-distribution" || phase === "markdown") return "down";
@@ -85,6 +95,7 @@ function buildQs(opts: {
   setup: string;
   trModel: string;
   vsaTag: string;
+  vsaSignal: string;
   channelPos: string;
   minRr1: string;
   onlyLeaders: boolean;
@@ -102,6 +113,7 @@ function buildQs(opts: {
   if (opts.trModel && opts.trModel !== "all") qs.set("trModel", opts.trModel);
   if (opts.vsaTag && opts.vsaTag !== "all") qs.set("vsaTag", opts.vsaTag);
   if (opts.channelPos && opts.channelPos !== "all") qs.set("channelPos", opts.channelPos);
+  if (opts.vsaSignal && opts.vsaSignal !== "all") qs.set("vsaSignal", opts.vsaSignal);
   if (opts.minRr1) qs.set("minRr1", opts.minRr1);
   if (opts.onlyLeaders) qs.set("onlyLeaders", "true");
   if (opts.sector) qs.set("sector", opts.sector);
@@ -119,6 +131,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
   const [setup, setSetup] = useState("all");
   const [trModel, setTrModel] = useState("all");
   const [vsaTag, setVsaTag] = useState("all");
+  const [vsaSignal, setVsaSignal] = useState("all");
   const [channelPos, setChannelPos] = useState("all");
   const [minRr1, setMinRr1] = useState("");
   const [onlyLeaders, setOnlyLeaders] = useState(false);
@@ -132,6 +145,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
       setup: "all",
       trModel: "all",
       vsaTag: "all",
+      vsaSignal: "all",
       channelPos: "all",
       minRr1: "",
       onlyLeaders: false,
@@ -155,6 +169,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
         setup,
         trModel,
         vsaTag,
+        vsaSignal,
         channelPos,
         minRr1,
         onlyLeaders,
@@ -166,7 +181,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
     );
     void mutate();
     window.setTimeout(() => setPressed(false), 180);
-  }, [phase, setup, trModel, vsaTag, channelPos, minRr1, onlyLeaders, minConf, sector, symbols, mutate]);
+  }, [phase, setup, trModel, vsaTag, vsaSignal, channelPos, minRr1, onlyLeaders, minConf, sector, symbols, mutate]);
 
   useEffect(() => {
     if (!flash) return;
@@ -297,6 +312,19 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
               {VSA_TAGS.map((t) => (
                 <option key={t.v} value={t.v}>
                   {t.l}
+                </option>
+              ))}
+            </select>
+          </FilterChip>
+          <FilterChip title="Nến VSA Tom Williams" className="min-w-[9rem]">
+            <select
+              value={vsaSignal}
+              onChange={(e) => setVsaSignal(e.target.value)}
+              className="input !w-full !px-2 !py-1.5 text-[12px]"
+            >
+              {VSA_SIGNALS.map((s) => (
+                <option key={s.v} value={s.v}>
+                  {s.l}
                 </option>
               ))}
             </select>
@@ -490,6 +518,17 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                           ) : r.vsaTag === "low" ? (
                             <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-sky-500/15 text-sky-400 border border-sky-500/30">
                               Kiệt Vol
+                            </span>
+                          ) : null}
+                          {r.latestVsaSignal ? (
+                            <span
+                              className={`text-[9px] px-1.5 py-0.2 rounded font-semibold border ${
+                                r.latestVsaSignal.nature === "BULLISH"
+                                  ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
+                                  : "border-rose-500/40 text-rose-300 bg-rose-500/10"
+                              }`}
+                            >
+                              {r.latestVsaSignal.nameVi}
                             </span>
                           ) : null}
                         </div>

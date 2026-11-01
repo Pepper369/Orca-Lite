@@ -103,9 +103,9 @@ export function buildWyckoffOverlay(bars: OhlcvBar[]): WyckoffOverlayPayload | n
         position: isUp ? "belowBar" : "aboveBar",
         shape: isUp ? "arrowUp" : "arrowDown",
         color:
-          ev.code.startsWith("SPRING") || ev.code === "SOS"
+          ev.code === "NO_SUPPLY" || ev.code === "STOPPING_VOLUME" || ev.code.startsWith("SPRING") || ev.code === "SOS"
             ? "#10b981"
-            : ev.code === "UTAD" || ev.code === "SOW"
+            : ev.code === "NO_DEMAND" || ev.code === "UPTHRUST" || ev.code === "SOW" || ev.code === "UTAD" || ev.code === "EFFORT_TO_RISE_FAILED"
               ? "#f43f5e"
               : isUp
                 ? "#38bdf8"

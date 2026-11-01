@@ -50,6 +50,8 @@ export async function GET(req: Request) {
   const minCauseWeeks = url.searchParams.get("minCauseWeeks") ? Number(url.searchParams.get("minCauseWeeks")) : undefined;
   const minRr1 = url.searchParams.get("minRr1") ? Number(url.searchParams.get("minRr1")) : undefined;
   const onlyLeaders = url.searchParams.get("onlyLeaders") === "true";
+  const vsaSignalRaw = url.searchParams.get("vsaSignal") ?? "all";
+  const vsaSignal = vsaSignalRaw === "all" ? "all" : (vsaSignalRaw as any);
   const symbols = (url.searchParams.get("symbols") ?? "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
@@ -70,6 +72,7 @@ export async function GET(req: Request) {
         minCauseWeeks: Number.isFinite(minCauseWeeks) ? minCauseWeeks : undefined,
         minRr1: Number.isFinite(minRr1) ? minRr1 : undefined,
         onlyLeaders,
+        vsaSignal,
         minConfidence: Number.isFinite(minConfidence) ? minConfidence : 40,
         sector,
         limit,

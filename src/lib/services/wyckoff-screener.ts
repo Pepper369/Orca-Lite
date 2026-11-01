@@ -1,6 +1,7 @@
 import "server-only";
 import { buildMeta } from "../freshness";
 import { analyzeWyckoff, computeMarketRoro, type WyckoffPhase, type WyckoffSnapshot, type MarketRoroStatus } from "../engines/wyckoff-elliott";
+import type { VsaBarSignal, VsaSignalCode } from "../engines/vsa-engine";
 import { getVnQuotes, getVnOhlcv } from "./stocks";
 import { LIQUID_BOARD } from "../providers/public-vn-feed";
 import { fetchOhlcvResilient, mapPool } from "./screener-ohlcv";
@@ -64,6 +65,7 @@ export interface WyckoffScreenRow {
   rsScore?: number | null;
   isRsAboveMa49?: boolean;
   isLeaderITF?: boolean;
+  latestVsaSignal?: VsaBarSignal | null;
 }
 
 const SETUP_VI: Record<WyckoffSetup, string> = {
@@ -108,6 +110,7 @@ export async function screenWyckoff(args?: {
   minCauseWeeks?: number;
   minRr1?: number;
   onlyLeaders?: boolean;
+  vsaSignal?: VsaSignalCode | "all";
   minConfidence?: number;
   sector?: string;
   limit?: number;
@@ -170,6 +173,7 @@ export async function screenWyckoff(args?: {
       rsScore: w.rsScore,
       isRsAboveMa49: w.isRsAboveMa49,
       isLeaderITF: w.isLeaderITF,
+      latestVsaSignal: w.vsaAnalysis?.latestSignal ?? null,
     };
     return row;
   });
@@ -213,6 +217,9 @@ export async function screenWyckoff(args?: {
   }
   if (args?.onlyLeaders) {
     rows = rows.filter((r) => r.isLeaderITF === true || (r.isRsAboveMa49 && (r.rsScore ?? 0) > 0));
+  }
+  if (args?.vsaSignal && args.vsaSignal !== "all") {
+    rows = rows.filter((r) => r.latestVsaSignal?.code === args.vsaSignal);
   }
 
   rows.sort((a, b) => b.confidence - a.confidence || (b.volume ?? 0) - (a.volume ?? 0));
