@@ -50,6 +50,8 @@ export interface WyckoffScreenRow {
   target1?: number | null;
   target2?: number | null;
   stopLoss?: number | null;
+  rr1?: number | null;
+  rr2?: number | null;
   vsaTag?: "ultra-high" | "high" | "low" | "normal";
 }
 
@@ -89,6 +91,11 @@ export async function screenWyckoff(args?: {
   symbols?: string[];
   phase?: WyckoffPhase | "all";
   setup?: WyckoffSetup | "all";
+  trModel?: "Base" | "Top" | "all";
+  vsaTag?: "ultra-high" | "high" | "low" | "normal" | "all";
+  channelPos?: "ice" | "mid" | "creek" | "breakout" | "all";
+  minCauseWeeks?: number;
+  minRr1?: number;
   minConfidence?: number;
   sector?: string;
   limit?: number;
@@ -141,6 +148,8 @@ export async function screenWyckoff(args?: {
       target1: w.target1,
       target2: w.target2,
       stopLoss: w.stopLoss,
+      rr1: w.rr1,
+      rr2: w.rr2,
       vsaTag: w.vsaTag,
     };
     return row;
@@ -159,6 +168,29 @@ export async function screenWyckoff(args?: {
   }
   if (args?.sector) {
     rows = rows.filter((r) => r.sector === args.sector);
+  }
+  if (args?.trModel && args.trModel !== "all") {
+    rows = rows.filter((r) => r.trModel === args.trModel);
+  }
+  if (args?.vsaTag && args.vsaTag !== "all") {
+    rows = rows.filter((r) => r.vsaTag === args.vsaTag);
+  }
+  if (args?.channelPos && args.channelPos !== "all") {
+    if (args.channelPos === "ice") {
+      rows = rows.filter((r) => r.channelPosPct != null && r.channelPosPct <= 30);
+    } else if (args.channelPos === "mid") {
+      rows = rows.filter((r) => r.channelPosPct != null && r.channelPosPct > 30 && r.channelPosPct < 75);
+    } else if (args.channelPos === "creek") {
+      rows = rows.filter((r) => r.channelPosPct != null && r.channelPosPct >= 75 && r.channelPosPct <= 100);
+    } else if (args.channelPos === "breakout") {
+      rows = rows.filter((r) => r.channelPosPct != null && r.channelPosPct > 100);
+    }
+  }
+  if (args?.minCauseWeeks != null && args.minCauseWeeks > 0) {
+    rows = rows.filter((r) => (r.causeWeeks ?? 0) >= args.minCauseWeeks!);
+  }
+  if (args?.minRr1 != null && args.minRr1 > 0) {
+    rows = rows.filter((r) => (r.rr1 ?? 0) >= args.minRr1!);
   }
 
   rows.sort((a, b) => b.confidence - a.confidence || (b.volume ?? 0) - (a.volume ?? 0));

@@ -51,19 +51,55 @@ const WYCKOFF_SETUPS = [
   { v: "distribution-range", l: "Range phân phối" },
 ] as const;
 
+const TR_MODELS = [
+  { v: "all", l: "Mọi cấu trúc TR" },
+  { v: "Base", l: "Tích lũy đáy (Base TR)" },
+  { v: "Top", l: "Phân phối đỉnh (Top TR)" },
+] as const;
+
+const VSA_TAGS = [
+  { v: "all", l: "Mọi Volume VSA" },
+  { v: "ultra-high", l: "Ultra High Vol (Cao trào)" },
+  { v: "high", l: "High Vol (Hoạt động)" },
+  { v: "low", l: "Kiệt Vol (Cạn cung/cầu)" },
+] as const;
+
+const CHANNEL_POSITIONS = [
+  { v: "all", l: "Mọi vị trí kênh" },
+  { v: "ice", l: "Sát sàn Ice (≤ 30%)" },
+  { v: "mid", l: "Trục giữa (30% - 75%)" },
+  { v: "creek", l: "Tiệm cận Creek (75% - 100%)" },
+  { v: "breakout", l: "Vượt đỉnh Creek (> 100%)" },
+] as const;
+
 function phaseTone(phase: string): "up" | "down" | "warn" | "neutral" {
   if (phase === "accumulation" || phase === "re-accumulation" || phase === "markup") return "up";
   if (phase === "distribution" || phase === "re-distribution" || phase === "markdown") return "down";
   return "neutral";
 }
 
-function buildQs(opts: { phase: string; setup: string; minConf: string; sector: string; symbols: string; bust?: number }) {
+function buildQs(opts: {
+  phase: string;
+  setup: string;
+  trModel: string;
+  vsaTag: string;
+  channelPos: string;
+  minRr1: string;
+  minConf: string;
+  sector: string;
+  symbols: string;
+  bust?: number;
+}) {
   const qs = new URLSearchParams({
     phase: opts.phase,
     setup: opts.setup,
     minConfidence: opts.minConf || "40",
     limit: "40",
   });
+  if (opts.trModel && opts.trModel !== "all") qs.set("trModel", opts.trModel);
+  if (opts.vsaTag && opts.vsaTag !== "all") qs.set("vsaTag", opts.vsaTag);
+  if (opts.channelPos && opts.channelPos !== "all") qs.set("channelPos", opts.channelPos);
+  if (opts.minRr1) qs.set("minRr1", opts.minRr1);
   if (opts.sector) qs.set("sector", opts.sector);
   const symbols = opts.symbols
     .split(/[\s,;]+/)
@@ -77,11 +113,25 @@ function buildQs(opts: { phase: string; setup: string; minConf: string; sector: 
 export function WyckoffScreener({ defaultSector }: { defaultSector: string | null }) {
   const [phase, setPhase] = useState("all");
   const [setup, setSetup] = useState("all");
+  const [trModel, setTrModel] = useState("all");
+  const [vsaTag, setVsaTag] = useState("all");
+  const [channelPos, setChannelPos] = useState("all");
+  const [minRr1, setMinRr1] = useState("");
   const [minConf, setMinConf] = useState("40");
   const [sector, setSector] = useState(defaultSector ?? "");
   const [symbols, setSymbols] = useState("");
   const [query, setQuery] = useState(() =>
-    buildQs({ phase: "all", setup: "all", minConf: "40", sector: defaultSector ?? "", symbols: "" }),
+    buildQs({
+      phase: "all",
+      setup: "all",
+      trModel: "all",
+      vsaTag: "all",
+      channelPos: "all",
+      minRr1: "",
+      minConf: "40",
+      sector: defaultSector ?? "",
+      symbols: "",
+    }),
   );
   const [pressed, setPressed] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -92,10 +142,23 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
   const run = useCallback(() => {
     setPressed(true);
     setFlash(true);
-    setQuery(buildQs({ phase, setup, minConf, sector, symbols, bust: Date.now() }));
+    setQuery(
+      buildQs({
+        phase,
+        setup,
+        trModel,
+        vsaTag,
+        channelPos,
+        minRr1,
+        minConf,
+        sector,
+        symbols,
+        bust: Date.now(),
+      }),
+    );
     void mutate();
     window.setTimeout(() => setPressed(false), 180);
-  }, [phase, setup, minConf, sector, symbols, mutate]);
+  }, [phase, setup, trModel, vsaTag, channelPos, minRr1, minConf, sector, symbols, mutate]);
 
   useEffect(() => {
     if (!flash) return;
@@ -163,6 +226,58 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
               onChange={(e) => setMinConf(e.target.value)}
               inputMode="decimal"
               placeholder="40"
+              className="num input !w-full !px-2 !py-1.5 text-[12px]"
+            />
+          </FilterChip>
+        </div>
+
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Cấu trúc TR, VSA & Tỷ lệ R:R</div>
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <FilterChip title="Cấu trúc TR" className="min-w-[9rem]">
+            <select
+              value={trModel}
+              onChange={(e) => setTrModel(e.target.value)}
+              className="input !w-full !px-2 !py-1.5 text-[12px]"
+            >
+              {TR_MODELS.map((m) => (
+                <option key={m.v} value={m.v}>
+                  {m.l}
+                </option>
+              ))}
+            </select>
+          </FilterChip>
+          <FilterChip title="Volume VSA" className="min-w-[9rem]">
+            <select
+              value={vsaTag}
+              onChange={(e) => setVsaTag(e.target.value)}
+              className="input !w-full !px-2 !py-1.5 text-[12px]"
+            >
+              {VSA_TAGS.map((t) => (
+                <option key={t.v} value={t.v}>
+                  {t.l}
+                </option>
+              ))}
+            </select>
+          </FilterChip>
+          <FilterChip title="Vị trí Kênh" className="min-w-[9rem]">
+            <select
+              value={channelPos}
+              onChange={(e) => setChannelPos(e.target.value)}
+              className="input !w-full !px-2 !py-1.5 text-[12px]"
+            >
+              {CHANNEL_POSITIONS.map((c) => (
+                <option key={c.v} value={c.v}>
+                  {c.l}
+                </option>
+              ))}
+            </select>
+          </FilterChip>
+          <FilterChip title="R:R T1 ≥">
+            <input
+              value={minRr1}
+              onChange={(e) => setMinRr1(e.target.value)}
+              inputMode="decimal"
+              placeholder="2.0"
               className="num input !w-full !px-2 !py-1.5 text-[12px]"
             />
           </FilterChip>
@@ -338,7 +453,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                           </div>
                         ) : null}
                         {r.stopLoss != null || r.target1 != null ? (
-                          <div className="mt-0.5 text-[10px] flex items-center gap-2 font-mono">
+                          <div className="mt-1 flex items-center gap-2 font-mono text-[10px] flex-wrap">
                             {r.stopLoss != null ? (
                               <span className="text-rose-400">SL: {fmtNum(r.stopLoss, 1)}</span>
                             ) : null}
@@ -347,6 +462,19 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                             ) : null}
                             {r.target2 != null ? (
                               <span className="text-cyan-400">T2: {fmtNum(r.target2, 1)}</span>
+                            ) : null}
+                            {r.rr1 != null ? (
+                              <span
+                                className={`px-1.5 py-0.2 rounded font-semibold border ${
+                                  r.rr1 >= 2.5
+                                    ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                                    : r.rr1 >= 1.5
+                                      ? "border-amber-500/40 text-amber-400 bg-amber-500/10"
+                                      : "border-line text-text-muted"
+                                }`}
+                              >
+                                R:R 1:{r.rr1}
+                              </span>
                             ) : null}
                           </div>
                         ) : null}

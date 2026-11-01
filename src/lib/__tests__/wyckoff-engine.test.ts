@@ -75,6 +75,8 @@ test("analyzeWyckoff tính toán Base TR, Ice, Creek, CauseWeeks và Targets", (
   assert.ok(res.stopLoss && res.stopLoss > 0);
   assert.ok(res.target1 && res.target1 >= res.iceLevel);
   assert.ok(res.target2 && res.target2 >= res.target1);
+  assert.ok(res.rr1 != null && res.rr1 >= 0);
+  assert.ok(res.rr2 != null && res.rr2 >= 0);
 });
 
 test("analyzeWyckoff nhận diện Top Distribution khi cổ phiếu tăng mạnh và neo đỉnh", () => {

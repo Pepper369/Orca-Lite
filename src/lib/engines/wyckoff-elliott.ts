@@ -65,6 +65,8 @@ export interface WyckoffSnapshot {
   target1?: number | null;              // mục tiêu 1 (Creek + 0.5× height)
   target2?: number | null;              // mục tiêu 2 (theo CauseWeeks)
   stopLoss?: number | null;             // cắt lỗ dưới Ice
+  rr1?: number | null;                  // Tỷ số R:R theo Target 1
+  rr2?: number | null;                  // Tỷ số R:R theo Target 2
   vsaTag?: "ultra-high" | "high" | "low" | "normal";  // VSA volume classification
 }
 
@@ -163,6 +165,8 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     target1: null,
     target2: null,
     stopLoss: null,
+    rr1: null,
+    rr2: null,
     vsaTag: "normal",
   };
 }
@@ -669,6 +673,12 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     }
   }
 
+  const riskVal = Math.max(0.01, Math.abs(curClose - stopLoss));
+  const reward1Val = Math.abs(target1 - curClose);
+  const reward2Val = Math.abs(target2 - curClose);
+  const rr1 = riskVal > 0 ? Number((reward1Val / riskVal).toFixed(2)) : null;
+  const rr2 = riskVal > 0 ? Number((reward2Val / riskVal).toFixed(2)) : null;
+
   // Điều chỉnh điểm tin cậy multi-factor
   const vt = volumeTrend(bars.slice(-30));
   if (vt === "rising" && (phase === "markup" || phase === "markdown")) confidence = Math.min(92, confidence + 6);
@@ -700,6 +710,8 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     target1,
     target2,
     stopLoss,
+    rr1,
+    rr2,
     vsaTag,
   };
 }

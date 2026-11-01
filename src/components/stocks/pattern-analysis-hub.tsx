@@ -439,7 +439,10 @@ function WyckoffDetail({
           )}
           {w.target1 != null && (
             <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1.5">
-              <div className="text-[10px] uppercase text-emerald-400 font-semibold">Mục tiêu 1 (T1)</div>
+              <div className="text-[10px] uppercase text-emerald-400 font-semibold flex items-center justify-between">
+                <span>Mục tiêu 1 (T1)</span>
+                {w.rr1 != null && <span className="text-[9px] font-mono text-emerald-300">R:R 1:{w.rr1}</span>}
+              </div>
               <div className="num mt-0.5 font-medium text-emerald-400">
                 {w.target1.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
               </div>
@@ -447,7 +450,10 @@ function WyckoffDetail({
           )}
           {w.target2 != null && (
             <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5">
-              <div className="text-[10px] uppercase text-cyan-400 font-semibold">Mục tiêu 2 (T2)</div>
+              <div className="text-[10px] uppercase text-cyan-400 font-semibold flex items-center justify-between">
+                <span>Mục tiêu 2 (T2)</span>
+                {w.rr2 != null && <span className="text-[9px] font-mono text-cyan-300">R:R 1:{w.rr2}</span>}
+              </div>
               <div className="num mt-0.5 font-medium text-cyan-400">
                 {w.target2.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
               </div>

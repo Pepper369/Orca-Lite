@@ -41,6 +41,14 @@ export async function GET(req: Request) {
   const setup = setupRaw === "all" ? "all" : SETUPS.has(setupRaw as WyckoffSetup) ? (setupRaw as WyckoffSetup) : "all";
   const minConfidence = url.searchParams.get("minConfidence") != null ? Number(url.searchParams.get("minConfidence")) : 40;
   const sector = url.searchParams.get("sector") || undefined;
+  const trModelRaw = (url.searchParams.get("trModel") ?? "all");
+  const trModel = trModelRaw === "Base" || trModelRaw === "Top" ? trModelRaw : "all";
+  const vsaTagRaw = (url.searchParams.get("vsaTag") ?? "all");
+  const vsaTag = vsaTagRaw === "ultra-high" || vsaTagRaw === "high" || vsaTagRaw === "low" || vsaTagRaw === "normal" ? vsaTagRaw : "all";
+  const channelPosRaw = (url.searchParams.get("channelPos") ?? "all");
+  const channelPos = channelPosRaw === "ice" || channelPosRaw === "mid" || channelPosRaw === "creek" || channelPosRaw === "breakout" ? channelPosRaw : "all";
+  const minCauseWeeks = url.searchParams.get("minCauseWeeks") ? Number(url.searchParams.get("minCauseWeeks")) : undefined;
+  const minRr1 = url.searchParams.get("minRr1") ? Number(url.searchParams.get("minRr1")) : undefined;
   const symbols = (url.searchParams.get("symbols") ?? "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
@@ -55,6 +63,11 @@ export async function GET(req: Request) {
         symbols: symbols.length ? symbols : undefined,
         phase,
         setup,
+        trModel,
+        vsaTag,
+        channelPos,
+        minCauseWeeks: Number.isFinite(minCauseWeeks) ? minCauseWeeks : undefined,
+        minRr1: Number.isFinite(minRr1) ? minRr1 : undefined,
         minConfidence: Number.isFinite(minConfidence) ? minConfidence : 40,
         sector,
         limit,
