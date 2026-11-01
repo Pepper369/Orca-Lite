@@ -17,6 +17,8 @@ import { ORCA_CHART_THEME as T, type ChartKind } from "./theme";
 import { Loading } from "@/components/ui";
 import { analyzeMoneyFlow } from "@/lib/engines/money-flow";
 import { buildSmcOverlay } from "@/chart/smc-overlay";
+import { buildWyckoffOverlay } from "@/chart/wyckoff-overlay";
+import type { WyckoffSnapshot } from "@/lib/engines/wyckoff-elliott";
 import { applySmcPriceLines, type SmcLineBag } from "@/chart/smc-series-helpers";
 import { analyzeMtfBias, companionTimeframes, type MtfBiasResult } from "@/lib/engines/mtf-bias";
 import type { OhlcvBar } from "@/lib/types";
@@ -135,6 +137,9 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   const [liveState, setLiveState] = useState<LiveState | null>(null);
   const [smcOn, setSmcOn] = useState(false);
   const smcLineBag = useRef<SmcLineBag>({ lines: [] });
+  const [wyckoffOn, setWyckoffOn] = useState(false);
+  const wyckoffLineBag = useRef<SmcLineBag>({ lines: [] });
+  const [wyckoffSnap, setWyckoffSnap] = useState<WyckoffSnapshot | null>(null);
   const [mtfBias, setMtfBias] = useState<MtfBiasResult | null>(null);
   useEffect(() => {
     extraLevelsRef.current = extraLevels;
@@ -337,6 +342,39 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       /* */
     }
   }, [data, smcOn, engineReady, tf]);
+
+  useEffect(() => {
+    const mgr = mgrRef.current;
+    if (!engineReady || !mgr || !data?.candles?.length) return;
+    if (data.timeframe && data.timeframe.toLowerCase() !== tf.toLowerCase()) return;
+    try {
+      const series = mgr.getCandleSeries?.() ?? null;
+      if (!wyckoffOn) {
+        applySmcPriceLines(series, wyckoffLineBag.current, []);
+        setWyckoffSnap(null);
+        return;
+      }
+      const bars: OhlcvBar[] = data.candles.map((c) => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume ?? 0,
+      }));
+      const overlay = buildWyckoffOverlay(bars);
+      if (overlay) {
+        applySmcPriceLines(series, wyckoffLineBag.current, overlay.levels);
+        if (overlay.markers.length) mgr.applyMarkers(overlay.markers as any);
+        setWyckoffSnap(overlay.snapshot);
+      } else {
+        applySmcPriceLines(series, wyckoffLineBag.current, []);
+        setWyckoffSnap(null);
+      }
+    } catch {
+      /* */
+    }
+  }, [data, wyckoffOn, engineReady, tf]);
 
   const companions = companionTimeframes(tf, tfs);
   const shouldRunMtf = Boolean(symbol && companions.length >= 2);
@@ -624,7 +662,68 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
             {k.label}
           </button>
         ))}
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            title="Smart Money Concepts (FVG, OrderBlock, Swings, Liquidity)"
+            onClick={() => setSmcOn((v) => !v)}
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium transition ${
+              smcOn
+                ? "border-cyan-500/50 bg-cyan-500/20 text-cyan-300 font-semibold"
+                : "border-border-subtle text-text-muted hover:text-text-primary"
+            }`}
+          >
+            SMC
+          </button>
+          <button
+            type="button"
+            title="Hệ thống Wyckoff VSA Master 6.0 (Ice, Creek, Midline, SL, T1, T2 & Markers)"
+            onClick={() => setWyckoffOn((v) => !v)}
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium transition ${
+              wyckoffOn
+                ? "border-amber-500/50 bg-amber-500/20 text-amber-300 font-semibold"
+                : "border-border-subtle text-text-muted hover:text-text-primary"
+            }`}
+          >
+            WYCKOFF
+          </button>
+        </div>
       </div>
+      {wyckoffOn && wyckoffSnap && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle/80 bg-surface-elevated/40 px-2 py-1 text-[10px]">
+          <span className="font-semibold text-text-primary">
+            Wyckoff {wyckoffSnap.trModel ? `(${wyckoffSnap.trModel === "Base" ? "Base TR" : "Top TR"})` : ""}:
+          </span>
+          <span className="font-medium text-accent-primary">
+            {wyckoffSnap.phaseVi}{wyckoffSnap.subPhase ? ` · Pha ${wyckoffSnap.subPhase}` : ""}
+          </span>
+          {wyckoffSnap.channelPosPct != null && (
+            <span className="text-text-muted">
+              · Kênh: <b className="text-text-primary font-mono">{wyckoffSnap.channelPosPct}%</b>
+            </span>
+          )}
+          {wyckoffSnap.causeWeeks != null && (
+            <span className="text-text-muted">
+              · Tích lũy: <b className="text-text-primary">{wyckoffSnap.causeWeeks}w</b>
+            </span>
+          )}
+          {wyckoffSnap.stopLoss != null && (
+            <span className="font-mono text-rose-400">
+              · SL: <b>{wyckoffSnap.stopLoss}</b>
+            </span>
+          )}
+          {wyckoffSnap.target1 != null && (
+            <span className="font-mono text-emerald-400">
+              · T1: <b>{wyckoffSnap.target1}</b>{wyckoffSnap.rr1 ? ` (R:R 1:${wyckoffSnap.rr1})` : ""}
+            </span>
+          )}
+          {wyckoffSnap.target2 != null && (
+            <span className="font-mono text-cyan-400">
+              · T2: <b>{wyckoffSnap.target2}</b>{wyckoffSnap.rr2 ? ` (R:R 1:${wyckoffSnap.rr2})` : ""}
+            </span>
+          )}
+        </div>
+      )}
       {readout && (
         <div className="flex flex-wrap gap-3 px-2 py-1 text-[10px] text-text-secondary">
           {readout.rsi != null && <span>RSI <b className="text-text-primary">{readout.rsi.toFixed(1)}</b></span>}

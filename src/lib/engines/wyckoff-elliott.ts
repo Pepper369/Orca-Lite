@@ -68,6 +68,13 @@ export interface WyckoffSnapshot {
   rr1?: number | null;                  // Tỷ số R:R theo Target 1
   rr2?: number | null;                  // Tỷ số R:R theo Target 2
   vsaTag?: "ultra-high" | "high" | "low" | "normal";  // VSA volume classification
+  keyEvents?: Array<{
+    code: string;
+    label: string;
+    time: number;
+    price: number;
+    kind: "above" | "below";
+  }>;
 }
 
 export interface ElliottSnapshot {
@@ -168,6 +175,7 @@ function emptySnap(notes: string[]): WyckoffSnapshot {
     rr1: null,
     rr2: null,
     vsaTag: "normal",
+    keyEvents: [],
   };
 }
 
@@ -484,7 +492,30 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
   }
 
   // 6. GẮN NHÃN SỰ KIỆN VÀ MÃ CODES
+  const keyEvents: Array<{
+    code: string;
+    label: string;
+    time: number;
+    price: number;
+    kind: "above" | "below";
+  }> = [];
+
   if (isTopDist) {
+    if (bcIdx > 0 && bars[bcIdx]) {
+      keyEvents.push({ code: "BC", label: "BC", time: bars[bcIdx]!.time, price: bars[bcIdx]!.high, kind: "above" });
+    }
+    if (arIdx > 0 && bars[arIdx]) {
+      keyEvents.push({ code: "AR", label: "AR", time: bars[arIdx]!.time, price: bars[arIdx]!.low, kind: "below" });
+    }
+    if (stIdx > 0 && stIdx !== bcIdx && bars[stIdx]) {
+      keyEvents.push({ code: "ST", label: "ST", time: bars[stIdx]!.time, price: bars[stIdx]!.high, kind: "above" });
+    }
+    if (utIdx > 0 && bars[utIdx]) {
+      keyEvents.push({ code: "UTAD", label: "UTAD", time: bars[utIdx]!.time, price: bars[utIdx]!.high, kind: "above" });
+    }
+    if (sowIdx > 0 && bars[sowIdx]) {
+      keyEvents.push({ code: "SOW", label: "SOW", time: bars[sowIdx]!.time, price: bars[sowIdx]!.low, kind: "below" });
+    }
     if (bcIdx > 0) {
       eventCodes.push("BC");
       events.push(`BC — Mua cao trào phân phối đỉnh (${fmtNum(bcPrice, 1)})`);
@@ -502,6 +533,27 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
       events.push("SOW — Thủng sàn hỗ trợ Ice kèm thanh khoản suy yếu");
     }
   } else {
+    if (scIdx > 0 && bars[scIdx]) {
+      keyEvents.push({ code: "SC", label: "SC", time: bars[scIdx]!.time, price: bars[scIdx]!.low, kind: "below" });
+    }
+    if (arIdx > 0 && bars[arIdx]) {
+      keyEvents.push({ code: "AR", label: "AR", time: bars[arIdx]!.time, price: bars[arIdx]!.high, kind: "above" });
+    }
+    if (stIdx > 0 && bars[stIdx]) {
+      keyEvents.push({ code: "ST", label: "ST", time: bars[stIdx]!.time, price: bars[stIdx]!.low, kind: "below" });
+    }
+    if (springIdx > 0 && bars[springIdx]) {
+      keyEvents.push({
+        code: springTested ? "SPRING_TESTED" : "SPRING",
+        label: springTested ? "Spring Test" : "Spring",
+        time: bars[springIdx]!.time,
+        price: bars[springIdx]!.low,
+        kind: "below",
+      });
+    }
+    if (sosIdx > 0 && bars[sosIdx]) {
+      keyEvents.push({ code: "SOS", label: "SOS", time: bars[sosIdx]!.time, price: bars[sosIdx]!.high, kind: "above" });
+    }
     if (scIdx > 0) {
       eventCodes.push("SC");
       events.push(`SC — Bán tháo cao trào đáy chu kỳ (${fmtNum(scPrice, 1)})`);
@@ -713,6 +765,7 @@ export function analyzeWyckoff(bars: OhlcvBar[]): WyckoffSnapshot {
     rr1,
     rr2,
     vsaTag,
+    keyEvents,
   };
 }
 
