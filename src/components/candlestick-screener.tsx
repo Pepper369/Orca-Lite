@@ -23,6 +23,8 @@ type PatternHit = {
 };
 
 type CandleTradeSetup = {
+  action?: "BUY" | "EXIT_WARNING";
+  actionLabelVi?: string;
   entryPrice: number;
   stopLoss: number;
   target1: number;
@@ -68,7 +70,7 @@ type ScreenPayload = {
 const CATEGORIES = [
   { id: "all", label: "Tất cả nhóm" },
   { id: "bullish_reversal", label: "Đảo chiều tăng (Đáy)" },
-  { id: "bearish_reversal", label: "Đảo chiều giảm (Đỉnh)" },
+  { id: "bearish_reversal", label: "Đảo chiều giảm (Cảnh báo Chốt lời / Bán)" },
   { id: "continuation", label: "Tiếp diễn" },
   { id: "neutral", label: "Trung tính" },
 ] as const;
@@ -305,7 +307,7 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                 <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-3">
                   <th className="px-3.5 py-2 font-medium">Mã CK</th>
                   <th className="py-2 font-medium">Mẫu hình đảo chiều</th>
-                  <th className="py-2 font-medium">Kế hoạch Giao dịch (R:R)</th>
+                  <th className="py-2 font-medium">Kế hoạch Giao dịch (Setup / Cảnh báo)</th>
                   <th className="py-2 text-right font-medium">Điểm</th>
                   <th className="py-2 text-right font-medium">Giá</th>
                   <th className="py-2 pr-3.5 text-right font-medium">± %</th>
@@ -420,30 +422,44 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                         )}
                       </td>
 
-                      {/* Setup Giao dịch (R:R) */}
+                      {/* Kế hoạch Giao dịch (Setup / Cảnh báo) */}
                       <td className="py-2.5 align-top text-[11px]">
                         {setup ? (
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-text-muted">SL:</span>
-                              <span className="text-rose-400 font-medium">{fmtNum(setup.stopLoss, 2)}</span>
-                              <span className="text-[10px] text-rose-400/80">(-{setup.riskPercent}%)</span>
+                          setup.action === "EXIT_WARNING" || pat?.type === "bearish" ? (
+                            <div className="rounded bg-rose-500/10 border border-rose-500/25 p-1.5 text-[10.5px]">
+                              <div className="flex items-center gap-1 font-semibold text-rose-300">
+                                <span>⚠️ Cảnh báo Bán / Chốt lời</span>
+                              </div>
+                              <div className="text-[10px] text-text-muted mt-0.5">
+                                Kích hoạt thoát khi &lt; <span className="font-semibold text-rose-400">{fmtNum(setup.stopLoss, 2)}</span>
+                              </div>
+                              <div className="text-[10px] text-text-muted mt-0.5">
+                                Hỗ trợ rơi về: <span className="font-medium text-amber-300">{fmtNum(setup.target1, 2)}</span>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-text-muted">TP1:</span>
-                              <span className="text-emerald-400 font-medium">{fmtNum(setup.target1, 2)}</span>
-                              <span className="text-[10px] text-emerald-400/80">(+{setup.rewardPercent}%)</span>
-                              <span
-                                className={`ml-auto font-bold px-1.5 py-0.2 rounded text-[10px] ${
-                                  setup.riskReward >= 2.0
-                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                                    : "bg-surface-elevated text-text-secondary"
-                                }`}
-                              >
-                                R:R 1:{setup.riskReward}
-                              </span>
+                          ) : (
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-text-muted">SL:</span>
+                                <span className="text-rose-400 font-medium">{fmtNum(setup.stopLoss, 2)}</span>
+                                <span className="text-[10px] text-rose-400/80">(-{setup.riskPercent}%)</span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-text-muted">TP1:</span>
+                                <span className="text-emerald-400 font-medium">{fmtNum(setup.target1, 2)}</span>
+                                <span className="text-[10px] text-emerald-400/80">(+{setup.rewardPercent}%)</span>
+                                <span
+                                  className={`ml-auto font-bold px-1.5 py-0.2 rounded text-[10px] ${
+                                    setup.riskReward >= 2.0
+                                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                      : "bg-surface-elevated text-text-secondary"
+                                  }`}
+                                >
+                                  R:R 1:{setup.riskReward}
+                                </span>
+                              </div>
                             </div>
-                          </div>
+                          )
                         ) : (
                           <span className="text-text-muted">—</span>
                         )}

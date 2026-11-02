@@ -131,14 +131,14 @@ export function SqueezeBadge({ state }: { state: string | null | undefined }) {
   if (state === "fired_bull") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
-        Nổ tăng
+        Bứt phá tăng (Tín hiệu Mua)
       </span>
     );
   }
   if (state === "fired_bear") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold text-rose-400 whitespace-nowrap">
-        Nổ giảm
+        Gãy giảm (Cảnh báo Bán)
       </span>
     );
   }

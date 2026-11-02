@@ -172,7 +172,14 @@ export default function JournalPage() {
               <L>Loại tài sản</L>
               <select
                 value={form.assetType}
-                onChange={(e) => setForm({ ...form, assetType: e.target.value as Trade["assetType"] })}
+                onChange={(e) => {
+                  const at = e.target.value as Trade["assetType"];
+                  setForm({
+                    ...form,
+                    assetType: at,
+                    side: at === "stock" ? "long" : form.side,
+                  });
+                }}
                 className="input"
               >
                 <option value="crypto">Crypto</option>
@@ -191,14 +198,17 @@ export default function JournalPage() {
               />
             </label>
             <label>
-              <L>Phía</L>
+              <L>
+                Vị thế {form.assetType === "stock" && <span className="text-text-muted font-normal">(Cổ phiếu chỉ Mua)</span>}
+              </L>
               <select
                 value={form.side}
+                disabled={form.assetType === "stock"}
                 onChange={(e) => setForm({ ...form, side: e.target.value as "long" | "short" })}
-                className="input"
+                className="input disabled:opacity-60"
               >
-                <option value="long">Long</option>
-                <option value="short">Short</option>
+                <option value="long">Mua (Long)</option>
+                {form.assetType !== "stock" && <option value="short">Bán khống (Short)</option>}
               </select>
             </label>
             <label>
@@ -316,7 +326,9 @@ export default function JournalPage() {
                       <span className="ml-1 text-[10px] font-normal text-ink-3">{t.assetType}</span>
                     </td>
                     <td className="py-2">
-                      <Badge tone={t.side === "long" ? "up" : "down"}>{t.side}</Badge>
+                      <Badge tone={t.side === "long" ? "up" : "down"}>
+                        {t.side === "long" ? "Mua" : "Bán (Short)"}
+                      </Badge>
                     </td>
                     <td className="num py-2 text-right">{fmtNum(t.entry, 4)}</td>
                     <td className="num py-2 text-right">

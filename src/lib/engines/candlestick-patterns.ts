@@ -939,6 +939,8 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
 }
 
 export type CandleTradeSetup = {
+  action: "BUY" | "EXIT_WARNING";
+  actionLabelVi: string;
   entryPrice: number;
   stopLoss: number;
   target1: number;
@@ -1005,6 +1007,8 @@ export function buildCandleTradeSetup(
     const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : pattern.score >= 68 ? "A" : "B";
 
     return {
+      action: "BUY",
+      actionLabelVi: "Kế hoạch MUA (Đảo chiều đáy)",
       entryPrice: roundPrice(entryPrice, entryPrice),
       stopLoss: roundPrice(stopLoss, entryPrice),
       target1: roundPrice(target1, entryPrice),
@@ -1015,14 +1019,10 @@ export function buildCandleTradeSetup(
       setupQuality,
     };
   } else {
-    const stopLoss = patternHigh + buffer;
-    const risk = stopLoss - entryPrice;
-    if (risk <= 0) return null;
-    const target1 = Math.max(0.0001, entryPrice - risk * 1.5);
-    const target2 = Math.max(0.0001, entryPrice - risk * 2.5);
-    const riskPercent = (risk / entryPrice) * 100;
-    const rewardPercent = ((entryPrice - target1) / entryPrice) * 100;
-    const riskReward = +(rewardPercent / Math.max(riskPercent, 0.01)).toFixed(1);
+    // Thị trường cổ phiếu cơ sở là Long-Only: nến đảo chiều giảm là Cảnh báo Bán / Thoát hàng / Chốt lời
+    const exitTrigger = Math.max(0.0001, Math.min(patternLow, entryPrice - buffer));
+    const expectedDrop1 = Math.max(0.0001, entryPrice - (patternHigh - patternLow + atrVal) * 1.0);
+    const expectedDrop2 = Math.max(0.0001, entryPrice - (patternHigh - patternLow + atrVal) * 1.8);
 
     const isAplus =
       pattern.score >= 75 &&
@@ -1031,13 +1031,15 @@ export function buildCandleTradeSetup(
     const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : pattern.score >= 68 ? "A" : "B";
 
     return {
+      action: "EXIT_WARNING",
+      actionLabelVi: "Cảnh báo BÁN / CHỐT LỜI",
       entryPrice: roundPrice(entryPrice, entryPrice),
-      stopLoss: roundPrice(stopLoss, entryPrice),
-      target1: roundPrice(target1, entryPrice),
-      target2: roundPrice(target2, entryPrice),
-      riskReward,
-      riskPercent: +riskPercent.toFixed(1),
-      rewardPercent: +rewardPercent.toFixed(1),
+      stopLoss: roundPrice(exitTrigger, entryPrice), // Ngưỡng xác nhận gãy cần bán thoát dứt khoát
+      target1: roundPrice(expectedDrop1, entryPrice), // Vùng hỗ trợ điều chỉnh 1
+      target2: roundPrice(expectedDrop2, entryPrice), // Vùng hỗ trợ điều chỉnh 2
+      riskReward: 0,
+      riskPercent: 0,
+      rewardPercent: 0,
       setupQuality,
     };
   }

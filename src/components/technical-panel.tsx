@@ -285,13 +285,13 @@ export function TechnicalPanel({
                     d.oscillator === "rsi" ? "RSI" : d.oscillator === "macd_hist" ? "MACD hist" : d.oscillator;
                   const kindLabel =
                     d.kind === "regular_bullish"
-                      ? "Regular ↑ đảo chiều lên"
+                      ? "Phân kỳ dương ↑ (Tín hiệu MUA từ đáy)"
                       : d.kind === "regular_bearish"
-                        ? "Regular ↓ đảo chiều xuống"
+                        ? "Phân kỳ âm ↓ (Cảnh báo BÁN chốt lời)"
                         : d.kind === "hidden_bullish"
-                          ? "Hidden ↑ tiếp diễn"
+                          ? "Phân kỳ ẩn ↑ (Tín hiệu MUA gia tăng)"
                           : d.kind === "hidden_bearish"
-                            ? "Hidden ↓ tiếp diễn"
+                            ? "Phân kỳ ẩn ↓ (Cảnh báo BÁN thoát hàng)"
                             : d.kind;
                   return (
                     <div key={`${d.kind}-${d.oscillator}-${i}`} className="panel-inset p-2.5">

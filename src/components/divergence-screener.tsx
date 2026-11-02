@@ -45,10 +45,10 @@ type ScreenPayload = {
 
 const KINDS = [
   { id: "any", label: "Tất cả loại" },
-  { id: "regular_bullish", label: "Regular ↑ (đảo chiều lên)" },
-  { id: "regular_bearish", label: "Regular ↓ (đảo chiều xuống)" },
-  { id: "hidden_bullish", label: "Hidden ↑ (tiếp diễn)" },
-  { id: "hidden_bearish", label: "Hidden ↓ (tiếp diễn)" },
+  { id: "regular_bullish", label: "Phân kỳ dương ↑ (Tín hiệu MUA từ đáy)" },
+  { id: "regular_bearish", label: "Phân kỳ âm ↓ (Cảnh báo BÁN chốt lời tại đỉnh)" },
+  { id: "hidden_bullish", label: "Phân kỳ ẩn ↑ (Tín hiệu MUA gia tăng)" },
+  { id: "hidden_bearish", label: "Phân kỳ ẩn ↓ (Cảnh báo BÁN cắt lỗ / Đứng ngoài)" },
 ] as const;
 
 const OSCS = [
@@ -93,13 +93,13 @@ function kindTone(kind: string): "up" | "down" | "neutral" {
 function kindShort(kind: string): string {
   switch (kind) {
     case "regular_bullish":
-      return "Reg ↑";
+      return "MUA Đáy (Reg ↑)";
     case "regular_bearish":
-      return "Reg ↓";
+      return "BÁN Đỉnh (Reg ↓)";
     case "hidden_bullish":
-      return "Hid ↑";
+      return "MUA Thêm (Hid ↑)";
     case "hidden_bearish":
-      return "Hid ↓";
+      return "BÁN Thoát (Hid ↓)";
     default:
       return kind;
   }

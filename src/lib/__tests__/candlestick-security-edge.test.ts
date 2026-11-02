@@ -71,11 +71,26 @@ test("Security & Edge: Trade Setup Calculator guards against arithmetic anomalie
 
   const setup = buildCandleTradeSetup(dummyBullPattern, bars);
   assert.ok(setup, "Setup should be generated for valid reversal");
+  assert.equal(setup.action, "BUY");
   assert.ok(Number.isFinite(setup.entryPrice) && setup.entryPrice > 0);
   assert.ok(Number.isFinite(setup.stopLoss) && setup.stopLoss > 0);
   assert.ok(Number.isFinite(setup.target1) && setup.target1 > setup.entryPrice);
   assert.ok(setup.stopLoss < setup.entryPrice, "Stop-loss must be strictly below entry price for bullish setup");
   assert.ok(Number.isFinite(setup.riskReward) && setup.riskReward > 0);
+
+  // Bearish pattern in spot equity should generate EXIT_WARNING
+  const dummyBearPattern = {
+    ...dummyBullPattern,
+    type: "bearish" as const,
+    name: "Bearish Engulfing",
+    nameVi: "Nến nhấn chìm giảm",
+  };
+  const bearSetup = buildCandleTradeSetup(dummyBearPattern, bars);
+  assert.ok(bearSetup, "Bear setup should be generated");
+  assert.equal(bearSetup.action, "EXIT_WARNING");
+  assert.equal(bearSetup.riskReward, 0, "Spot equity should not calculate short risk/reward");
+  assert.ok(bearSetup.stopLoss <= bearSetup.entryPrice, "Exit trigger should be at or below entry price");
+  assert.ok(bearSetup.target1 < bearSetup.entryPrice, "Support drop target should be below entry");
 
   // Negative or zero close edge case
   const invalidBars = [
