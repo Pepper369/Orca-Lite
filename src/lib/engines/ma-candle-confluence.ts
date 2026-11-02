@@ -152,12 +152,19 @@ export function analyzeMaCandleRow(
   // 1. Candlestick Patterns
   const rawPatterns = detectCandlePatterns(bars, {
     assetClass: "stock",
-    recentBars: 3,
-    reversalOnly: true,
-    maxAgeBars: 3,
+    recentBars: 4,
+    reversalOnly: false,
+    maxAgeBars: 4,
   });
 
-  const bullPatterns = rawPatterns.filter((p) => p.type === "bullish" && p.category === "bullish_reversal");
+  const bullPatterns = rawPatterns.filter(
+    (p) =>
+      p.type === "bullish" &&
+      (p.category === "bullish_reversal" ||
+        p.name === "Rising Three Methods" ||
+        p.name === "Three White Soldiers" ||
+        p.name === "Upside Tasuki Gap"),
+  );
   if (!bullPatterns.length) return null;
   const topPattern = bullPatterns[0]!;
 

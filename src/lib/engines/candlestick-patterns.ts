@@ -251,6 +251,8 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
   const cur = cs[i]!;
   const p1 = cs[i - 1]!;
   const p2 = cs[i - 2]!;
+  const p3 = cs[i - 3];
+  const p4 = cs[i - 4];
   const ab = avgBody(cs, 12);
   const avgVol = avgVolume(bars, i, 20);
   const volOk = (idx: number) => {
@@ -923,6 +925,178 @@ function detectCandlePatternsAt(bars: OhlcvBar[], soft: boolean): DetectedCandle
       candles: 3,
       description: "Ba nến giảm liên tiếp.",
       confirmation: "Không bóng dưới dài",
+      volumeOk: volOk(i),
+      trendOk: true,
+      trendContext: trendBefore(3),
+      barIndex: i,
+    });
+  }
+
+  // VSA Spring Pinbar (Shakeout rút chân cạn cung / quét thanh khoản đáy)
+  const isSpringCur =
+    cur.lower >= cur.range * 0.52 &&
+    cur.upper <= cur.range * 0.25 &&
+    (cur.c - cur.l) >= cur.range * 0.60 &&
+    (trendBefore(2) === "down" || p1.bear);
+  const isSpringP1 =
+    p1.lower >= p1.range * 0.52 &&
+    cur.bull &&
+    cur.c >= p1.c &&
+    (trendBefore(3) === "down" || p2.bear);
+
+  if (isSpringCur || isSpringP1) {
+    const t = trendBefore(isSpringCur ? 2 : 3);
+    push(out, {
+      name: "VSA Spring Pinbar",
+      nameVi: "VSA Spring (Rút chân cạn cung)",
+      type: "bullish",
+      category: "bullish_reversal",
+      baseReliability: "very_high",
+      candles: isSpringCur ? 1 : 2,
+      description: "Cụm nến nhúng đáy quét sạch cung bán rồi rút chân mạnh mẽ, dòng tiền thông minh hấp thụ toàn bộ lực bán.",
+      confirmation: "Đóng cửa cao hơn nửa trên nến hoặc nến sau xác nhận tăng giá",
+      volumeOk: volOk(i) || volOk(i - 1),
+      trendOk: t === "down",
+      trendContext: t,
+      barIndex: i,
+    });
+  }
+
+  // Bullish Harami Breakout (Harami bứt phá đỉnh hộp)
+  if (
+    p2.bear &&
+    p2.body >= ab * 0.7 &&
+    p1.body <= p2.body * 0.65 &&
+    Math.max(p1.o, p1.c) <= p2.o &&
+    Math.min(p1.o, p1.c) >= p2.c &&
+    cur.bull &&
+    cur.c > p2.o &&
+    cur.body >= ab * 0.6
+  ) {
+    const t = trendBefore(3);
+    push(out, {
+      name: "Bullish Harami Breakout",
+      nameVi: "Harami Bứt phá đáy",
+      type: "bullish",
+      category: "bullish_reversal",
+      baseReliability: "very_high",
+      candles: 3,
+      description: "Cụm nến Harami tích lũy đáy sau đó bứt phá vượt qua toàn bộ thân nến mẹ, xác nhận tạo đáy thành công.",
+      confirmation: "Khối lượng nến bứt phá vượt trung bình 20 phiên",
+      volumeOk: volOk(i),
+      trendOk: t === "down",
+      trendContext: t,
+      barIndex: i,
+    });
+  }
+
+  // Stick Sandwich (Bánh kẹp đáy hỗ trợ kép)
+  if (
+    p2.bear &&
+    p2.body >= ab * 0.6 &&
+    p1.bull &&
+    p1.c > p2.c &&
+    cur.bear &&
+    Math.abs(cur.c - p2.c) / Math.max(p2.c, 0.001) <= 0.012 &&
+    cur.c < p1.c
+  ) {
+    const t = trendBefore(3);
+    push(out, {
+      name: "Stick Sandwich",
+      nameVi: "Bánh kẹp đáy (Hỗ trợ kép)",
+      type: "bullish",
+      category: "bullish_reversal",
+      baseReliability: "high",
+      candles: 3,
+      description: "Hai nến giảm đóng cửa ở cùng một mức giá tạo thành vùng hỗ trợ kép kiên cố không thể xuyên thủng.",
+      confirmation: "Nến tiếp theo mở cửa tăng giá hoặc duy trì trên ngưỡng hỗ trợ",
+      volumeOk: volOk(i),
+      trendOk: t === "down",
+      trendContext: t,
+      barIndex: i,
+    });
+  }
+
+  // Rising Three Methods (Mẫu nến Tăng giá Ba bước) & Falling Three Methods
+  if (p4 && p3) {
+    const isRisingThree =
+      p4.bull &&
+      p4.body >= ab * 0.75 &&
+      p3.body <= p4.body * 0.65 &&
+      p2.body <= p4.body * 0.65 &&
+      p1.body <= p4.body * 0.65 &&
+      Math.max(p3.h, p2.h, p1.h) <= p4.h * 1.015 &&
+      Math.min(p3.l, p2.l, p1.l) >= p4.l * 0.985 &&
+      cur.bull &&
+      cur.c > p4.c &&
+      cur.body >= ab * 0.7;
+
+    if (isRisingThree) {
+      push(out, {
+        name: "Rising Three Methods",
+        nameVi: "Tăng giá Ba bước (Cụm 5 nến tiếp diễn)",
+        type: "bullish",
+        category: "continuation",
+        baseReliability: "very_high",
+        candles: 5,
+        description: "Mẫu hình 5 nến kinh điển: 1 nến tăng dài, 3 nến nghỉ cạn cung trong thân nến 1, nến 5 bứt phá lập đỉnh mới.",
+        confirmation: "Khối lượng nến bứt phá số 5 tăng vọt",
+        volumeOk: volOk(i),
+        trendOk: true,
+        trendContext: trendBefore(5),
+        barIndex: i,
+      });
+    }
+
+    const isFallingThree =
+      p4.bear &&
+      p4.body >= ab * 0.75 &&
+      p3.body <= p4.body * 0.65 &&
+      p2.body <= p4.body * 0.65 &&
+      p1.body <= p4.body * 0.65 &&
+      Math.max(p3.h, p2.h, p1.h) <= p4.h * 1.015 &&
+      Math.min(p3.l, p2.l, p1.l) >= p4.l * 0.985 &&
+      cur.bear &&
+      cur.c < p4.c &&
+      cur.body >= ab * 0.7;
+
+    if (isFallingThree) {
+      push(out, {
+        name: "Falling Three Methods",
+        nameVi: "Giảm giá Ba bước (Cảnh báo Thoát hàng)",
+        type: "bearish",
+        category: "bearish_reversal",
+        baseReliability: "very_high",
+        candles: 5,
+        description: "Mẫu hình 5 nến giảm tiếp diễn: nến đỏ số 5 phá vỡ đáy nến 1, cảnh báo áp lực bán tháo tiếp diễn.",
+        confirmation: "Khối lượng nến số 5 gia tăng khi thủng đáy",
+        volumeOk: volOk(i),
+        trendOk: true,
+        trendContext: trendBefore(5),
+        barIndex: i,
+      });
+    }
+  }
+
+  // Upside Tasuki Gap (Khoảng trống tiếp diễn tăng)
+  if (
+    p2.bull &&
+    p1.bull &&
+    p1.l > p2.h &&
+    cur.bear &&
+    cur.o >= p1.o &&
+    cur.c < p1.o &&
+    cur.c > p2.h
+  ) {
+    push(out, {
+      name: "Upside Tasuki Gap",
+      nameVi: "Khoảng trống Tasuki tăng",
+      type: "bullish",
+      category: "continuation",
+      baseReliability: "high",
+      candles: 3,
+      description: "Nến điều chỉnh đỏ nhúng xuống nhưng giữ vững khoảng trống gap up, báo hiệu phe mua kiểm soát hoàn toàn thế trận.",
+      confirmation: "Gap giá giữa nến 1 và 2 không bị lấp kín",
       volumeOk: volOk(i),
       trendOk: true,
       trendContext: trendBefore(3),

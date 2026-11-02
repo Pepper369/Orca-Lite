@@ -77,6 +77,9 @@ export type ScreenerStockItem = {
   squeezeState: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   superTrendDir: "up" | "down" | null;
   chartPattern: string | null;
+  candlePattern?: string | null;
+  candlePatternScore?: number | null;
+  candleAgeBars?: number | null;
   confluenceScore: number; // 0-100
   confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
   hasBullishDivergence?: boolean;
@@ -295,6 +298,9 @@ function analyzeTechFeatures(
       squeezeState: null,
       superTrendDir: null,
       chartPattern: null,
+      candlePattern: null,
+      candlePatternScore: null,
+      candleAgeBars: null,
       hasBullishDivergence: false,
       divergenceSummary: null,
       confluenceScore: compositeScore,
@@ -327,9 +333,12 @@ function analyzeTechFeatures(
   const chartPatterns = detectChartPatterns(ohlcvBars);
   const topPattern = chartPatterns[0] ?? null;
 
-  // Multi-tier Candlestick pattern detection (recent 3 bars)
-  const candlePatterns = detectCandlePatterns(ohlcvBars, { recentBars: 3, reversalOnly: false });
+  // Multi-tier Candlestick pattern detection (recent 5 bars)
+  const candlePatterns = detectCandlePatterns(ohlcvBars, { recentBars: 5, reversalOnly: false });
   const topCandle = candlePatterns.find((c) => c.type === "bullish") ?? null;
+  const candlePattern = topCandle ? topCandle.nameVi : null;
+  const candlePatternScore = topCandle ? topCandle.score : null;
+  const candleAgeBars = topCandle?.ageBars ?? null;
 
   // 1. Trend Pillar (max 25)
   let trendScore = 0;
@@ -343,12 +352,15 @@ function analyzeTechFeatures(
   // 2. Pattern & VSA Pillar (max 25)
   let patternScore = 0;
   let patternLabel: string | null = null;
-  if (topPattern && topPattern.type === "bullish") {
+  if (topPattern && topPattern.type === "bullish" && topCandle) {
+    patternScore = Math.min(25, Math.round(topPattern.score * 0.14 + (topCandle.score || 75) * 0.16));
+    patternLabel = `${topPattern.nameVi} + ${topCandle.nameVi}`;
+  } else if (topCandle && (!topPattern || topCandle.score >= (topPattern.score ?? 0))) {
+    patternScore = Math.min(25, Math.round((topCandle.score || 75) * 0.26));
+    patternLabel = topCandle.nameVi;
+  } else if (topPattern && topPattern.type === "bullish") {
     patternScore = Math.min(25, Math.round(topPattern.score * 0.26));
     patternLabel = topPattern.nameVi;
-  } else if (topCandle) {
-    patternScore = Math.min(22, Math.round((topCandle.score || 75) * 0.24));
-    patternLabel = topCandle.nameVi;
   } else if (currentPrice && maRes.ma20 && currentPrice >= maRes.ma20 * 0.98) {
     // Giá giữ vững hỗ trợ MA20
     patternScore = 14;
@@ -421,6 +433,9 @@ function analyzeTechFeatures(
     squeezeState: sqState,
     superTrendDir: stDir,
     chartPattern: patternLabel,
+    candlePattern,
+    candlePatternScore,
+    candleAgeBars,
     hasBullishDivergence,
     divergenceSummary,
     confluenceScore,
@@ -632,6 +647,7 @@ function detectPresets(item: {
   ma10?: number | null;
   ma20?: number | null;
   chartPattern?: string | null;
+  candlePattern?: string | null;
   hasBullishDivergence?: boolean;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   confluenceScore: number;
@@ -712,14 +728,18 @@ function detectPresets(item: {
       item.squeezeState === "squeeze_on" ||
       item.maSignal === "GOLDEN_CROSS" ||
       item.maSignal === "BULLISH_ALIGN" ||
-      Boolean(item.chartPattern)
+      Boolean(item.chartPattern) ||
+      Boolean(item.candlePattern)
     ))
   ) {
     passes.push("confluence");
   }
 
-  // 8b. Bottom Confluence (Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương)
-  const hasCandleReversal = Boolean(item.chartPattern && !item.chartPattern.includes("Nền"));
+  // 8b. Bottom Confluence (Hợp lưu Đáy: MA + Cụm nến đảo chiều + Phân kỳ dương)
+  const hasCandleReversal = Boolean(
+    item.candlePattern ||
+    (item.chartPattern && !item.chartPattern.includes("Nền"))
+  );
   const hasMaSupport =
     item.ma10 != null &&
     item.price != null &&
@@ -730,7 +750,7 @@ function detectPresets(item: {
 
   if (
     item.hasBullishDivergence &&
-    (hasCandleReversal || hasMaSupport || item.confluenceScore >= 48)
+    (hasCandleReversal || hasMaSupport || item.confluenceScore >= 45)
   ) {
     passes.push("bottom_confluence");
   }
@@ -1104,6 +1124,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           ma10: techFeatures.ma10,
           ma20: techFeatures.ma20,
           chartPattern: techFeatures.chartPattern,
+          candlePattern: techFeatures.candlePattern,
           hasBullishDivergence: techFeatures.hasBullishDivergence,
           squeezeState: techFeatures.squeezeState,
           confluenceScore: techFeatures.confluenceScore,
@@ -1150,6 +1171,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           squeezeState: techFeatures.squeezeState,
           superTrendDir: techFeatures.superTrendDir,
           chartPattern: techFeatures.chartPattern,
+          candlePattern: techFeatures.candlePattern,
+          candlePatternScore: techFeatures.candlePatternScore,
+          candleAgeBars: techFeatures.candleAgeBars,
           hasBullishDivergence: techFeatures.hasBullishDivergence,
           divergenceSummary: techFeatures.divergenceSummary,
           confluenceScore: techFeatures.confluenceScore,

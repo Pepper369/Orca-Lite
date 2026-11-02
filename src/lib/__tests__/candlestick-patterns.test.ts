@@ -161,6 +161,42 @@ test("detectCandlePatterns: identifies Three Inside Up and Three Outside Up", ()
   assert.equal(insideUp.candles, 3);
 });
 
+test("detectCandlePatterns: identifies modern clusters (VSA Spring, Rising Three Methods, Harami Breakout)", () => {
+  // 1. VSA Spring Pinbar: Shakeout below support with long lower wick
+  const springBars = series([
+    [108, 109, 106, 107],
+    [106, 107, 104, 105],
+    [105, 106, 103, 104],
+    [104, 105, 101, 102],
+    [102, 103, 99, 100],
+    [100, 101, 97, 98],
+    [98, 98.5, 90, 97.8], // Open 98, High 98.5, Low 90, Close 97.8 (Lower wick = 7.8 / 8.5 = 91%)
+  ], 1_500);
+
+  const springPatterns = detectCandlePatterns(springBars, { recentBars: 1 });
+  const spring = springPatterns.find((p) => p.name === "VSA Spring Pinbar");
+  assert.ok(spring, "Should detect VSA Spring Pinbar");
+  assert.equal(spring.type, "bullish");
+  assert.equal(spring.category, "bullish_reversal");
+
+  // 2. Rising Three Methods: 5 candles (1 large green, 3 small consolidating inside, 1 breakout green)
+  const risingBars = series([
+    [100, 101, 98, 99],
+    [99, 100, 97, 98],
+    [98, 105, 97.5, 104.5], // Candle 1: large bull (Range 97.5-105, body 6.5)
+    [104, 104.2, 102, 102.5], // Candle 2: small bear inside
+    [102.5, 103, 101.5, 102], // Candle 3: small bear inside
+    [102, 103, 101, 102.8], // Candle 4: small bull inside
+    [102.8, 108, 102.5, 107.5], // Candle 5: breakout bull (close 107.5 > 104.5)
+  ], 2_000);
+
+  const risingPatterns = detectCandlePatterns(risingBars, { recentBars: 1 });
+  const risingThree = risingPatterns.find((p) => p.name === "Rising Three Methods");
+  assert.ok(risingThree, "Should detect Rising Three Methods");
+  assert.equal(risingThree.candles, 5);
+  assert.equal(risingThree.category, "continuation");
+});
+
 test("detectCandlePatterns: output contract is stable and bounded", () => {
   const bars = series(Array.from({ length: 40 }, (_, i) => [100 + i, 101 + i, 99 + i, 100.5 + i] as [number, number, number, number]));
   const patterns = detectCandlePatterns(bars);

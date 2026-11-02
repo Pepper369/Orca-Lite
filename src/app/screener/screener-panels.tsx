@@ -1258,7 +1258,13 @@ export function VnScreener({
                               <span className="inline-block rounded bg-accent-primary/10 border border-accent-primary/20 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
                                 {row.chartPattern}
                               </span>
-                            ) : (
+                            ) : null}
+                            {row.candlePattern && row.candlePattern !== row.chartPattern ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">
+                                ✦ {row.candlePattern} {row.candleAgeBars === 0 ? <span className="text-[9px] text-emerald-400 font-bold">(T+0)</span> : row.candleAgeBars != null ? <span className="text-[9px] text-text-muted font-normal">(T-{row.candleAgeBars})</span> : null}
+                              </span>
+                            ) : null}
+                            {!row.chartPattern && !row.candlePattern && (
                               <span className="text-[10px] text-text-muted">—</span>
                             )}
                             <div className="flex flex-wrap gap-1 items-center">
