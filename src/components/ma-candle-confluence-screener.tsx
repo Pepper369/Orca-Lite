@@ -18,6 +18,7 @@ type ScreenPayload = {
 
 const SCENARIOS = [
   { id: "all", label: "Tất cả kịch bản", shortLabel: "Tất cả" },
+  { id: "CHART_PATTERN_BREAKOUT", label: "💎 Bứt phá Mẫu hình Biểu đồ (VCP / Cốc / VĐV)", shortLabel: "💎 Mẫu Hình Giá" },
   { id: "BOTTOM_BULLISH_DIVERGENCE", label: "🌟 Hợp lưu Đáy: MA + Nến + Phân kỳ dương", shortLabel: "🌟 Phân Kỳ Đáy" },
   { id: "SMC_SWEEP_RECLAIM", label: "🧲 Quét rũ thanh khoản (SMC Spring)", shortLabel: "🧲 Quét SMC" },
   { id: "VSA_NO_SUPPLY_TEST", label: "🧪 Test cung cạn kiệt (No Supply)", shortLabel: "🧪 Test VSA" },
@@ -48,6 +49,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [selectedQuality, setSelectedQuality] = useState<"all" | "A+" | "A">("all");
   const [minScoreThreshold, setMinScoreThreshold] = useState<number>(55);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [chartPatternOnly, setChartPatternOnly] = useState<boolean>(false);
   const [volumeOnly, setVolumeOnly] = useState<boolean>(false);
   const [divergenceOnly, setDivergenceOnly] = useState<boolean>(false);
   const [foreignOnly, setForeignOnly] = useState<boolean>(false);
@@ -107,6 +109,11 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
       list = list.filter((r) => (r.volRatio ?? 0) >= 1.2 || r.confluenceTags.some((t) => t.includes("Vol")));
     }
 
+    // 5a. Classical Geometric Chart Pattern Only
+    if (chartPatternOnly) {
+      list = list.filter((r) => Boolean(r.topChartPattern || r.chartPatternName || r.scenario === "CHART_PATTERN_BREAKOUT"));
+    }
+
     // 5b. Foreign Accumulation Only
     if (foreignOnly) {
       list = list.filter((r) => Boolean(r.foreignAccumulating));
@@ -140,6 +147,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
           r.symbol.toLowerCase().includes(q) ||
           (r.name && r.name.toLowerCase().includes(q)) ||
           r.candleNameVi.toLowerCase().includes(q) ||
+          (r.chartPatternNameVi && r.chartPatternNameVi.toLowerCase().includes(q)) ||
           r.scenarioLabel.toLowerCase().includes(q),
       );
     }
@@ -401,6 +409,18 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-surface-elevated/15 text-[11px]">
           {/* Quick Condition Toggles */}
           <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
+              <input
+                type="checkbox"
+                checked={chartPatternOnly}
+                onChange={(e) => setChartPatternOnly(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-purple-400 font-semibold">💎 Mẫu hình giá (VCP/Cốc/VĐV)</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
             <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
               <input
                 type="checkbox"
@@ -717,6 +737,22 @@ function ConfluenceRowItem({
                 NN Gom
               </span>
             )}
+            {row.chartPatternNameVi && (
+              <span
+                className="rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1 py-0.2 text-[9px] font-semibold"
+                title={`Mẫu hình kỹ thuật: ${row.chartPatternNameVi}`}
+              >
+                💎 {row.chartPatternNameVi}
+              </span>
+            )}
+            {row.hasMultiLayerConfluence && (
+              <span
+                className="rounded bg-gradient-to-r from-amber-500/25 to-purple-500/25 text-amber-300 border border-amber-500/40 px-1 py-0.2 text-[9px] font-bold"
+                title="Siêu hợp lưu Đa tầng (Mẫu hình + Đường MA + Nến đảo chiều + Volume)"
+              >
+                ⭐ Siêu Hợp Lưu
+              </span>
+            )}
             {row.alertWorthy && <Badge tone="bull">Alert</Badge>}
           </div>
           <div className="text-[10.5px] text-text-muted truncate max-w-[130px] mt-0.5">
@@ -910,6 +946,24 @@ function ConfluenceRowItem({
                     <span className="font-medium text-text-secondary uppercase">{row.candleReliability}</span>
                   </div>
                 </div>
+
+                {row.topChartPattern && (
+                  <div className="mt-2 rounded border border-purple-500/30 bg-purple-500/10 p-2 text-[10.5px] space-y-1">
+                    <div className="flex items-center justify-between font-semibold text-purple-300">
+                      <span>💎 {row.topChartPattern.nameVi}</span>
+                      <span className="text-[10px] text-purple-400">Độ tin cậy: {row.topChartPattern.score}/100</span>
+                    </div>
+                    <div className="text-text-muted">{row.topChartPattern.description}</div>
+                    <div className="flex items-center gap-3 text-[10px] text-purple-200">
+                      {row.topChartPattern.breakoutPrice != null && (
+                        <span>Pivot cản: <strong>{fmtNum(row.topChartPattern.breakoutPrice, 2)}</strong></span>
+                      )}
+                      {row.topChartPattern.targetPrice != null && (
+                        <span>Mục tiêu hình học: <strong>{fmtNum(row.topChartPattern.targetPrice, 2)}</strong></span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-1.5 flex items-center justify-between">
                   <div className="flex flex-wrap gap-1">

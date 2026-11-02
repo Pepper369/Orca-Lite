@@ -10,6 +10,9 @@ export type ChartPatternKind =
   | "vcp"
   | "cup_with_handle"
   | "double_bottom"
+  | "inverse_head_and_shoulders"
+  | "ascending_triangle"
+  | "triple_bottom"
   | "bull_flag"
   | "no_supply"
   | "shakeout"
@@ -294,6 +297,206 @@ function detectDoubleBottom(bars: OhlcvBar[]): DetectedChartPattern | null {
 }
 
 /**
+ * 3b. Inverse Head and Shoulders (Vai Đầu Vai Ngược)
+ * One of the most reliable and powerful bottom reversal patterns.
+ */
+function detectInverseHeadAndShoulders(
+  bars: OhlcvBar[],
+  volMa20: (number | null)[],
+): DetectedChartPattern | null {
+  const n = bars.length;
+  if (n < 35) return null;
+
+  const { lows, highs } = findLocalPivots(bars, 3);
+  if (lows.length < 3 || highs.length < 2) return null;
+
+  const l3 = lows[lows.length - 1]!; // Right Shoulder
+  const l2 = lows[lows.length - 2]!; // Head
+  const l1 = lows[lows.length - 3]!; // Left Shoulder
+
+  // Distance between pivots
+  const dist12 = l2.index - l1.index;
+  const dist23 = l3.index - l2.index;
+  if (dist12 < 5 || dist12 > 35 || dist23 < 5 || dist23 > 35) return null;
+
+  // Head must be significantly lower than both shoulders
+  const headDepthLeft = (l1.price - l2.price) / l1.price;
+  const headDepthRight = (l3.price - l2.price) / l3.price;
+  if (headDepthLeft < 0.025 || headDepthRight < 0.02) return null;
+
+  // Shoulders symmetry check (within 8% price difference)
+  const shoulderDiff = Math.abs(l1.price - l3.price) / l1.price;
+  if (shoulderDiff > 0.08) return null;
+
+  // Intermediate peaks (neckline points)
+  const p1List = highs.filter((h) => h.index > l1.index && h.index < l2.index);
+  const p2List = highs.filter((h) => h.index > l2.index && h.index < l3.index);
+  if (!p1List.length || !p2List.length) return null;
+
+  const p1 = p1List.reduce((max, h) => (h.price > max.price ? h : max));
+  const p2 = p2List.reduce((max, h) => (h.price > max.price ? h : max));
+
+  // Neckline slope check (relatively horizontal or slightly upward)
+  const neckDiff = Math.abs(p1.price - p2.price) / p1.price;
+  if (neckDiff > 0.09) return null;
+
+  const neckline = Math.max(p1.price, p2.price);
+  const lastBar = bars[n - 1]!;
+
+  // Price should have recovered from right shoulder towards neckline
+  if (lastBar.close < l3.price * 1.02) return null;
+  if (lastBar.close < neckline * 0.92) return null;
+
+  // Volume verification: right shoulder volume typically dries up vs head
+  const volDry = l3.bar.volume <= l2.bar.volume * 1.15;
+  const higherRightShoulder = l3.price >= l1.price;
+
+  let score = 74;
+  if (volDry) score += 8;
+  if (higherRightShoulder) score += 6;
+  if (lastBar.close >= neckline * 0.97) score += 8;
+
+  const patternHeight = neckline - l2.price;
+
+  return {
+    kind: "inverse_head_and_shoulders",
+    name: "Inverse Head and Shoulders",
+    nameVi: "Mẫu hình Vai Đầu Vai Ngược",
+    type: "bullish",
+    score: Math.min(96, score),
+    reliability: score >= 82 ? "very_high" : "high",
+    breakoutPrice: Math.round(neckline * 100) / 100,
+    stopLossPrice: Math.round(l3.price * 0.985 * 100) / 100,
+    targetPrice: Math.round((neckline + patternHeight * 0.85) * 100) / 100,
+    description: `Cấu trúc 3 đáy đảo chiều (Vai trái ${l1.price.toFixed(1)} - Đầu ${l2.price.toFixed(1)} - Vai phải ${l3.price.toFixed(1)}). Đường viền cổ cản tại ${neckline.toFixed(1)}.`,
+    confirmation: higherRightShoulder
+      ? "Vai phải nâng đáy thể hiện lực cầu gom chủ động, chờ vượt viền cổ"
+      : "Đang hồi phục từ vai phải, cần bùng nổ vượt viền cổ để xác nhận xu hướng tăng",
+    ageBars: n - 1 - l3.index,
+    volumeDrying: volDry,
+  };
+}
+
+/**
+ * 3c. Ascending Triangle (Tam giác tăng)
+ * Flat horizontal resistance with ascending higher lows showing persistent accumulation.
+ */
+function detectAscendingTriangle(
+  bars: OhlcvBar[],
+  volMa20: (number | null)[],
+): DetectedChartPattern | null {
+  const n = bars.length;
+  if (n < 25) return null;
+
+  const { lows, highs } = findLocalPivots(bars, 2);
+  if (lows.length < 2 || highs.length < 2) return null;
+
+  // Recent highs forming flat horizontal resistance
+  const recentHighs = highs.slice(-3);
+  if (recentHighs.length < 2) return null;
+
+  const maxH = Math.max(...recentHighs.map((h) => h.price));
+  const minH = Math.min(...recentHighs.map((h) => h.price));
+  if ((maxH - minH) / maxH > 0.03) return null; // Flat ceiling within 3%
+
+  // Recent lows forming ascending higher lows
+  const recentLows = lows.slice(-3);
+  if (recentLows.length < 2) return null;
+
+  let ascending = true;
+  for (let i = 1; i < recentLows.length; i++) {
+    if (recentLows[i]!.price <= recentLows[i - 1]!.price * 1.008) {
+      ascending = false;
+      break;
+    }
+  }
+  if (!ascending) return null;
+
+  const lastLow = recentLows[recentLows.length - 1]!;
+  const firstLow = recentLows[0]!;
+  const initialSpread = (maxH - firstLow.price) / maxH;
+  const currentSpread = (maxH - lastLow.price) / maxH;
+
+  // Must show volatility coiling / contraction
+  if (currentSpread >= initialSpread * 0.85) return null;
+
+  const lastBar = bars[n - 1]!;
+  if (lastBar.close < maxH * 0.94) return null;
+
+  const curVolMa = volMa20[n - 1] ?? 0;
+  const recentAvgVol = bars.slice(-3).reduce((acc, b) => acc + b.volume, 0) / 3;
+  const volDry = curVolMa > 0 && recentAvgVol < curVolMa * 0.95;
+
+  let score = 72;
+  if (recentLows.length >= 3) score += 10;
+  if (volDry) score += 8;
+  if (lastBar.close >= maxH * 0.98) score += 8;
+
+  return {
+    kind: "ascending_triangle",
+    name: "Ascending Triangle",
+    nameVi: "Mẫu hình Tam giác tăng (Ascending Triangle)",
+    type: "bullish",
+    score: Math.min(95, score),
+    reliability: score >= 82 ? "very_high" : "high",
+    breakoutPrice: Math.round(maxH * 100) / 100,
+    stopLossPrice: Math.round(lastLow.price * 0.985 * 100) / 100,
+    targetPrice: Math.round((maxH + (maxH - firstLow.price) * 0.8) * 100) / 100,
+    description: `Kháng cự ngang ${maxH.toFixed(1)} được kiểm định liên tục với các đáy nâng dần, biên độ co hẹp sẵn sàng bứt phá.`,
+    confirmation: volDry ? "Thanh khoản co hẹp cạn kiệt trong tam giác" : "Chờ nến breakout vượt đỉnh kèm vol",
+    ageBars: n - 1 - lastLow.index,
+    volumeDrying: volDry,
+  };
+}
+
+/**
+ * 3d. Triple Bottom (Mô hình Ba đáy)
+ * Three solid tests of the same support zone.
+ */
+function detectTripleBottom(bars: OhlcvBar[]): DetectedChartPattern | null {
+  const n = bars.length;
+  if (n < 35) return null;
+
+  const { lows, highs } = findLocalPivots(bars, 3);
+  if (lows.length < 3 || highs.length < 2) return null;
+
+  const l3 = lows[lows.length - 1]!;
+  const l2 = lows[lows.length - 2]!;
+  const l1 = lows[lows.length - 3]!;
+
+  const dist12 = l2.index - l1.index;
+  const dist23 = l3.index - l2.index;
+  if (dist12 < 6 || dist23 < 6 || dist12 + dist23 > 60) return null;
+
+  const minL = Math.min(l1.price, l2.price, l3.price);
+  const maxL = Math.max(l1.price, l2.price, l3.price);
+  if ((maxL - minL) / minL > 0.035) return null; // All 3 bottoms within 3.5%
+
+  const intermediateHighs = highs.filter((h) => h.index > l1.index && h.index < l3.index);
+  if (!intermediateHighs.length) return null;
+  const peak = intermediateHighs.reduce((prev, cur) => (cur.price > prev.price ? cur : prev));
+
+  const lastBar = bars[n - 1]!;
+  if (lastBar.close < l3.price * 1.02) return null;
+
+  const score = 76;
+  return {
+    kind: "triple_bottom",
+    name: "Triple Bottom",
+    nameVi: "Mẫu hình Ba đáy vững chắc",
+    type: "bullish",
+    score: 80,
+    reliability: "high",
+    breakoutPrice: Math.round(peak.price * 100) / 100,
+    stopLossPrice: Math.round(minL * 0.985 * 100) / 100,
+    targetPrice: Math.round((peak.price + (peak.price - minL) * 0.8) * 100) / 100,
+    description: `Ba lần kiểm định hỗ trợ thành công tại vùng ${minL.toFixed(1)}, dòng tiền bảo vệ vững chắc.`,
+    confirmation: "Cần vượt đỉnh trung tâm để kích hoạt đợt sóng tăng mới",
+    ageBars: n - 1 - l3.index,
+  };
+}
+
+/**
  * 4. Bull Flag (Cờ tăng)
  */
 function detectBullFlag(bars: OhlcvBar[], volMa20: (number | null)[]): DetectedChartPattern | null {
@@ -476,6 +679,15 @@ export function detectChartPatterns(
 
   const doubleBottom = detectDoubleBottom(slice);
   if (doubleBottom && doubleBottom.score >= minScore) patterns.push(doubleBottom);
+
+  const invHs = detectInverseHeadAndShoulders(slice, volMa20);
+  if (invHs && invHs.score >= minScore) patterns.push(invHs);
+
+  const ascTri = detectAscendingTriangle(slice, volMa20);
+  if (ascTri && ascTri.score >= minScore) patterns.push(ascTri);
+
+  const tripleBottom = detectTripleBottom(slice);
+  if (tripleBottom && tripleBottom.score >= minScore) patterns.push(tripleBottom);
 
   const bullFlag = detectBullFlag(slice, volMa20);
   if (bullFlag && bullFlag.score >= minScore) patterns.push(bullFlag);

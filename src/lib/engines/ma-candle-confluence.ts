@@ -1,4 +1,5 @@
 import { detectCandlePatterns, type DetectedCandlePattern } from "./candlestick-patterns";
+import { detectChartPatterns, type DetectedChartPattern } from "./chart-patterns";
 import { sma } from "../technical";
 import { ema, rsi, macd } from "./oscillators";
 import { detectDivergences, SHORT_3_4D } from "./divergence";
@@ -8,6 +9,7 @@ import type { OhlcvBar, Quote, DivergenceSignal } from "../types";
 export type MaCandleScenario =
   | "ALL"
   | "BOTTOM_BULLISH_DIVERGENCE" // Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương
+  | "CHART_PATTERN_BREAKOUT"    // Hợp lưu Bứt phá Mẫu hình Biểu đồ (VCP, Cup & Handle, Vai Đầu Vai Ngược, Tam giác tăng)
   | "SMC_SWEEP_RECLAIM"    // Quét thanh khoản & rút chân hỗ trợ (SMC Shakeout)
   | "VSA_NO_SUPPLY_TEST"   // Test cung cạn kiệt thanh khoản tại MA (Wyckoff/VSA)
   | "EMA_RIBBON_ALIGN"     // Retest dải EMA Ribbon đa chu kỳ
@@ -57,6 +59,13 @@ export interface MaCandleConfluenceRow {
   candleReliability: string;
   patternAgeBars: number;
   confirmation: string;
+
+  // Chart Pattern Confluence (Classical Geometric Formations)
+  topChartPattern?: DetectedChartPattern | null;
+  chartPatternName?: string | null;
+  chartPatternNameVi?: string | null;
+  chartPatternScore?: number | null;
+  hasMultiLayerConfluence?: boolean;
 
   // Divergence Engine Integration
   divergenceSignal?: DivergenceSignal | null;
@@ -167,6 +176,10 @@ export function analyzeMaCandleRow(
   );
   if (!bullPatterns.length) return null;
   const topPattern = bullPatterns[0]!;
+
+  // 1b. Classical Geometric Chart Patterns (VCP, Cup & Handle, Inv H&S, Ascending Triangle, Double Bottom)
+  const rawChartPatterns = detectChartPatterns(bars, { lookback: 90, minScore: 60 });
+  const topChart = rawChartPatterns.length > 0 ? rawChartPatterns[0]! : null;
 
   // 2. Moving Averages & EMAs
   const sma10 = lastSma(effectiveCloses, 10);
@@ -362,6 +375,23 @@ export function analyzeMaCandleRow(
     anchorMa = "MA10";
     anchorMaPrice = sma20;
     confluenceTags.push("Nén MA bứt phá");
+  } else if (
+    topChart != null &&
+    topChart.score >= 70 &&
+    (topChart.kind === "vcp" ||
+      topChart.kind === "cup_with_handle" ||
+      topChart.kind === "inverse_head_and_shoulders" ||
+      topChart.kind === "ascending_triangle" ||
+      topChart.kind === "double_bottom" ||
+      topChart.kind === "triple_bottom" ||
+      topChart.kind === "bull_flag")
+  ) {
+    scenario = "CHART_PATTERN_BREAKOUT";
+    scenarioLabel = `Bứt Phá ${topChart.nameVi.replace(/Mẫu hình /gi, "")}`;
+    scenarioBadgeTone = "purple";
+    anchorMa = near50 ? "MA50" : near20 ? "MA20" : testedBelow200 ? "MA200" : "MA20";
+    anchorMaPrice = near50 ? sma50 : near20 ? sma20 : testedBelow200 ? sma200 : sma20 ?? sma10;
+    confluenceTags.push(`Mẫu hình ${topChart.nameVi}`);
   } else if (near20) {
     scenario = "MA20_BOUNCE";
     scenarioLabel = "Nảy Hỗ Trợ MA20 (Sóng Tăng)";
@@ -388,6 +418,12 @@ export function analyzeMaCandleRow(
   }
 
   confluenceTags.push(topPattern.nameVi);
+  if (topChart && !confluenceTags.some((t) => t.includes(topChart.nameVi))) {
+    confluenceTags.push(topChart.nameVi);
+  }
+  if (topChart?.volumeDrying) {
+    confluenceTags.push("Vol cạn kiệt mẫu hình");
+  }
 
   // 4. Momentum Confluence (RSI + MACD)
   let rsiVal: number | null = null;
@@ -513,6 +549,7 @@ export function analyzeMaCandleRow(
   // 7. Trend Pillar (max 25)
   let trendScore = 16;
   if (scenario === "BOTTOM_BULLISH_DIVERGENCE") trendScore = 25;
+  else if (scenario === "CHART_PATTERN_BREAKOUT") trendScore = 24;
   else if (scenario === "MA200_RECLAIM") trendScore = 24;
   else if (scenario === "SMC_SWEEP_RECLAIM") trendScore = 23;
   else if (scenario === "MA50_BOUNCE") trendScore = 22;
@@ -534,10 +571,25 @@ export function analyzeMaCandleRow(
     confluenceTags.push("Trật tự MA Ribbon");
   }
 
-  // 8. Candle Pattern Pillar (max 25)
+  // 8. Candle & Chart Pattern Pillar (max 25)
   let candleScore = Math.min(25, Math.round(topPattern.score * 0.25));
   if (topPattern.ageBars === 0) {
     candleScore = Math.min(25, candleScore + 2);
+  }
+  // Chart pattern geometric reinforcement
+  if (topChart) {
+    if (topChart.score >= 80) candleScore = Math.min(25, candleScore + 3);
+    else if (topChart.score >= 70) candleScore = Math.min(25, candleScore + 1);
+  }
+
+  // Multi-layer Confluence Detection
+  const hasMultiLayerConfluence = Boolean(
+    topChart &&
+      topChart.score >= 70 &&
+      (near20 || near50 || testedBelow200 || isEmaPullback || isGoldenCross || isSqueeze),
+  );
+  if (hasMultiLayerConfluence) {
+    confluenceTags.push("Siêu hợp lưu Mẫu hình + MA");
   }
 
   // 9. Total Confluence Score Calculation (0-100)
@@ -556,7 +608,11 @@ export function analyzeMaCandleRow(
   const distToMaPct =
     anchorMaPrice && anchorMaPrice > 0 ? Number((((close - anchorMaPrice) / anchorMaPrice) * 100).toFixed(1)) : null;
 
-  const supportPrice = anchorMaPrice != null ? Math.min(patternLow, anchorMaPrice) : patternLow;
+  let supportPrice = anchorMaPrice != null ? Math.min(patternLow, anchorMaPrice) : patternLow;
+  if (topChart?.stopLossPrice && topChart.stopLossPrice > 0 && topChart.stopLossPrice < close) {
+    supportPrice = Math.min(supportPrice, topChart.stopLossPrice);
+  }
+
   const buffer = Math.max(close * 0.005, (patternHigh - patternLow) * 0.2);
   const stopLoss = roundPrice(Math.max(0.01, supportPrice - buffer), close);
   const risk = close - stopLoss;
@@ -564,15 +620,19 @@ export function analyzeMaCandleRow(
 
   const riskPercent = Number(((risk / close) * 100).toFixed(1));
   const target1 = roundPrice(close + risk * 1.5, close);
-  const target2 = roundPrice(close + risk * 2.5, close);
+  let target2 = roundPrice(close + risk * 2.5, close);
+  if (topChart?.targetPrice && topChart.targetPrice > target1) {
+    target2 = roundPrice(Math.max(target2, topChart.targetPrice), close);
+  }
   const rewardPercent = Number((((target1 - close) / close) * 100).toFixed(1));
   const riskReward = Number((rewardPercent / Math.max(0.1, riskPercent)).toFixed(1));
 
   // Setup Quality Classification
   const isAplus =
     confluenceScore >= 75 &&
-    ((volRatio ?? 0) >= 1.15 || foreignAccumulating || isMarketLeader || bestBullDiv != null) &&
+    ((volRatio ?? 0) >= 1.15 || foreignAccumulating || isMarketLeader || bestBullDiv != null || hasMultiLayerConfluence) &&
     (scenario === "BOTTOM_BULLISH_DIVERGENCE" ||
+      scenario === "CHART_PATTERN_BREAKOUT" ||
       scenario === "SMC_SWEEP_RECLAIM" ||
       scenario === "MA50_BOUNCE" ||
       scenario === "MA200_RECLAIM" ||
@@ -610,6 +670,13 @@ export function analyzeMaCandleRow(
     candleReliability: topPattern.reliability,
     patternAgeBars: topPattern.ageBars ?? 0,
     confirmation: topPattern.confirmation,
+
+    // Chart Pattern Confluence
+    topChartPattern: topChart,
+    chartPatternName: topChart?.name ?? null,
+    chartPatternNameVi: topChart?.nameVi ?? null,
+    chartPatternScore: topChart?.score ?? null,
+    hasMultiLayerConfluence,
 
     divergenceSignal: bestBullDiv,
     divergenceSummary: bestBullDiv

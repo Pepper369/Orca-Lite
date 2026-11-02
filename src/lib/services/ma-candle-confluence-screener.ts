@@ -31,6 +31,7 @@ export interface MaCandleScreenOpts {
   volumeOnly?: boolean;
   foreignOnly?: boolean;
   leaderOnly?: boolean;
+  patternOnly?: boolean;
   limit?: number;
 }
 
@@ -93,6 +94,7 @@ export async function screenMaCandleConfluence(
     if (opts.volumeOnly && !(row.volRatio && row.volRatio >= 1.15)) continue;
     if (opts.foreignOnly && !row.foreignAccumulating) continue;
     if (opts.leaderOnly && !row.isMarketLeader) continue;
+    if (opts.patternOnly && !row.topChartPattern) continue;
 
     rows.push(row);
   }

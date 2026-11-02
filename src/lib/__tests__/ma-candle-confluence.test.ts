@@ -158,3 +158,60 @@ test("MA & Candle Confluence: Identifies Triple Confluence (Bottom Bullish Diver
   assert.equal(result.isBottomReversal, true);
   assert.ok(result.stopLoss < result.entryPrice, "Stop loss below entry");
 });
+
+test("MA & Candle Confluence: Identifies Multi-layer Confluence with Classical Chart Pattern", () => {
+  const bars: OhlcvBar[] = [];
+
+  // Prefix 25 bars in mild decline from 58 to 50
+  for (let i = 0; i < 25; i++) {
+    const p = 58 - i * 0.32;
+    bars.push(bar(p, p + 0.5, p - 0.4, p + 0.1, 1500));
+  }
+
+  // Inverse Head and Shoulders structure:
+  // L1 = 45.0
+  bars.push(bar(50, 50.2, 47.0, 47.2, 1400));
+  bars.push(bar(47.2, 47.5, 46.0, 46.2, 1600));
+  bars.push(bar(46.2, 46.5, 45.0, 45.4, 1800));
+  bars.push(bar(45.4, 46.8, 45.2, 46.5, 1500));
+  bars.push(bar(46.5, 48.0, 46.2, 47.8, 1500));
+  bars.push(bar(47.8, 50.4, 47.5, 49.9, 1600)); // P1 = 50.4
+  bars.push(bar(49.9, 50.0, 48.0, 48.5, 1400));
+
+  // L2 (Head) = 40.2
+  bars.push(bar(48.5, 48.8, 44.5, 44.8, 1700));
+  bars.push(bar(44.8, 45.0, 42.0, 42.2, 2200));
+  bars.push(bar(42.2, 42.5, 40.2, 40.6, 2800));
+  bars.push(bar(40.6, 43.0, 40.4, 42.5, 2400));
+  bars.push(bar(42.5, 45.5, 42.0, 45.0, 2000));
+  bars.push(bar(45.0, 48.0, 44.8, 47.5, 1900));
+  bars.push(bar(47.5, 50.5, 47.0, 50.0, 1800)); // P2 = 50.5
+  bars.push(bar(50.0, 50.1, 48.5, 48.8, 1500));
+
+  // L3 (Right Shoulder) = 45.2 (lower volume)
+  bars.push(bar(48.8, 49.0, 46.5, 46.8, 1100));
+  bars.push(bar(46.8, 47.0, 45.2, 45.8, 900));
+  bars.push(bar(45.8, 47.5, 45.6, 47.0, 1100));
+  bars.push(bar(47.0, 48.8, 46.8, 48.2, 1300));
+  // Bullish Engulfing reversal at right shoulder near MA
+  bars.push(bar(48.0, 48.5, 47.5, 47.8, 1000));
+  bars.push(bar(47.4, 50.6, 47.2, 50.4, 3200)); // Rebound engulfing bar breaking neckline
+
+  const result = analyzeMaCandleRow("TEST_MULTI_LAYER", bars, undefined, {
+    foreign: {
+      buyVolume: 50000,
+      sellVolume: 10000,
+      netVolume: 40000,
+      netValue: 2_000_000_000,
+      buyRatioPct: 75,
+    },
+  });
+
+  assert.ok(result, "Should successfully detect multi-layer confluence");
+  assert.ok(result.topPattern, "Should have top bullish reversal candle");
+  assert.ok(result.topChartPattern, "Should have identified geometric chart pattern");
+  assert.equal(result.topChartPattern?.kind, "inverse_head_and_shoulders");
+  assert.ok(result.confluenceScore >= 75, `Score ${result.confluenceScore} should be >= 75`);
+  assert.equal(result.setupQuality, "A+");
+  assert.ok(result.confluenceTags.some((t) => t.includes("Vai Đầu Vai")), "Should include chart pattern tag");
+});
