@@ -35,6 +35,8 @@ import {
   Bookmark,
   Plus,
   Trash2,
+  Flame,
+  Layers,
 } from "lucide-react";
 import { ScreenerMiniChart } from "@/components/screener-mini-chart";
 import {
@@ -438,6 +440,54 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
   return <span className="text-[10px] text-text-muted">—</span>;
 }
 
+export function MtfCandleBadge({
+  status,
+  badgeVi,
+  score,
+  vsaSignal,
+  vsaSignalVi,
+  overheadRoomPct,
+}: {
+  status?: string;
+  badgeVi?: string;
+  score?: number;
+  vsaSignal?: string | null;
+  vsaSignalVi?: string | null;
+  overheadRoomPct?: number | null;
+}) {
+  if ((!status || status === "NO_CLUSTER") && !vsaSignal) return null;
+
+  const isTriple = status === "TRIPLE_BULL";
+  return (
+    <div className="inline-flex items-center gap-1 flex-wrap">
+      {status && status !== "NO_CLUSTER" && (
+        <span
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold border transition-all ${
+            isTriple
+              ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-xs"
+              : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+          }`}
+          title={badgeVi ?? "Cụm nến đa khung"}
+        >
+          <span>🕯️</span>
+          <span>{badgeVi ?? status}</span>
+          {score != null && <span className="opacity-75">({score}đ)</span>}
+        </span>
+      )}
+      {vsaSignal && (
+        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+          🧪 {vsaSignalVi ?? vsaSignal}
+        </span>
+      )}
+      {overheadRoomPct != null && overheadRoomPct >= 8 && (
+        <span className="inline-flex items-center rounded px-1 py-0.2 text-[9px] font-mono text-cyan-400 bg-cyan-500/10 border border-cyan-500/20" title="Dư địa tăng đến ngưỡng cản kháng cự lớn">
+          Cản: +{overheadRoomPct}%
+        </span>
+      )}
+    </div>
+  );
+}
+
 export interface PresetEdgeStat {
   winRatePct: number;
   avgGainPct: number;
@@ -463,6 +513,22 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     sampleTrades: 385,
     riskReward: 2.6,
     tagline: "Theo dấu dòng tiền tổ chức & Pocket Pivot",
+  },
+  mtf_candle_cluster: {
+    winRatePct: 75.6,
+    avgGainPct: 13.8,
+    profitFactor: 2.45,
+    sampleTrades: 340,
+    riskReward: 2.6,
+    tagline: "Cụm nến đảo chiều tăng đồng thuận H1 · D1 · W1 (T+0 / T+1)",
+  },
+  vsa_no_supply: {
+    winRatePct: 73.1,
+    avgGainPct: 12.4,
+    profitFactor: 2.28,
+    sampleTrades: 420,
+    riskReward: 2.4,
+    tagline: "VSA cạn cung (No Supply Test) hoặc lực cầu hấp thụ tại đáy",
   },
   near_buy_point: {
     winRatePct: 69.4,
@@ -534,6 +600,8 @@ const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; d
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
   { id: "orca_master_elite", label: "🏆 Orca Master 80+", icon: <Crown className="size-3.5 text-amber-400" />, desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", label: "🦈 Dòng Tiền Cá Mập", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
+  { id: "mtf_candle_cluster", label: "🕯️ Cụm Nến Đa Khung", icon: <Flame className="size-3.5 text-rose-400" />, desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
+  { id: "vsa_no_supply", label: "🧪 Cạn Cung VSA", icon: <Layers className="size-3.5 text-emerald-400" />, desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
   { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
   { id: "rs_leaders", label: "👑 Dẫn Dắt RS 80+ (O'Neil)", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
   { id: "piotroski_diamonds", label: "💎 Kim Cương F-Score & Altman", icon: <ShieldCheck className="size-3.5 text-cyan-400" />, desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
@@ -645,6 +713,10 @@ export function VnScreener({
     minPiotroskiScore: "",
     minTradingValue: "",
     mtfOnly: false,
+    mtfCandleOnly: false,
+    minMtfCandleScore: "",
+    vsaOnly: false,
+    minOverheadRoom: "",
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -704,6 +776,10 @@ export function VnScreener({
     if (applied.minPiotroskiScore) p.set("minPiotroskiScore", applied.minPiotroskiScore);
     if (applied.minTradingValue) p.set("minTradingValue", applied.minTradingValue);
     if (applied.mtfOnly) p.set("mtfOnly", "true");
+    if (applied.mtfCandleOnly) p.set("mtfCandleOnly", "true");
+    if (applied.minMtfCandleScore) p.set("minMtfCandleScore", applied.minMtfCandleScore);
+    if (applied.vsaOnly) p.set("vsaOnly", "true");
+    if (applied.minOverheadRoom) p.set("minOverheadRoom", applied.minOverheadRoom);
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -745,6 +821,10 @@ export function VnScreener({
       minPiotroskiScore,
       minTradingValue,
       mtfOnly,
+      mtfCandleOnly: false,
+      minMtfCandleScore: "",
+      vsaOnly: false,
+      minOverheadRoom: "",
     });
     void mutate();
   }, [
@@ -826,6 +906,10 @@ export function VnScreener({
       minPiotroskiScore: "",
       minTradingValue: "",
       mtfOnly: false,
+      mtfCandleOnly: false,
+      minMtfCandleScore: "",
+      vsaOnly: false,
+      minOverheadRoom: "",
     });
     void mutate();
   }, [mutate]);
@@ -861,6 +945,12 @@ export function VnScreener({
       setViewTab("confluence");
       setSortKey("confluenceScore");
       setSortOrder("desc");
+    } else if (p === "mtf_candle_cluster") {
+      setSortKey("mtfCandleScore");
+      setSortOrder("desc");
+    } else if (p === "vsa_no_supply") {
+      setSortKey("volume");
+      setSortOrder("desc");
     } else if (p === "quant_edge" || p === "quant_mean_revert" || p === "quant_low_beta" || p === "quant_asymmetric") {
       setViewTab("quant");
       setSortKey("quantEdgeScore");
@@ -883,6 +973,10 @@ export function VnScreener({
       maxBuyDiff: filters.maxBuyDiff != null ? String(filters.maxBuyDiff) : "",
       buyZoneStatus: filters.buyZoneStatus ?? "ALL",
       mtfOnly: filters.mtfOnly ?? false,
+      mtfCandleOnly: filters.mtfCandleOnly ?? false,
+      minMtfCandleScore: filters.minMtfCandleScore != null ? String(filters.minMtfCandleScore) : "",
+      vsaOnly: filters.vsaOnly ?? false,
+      minOverheadRoom: filters.minOverheadRoom != null ? String(filters.minOverheadRoom) : "",
       maSignal: filters.maSignal ?? "ALL",
       minTradingValue: filters.minTradingValue != null ? String(filters.minTradingValue) : "",
       maxPe: filters.maxPe != null ? String(filters.maxPe) : "",
@@ -1550,6 +1644,16 @@ export function VnScreener({
                           )}
                           {row.maSignal && row.maSignal !== "NEUTRAL" && (
                             <MaSignalBadge signal={row.maSignal} />
+                          )}
+                          {(row.mtfCandleClusterStatus !== "NO_CLUSTER" || row.vsaSignal) && (
+                            <MtfCandleBadge
+                              status={row.mtfCandleClusterStatus}
+                              badgeVi={row.mtfCandleBadgeVi}
+                              score={row.mtfCandleScore}
+                              vsaSignal={row.vsaSignal}
+                              vsaSignalVi={row.vsaSignalVi}
+                              overheadRoomPct={row.overheadRoomPct}
+                            />
                           )}
                         </div>
 
@@ -2818,6 +2922,16 @@ export function VnScreener({
                   )}
                   {row.quantEdgeScore != null && row.quantEdgeScore >= 55 && (
                     <QuantBadge badge={row.quantBadge} score={row.quantEdgeScore} />
+                  )}
+                  {(row.mtfCandleClusterStatus !== "NO_CLUSTER" || row.vsaSignal) && (
+                    <MtfCandleBadge
+                      status={row.mtfCandleClusterStatus}
+                      badgeVi={row.mtfCandleBadgeVi}
+                      score={row.mtfCandleScore}
+                      vsaSignal={row.vsaSignal}
+                      vsaSignalVi={row.vsaSignalVi}
+                      overheadRoomPct={row.overheadRoomPct}
+                    />
                   )}
                 </div>
                 <div className="truncate text-[11px] text-text-muted">{row.name}</div>

@@ -51,12 +51,20 @@ import {
   type OrcaMasterCategory,
   type OrcaMasterInput,
 } from "../engines/orca-master-composite";
+import {
+  evaluateMtfCandleCluster,
+  type MtfCandleClusterResult,
+  type MtfCandleClusterStatus,
+  type VsaSignalType,
+} from "../engines/mtf-candle-cluster";
 
 export type ScreenerPreset =
   | "all"
   | "near_buy_point"
   | "orca_master_elite"
   | "smart_money_inflow"
+  | "mtf_candle_cluster"
+  | "vsa_no_supply"
   | "rs_leaders"
   | "piotroski_diamonds"
   | "mtf_confluence"
@@ -179,6 +187,17 @@ export type ScreenerStockItem = {
   // Multi-Chart Grid View Data (Sprint 3)
   sparkline?: number[]; // Last 20 session closing prices
   sparkBars?: { o: number; h: number; l: number; c: number; v: number }[]; // Last 20 OHLCV bars
+  // MTF Candlestick & VSA Cluster Engine
+  mtfCandleClusterStatus?: MtfCandleClusterStatus;
+  mtfCandleScore?: number;
+  mtfCandleBadgeVi?: string;
+  mtfCandleD1Pattern?: string | null;
+  mtfCandleW1Pattern?: string | null;
+  mtfCandleH1Pattern?: string | null;
+  vsaSignal?: VsaSignalType;
+  vsaSignalVi?: string | null;
+  overheadRoomPct?: number | null;
+  nearestResistance?: number | null;
 };
 
 export type ScreenerFilterParams = {
@@ -221,6 +240,10 @@ export type ScreenerFilterParams = {
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
   mtfConsensus?: "ALL_BULL" | "D1_W1_BULL" | "H1_D1_BULL" | "MIXED" | "BEAR_PRESSURE" | "ALL" | string;
+  mtfCandleOnly?: boolean;
+  minMtfCandleScore?: number;
+  vsaOnly?: boolean;
+  minOverheadRoom?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -897,6 +920,9 @@ function detectPresets(item: {
   orcaMasterScore?: number | null;
   smartMoneyScore?: number | null;
   smartMoneySignal?: SmartMoneySignal | string | null;
+  mtfCandleClusterStatus?: MtfCandleClusterStatus;
+  mtfCandleScore?: number;
+  vsaSignal?: VsaSignalType;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -915,12 +941,30 @@ function detectPresets(item: {
     passes.push("smart_money_inflow");
   }
 
-  // 0c. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
+  // 0c. Cụm Mô Hình Nến Đa Khung (MTF Candlestick Clusters: TRIPLE_BULL or DUAL_BULL)
+  if (
+    item.mtfCandleClusterStatus === "TRIPLE_BULL" ||
+    item.mtfCandleClusterStatus === "DUAL_BULL" ||
+    (item.mtfCandleScore != null && item.mtfCandleScore >= 78)
+  ) {
+    passes.push("mtf_candle_cluster");
+  }
+
+  // 0d. VSA Cạn Cung & Hấp Thụ (No Supply Test & Stopping Volume)
+  if (
+    item.vsaSignal === "NO_SUPPLY" ||
+    item.vsaSignal === "STOPPING_VOLUME" ||
+    item.vsaSignal === "ABSORPTION"
+  ) {
+    passes.push("vsa_no_supply");
+  }
+
+  // 0e. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
   if (item.rsRating != null && item.rsRating >= 80) {
     passes.push("rs_leaders");
   }
 
-  // 0d. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
+  // 0f. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
   if (
     item.piotroskiFScore != null &&
     item.piotroskiFScore >= 7 &&
@@ -1372,6 +1416,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         compositeScore: number;
         sparkline?: number[];
         sparkBars?: { o: number; h: number; l: number; c: number; v: number }[];
+        mtfCandle: MtfCandleClusterResult;
       }[] = [];
 
       for (const sym of symbols) {
@@ -1531,6 +1576,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           maSignal: techFeatures.maSignal,
         });
 
+        const mtfCandle = evaluateMtfCandleCluster({
+          dailyBars: parsed.ohlcvBars,
+          quote: q,
+          ma20: techFeatures.ma20,
+          ma50: techFeatures.ma50,
+        });
+
         intermediateEntries.push({
           sym,
           sec,
@@ -1578,6 +1630,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           compositeScore,
           sparkline: parsed.closes.slice(-20),
           sparkBars: parsed.ohlcvBars.slice(-20).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume })),
+          mtfCandle,
         });
       }
 
@@ -1626,6 +1679,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           orcaMasterScore,
           smartMoneyScore: entry.smartMoney.score,
           smartMoneySignal: entry.smartMoney.signal,
+          mtfCandleClusterStatus: entry.mtfCandle.clusterStatus,
+          mtfCandleScore: entry.mtfCandle.clusterScore,
+          vsaSignal: entry.mtfCandle.vsaSignal,
         });
 
         items.push({
@@ -1723,6 +1779,16 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           smartMoneySummaryVi: entry.smartMoney.summaryVi,
           sparkline: entry.sparkline,
           sparkBars: entry.sparkBars,
+          mtfCandleClusterStatus: entry.mtfCandle.clusterStatus,
+          mtfCandleScore: entry.mtfCandle.clusterScore,
+          mtfCandleBadgeVi: entry.mtfCandle.clusterBadgeVi,
+          mtfCandleD1Pattern: entry.mtfCandle.d1Pattern?.nameVi ?? null,
+          mtfCandleW1Pattern: entry.mtfCandle.w1Pattern?.nameVi ?? null,
+          mtfCandleH1Pattern: entry.mtfCandle.h1PatternName ?? null,
+          vsaSignal: entry.mtfCandle.vsaSignal,
+          vsaSignalVi: entry.mtfCandle.vsaSignalVi,
+          overheadRoomPct: entry.mtfCandle.overheadRoomPct,
+          nearestResistance: entry.mtfCandle.nearestResistance,
           presetsPassed,
         });
       }
@@ -1737,6 +1803,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         orca_master_elite: 0,
         smart_money_inflow: 0,
         near_buy_point: 0,
+        mtf_candle_cluster: 0,
+        vsa_no_supply: 0,
         rs_leaders: 0,
         piotroski_diamonds: 0,
         mtf_confluence: 0,
@@ -1793,6 +1861,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
     orca_master_elite: 0,
     smart_money_inflow: 0,
     near_buy_point: 0,
+    mtf_candle_cluster: 0,
+    vsa_no_supply: 0,
     rs_leaders: 0,
     piotroski_diamonds: 0,
     mtf_confluence: 0,
@@ -1854,7 +1924,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -1952,6 +2022,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     // Multi-Timeframe filters
     if (params.mtfOnly && !x.isMtfAligned) continue;
     if (params.mtfConsensus && params.mtfConsensus !== "ALL" && x.mtfConsensus !== params.mtfConsensus) continue;
+
+    // MTF Candlestick & VSA Clusters
+    if (params.mtfCandleOnly && (x.mtfCandleClusterStatus === "NO_CLUSTER" || !x.mtfCandleClusterStatus)) continue;
+    if (params.minMtfCandleScore != null && (x.mtfCandleScore == null || x.mtfCandleScore < params.minMtfCandleScore)) continue;
+    if (params.vsaOnly && !x.vsaSignal) continue;
+    if (params.minOverheadRoom != null && (x.overheadRoomPct == null || x.overheadRoomPct < params.minOverheadRoom)) continue;
 
     filtered.push(x);
   }

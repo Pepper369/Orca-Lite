@@ -26,6 +26,10 @@ export interface CustomScreenerPreset {
     minDivYield?: number;
     maxDe?: number;
     minMarketCap?: number;
+    mtfCandleOnly?: boolean;
+    minMtfCandleScore?: number;
+    vsaOnly?: boolean;
+    minOverheadRoom?: number;
   };
 }
 
@@ -102,6 +106,9 @@ export function CustomScreenerBuilder({
   const [maxPe, setMaxPe] = useState<string>(activeFilters.maxPe != null ? String(activeFilters.maxPe) : "");
   const [minRoe, setMinRoe] = useState<string>(activeFilters.minRoe != null ? String(activeFilters.minRoe) : "");
   const [minDivYield, setMinDivYield] = useState<string>(activeFilters.minDivYield != null ? String(activeFilters.minDivYield) : "");
+  const [mtfCandleOnly, setMtfCandleOnly] = useState<boolean>(activeFilters.mtfCandleOnly ?? false);
+  const [vsaOnly, setVsaOnly] = useState<boolean>(activeFilters.vsaOnly ?? false);
+  const [minOverheadRoom, setMinOverheadRoom] = useState<string>(activeFilters.minOverheadRoom != null ? String(activeFilters.minOverheadRoom) : "");
 
   const [presetName, setPresetName] = useState<string>("");
   const [showSaveDialog, setShowSaveDialog] = useState<boolean>(false);
@@ -124,6 +131,9 @@ export function CustomScreenerBuilder({
       maxBuyDiff: maxBuyDiff ? Number(maxBuyDiff) : undefined,
       buyZoneStatus: buyZoneStatus !== "ALL" ? buyZoneStatus : undefined,
       mtfOnly: mtfOnly ? true : undefined,
+      mtfCandleOnly: mtfCandleOnly ? true : undefined,
+      vsaOnly: vsaOnly ? true : undefined,
+      minOverheadRoom: minOverheadRoom ? Number(minOverheadRoom) : undefined,
       maSignal: maSignal !== "ALL" ? maSignal : undefined,
       minTradingValue: minTradingValue ? Number(minTradingValue) : undefined,
       maxPe: maxPe ? Number(maxPe) : undefined,
@@ -344,7 +354,42 @@ export function CustomScreenerBuilder({
                 </select>
               </div>
 
-              <div className="flex items-center pt-5">
+              <div>
+                <span className="block text-[11px] text-text-secondary mb-1">Dư địa tăng đến cản min (%)</span>
+                <input
+                  value={minOverheadRoom}
+                  onChange={(e) => setMinOverheadRoom(e.target.value)}
+                  placeholder="Ví dụ: 12"
+                  className="input w-full !py-1.5 text-[11px]"
+                  inputMode="decimal"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2 sm:col-span-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={mtfCandleOnly}
+                    onChange={(e) => setMtfCandleOnly(e.target.checked)}
+                    className="size-4 rounded accent-rose-500 cursor-pointer"
+                  />
+                  <span className="text-[11px] font-semibold text-rose-300">
+                    🕯️ Bắt buộc có Cụm Nến Đảo Chiều Đa Khung (H1 + D1 + W1)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={vsaOnly}
+                    onChange={(e) => setVsaOnly(e.target.checked)}
+                    className="size-4 rounded accent-cyan-500 cursor-pointer"
+                  />
+                  <span className="text-[11px] font-semibold text-cyan-300">
+                    🧪 Bắt buộc có tín hiệu Cạn Cung VSA (No Supply / Stopping Vol)
+                  </span>
+                </label>
+
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -353,7 +398,7 @@ export function CustomScreenerBuilder({
                     className="size-4 rounded accent-emerald-500 cursor-pointer"
                   />
                   <span className="text-[11px] font-semibold text-text-primary">
-                    Bắt buộc đồng thuận Đa khung H1 + D1 + W1
+                    ⚡ Bắt buộc đồng thuận Đa khung xu hướng H1 + D1 + W1
                   </span>
                 </label>
               </div>
