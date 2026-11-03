@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { SlidersHorizontal, Plus, Trash2, Check, X, Bookmark, Zap, Sparkles, ShieldCheck } from "lucide-react";
+import { SlidersHorizontal, Plus, Trash2, Check, X, Bookmark, Zap, ShieldCheck } from "lucide-react";
 
 export interface CustomScreenerPreset {
   id: string;
@@ -235,7 +235,7 @@ export function CustomScreenerBuilder({
           <div className="rounded-xl bg-panel-2/40 border border-border-subtle p-3.5 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <Sparkles className="size-3.5 text-amber-400" />
+                <span className="size-2 rounded-full bg-amber-400" />
                 1. Trụ Cột Độc Quyền (Elite Quantitative Ratings)
               </span>
               <span className="text-[10px] text-text-muted">Thang điểm 1 - 99 percentile</span>
@@ -349,8 +349,8 @@ export function CustomScreenerBuilder({
                   className="input w-full !py-1.5 text-[11px]"
                 >
                   <option value="ALL">Tất cả tín hiệu</option>
-                  <option value="GOLDEN_CROSS">⭐ Giao cắt Vàng (Golden Cross MA20/MA50)</option>
-                  <option value="BULLISH_ALIGN">📈 Kênh tăng vững (Trật tự MA10 &gt; MA20 &gt; MA50)</option>
+                  <option value="GOLDEN_CROSS">Giao cắt Vàng (Golden Cross MA20/MA50)</option>
+                  <option value="BULLISH_ALIGN">Kênh tăng vững (Trật tự MA10 &gt; MA20 &gt; MA50)</option>
                 </select>
               </div>
 
@@ -373,8 +373,9 @@ export function CustomScreenerBuilder({
                     onChange={(e) => setMtfCandleOnly(e.target.checked)}
                     className="size-4 rounded accent-rose-500 cursor-pointer"
                   />
-                  <span className="text-[11px] font-semibold text-rose-300">
-                    🕯️ Bắt buộc có Cụm Nến Đảo Chiều Đa Khung (H1 + D1 + W1)
+                  <span className="text-[11px] font-semibold text-rose-300 flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-rose-400" />
+                    Bắt buộc có Cụm Nến Đảo Chiều Đa Khung (H1 + D1 + W1)
                   </span>
                 </label>
 
@@ -385,8 +386,9 @@ export function CustomScreenerBuilder({
                     onChange={(e) => setVsaOnly(e.target.checked)}
                     className="size-4 rounded accent-cyan-500 cursor-pointer"
                   />
-                  <span className="text-[11px] font-semibold text-cyan-300">
-                    🧪 Bắt buộc có tín hiệu Cạn Cung VSA (No Supply / Stopping Vol)
+                  <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-cyan-400" />
+                    Bắt buộc có tín hiệu Cạn Cung VSA (No Supply / Stopping Vol)
                   </span>
                 </label>
 

@@ -20,7 +20,6 @@ import {
   SlidersHorizontal,
   Download,
   Search,
-  Sparkles,
   TrendingUp,
   ShieldCheck,
   Zap,
@@ -29,13 +28,11 @@ import {
   ChevronUp,
   RotateCcw,
   CheckCircle2,
-  Crown,
   LayoutGrid,
   List,
   Bookmark,
   Plus,
   Trash2,
-  Flame,
   Layers,
 } from "lucide-react";
 import { ScreenerMiniChart } from "@/components/screener-mini-chart";
@@ -102,26 +99,28 @@ export function OrcaMasterBadge({
   if (score == null || isNaN(score)) return <span className="text-[10px] text-text-muted">—</span>;
 
   let colorClass = "bg-surface-base text-text-muted border-border-subtle";
-  let icon = null;
+  let dotClass = "bg-text-muted";
 
   if (score >= 90) {
-    colorClass = "bg-gradient-to-r from-amber-500/25 to-yellow-500/25 text-amber-200 border-amber-400/50 shadow-sm font-black";
-    icon = <Crown className="size-2.5 text-amber-300" />;
+    colorClass = "bg-amber-500/15 text-amber-300 border-amber-400/40 font-bold";
+    dotClass = "bg-amber-400";
   } else if (score >= 80) {
-    colorClass = "bg-cyan-500/20 text-cyan-200 border-cyan-400/40 font-bold shadow-xs";
-    icon = <Sparkles className="size-2.5 text-cyan-300" />;
+    colorClass = "bg-cyan-500/15 text-cyan-300 border-cyan-400/35 font-semibold";
+    dotClass = "bg-cyan-400";
   } else if (score >= 60) {
     colorClass = "bg-blue-500/15 text-blue-300 border-blue-500/30 font-medium";
+    dotClass = "bg-blue-400";
   } else if (score < 40) {
     colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    dotClass = "bg-rose-400";
   }
 
   return (
     <span
       title={`Orca Master Composite Rating: ${score}/99 (${category ?? ""})${strengthVi ? ` · Trụ cột: ${strengthVi}` : ""}`}
-      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
     >
-      {icon}
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
       <span>Master {score}</span>
     </span>
   );
@@ -153,9 +152,9 @@ export function SmartMoneyBadge({
     return (
       <span
         title={`Cá mập gom mạnh: Mua chủ động ${activeBuyRatioPct ?? ""}%`}
-        className="inline-flex items-center gap-1 rounded bg-purple-500/20 text-purple-200 border border-purple-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap shadow-xs"
+        className="inline-flex items-center gap-1.5 rounded bg-purple-500/20 text-purple-200 border border-purple-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap shadow-xs"
       >
-        <Zap className="size-2.5 text-purple-300" />
+        <span className="size-1.5 rounded-full bg-purple-400" />
         <span>Cá Mập Gom {activeBuyRatioPct ? `(${activeBuyRatioPct}%)` : ""}</span>
       </span>
     );
@@ -165,9 +164,9 @@ export function SmartMoneyBadge({
     return (
       <span
         title="Pocket Pivot: Dòng tiền lớn bùng nổ vol sớm trong nền giá"
-        className="inline-flex items-center gap-1 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
+        className="inline-flex items-center gap-1.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
       >
-        <TrendingUp className="size-2.5 text-emerald-300" />
+        <span className="size-1.5 rounded-full bg-emerald-400" />
         <span>Pocket Pivot</span>
       </span>
     );
@@ -177,9 +176,9 @@ export function SmartMoneyBadge({
     return (
       <span
         title="Wyckoff Spring: Rũ bỏ cạn cung test thành công"
-        className="inline-flex items-center gap-1 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
+        className="inline-flex items-center gap-1.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
       >
-        <Sparkles className="size-2.5 text-cyan-300" />
+        <span className="size-1.5 rounded-full bg-cyan-400" />
         <span>Wyckoff Spring</span>
       </span>
     );
@@ -189,8 +188,9 @@ export function SmartMoneyBadge({
     return (
       <span
         title="Khối ngoại mua ròng liên tục"
-        className="inline-flex items-center gap-1 rounded bg-blue-500/15 text-blue-200 border border-blue-400/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+        className="inline-flex items-center gap-1.5 rounded bg-blue-500/15 text-blue-200 border border-blue-400/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
       >
+        <span className="size-1.5 rounded-full bg-blue-400" />
         <span>Khối Ngoại Gom</span>
       </span>
     );
@@ -200,8 +200,9 @@ export function SmartMoneyBadge({
     return (
       <span
         title="Áp lực bán chủ động lớn / phân phối"
-        className="inline-flex items-center gap-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+        className="inline-flex items-center gap-1.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
       >
+        <span className="size-1.5 rounded-full bg-rose-400" />
         <span>Phân Phối</span>
       </span>
     );
@@ -255,26 +256,28 @@ export function RsRatingBadge({
   if (rating == null || isNaN(rating)) return <span className="text-[10px] text-text-muted">—</span>;
 
   let colorClass = "bg-surface-base text-text-muted border-border-subtle";
-  let icon = null;
+  let dotClass = "bg-text-muted";
 
   if (rating >= 90) {
-    colorClass = "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm font-bold";
-    icon = <Sparkles className="size-2.5 text-amber-300" />;
+    colorClass = "bg-amber-500/15 text-amber-300 border-amber-400/40 font-bold";
+    dotClass = "bg-amber-400";
   } else if (rating >= 80) {
-    colorClass = "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold";
-    icon = <TrendingUp className="size-2.5 text-emerald-300" />;
+    colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-500/35 font-bold";
+    dotClass = "bg-emerald-400";
   } else if (rating >= 60) {
     colorClass = "bg-blue-500/15 text-blue-300 border-blue-500/30";
+    dotClass = "bg-blue-400";
   } else if (rating < 40) {
     colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    dotClass = "bg-rose-400";
   }
 
   return (
     <span
       title={`Relative Strength Rating (1-99): ${rating}${trend ? ` (Xu hướng: ${trend})` : ""}`}
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap num ${colorClass}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap num ${colorClass}`}
     >
-      {icon}
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
       <span>RS {rating}</span>
       {trend === "IMPROVING" && <span className="text-[9px] text-emerald-400 font-black">▲</span>}
       {trend === "WEAKENING" && <span className="text-[9px] text-rose-400 font-black">▼</span>}
@@ -291,20 +294,24 @@ export function PiotroskiBadge({
   if (score == null || isNaN(score)) return <span className="text-[10px] text-text-muted">—</span>;
 
   let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  let dotClass = "bg-text-muted";
   if (score >= 8) {
-    colorClass = "bg-cyan-500/20 text-cyan-300 border-cyan-400/40 font-bold shadow-sm";
+    colorClass = "bg-cyan-500/15 text-cyan-300 border-cyan-400/40 font-bold shadow-xs";
+    dotClass = "bg-cyan-400";
   } else if (score >= 6) {
     colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 font-semibold";
+    dotClass = "bg-emerald-400";
   } else if (score < 4) {
     colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    dotClass = "bg-rose-400";
   }
 
   return (
     <span
       title={`Piotroski F-Score: ${score}/9`}
-      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap num ${colorClass}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap num ${colorClass}`}
     >
-      <ShieldCheck className="size-2.5" />
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
       <span>F-{score}/9</span>
     </span>
   );
@@ -462,21 +469,22 @@ export function MtfCandleBadge({
     <div className="inline-flex items-center gap-1 flex-wrap">
       {status && status !== "NO_CLUSTER" && (
         <span
-          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold border transition-all ${
+          className={`inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-all ${
             isTriple
-              ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-xs"
+              ? "bg-rose-500/15 text-rose-300 border-rose-500/40 shadow-xs font-bold"
               : "bg-amber-500/15 text-amber-300 border-amber-500/30"
           }`}
           title={badgeVi ?? "Cụm nến đa khung"}
         >
-          <span>🕯️</span>
+          <span className={`size-1.5 rounded-full ${isTriple ? "bg-rose-400 animate-pulse" : "bg-amber-400"}`} />
           <span>{badgeVi ?? status}</span>
           {score != null && <span className="opacity-75">({score}đ)</span>}
         </span>
       )}
       {vsaSignal && (
-        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9.5px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-          🧪 {vsaSignalVi ?? vsaSignal}
+        <span className="inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[9.5px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+          <span className="size-1.5 rounded-full bg-emerald-400" />
+          <span>{vsaSignalVi ?? vsaSignal}</span>
         </span>
       )}
       {overheadRoomPct != null && overheadRoomPct >= 8 && (
@@ -596,31 +604,68 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
   },
 };
 
-const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
-  { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
-  { id: "orca_master_elite", label: "🏆 Orca Master 80+", icon: <Crown className="size-3.5 text-amber-400" />, desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
-  { id: "smart_money_inflow", label: "🦈 Dòng Tiền Cá Mập", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
-  { id: "mtf_candle_cluster", label: "🕯️ Cụm Nến Đa Khung", icon: <Flame className="size-3.5 text-rose-400" />, desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
-  { id: "vsa_no_supply", label: "🧪 Cạn Cung VSA", icon: <Layers className="size-3.5 text-emerald-400" />, desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
-  { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
-  { id: "rs_leaders", label: "👑 Dẫn Dắt RS 80+ (O'Neil)", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
-  { id: "piotroski_diamonds", label: "💎 Kim Cương F-Score & Altman", icon: <ShieldCheck className="size-3.5 text-cyan-400" />, desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
-  { id: "mtf_confluence", label: "Đồng Thuận Đa Khung H1-D1-W1", icon: <Zap className="size-3.5 text-amber-400" />, desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
-  { id: "bottom_confluence", label: "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)", icon: <Sparkles className="size-3.5 text-cyan-400" />, desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
-  { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
-  { id: "quant_edge", label: "Ưu thế Quant Pro", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
-  { id: "quant_mean_revert", label: "Mean Reversion OU", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ t½" },
-  { id: "quant_low_beta", label: "Low-Beta Anomaly", icon: <ShieldCheck className="size-3.5 text-blue-400" />, desc: "Bất thường học thuyết AQR: Beta <= 0.88 & Chất lượng cao" },
-  { id: "quant_asymmetric", label: "Triple-Barrier R/R >= 2.0", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Tỷ lệ Lời/Lỗ tối ưu theo mô hình biến động Marcos López de Prado" },
-  { id: "vcp", label: "Mẫu hình VCP / Cốc", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
-  { id: "ttm_squeeze", label: "Nén Squeeze", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
-  { id: "ma_cross", label: "Giao cắt MA", icon: <TrendingUp className="size-3.5 text-emerald-400" />, desc: "Golden Cross & Trật tự MA tăng" },
-  { id: "canslim", label: "CANSLIM", icon: <TrendingUp className="size-3.5 text-accent-primary" />, desc: "Tăng trưởng cao & ROE > 14%" },
-  { id: "dividend", label: "Cổ tức cao", icon: <DollarSign className="size-3.5 text-emerald-400" />, desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
-  { id: "growth", label: "Siêu tăng trưởng", icon: <Zap className="size-3.5 text-amber-400" />, desc: "LNST / Doanh thu tăng > 20%" },
-  { id: "value", label: "Giá trị rẻ", icon: <ShieldCheck className="size-3.5 text-blue-400" />, desc: "P/E < 11, P/B < 1.3, an toàn" },
-  { id: "breakout", label: "Bứt phá vol", icon: <CheckCircle2 className="size-3.5 text-purple-400" />, desc: "Giá tăng > 2% kèm vol lớn" },
+export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
+
+export interface StrategyGroupMeta {
+  id: StrategyGroup;
+  label: string;
+  desc: string;
+  dotColor: string;
+}
+
+export const STRATEGY_GROUPS: StrategyGroupMeta[] = [
+  { id: "core", label: "Cốt lõi Orca", desc: "Hệ thống độc quyền & Dòng tiền tổ chức", dotColor: "bg-amber-400" },
+  { id: "price_action", label: "Hành động giá & MTF", desc: "Cụm nến đa khung, VSA, VCP, Squeeze & MA", dotColor: "bg-rose-400" },
+  { id: "quant", label: "Định lượng Quant Pro", desc: "Mô hình thống kê OU, Low-Beta & Triple Barrier", dotColor: "bg-cyan-400" },
+  { id: "fundamental", label: "Cơ bản & CANSLIM", desc: "RS Rating, Piotroski, Altman Z'' & Tăng trưởng", dotColor: "bg-emerald-400" },
+  { id: "custom", label: "Bộ lọc của tôi", desc: "Các chiến lược tùy biến đã lưu", dotColor: "bg-purple-400" },
 ];
+
+export interface PresetTabItem {
+  id: ScreenerPreset;
+  category: "core" | "price_action" | "quant" | "fundamental";
+  label: string;
+  dotColor: string;
+  desc: string;
+}
+
+export const PRESET_TABS: PresetTabItem[] = [
+  // Core Orca
+  { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
+  { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
+  { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
+  { id: "near_buy_point", category: "core", label: "Sát Điểm Mua (Buy Zone)", dotColor: "bg-emerald-400", desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
+
+  // Price Action & MTF
+  { id: "mtf_candle_cluster", category: "price_action", label: "Cụm Nến Đa Khung", dotColor: "bg-rose-400", desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
+  { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-emerald-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
+  { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-amber-400", desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
+  { id: "bottom_confluence", category: "price_action", label: "Hợp Lưu Đáy (Reclaim + Phân Kỳ)", dotColor: "bg-cyan-400", desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
+  { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
+  { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
+  { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM)", dotColor: "bg-purple-400", desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
+  { id: "breakout", category: "price_action", label: "Bùng Nổ Khối Lượng", dotColor: "bg-purple-400", desc: "Giá tăng > 2% kèm vol lớn vượt đỉnh" },
+  { id: "ma_cross", category: "price_action", label: "Giao Cắt MA Vàng", dotColor: "bg-emerald-400", desc: "Golden Cross & Trật tự MA tăng" },
+
+  // Quant Pro
+  { id: "quant_edge", category: "quant", label: "Ưu Thế Quant Pro", dotColor: "bg-cyan-400", desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
+  { id: "quant_mean_revert", category: "quant", label: "Mean Reversion OU", dotColor: "bg-emerald-400", desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ t½" },
+  { id: "quant_low_beta", category: "quant", label: "Low-Beta Anomaly", dotColor: "bg-blue-400", desc: "Bất thường học thuyết AQR: Beta <= 0.88 & Chất lượng cao" },
+  { id: "quant_asymmetric", category: "quant", label: "Triple-Barrier R/R ≥ 2", dotColor: "bg-amber-400", desc: "Tỷ lệ Lời/Lỗ tối ưu theo mô hình biến động Marcos López de Prado" },
+
+  // Fundamental & CANSLIM
+  { id: "rs_leaders", category: "fundamental", label: "Dẫn Dắt RS 80+ (O'Neil)", dotColor: "bg-amber-400", desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
+  { id: "piotroski_diamonds", category: "fundamental", label: "Piotroski & Altman Z", dotColor: "bg-cyan-400", desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
+  { id: "canslim", category: "fundamental", label: "CANSLIM Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST & ROE vượt trội" },
+  { id: "growth", category: "fundamental", label: "Siêu Tăng Trưởng LNST", dotColor: "bg-amber-400", desc: "LNST / Doanh thu tăng trưởng > 20%" },
+  { id: "value", category: "fundamental", label: "Giá Trị Biên An Toàn", dotColor: "bg-blue-400", desc: "P/E < 11, P/B < 1.3, an toàn vốn" },
+  { id: "dividend", category: "fundamental", label: "Cổ Tức Tiền Mặt Cao", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
+];
+
+export function getPresetCategory(preset: ScreenerPreset): StrategyGroup {
+  const item = PRESET_TABS.find((t) => t.id === preset);
+  return item ? item.category : "core";
+}
 
 export function VnScreener({
   defaultSector,
@@ -635,6 +680,9 @@ export function VnScreener({
 }) {
   // Preset & Tab state
   const [preset, setPreset] = useState<ScreenerPreset>(defaultPreset);
+  const [activeStrategyGroup, setActiveStrategyGroup] = useState<StrategyGroup>(() =>
+    getPresetCategory(defaultPreset),
+  );
   const [viewTab, setViewTab] = useState<ViewTab>(defaultView);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [displayMode, setDisplayMode] = useState<"table" | "grid">("table");
@@ -722,6 +770,7 @@ export function VnScreener({
   // Synchronize when parent changes preset/view/sector
   useEffect(() => {
     setPreset(defaultPreset);
+    setActiveStrategyGroup(getPresetCategory(defaultPreset));
     setViewTab(defaultView);
     setSector(defaultSector ?? "");
     if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
@@ -925,6 +974,8 @@ export function VnScreener({
 
   const handleSelectPreset = (p: ScreenerPreset) => {
     setPreset(p);
+    setActiveCustomPresetName(null);
+    setActiveStrategyGroup(getPresetCategory(p));
     if (p === "orca_master_elite") {
       setViewTab("orca_master");
       setSortKey("orcaMasterScore");
@@ -956,12 +1007,12 @@ export function VnScreener({
       setSortKey("quantEdgeScore");
       setSortOrder("desc");
     }
-    setActiveCustomPresetName(null);
     setApplied((prev) => ({ ...prev, preset: p }));
   };
 
   const handleApplyCustomPreset = (filters: CustomScreenerPreset["filters"], presetName?: string) => {
     setActiveCustomPresetName(presetName ?? "Tùy biến");
+    setActiveStrategyGroup("custom");
     setPreset("all");
     setApplied((prev) => ({
       ...prev,
@@ -1080,78 +1131,138 @@ export function VnScreener({
 
   return (
     <div className="space-y-3">
-      {/* 1. Preset Navigation Bar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-panel p-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted px-1.5 flex items-center gap-1.5">
-          <Sparkles className="size-3 text-accent-primary" />
-          Chiến lược:
-        </span>
-        <div className="flex flex-wrap gap-1.5">
-          {PRESET_TABS.map((tab) => {
-            const active = preset === tab.id;
-            const count = presetsCount ? presetsCount[tab.id] : null;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => handleSelectPreset(tab.id)}
-                title={tab.desc}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-all ${
-                  active
-                    ? "bg-accent-primary text-white shadow-sm font-semibold"
-                    : "bg-panel-2 text-text-secondary hover:bg-panel-hover hover:text-text-primary"
-                }`}
-              >
-                {tab.icon}
-                <span>{tab.label}</span>
-                {count != null && (
-                  <span
-                    className={`rounded-full px-1.5 py-0.2 text-[10px] ${
-                      active ? "bg-white/25 text-white" : "bg-panel-3 text-text-muted"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-
-          {customPresets.map((cp) => {
-            const active = activeCustomPresetName === cp.name;
-            return (
-              <div
-                key={cp.id}
-                onClick={() => handleApplyCustomPreset(cp.filters, cp.name)}
-                className={`group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all cursor-pointer border ${
-                  active
-                    ? "bg-amber-500/25 text-amber-200 border-amber-400/50 shadow-sm"
-                    : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-                }`}
-              >
-                <Bookmark className="size-3 text-amber-400" />
-                <span>{cp.name}</span>
-                <span className="rounded bg-amber-500/20 px-1 text-[9px] text-amber-300 font-mono">Custom</span>
+      {/* 1. Categorized Strategy Navigation */}
+      <div className="rounded-lg border border-line bg-panel p-2.5 space-y-2.5">
+        {/* Tier 1: Category Selector + Builder action */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line/60">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted px-1.5">
+              Nhóm chiến lược:
+            </span>
+            {STRATEGY_GROUPS.map((group) => {
+              const isActive = activeStrategyGroup === group.id;
+              const customCount = group.id === "custom" ? customPresets.length : null;
+              return (
                 <button
+                  key={group.id}
                   type="button"
-                  onClick={(e) => handleDeleteCustomPreset(cp.id, e)}
-                  className="opacity-40 hover:opacity-100 hover:text-rose-400 p-0.5 rounded transition-all"
-                  title="Xóa bộ lọc này"
+                  onClick={() => {
+                    setActiveStrategyGroup(group.id);
+                    if (group.id !== "custom") {
+                      // If current preset not in this category, pick the first one
+                      const firstInGroup = PRESET_TABS.find((t) => t.category === group.id);
+                      if (firstInGroup && getPresetCategory(preset) !== group.id) {
+                        handleSelectPreset(firstInGroup.id);
+                      }
+                    }
+                  }}
+                  title={group.desc}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] transition-all ${
+                    isActive
+                      ? "bg-surface-elevated text-text-primary border border-border-subtle shadow-xs font-semibold"
+                      : "text-text-secondary hover:text-text-primary hover:bg-panel-2"
+                  }`}
                 >
-                  <Trash2 className="size-2.5" />
+                  <span className={`size-1.5 rounded-full ${group.dotColor}`} />
+                  <span>{group.label}</span>
+                  {customCount != null && customCount > 0 && (
+                    <span className="rounded-full bg-purple-500/20 text-purple-300 px-1.5 text-[10px] font-mono">
+                      {customCount}
+                    </span>
+                  )}
                 </button>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
 
           <button
             type="button"
             onClick={() => setShowCustomBuilder(true)}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-bold bg-accent-primary/20 text-accent-primary border border-accent-primary/40 hover:bg-accent-primary/30 transition-all shadow-xs"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium bg-panel-2 text-text-secondary border border-border-subtle hover:text-text-primary hover:bg-panel-hover transition-all shrink-0"
           >
-            <SlidersHorizontal className="size-3.5" />
-            <span>🛠 Tự Tạo Bộ Lọc (Builder)</span>
+            <SlidersHorizontal className="size-3 text-accent-primary" />
+            <span>Tự tạo bộ lọc</span>
           </button>
+        </div>
+
+        {/* Tier 2: Presets under the active Category */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {activeStrategyGroup !== "custom" ? (
+            PRESET_TABS.filter((tab) => tab.category === activeStrategyGroup).map((tab) => {
+              const active = preset === tab.id && !activeCustomPresetName;
+              const count = presetsCount ? presetsCount[tab.id] : null;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleSelectPreset(tab.id)}
+                  title={tab.desc}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] transition-all ${
+                    active
+                      ? "bg-accent-primary text-white shadow-xs font-semibold"
+                      : "bg-panel-2 text-text-secondary hover:bg-panel-hover hover:text-text-primary"
+                  }`}
+                >
+                  <span
+                    className={`size-1.5 rounded-full ${
+                      active ? "bg-white" : tab.dotColor
+                    }`}
+                  />
+                  <span>{tab.label}</span>
+                  {count != null && (
+                    <span
+                      className={`rounded px-1.5 py-0.2 text-[10px] font-mono ${
+                        active ? "bg-white/20 text-white" : "bg-panel-3 text-text-muted"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 w-full">
+              {customPresets.length === 0 ? (
+                <div className="flex items-center justify-between w-full py-1 text-[11.5px] text-text-muted">
+                  <span>Chưa có bộ lọc tùy biến nào được lưu. Bạn có thể tự phối hợp các chỉ số theo phong cách riêng.</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomBuilder(true)}
+                    className="text-accent-primary hover:underline font-medium ml-2"
+                  >
+                    Mở trình tạo bộ lọc →
+                  </button>
+                </div>
+              ) : (
+                customPresets.map((cp) => {
+                  const active = activeCustomPresetName === cp.name;
+                  return (
+                    <div
+                      key={cp.id}
+                      onClick={() => handleApplyCustomPreset(cp.filters, cp.name)}
+                      className={`group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-all cursor-pointer border ${
+                        active
+                          ? "bg-purple-500/20 text-purple-200 border-purple-400/50 shadow-xs font-semibold"
+                          : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+                      }`}
+                    >
+                      <span className="size-1.5 rounded-full bg-purple-400" />
+                      <span>{cp.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteCustomPreset(cp.id, e)}
+                        className="opacity-40 group-hover:opacity-100 hover:text-rose-400 p-0.5 rounded transition-all ml-1"
+                        title="Xóa bộ lọc này"
+                      >
+                        <Trash2 className="size-2.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1235,8 +1346,8 @@ export function VnScreener({
           return (
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-gradient-to-r from-emerald-500/10 via-amber-500/5 to-transparent border-b border-border-subtle text-[11.5px]">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold shadow-xs">
-                  <Sparkles className="size-3 text-emerald-300" />
+                <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold shadow-xs">
+                  <span className="size-2 rounded-full bg-emerald-400" />
                   Win-rate: {edge.winRatePct}%
                 </span>
                 <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[11px] font-semibold">
@@ -1413,13 +1524,13 @@ export function VnScreener({
                 setSortKey("orcaMasterScore");
                 setSortOrder("desc");
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "orca_master"
-                  ? "bg-panel-3 text-amber-300 font-bold shadow-sm"
+                  ? "bg-panel-3 text-amber-300 font-bold shadow-xs"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Crown className="size-3 text-amber-300" />
+              <span className="size-1.5 rounded-full bg-amber-400" />
               Orca Master
             </button>
             <button
@@ -1429,13 +1540,13 @@ export function VnScreener({
                 setSortKey("smartMoneyScore");
                 setSortOrder("desc");
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "smart_money"
-                  ? "bg-panel-3 text-purple-300 font-bold shadow-sm"
+                  ? "bg-panel-3 text-purple-300 font-bold shadow-xs"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Zap className="size-3 text-purple-400" />
+              <span className="size-1.5 rounded-full bg-purple-400" />
               Dòng Tiền Cá Mập
             </button>
             <button
@@ -1445,49 +1556,49 @@ export function VnScreener({
                 setSortKey("absBuyDiff");
                 setSortOrder("asc");
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "buy_point"
-                  ? "bg-panel-3 text-emerald-400 font-bold shadow-sm"
+                  ? "bg-panel-3 text-emerald-400 font-bold shadow-xs"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Zap className="size-3 text-emerald-400" />
+              <span className="size-1.5 rounded-full bg-emerald-400" />
               Điểm Mua & Kế Hoạch
             </button>
             <button
               type="button"
               onClick={() => setViewTab("quant")}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "quant"
                   ? "bg-panel-3 text-cyan-400 font-semibold"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Zap className="size-3 text-cyan-400" />
+              <span className="size-1.5 rounded-full bg-cyan-400" />
               Ưu thế Quant Trading
             </button>
             <button
               type="button"
               onClick={() => setViewTab("confluence")}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "confluence"
                   ? "bg-panel-3 text-amber-400 font-semibold"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Sparkles className="size-3 text-amber-400" />
+              <span className="size-1.5 rounded-full bg-amber-400" />
               Siêu Hội Tụ & Mẫu hình
             </button>
             <button
               type="button"
               onClick={() => setViewTab("technical")}
-              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
                 viewTab === "technical"
                   ? "bg-panel-3 text-emerald-400 font-semibold"
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <TrendingUp className="size-3 text-emerald-400" />
+              <span className="size-1.5 rounded-full bg-emerald-400" />
               Kỹ thuật & MA
             </button>
             <button

@@ -14,8 +14,8 @@ interface ScreenerBacktestModalProps {
 }
 
 const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
-  { id: "orca_master", label: "🏆 Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
-  { id: "smart_money", label: "🦈 Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
+  { id: "orca_master", label: "Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
+  { id: "smart_money", label: "Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
   { id: "quant_edge", label: "Ưu Thế Quant OU (Mean Reversion)", desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ bán rã t½ tối ưu" },
   { id: "breakout", label: "Breakout Khối lượng", desc: "Vượt đỉnh 20 phiên + Khối lượng đột biến > 1.3x TB20" },
   { id: "canslim", label: "CANSLIM Momentum", desc: "Đà tăng trưởng: RSI > 52, EMA20 > EMA50, thanh khoản tích cực" },

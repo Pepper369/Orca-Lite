@@ -50,9 +50,9 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
-      { id: "orca-master", label: "🏆 Orca Master (Top 90+)" },
-      { id: "smart-money", label: "🦈 Dòng Tiền Cá Mập" },
-      { id: "buy-point", label: "🎯 Điểm Mua Tối Ưu (Buy Zone)" },
+      { id: "orca-master", label: "Orca Master (Top 90+)" },
+      { id: "smart-money", label: "Dòng Tiền Cá Mập" },
+      { id: "buy-point", label: "Điểm Mua Tối Ưu (Buy Zone)" },
       { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
       { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
       { id: "confluence", label: "Siêu Hội Tụ (Confluence)" },
@@ -67,7 +67,7 @@ export const SCREENER_GROUPS: {
     title: "Tăng trưởng & Hành vi giá",
     badge: "Trend & Patterns",
     items: [
-      { id: "rs-leaders", label: "👑 RS Leaders (O'Neil 80+)" },
+      { id: "rs-leaders", label: "RS Leaders (O'Neil 80+)" },
       { id: "canslim", label: "CANSLIM" },
       { id: "four-m", label: "Bộ lọc 4M (Phil Town)" },
       { id: "minervini", label: "Minervini Trend Template" },
@@ -94,7 +94,7 @@ export const SCREENER_GROUPS: {
     title: "Cơ bản & Định giá",
     badge: "Valuation & Health",
     items: [
-      { id: "piotroski", label: "💎 F-Score Kim Cương & Altman Z" },
+      { id: "piotroski", label: "F-Score & Altman Z" },
       { id: "valuation", label: "Định giá P/E & P/B" },
       { id: "fundamental", label: "Chỉ số tài chính cơ bản" },
     ],
