@@ -2,7 +2,7 @@ import { OhlcvBar } from "../types";
 import { batchVnOhlcv } from "../services/ohlcv-batch";
 import { estimateOrnsteinUhlenbeck } from "./advanced-quant-math";
 
-export type StrategyType = "breakout" | "canslim" | "ma_cross" | "value" | "quant_edge";
+export type StrategyType = "breakout" | "canslim" | "ma_cross" | "value" | "quant_edge" | "orca_master" | "smart_money";
 
 export interface BacktestRequest {
   strategy?: StrategyType;
@@ -75,6 +75,14 @@ const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = 
   quant_edge: {
     name: "Ưu Thế Quant Mean Reversion (Ornstein-Uhlenbeck & Triple-Barrier)",
     desc: "Mô hình định lượng OU: Bắt đáy thống kê khi độ lệch Z-Score <= -1.4, chu kỳ bán rã t½ trong khoảng 2-35 phiên và giá có nến xác nhận bật tăng.",
+  },
+  orca_master: {
+    name: "🏆 Orca Master Composite Elite (Đa Trụ Cột Đỉnh Cao)",
+    desc: "Mô hình tổng hợp 5 trụ cột: RS Rating O'Neil >= 80, Trật tự kênh tăng EMA20 > EMA50, thanh khoản đột biến > 1.2x TB20 và dòng tiền cá mập tích lũy.",
+  },
+  smart_money: {
+    name: "🦈 Dấu Chân Cá Mập & Pocket Pivot (Smart Money Inflow)",
+    desc: "Tín hiệu Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng phiên tăng vượt đỉnh volume mọi phiên giảm trong 10 phiên trước đó và giá giữ vững trên EMA20.",
   },
 };
 
@@ -241,6 +249,31 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
               ou.halfLife <= 35 &&
               currentClose > closes[i - 1]
             ) {
+              signal = true;
+            }
+          }
+        } else if (strategy === "orca_master") {
+          // Multi-factor master: RSI healthy (48-68), Close > EMA20 > EMA50, Volume > 1.2x avgVol20, Up-bar
+          if (
+            rsi14[i] >= 48 &&
+            rsi14[i] <= 68 &&
+            currentClose > ema20[i] &&
+            ema20[i] > ema50[i] &&
+            volumes[i] >= avgVol20 * 1.2 &&
+            currentClose > closes[i - 1]
+          ) {
+            signal = true;
+          }
+        } else if (strategy === "smart_money") {
+          // Pocket Pivot: Volume on up-day exceeds highest volume of all down-days in prior 10 sessions
+          if (currentClose > closes[i - 1] && currentClose >= ema20[i] * 0.98) {
+            let maxDownVol10 = 0;
+            for (let d = Math.max(0, i - 10); d < i; d++) {
+              if (closes[d] < (d > 0 ? closes[d - 1] : closes[d])) {
+                if (volumes[d] > maxDownVol10) maxDownVol10 = volumes[d];
+              }
+            }
+            if (volumes[i] > maxDownVol10 && volumes[i] >= avgVol20 * 1.15) {
               signal = true;
             }
           }

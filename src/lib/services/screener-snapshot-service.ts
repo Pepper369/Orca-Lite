@@ -176,6 +176,9 @@ export type ScreenerStockItem = {
   smartMoneySignalVi?: string | null;
   activeBuyRatioPct?: number | null;
   smartMoneySummaryVi?: string | null;
+  // Multi-Chart Grid View Data (Sprint 3)
+  sparkline?: number[]; // Last 20 session closing prices
+  sparkBars?: { o: number; h: number; l: number; c: number; v: number }[]; // Last 20 OHLCV bars
 };
 
 export type ScreenerFilterParams = {
@@ -1367,6 +1370,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         isMarketLeader: boolean;
         smartMoney: SmartMoneyResult;
         compositeScore: number;
+        sparkline?: number[];
+        sparkBars?: { o: number; h: number; l: number; c: number; v: number }[];
       }[] = [];
 
       for (const sym of symbols) {
@@ -1571,6 +1576,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isMarketLeader,
           smartMoney,
           compositeScore,
+          sparkline: parsed.closes.slice(-20),
+          sparkBars: parsed.ohlcvBars.slice(-20).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume })),
         });
       }
 
@@ -1714,6 +1721,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           smartMoneySignalVi: entry.smartMoney.signalVi,
           activeBuyRatioPct: entry.smartMoney.activeBuyRatioPct,
           smartMoneySummaryVi: entry.smartMoney.summaryVi,
+          sparkline: entry.sparkline,
+          sparkBars: entry.sparkBars,
           presetsPassed,
         });
       }
