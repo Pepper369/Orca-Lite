@@ -231,7 +231,7 @@ export default function SmartPortfolioPage() {
         {(
           [
             ["overview", "Tổng quan"],
-            ["paper", "Giao dịch mô phỏng (500M)"],
+            ["paper", "Sàn đầu tư ảo (Paper Trading)"],
             ["positions", `Vị thế (${snapshot.positions.length})`],
             ["journal", `Nhật ký (${trades.length})`],
             ["alerts", "Cảnh báo giá"],

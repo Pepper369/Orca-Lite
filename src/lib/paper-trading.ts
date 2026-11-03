@@ -166,11 +166,25 @@ export function resetPaperAccount(initialCash = DEFAULT_INITIAL_CASH, tPlusRule:
   return acc;
 }
 
-/** Nạp thêm hoặc điều chỉnh vốn ảo */
+/** Cập nhật vốn ban đầu và điều chỉnh số dư tiền mặt tương ứng (giữ nguyên cổ phiếu đang nắm giữ) */
+export function updatePaperInitialCash(newInitialCash: number): PaperAccount {
+  const acc = loadPaperAccount();
+  const validCash = Math.max(1_000_000, newInitialCash);
+  const diff = validCash - acc.initialCash;
+  acc.initialCash = validCash;
+  acc.availableCash = Math.max(0, acc.availableCash + diff);
+  savePaperAccount(acc);
+  return acc;
+}
+
+/** Nạp thêm hoặc điều chỉnh vốn ảo (hỗ trợ nạp dương và rút âm) */
 export function adjustPaperCash(amount: number): PaperAccount {
   const acc = loadPaperAccount();
+  if (amount < 0 && Math.abs(amount) > acc.availableCash) {
+    amount = -acc.availableCash;
+  }
   acc.availableCash = Math.max(0, acc.availableCash + amount);
-  if (amount > 0) acc.initialCash += amount;
+  acc.initialCash = Math.max(1_000_000, acc.initialCash + amount);
   savePaperAccount(acc);
   return acc;
 }

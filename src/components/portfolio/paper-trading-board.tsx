@@ -20,6 +20,11 @@ import {
   Layers,
   Sparkles,
   Share2,
+  Sliders,
+  MinusCircle,
+  Coins,
+  RotateCcw,
+  Check,
 } from "lucide-react";
 import { Badge, Chg, Panel, fmtNum } from "@/components/ui";
 import {
@@ -27,6 +32,7 @@ import {
   placePaperOrder,
   cancelPaperOrder,
   resetPaperAccount,
+  updatePaperInitialCash,
   adjustPaperCash,
   setTPlusRule,
   calculatePortfolioMetrics,
@@ -40,6 +46,38 @@ import {
 } from "@/lib/paper-trading";
 
 const POPULAR_SYMBOLS = ["HPG", "SSI", "VNM", "FPT", "MWG", "TCB", "MBB", "DGC", "VHM", "VIC"];
+
+const INITIAL_CASH_PRESETS = [
+  { label: "10 Tr", value: 10_000_000, desc: "Tập sự F0" },
+  { label: "20 Tr", value: 20_000_000, desc: "Vốn nhỏ" },
+  { label: "50 Tr", value: 50_000_000, desc: "Lướt sóng" },
+  { label: "100 Tr", value: 100_000_000, desc: "Cơ bản" },
+  { label: "200 Tr", value: 200_000_000, desc: "Đa dạng hóa" },
+  { label: "500 Tr", value: 500_000_000, desc: "Chuẩn mặc định" },
+  { label: "1 Tỷ", value: 1_000_000_000, desc: "Chuyên nghiệp" },
+  { label: "2 Tỷ", value: 2_000_000_000, desc: "NAV lớn" },
+  { label: "5 Tỷ", value: 5_000_000_000, desc: "VIP / Quỹ" },
+];
+
+const QUICK_CASH_AMOUNTS = [10_000_000, 20_000_000, 50_000_000, 100_000_000, 200_000_000, 500_000_000];
+
+function parseNumberInput(val: string): number {
+  const clean = val.replace(/[^0-9]/g, "");
+  return clean ? parseInt(clean, 10) : 0;
+}
+
+function formatReadableVnd(val: number): string {
+  if (!val || val <= 0) return "0 đồng";
+  if (val >= 1_000_000_000) {
+    const billions = val / 1_000_000_000;
+    return `${Number.isInteger(billions) ? billions : billions.toFixed(2)} tỷ đồng`;
+  }
+  if (val >= 1_000_000) {
+    const millions = val / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)} triệu đồng`;
+  }
+  return `${val.toLocaleString("vi-VN")} đồng`;
+}
 
 function fmtVnd(num: number | null | undefined): string {
   if (num == null || isNaN(num)) return "0 đ";
@@ -70,10 +108,15 @@ export function PaperTradingBoard() {
   const [customPriceInput, setCustomPriceInput] = useState("");
   const [orderNotice, setOrderNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  // Quản lý modal xác nhận
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [showAddCashModal, setShowAddCashModal] = useState(false);
-  const [addCashAmount, setAddCashAmount] = useState(100_000_000);
+  // Quản lý modal Cài đặt vốn & Nạp/Rút vốn
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [setupCashAmount, setSetupCashAmount] = useState<number>(account.initialCash || DEFAULT_INITIAL_CASH);
+  const [setupInputText, setSetupInputText] = useState(String(account.initialCash || DEFAULT_INITIAL_CASH));
+  const [setupMode, setSetupMode] = useState<"reset_all" | "adjust_baseline">("reset_all");
+
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashAction, setCashAction] = useState<"DEPOSIT" | "WITHDRAW">("DEPOSIT");
+  const [cashAmountInput, setCashAmountInput] = useState("100000000");
 
   // Tab sổ lệnh / lịch sử
   const [activeBottomTab, setActiveBottomTab] = useState<"holdings" | "orders" | "history">("holdings");
@@ -236,7 +279,7 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
 
   return (
     <div className="space-y-4">
-      {/* 1. Header & KPI Ribbon: Tổng quan tài sản 500M */}
+      {/* 1. Header & KPI Ribbon: Tổng quan tài sản & vốn tuỳ chọn */}
       <Panel
         pad={true}
         className="border-border-subtle bg-surface-elevated"
@@ -244,7 +287,7 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex size-2 rounded-full bg-positive animate-pulse" />
             <span className="text-[13px] font-semibold text-text-primary">
-              Tài Khoản Giao Dịch Ảo (Mô Phỏng 500M)
+              Tài Khoản Giao Dịch Ảo (Paper Trading)
             </span>
             <Badge tone="accent">
               {account.tPlusRule === "T0" ? "T+0 Lướt sóng" : "T+2.5 Chuẩn sàn"}
@@ -253,7 +296,7 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
         }
         subtitle={
           <span className="text-[11px] text-text-muted">
-            Vốn khởi điểm: <strong className="num text-text-primary">{fmtVnd(account.initialCash)}</strong> · Lợi nhuận ròng:{" "}
+            Vốn khởi điểm: <strong className="num text-text-primary">{fmtVnd(account.initialCash)}</strong> ({formatReadableVnd(account.initialCash)}) · Lợi nhuận ròng:{" "}
             <span className={`num font-medium ${metrics.totalPnl >= 0 ? "text-positive" : "text-negative"}`}>
               {metrics.totalPnl >= 0 ? "+" : ""}
               {fmtVnd(metrics.totalPnl)}
@@ -285,12 +328,16 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
             </button>
 
             <button
-              onClick={() => setShowAddCashModal(true)}
-              title="Bơm thêm vốn ảo"
+              onClick={() => {
+                setCashAction("DEPOSIT");
+                setCashAmountInput("100000000");
+                setShowCashModal(true);
+              }}
+              title="Nạp thêm hoặc rút bớt vốn ảo"
               className="inline-flex items-center gap-1 rounded-md border border-positive/30 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive hover:bg-positive/20 transition"
             >
-              <PlusCircle className="size-3" />
-              <span>Nạp vốn</span>
+              <Coins className="size-3" />
+              <span>Nạp / Rút vốn</span>
             </button>
 
             <button
@@ -303,12 +350,16 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
             </button>
 
             <button
-              onClick={() => setShowResetConfirm(true)}
-              title="Khôi phục tài khoản về 500 triệu ban đầu"
-              className="inline-flex items-center gap-1 rounded-md border border-negative/30 bg-negative/10 px-2.5 py-1 text-[11px] font-medium text-negative hover:bg-negative/20 transition"
+              onClick={() => {
+                setSetupCashAmount(account.initialCash || DEFAULT_INITIAL_CASH);
+                setSetupInputText(String(account.initialCash || DEFAULT_INITIAL_CASH));
+                setShowSetupModal(true);
+              }}
+              title="Cài đặt số vốn ban đầu hoặc đặt lại tài khoản"
+              className="inline-flex items-center gap-1 rounded-md border border-accent-primary/40 bg-surface-base px-2.5 py-1 text-[11px] font-medium text-accent-primary hover:bg-accent-primary/10 hover:border-accent-primary transition"
             >
-              <RefreshCw className="size-3" />
-              <span>Đặt lại 500M</span>
+              <Sliders className="size-3" />
+              <span>Cài đặt vốn</span>
             </button>
           </div>
         }
@@ -776,7 +827,7 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
                   <Briefcase className="size-8 mx-auto text-text-muted/40 mb-1.5" />
                   <p className="text-[12px] font-medium text-text-primary">Danh mục cổ phiếu đang trống</p>
                   <p className="text-[11px] text-text-muted mt-0.5 max-w-xs mx-auto">
-                    Đặt lệnh Mua thử các mã tiêu biểu như HPG, SSI, VNM với số vốn được cấp 500 triệu.
+                    Đặt lệnh Mua thử các mã tiêu biểu như HPG, SSI, VNM với số vốn được cấp {formatReadableVnd(account.initialCash)} ({fmtVnd(account.initialCash)}).
                   </p>
                 </div>
               ) : (
@@ -1018,90 +1069,344 @@ Thực hành đầu tư cổ phiếu tại: https://orcalite.vn/portfolio`;
         </Panel>
       </div>
 
-      {/* Modal Xác nhận Reset 500M */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-elevated p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-1.5 flex items-center gap-1.5">
-              <RefreshCw className="size-4 text-negative" />
-              Đặt lại tài khoản về 500 triệu?
-            </h3>
-            <p className="text-[11px] text-text-muted mb-4 leading-relaxed">
-              Hành động này sẽ xoá toàn bộ danh mục cổ phiếu, sổ lệnh và lịch sử giao dịch mô phỏng, sau đó cấp lại 500.000.000 VNĐ tiền mặt để bạn bắt đầu lại từ đầu.
-            </p>
-            <div className="flex justify-end gap-2">
+      {/* Modal 1: Cài đặt vốn đầu tư ảo & Đặt lại tài khoản */}
+      {showSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg rounded-xl border border-border-subtle bg-surface-elevated p-5 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-border-subtle mb-4">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-accent-primary/10 text-accent-primary border border-accent-primary/20">
+                  <Sliders className="size-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-text-primary">
+                    Cài Đặt Vốn Đầu Tư Ảo
+                  </h3>
+                  <p className="text-[11px] text-text-muted">
+                    Tự do tuỳ chỉnh số vốn ban đầu mong muốn (từ 10 triệu đến hàng tỷ đồng)
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowResetConfirm(false)}
-                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
+                onClick={() => setShowSetupModal(false)}
+                className="text-text-muted hover:text-text-primary p-1 rounded transition"
               >
-                Đóng
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Presets Grid */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-medium text-text-muted mb-2">
+                Chọn nhanh hạn mức vốn phổ biến:
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {INITIAL_CASH_PRESETS.map((p) => {
+                  const isSelected = setupCashAmount === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => {
+                        setSetupCashAmount(p.value);
+                        setSetupInputText(String(p.value));
+                      }}
+                      className={`p-2 rounded-lg border text-left transition ${
+                        isSelected
+                          ? "border-accent-primary bg-accent-primary/15 text-accent-primary shadow-sm"
+                          : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary hover:border-border-default"
+                      }`}
+                    >
+                      <div className="text-[12px] font-bold num">{p.label}</div>
+                      <div className="text-[10px] text-text-muted">{p.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Input */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-medium text-text-muted mb-1.5">
+                Hoặc tự nhập số vốn bất kỳ (VNĐ):
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={setupInputText}
+                  onChange={(e) => {
+                    const parsed = parseNumberInput(e.target.value);
+                    setSetupInputText(e.target.value);
+                    setSetupCashAmount(parsed);
+                  }}
+                  placeholder="Nhập số vốn (VD: 250000000)"
+                  className="w-full num font-bold px-3 py-2 rounded-lg border border-border-subtle bg-surface-base text-text-primary text-[14px] focus:outline-none focus:border-accent-primary pr-24"
+                />
+                <div className="absolute right-3 top-2.5 text-[11px] text-text-muted font-medium pointer-events-none">
+                  VNĐ
+                </div>
+              </div>
+              {/* Preview badge */}
+              <div className="mt-2 p-2 rounded-md bg-surface-base/80 border border-border-subtle/60 flex items-center justify-between text-[11.5px]">
+                <span className="text-text-muted">Mức vốn áp dụng:</span>
+                <span className="font-bold text-accent-primary num">
+                  {formatReadableVnd(setupCashAmount)} ({fmtVnd(setupCashAmount)})
+                </span>
+              </div>
+            </div>
+
+            {/* Mode selection */}
+            <div className="mb-5 space-y-2">
+              <label className="block text-[11px] font-medium text-text-muted">
+                Phương thức áp dụng:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSetupMode("reset_all")}
+                  className={`p-2.5 rounded-lg border text-left transition ${
+                    setupMode === "reset_all"
+                      ? "border-accent-primary bg-accent-primary/10 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-text-primary mb-0.5">
+                    <RotateCcw className="size-3 text-negative" />
+                    Làm mới từ đầu
+                  </div>
+                  <div className="text-[10px] text-text-muted leading-tight">
+                    Xoá toàn bộ cổ phiếu và lịch sử, cấp mới 100% tiền mặt theo mức vốn này.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSetupMode("adjust_baseline")}
+                  className={`p-2.5 rounded-lg border text-left transition ${
+                    setupMode === "adjust_baseline"
+                      ? "border-accent-primary bg-accent-primary/10 text-accent-primary"
+                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-semibold text-[11.5px] text-text-primary mb-0.5">
+                    <Check className="size-3 text-positive" />
+                    Chỉ đổi mốc vốn
+                  </div>
+                  <div className="text-[10px] text-text-muted leading-tight">
+                    Giữ nguyên cổ phiếu đang nắm giữ, điều chỉnh số dư tiền mặt theo chênh lệch.
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border-subtle">
+              <button
+                type="button"
+                onClick={() => setShowSetupModal(false)}
+                className="px-3.5 py-1.5 rounded-md text-[11.5px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
+              >
+                Hủy bỏ
               </button>
               <button
                 type="button"
+                disabled={setupCashAmount < 1_000_000}
                 onClick={() => {
-                  resetPaperAccount(DEFAULT_INITIAL_CASH, account.tPlusRule);
-                  setShowResetConfirm(false);
-                  setOrderNotice({ type: "success", message: "Đã khôi phục tài khoản về 500 triệu đồng ban đầu." });
+                  if (setupCashAmount < 1_000_000) return;
+                  if (setupMode === "reset_all") {
+                    resetPaperAccount(setupCashAmount, account.tPlusRule);
+                    setOrderNotice({
+                      type: "success",
+                      message: `Đã làm mới tài khoản thành công với số vốn ${formatReadableVnd(setupCashAmount)} (${fmtVnd(setupCashAmount)})!`,
+                    });
+                  } else {
+                    updatePaperInitialCash(setupCashAmount);
+                    setOrderNotice({
+                      type: "success",
+                      message: `Đã cập nhật mốc vốn ban đầu thành ${formatReadableVnd(setupCashAmount)} (${fmtVnd(setupCashAmount)}) và điều chỉnh số dư tiền mặt tương ứng!`,
+                    });
+                  }
+                  setShowSetupModal(false);
                 }}
-                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-negative text-white hover:bg-negative/90 transition shadow-sm"
+                className="px-4 py-1.5 rounded-md text-[11.5px] font-semibold bg-accent-primary text-surface-base hover:bg-accent-primary/90 transition shadow-sm disabled:opacity-40"
               >
-                Xác nhận đặt lại
+                Xác nhận áp dụng
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal Bơm thêm vốn */}
-      {showAddCashModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm rounded-lg border border-border-subtle bg-surface-elevated p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-1.5 flex items-center gap-1.5">
-              <PlusCircle className="size-4 text-positive" />
-              Nạp thêm vốn ảo
-            </h3>
-            <p className="text-[11px] text-text-muted mb-3">
-              Chọn mức vốn bạn muốn bổ sung vào tiền mặt khả dụng:
-            </p>
-            <div className="grid grid-cols-3 gap-1.5 mb-4">
-              {[50_000_000, 100_000_000, 500_000_000].map((amt) => (
+      {/* Modal 2: Nạp / Rút vốn ảo */}
+      {showCashModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md rounded-xl border border-border-subtle bg-surface-elevated p-5 shadow-2xl">
+            {/* Modal Header & Tabs */}
+            <div className="flex items-center justify-between pb-3 border-b border-border-subtle mb-4">
+              <div className="flex items-center gap-1.5 p-1 rounded-lg bg-surface-base border border-border-subtle">
                 <button
-                  key={amt}
                   type="button"
-                  onClick={() => setAddCashAmount(amt)}
-                  className={`p-2 rounded-md border text-[11px] font-semibold num transition ${
-                    addCashAmount === amt
-                      ? "border-accent-primary bg-accent-primary/15 text-accent-primary"
-                      : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
+                  onClick={() => setCashAction("DEPOSIT")}
+                  className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
+                    cashAction === "DEPOSIT"
+                      ? "bg-positive text-surface-base shadow-sm"
+                      : "text-text-muted hover:text-text-primary"
                   }`}
                 >
-                  +{amt >= 100_000_000 ? `${amt / 1_000_000} Triệu` : `${amt / 1_000_000} Tr`}
+                  + Nạp thêm vốn
                 </button>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCashAction("WITHDRAW")}
+                  className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
+                    cashAction === "WITHDRAW"
+                      ? "bg-negative text-white shadow-sm"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  - Rút bớt vốn
+                </button>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowAddCashModal(false)}
-                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
+                onClick={() => setShowCashModal(false)}
+                className="text-text-muted hover:text-text-primary p-1 rounded transition"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {/* Current Balance Display */}
+            <div className="p-2.5 rounded-lg bg-surface-base border border-border-subtle mb-4 flex items-center justify-between text-[11.5px]">
+              <span className="text-text-muted">Tiền mặt khả dụng hiện tại:</span>
+              <strong className="num text-text-primary font-bold text-[12.5px]">
+                {fmtVnd(account.availableCash)}
+              </strong>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-medium text-text-muted mb-2">
+                Chọn nhanh số tiền:
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {QUICK_CASH_AMOUNTS.map((amt) => {
+                  const parsed = parseNumberInput(cashAmountInput);
+                  const isSelected = parsed === amt;
+                  return (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setCashAmountInput(String(amt))}
+                      className={`p-2 rounded-lg border text-[11.5px] font-semibold num transition text-center ${
+                        isSelected
+                          ? cashAction === "DEPOSIT"
+                            ? "border-positive bg-positive/15 text-positive"
+                            : "border-negative bg-negative/15 text-negative"
+                          : "border-border-subtle bg-surface-base text-text-muted hover:text-text-primary"
+                      }`}
+                    >
+                      {cashAction === "DEPOSIT" ? "+" : "-"}
+                      {formatReadableVnd(amt).replace(" đồng", "")}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Amount Input */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-medium text-text-muted mb-1.5">
+                Hoặc nhập số tiền mong muốn (VNĐ):
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={cashAmountInput}
+                  onChange={(e) => setCashAmountInput(e.target.value)}
+                  placeholder="Nhập số tiền..."
+                  className="w-full num font-bold px-3 py-2 rounded-lg border border-border-subtle bg-surface-base text-text-primary text-[14px] focus:outline-none focus:border-accent-primary pr-24"
+                />
+                <div className="absolute right-3 top-2.5 text-[11px] text-text-muted font-medium pointer-events-none">
+                  VNĐ
+                </div>
+              </div>
+              <div className="mt-1 text-[11px] text-text-muted">
+                {formatReadableVnd(parseNumberInput(cashAmountInput))}
+              </div>
+            </div>
+
+            {/* Impact Projection */}
+            {(() => {
+              const amt = parseNumberInput(cashAmountInput);
+              const isWithdraw = cashAction === "WITHDRAW";
+              const isOverWithdraw = isWithdraw && amt > account.availableCash;
+              const nextAvailableCash = isWithdraw
+                ? Math.max(0, account.availableCash - amt)
+                : account.availableCash + amt;
+
+              return (
+                <div className="mb-5 space-y-1.5">
+                  <div className="p-2.5 rounded-lg bg-surface-base/80 border border-border-subtle text-[11.5px] space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-text-muted">Sau khi thao tác:</span>
+                      <strong className={`num font-bold ${isOverWithdraw ? "text-negative" : "text-text-primary"}`}>
+                        {fmtVnd(nextAvailableCash)}
+                      </strong>
+                    </div>
+                  </div>
+                  {isOverWithdraw && (
+                    <div className="text-[11px] text-negative flex items-center gap-1 font-medium">
+                      <AlertCircle className="size-3.5" />
+                      Số tiền rút vượt quá số dư tiền mặt khả dụng hiện tại!
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border-subtle">
+              <button
+                type="button"
+                onClick={() => setShowCashModal(false)}
+                className="px-3.5 py-1.5 rounded-md text-[11.5px] font-medium bg-surface-base border border-border-subtle text-text-primary hover:border-border-default transition"
               >
                 Đóng
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  adjustPaperCash(addCashAmount);
-                  setShowAddCashModal(false);
-                  setOrderNotice({
-                    type: "success",
-                    message: `Đã nạp thêm ${fmtVnd(addCashAmount)} vào tài khoản thành công!`,
-                  });
-                }}
-                className="px-3 py-1.5 rounded-md text-[11px] font-medium bg-positive text-surface-base hover:bg-positive/90 transition shadow-sm"
-              >
-                Nạp ngay
-              </button>
+              {(() => {
+                const amt = parseNumberInput(cashAmountInput);
+                const isWithdraw = cashAction === "WITHDRAW";
+                const isInvalid = amt <= 0 || (isWithdraw && amt > account.availableCash);
+
+                return (
+                  <button
+                    type="button"
+                    disabled={isInvalid}
+                    onClick={() => {
+                      if (isInvalid) return;
+                      const signedAmount = isWithdraw ? -amt : amt;
+                      adjustPaperCash(signedAmount);
+                      setShowCashModal(false);
+                      setOrderNotice({
+                        type: "success",
+                        message: isWithdraw
+                          ? `Đã rút ${fmtVnd(amt)} khỏi tài khoản đầu tư ảo thành công!`
+                          : `Đã nạp ${fmtVnd(amt)} vào tài khoản đầu tư ảo thành công!`,
+                      });
+                    }}
+                    className={`px-4 py-1.5 rounded-md text-[11.5px] font-semibold text-white transition shadow-sm disabled:opacity-40 ${
+                      cashAction === "DEPOSIT"
+                        ? "bg-positive text-surface-base hover:bg-positive/90"
+                        : "bg-negative hover:bg-negative/90"
+                    }`}
+                  >
+                    {cashAction === "DEPOSIT" ? "Xác nhận nạp" : "Xác nhận rút"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
