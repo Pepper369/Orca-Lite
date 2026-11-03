@@ -40,8 +40,9 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const [researchFilter, setResearchFilter] = useState<"ALL" | "BUY" | "HIGH_UPSIDE">("ALL");
   const [instFilter, setInstFilter] = useState<"ALL" | "HIGH_INST">("ALL");
   const [quantFilter, setQuantFilter] = useState<"ALL" | "QUANT_EDGE" | "OU_OVERSOLD">("ALL");
-  const [sortBy, setSortBy] = useState<"upside" | "foreign" | "inst" | "quant" | "symbol">("upside");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [buyZoneFilter, setBuyZoneFilter] = useState<"ALL" | "NEAR_BUY" | "AT_BUY">("ALL");
+  const [sortBy, setSortBy] = useState<"upside" | "foreign" | "inst" | "quant" | "symbol" | "near_buy">("near_buy");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const items = useMemo(() => data ?? [], [data]);
 
@@ -78,10 +79,20 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         return false;
       }
 
+      // Buy Zone filter
+      if (buyZoneFilter === "NEAR_BUY" && (item.absBuyDiff == null || item.absBuyDiff > 2.0)) {
+        return false;
+      }
+      if (buyZoneFilter === "AT_BUY" && (item.absBuyDiff == null || item.absBuyDiff > 1.0)) {
+        return false;
+      }
+
       return true;
     }).sort((a, b) => {
       let diff = 0;
-      if (sortBy === "upside") {
+      if (sortBy === "near_buy") {
+        diff = (a.absBuyDiff ?? 999) - (b.absBuyDiff ?? 999);
+      } else if (sortBy === "upside") {
         diff = (b.targetUpsidePct ?? -999) - (a.targetUpsidePct ?? -999);
       } else if (sortBy === "foreign") {
         diff = b.foreignBuyRatioPct - a.foreignBuyRatioPct;
@@ -92,7 +103,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
       } else if (sortBy === "symbol") {
         diff = a.symbol.localeCompare(b.symbol);
       }
-      return sortDir === "desc" ? diff : -diff;
+      return sortDir === "desc" ? -diff : diff;
     });
   }, [items, query, foreignFilter, researchFilter, instFilter, quantFilter, sortBy, sortDir]);
 
@@ -217,6 +228,37 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
 
             {/* Quick Filter Buttons */}
             <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Điểm Mua Gần Nhất Filter */}
+              <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setBuyZoneFilter("ALL")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    buyZoneFilter === "ALL" ? "bg-surface-elevated text-text-primary" : "text-text-muted"
+                  }`}
+                >
+                  Mọi điểm mua
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBuyZoneFilter("NEAR_BUY")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    buyZoneFilter === "NEAR_BUY" ? "bg-emerald-500/20 text-emerald-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  🎯 Sát điểm mua (≤2%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBuyZoneFilter("AT_BUY")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    buyZoneFilter === "AT_BUY" ? "bg-cyan-500/20 text-cyan-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  ⚡ Đúng điểm mua (≤1%)
+                </button>
+              </div>
+
               {/* Foreign */}
               <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
                 <button
@@ -346,6 +388,18 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   <th
                     className="py-2.5 px-3 cursor-pointer hover:text-text-primary"
                     onClick={() => {
+                      setSortBy("near_buy");
+                      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                    }}
+                  >
+                    <div className="flex items-center gap-1 text-accent-primary">
+                      <span>🎯 Điểm Mua & Vùng Gom</span>
+                      <ArrowUpDown className="size-3" />
+                    </div>
+                  </th>
+                  <th
+                    className="py-2.5 px-3 cursor-pointer hover:text-text-primary"
+                    onClick={() => {
                       setSortBy("foreign");
                       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
                     }}
@@ -436,6 +490,38 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                             {item.changePercent.toFixed(2)}%
                           </span>
                         </div>
+                      </td>
+
+                      {/* Cột Điểm Mua & Kế Hoạch */}
+                      <td className="py-3 px-3">
+                        {item.buyPoint ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 font-mono">
+                              <span className="font-bold text-accent-primary">{item.buyPoint.toLocaleString("vi-VN")}</span>
+                              {item.buyPointDiffPct != null && (
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border whitespace-nowrap ${
+                                    Math.abs(item.buyPointDiffPct) <= 1.0
+                                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                      : Math.abs(item.buyPointDiffPct) <= 2.5
+                                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                                      : item.buyPointDiffPct > 0
+                                      ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                                      : "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                                  }`}
+                                >
+                                  {Math.abs(item.buyPointDiffPct) <= 1.0 ? "Đúng điểm" : item.buyPointDiffPct > 0 ? `+${item.buyPointDiffPct}%` : `${item.buyPointDiffPct}%`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] text-text-muted truncate max-w-[170px]">
+                              <span>{item.buyStrategy ?? "Bệ đỡ hội tụ"}</span>
+                              {item.riskReward && <span className="text-amber-400 font-semibold font-mono">({item.riskReward}R)</span>}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-text-muted text-[10px]">—</span>
+                        )}
                       </td>
 
                       {/* Cột 3: Ngoại Live */}

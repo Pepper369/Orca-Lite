@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
+  | "buy-point"
   | "multi-source"
   | "quant-edge"
   | "confluence"
@@ -45,6 +46,7 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
+      { id: "buy-point", label: "🎯 Điểm Mua Tối Ưu (Buy Zone)" },
       { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
       { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
       { id: "confluence", label: "Siêu Hội Tụ (Confluence)" },
@@ -230,6 +232,16 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "buy-point":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="near_buy_point"
+          defaultView="buy_point"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
     case "multi-source":
       body = <MultiSourceScreener />;
       break;

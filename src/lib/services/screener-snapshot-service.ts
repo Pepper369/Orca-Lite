@@ -22,9 +22,12 @@ import {
   calculateTripleBarrierLevels,
   calculateVaRAndCVaR,
 } from "../engines/advanced-quant-math";
+import { computeAsymmetricPlan, tickRound } from "../engines/asymmetric-quant-engine";
+import type { DetectedChartPattern } from "../engines/chart-patterns";
 
 export type ScreenerPreset =
   | "all"
+  | "near_buy_point"
   | "bottom_confluence"
   | "quant_edge"
   | "quant_mean_revert"
@@ -101,6 +104,16 @@ export type ScreenerStockItem = {
   returnSkewness?: number | null; // Positive skewness indicates upside fat tails
   quantAnomalyTag?: string | null; // e.g. "OU Mean Reversion", "Low-Beta Anomaly", "Asymmetric R/R"
   beta?: number | null;
+  // Optimal Buy Point & Trade Execution
+  buyPoint: number | null;
+  buyPointDiffPct: number | null; // % difference: ((price - buyPoint) / price) * 100
+  absBuyDiff: number | null; // Absolute difference %: Math.abs(buyPointDiffPct)
+  buyRange: [number, number] | null; // Entry accumulation zone [min, max]
+  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  stopLoss: number | null;
+  targetPrice: number | null;
+  riskReward: number | null;
+  buyStrategy: string | null;
   presetsPassed: ScreenerPreset[];
   compositeScore: number; // 0-100
 };
@@ -137,6 +150,8 @@ export type ScreenerFilterParams = {
   minQuantScore?: number;
   maxOuZScore?: number;
   minRiskReward?: number;
+  maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -298,6 +313,7 @@ function analyzeTechFeatures(
       squeezeState: null,
       superTrendDir: null,
       chartPattern: null,
+      topChartPattern: null as DetectedChartPattern | null,
       candlePattern: null,
       candlePatternScore: null,
       candleAgeBars: null,
@@ -433,6 +449,7 @@ function analyzeTechFeatures(
     squeezeState: sqState,
     superTrendDir: stDir,
     chartPattern: patternLabel,
+    topChartPattern: topPattern,
     candlePattern,
     candlePatternScore,
     candleAgeBars,
@@ -440,6 +457,130 @@ function analyzeTechFeatures(
     divergenceSummary,
     confluenceScore,
     confluenceBadge,
+  };
+}
+
+function calculateBuyPointPlan(
+  parsed: ParsedBars,
+  price: number | null,
+  ma20: number | null,
+  ma50: number | null,
+  topChartPattern: DetectedChartPattern | null,
+  confluenceScore: number,
+  volRatio20: number | null,
+) {
+  const { closes, highs, lows } = parsed;
+  const n = closes.length;
+  if (!price || price <= 0 || n < 10) {
+    return {
+      buyPoint: null,
+      buyPointDiffPct: null,
+      absBuyDiff: null,
+      buyRange: null as [number, number] | null,
+      buyZoneStatus: "NO_SETUP" as const,
+      stopLoss: null,
+      targetPrice: null,
+      riskReward: null,
+      buyStrategy: null,
+    };
+  }
+
+  // 1. Kiểm tra điểm Pivot bứt phá từ mẫu hình biểu đồ kinh điển (VCP, Cốc tay cầm, Hai đáy, Cờ tăng)
+  const pivot = topChartPattern?.breakoutPrice ?? null;
+  const isPivotValid = pivot != null && pivot > 0 && Math.abs((price - pivot) / price) <= 0.045;
+
+  if (isPivotValid && topChartPattern) {
+    const buyPoint = tickRound(pivot);
+    const diffPct = Number((((price - buyPoint) / price) * 100).toFixed(1));
+    const absDiff = Math.abs(diffPct);
+    const buyRange: [number, number] = [
+      tickRound(buyPoint * 0.99),
+      tickRound(buyPoint * 1.015),
+    ];
+    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+    if (absDiff <= 1.0 || (price >= buyRange[0] && price <= buyRange[1])) {
+      buyZoneStatus = "AT_BUY_POINT";
+    } else if (absDiff <= 2.5) {
+      buyZoneStatus = "NEAR_BUY_POINT";
+    } else if (diffPct > 2.5) {
+      buyZoneStatus = "WAIT_PULLBACK";
+    } else {
+      buyZoneStatus = "BELOW_SUPPORT";
+    }
+
+    const sl = topChartPattern.stopLossPrice ? tickRound(topChartPattern.stopLossPrice) : tickRound(buyPoint * 0.95);
+    const tp = topChartPattern.targetPrice ? tickRound(topChartPattern.targetPrice) : tickRound(buyPoint * 1.15);
+    const risk = buyPoint - sl;
+    const reward = tp - buyPoint;
+    const rr = risk > 0 ? Number((reward / risk).toFixed(1)) : 2.5;
+
+    return {
+      buyPoint,
+      buyPointDiffPct: diffPct,
+      absBuyDiff: absDiff,
+      buyRange,
+      buyZoneStatus,
+      stopLoss: sl,
+      targetPrice: tp,
+      riskReward: rr,
+      buyStrategy: `Pivot bứt phá ${topChartPattern.nameVi}`,
+    };
+  }
+
+  // 2. Tính bệ đỡ hỗ trợ hội tụ đa tầng theo thuật toán Asymmetric Quant
+  const localSupports: number[] = [];
+  const localResistances: number[] = [];
+  for (let i = Math.max(0, n - 25); i < n; i++) {
+    if (lows[i] && lows[i] > 0) localSupports.push(lows[i]);
+    if (highs[i] && highs[i] > 0) localResistances.push(highs[i]);
+  }
+
+  let trSum = 0;
+  const lb = Math.min(14, n - 1);
+  for (let i = n - lb; i < n; i++) {
+    trSum += Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+  }
+  const atr14 = lb > 0 ? trSum / lb : price * 0.02;
+
+  const asym = computeAsymmetricPlan({
+    last: price,
+    atr14,
+    supports: localSupports,
+    resistances: localResistances,
+    sma20: ma20,
+    sma50: ma50,
+    trendScore: confluenceScore,
+    volumeRatio20: volRatio20,
+  });
+
+  const buyPoint = asym.entry;
+  const diffPct = asym.currentPriceDiffPct;
+  const absDiff = Math.abs(diffPct);
+  const buyRange: [number, number] = asym.entryZone;
+
+  let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+  if (absDiff <= 1.0 || (price >= buyRange[0] && price <= buyRange[1])) {
+    buyZoneStatus = "AT_BUY_POINT";
+  } else if (absDiff <= 2.5) {
+    buyZoneStatus = "NEAR_BUY_POINT";
+  } else if (diffPct > 2.5) {
+    buyZoneStatus = "WAIT_PULLBACK";
+  } else {
+    buyZoneStatus = "BELOW_SUPPORT";
+  }
+
+  const primaryLayer = asym.confluenceCluster.layers[0] || "Bệ đỡ hội tụ";
+
+  return {
+    buyPoint,
+    buyPointDiffPct: diffPct,
+    absBuyDiff: absDiff,
+    buyRange,
+    buyZoneStatus,
+    stopLoss: asym.stopLoss,
+    targetPrice: asym.takeProfit,
+    riskReward: asym.riskReward,
+    buyStrategy: primaryLayer,
   };
 }
 
@@ -657,6 +798,8 @@ function detectPresets(item: {
   beta?: number | null;
   qualityScore?: number | null;
   tripleBarrierRiskReward?: number | null;
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  absBuyDiff?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -770,6 +913,29 @@ function detectPresets(item: {
   // 10. TTM Squeeze
   if (item.squeezeState === "squeeze_on" || item.squeezeState === "fired_bull") {
     passes.push("ttm_squeeze");
+  }
+
+  // 11. Sát Điểm Mua Nhất (Near Buy Point / Buy Zone)
+  const isNearBuy =
+    item.buyZoneStatus === "AT_BUY_POINT" ||
+    item.buyZoneStatus === "NEAR_BUY_POINT" ||
+    (item.absBuyDiff != null && item.absBuyDiff <= 2.2);
+
+  const hasSetupConfluence =
+    item.confluenceScore >= 42 ||
+    (item.quantEdgeScore != null && item.quantEdgeScore >= 48) ||
+    item.maSignal === "GOLDEN_CROSS" ||
+    item.maSignal === "BULLISH_ALIGN" ||
+    Boolean(item.chartPattern) ||
+    Boolean(item.candlePattern) ||
+    item.hasBullishDivergence === true ||
+    item.squeezeState === "squeeze_on" ||
+    item.squeezeState === "fired_bull";
+
+  const isLiquid = (item.price == null || item.price >= 5) && (item.volume == null || item.volume >= 40_000);
+
+  if (isNearBuy && hasSetupConfluence && isLiquid) {
+    passes.push("near_buy_point");
   }
 
   return passes;
@@ -1108,6 +1274,16 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           compositeScore
         );
 
+        const buyPointPlan = calculateBuyPointPlan(
+          parsed,
+          price,
+          techFeatures.ma20,
+          techFeatures.ma50,
+          techFeatures.topChartPattern,
+          techFeatures.confluenceScore,
+          techFeatures.volRatio20
+        );
+
         const presetsPassed = detectPresets({
           roe,
           revenueYoyPct,
@@ -1134,6 +1310,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           beta: quantFeatures.beta,
           qualityScore,
           tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
+          buyZoneStatus: buyPointPlan.buyZoneStatus,
+          absBuyDiff: buyPointPlan.absBuyDiff,
         });
 
         items.push({
@@ -1194,6 +1372,15 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           returnSkewness: quantFeatures.returnSkewness,
           quantAnomalyTag: quantFeatures.quantAnomalyTag,
           beta: quantFeatures.beta,
+          buyPoint: buyPointPlan.buyPoint,
+          buyPointDiffPct: buyPointPlan.buyPointDiffPct,
+          absBuyDiff: buyPointPlan.absBuyDiff,
+          buyRange: buyPointPlan.buyRange,
+          buyZoneStatus: buyPointPlan.buyZoneStatus,
+          stopLoss: buyPointPlan.stopLoss,
+          targetPrice: buyPointPlan.targetPrice,
+          riskReward: buyPointPlan.riskReward,
+          buyStrategy: buyPointPlan.buyStrategy,
           presetsPassed,
           compositeScore,
         });
@@ -1206,6 +1393,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        near_buy_point: 0,
         bottom_confluence: 0,
         quant_edge: 0,
         quant_mean_revert: 0,
@@ -1256,6 +1444,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    near_buy_point: 0,
     bottom_confluence: 0,
     quant_edge: 0,
     quant_mean_revert: 0,
@@ -1399,12 +1588,18 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (maxOuZScore != null && (x.ouZScore == null || x.ouZScore > maxOuZScore)) continue;
     if (minRiskReward != null && (x.tripleBarrierRiskReward == null || x.tripleBarrierRiskReward < minRiskReward)) continue;
 
+    // Buy Point filters
+    if (params.maxBuyDiff != null && (x.absBuyDiff == null || x.absBuyDiff > params.maxBuyDiff)) continue;
+    if (params.buyZoneStatus && params.buyZoneStatus !== "ALL" && x.buyZoneStatus !== params.buyZoneStatus) continue;
+
     filtered.push(x);
   }
 
   // High-performance sorting comparator
   const sortKey = (params.sort ?? "marketCap") as keyof ScreenerStockItem;
-  const isAsc = params.order === "asc";
+  const isAsc = params.order != null
+    ? params.order === "asc"
+    : (sortKey === "absBuyDiff" || sortKey === "buyPointDiffPct");
 
   filtered.sort((a, b) => {
     const valA = a[sortKey];

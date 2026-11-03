@@ -32,7 +32,7 @@ const SCENARIOS = [
 ] as const;
 
 type ViewMode = "table" | "group_scenario" | "group_quality";
-type SortField = "score" | "riskReward" | "change" | "volume";
+type SortField = "score" | "riskReward" | "change" | "volume" | "nearBuyPoint";
 
 const BADGE_COLORS = {
   emerald: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -56,8 +56,9 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [leaderOnly, setLeaderOnly] = useState<boolean>(false);
   const [freshOnly, setFreshOnly] = useState<boolean>(false); // T+0 only
   const [highRrOnly, setHighRrOnly] = useState<boolean>(false); // R:R >= 2.0
+  const [nearEntryOnly, setNearEntryOnly] = useState<boolean>(false); // Diff <= 1.5%
   const [viewMode, setViewMode] = useState<ViewMode>("table");
-  const [sortBy, setSortBy] = useState<SortField>("score");
+  const [sortBy, setSortBy] = useState<SortField>("nearBuyPoint");
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
   const [pressed, setPressed] = useState<boolean>(false);
 
@@ -152,10 +153,24 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
       );
     }
 
+    // 8b. Sát điểm mua (<= 1.5%)
+    if (nearEntryOnly) {
+      list = list.filter((r) => {
+        if (!r.price || !r.entryPrice) return false;
+        const diffPct = Math.abs((r.price - r.entryPrice) / r.price) * 100;
+        return diffPct <= 1.5;
+      });
+    }
+
     // 9. Sorting
     const sorted = [...list].sort((a, b) => {
       if (a.alertWorthy !== b.alertWorthy) return a.alertWorthy ? -1 : 1;
       switch (sortBy) {
+        case "nearBuyPoint": {
+          const diffA = a.price && a.entryPrice ? Math.abs((a.price - a.entryPrice) / a.price) : 999;
+          const diffB = b.price && b.entryPrice ? Math.abs((b.price - b.entryPrice) / b.price) : 999;
+          return diffA - diffB;
+        }
         case "score":
           return b.confluenceScore - a.confluenceScore;
         case "riskReward":
@@ -181,6 +196,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     leaderOnly,
     freshOnly,
     highRrOnly,
+    nearEntryOnly,
     searchQuery,
     sortBy,
   ]);
@@ -490,6 +506,18 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
               />
               <span>R:R cao (≥ 1:2.0)</span>
             </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-400 font-bold select-none">
+              <input
+                type="checkbox"
+                checked={nearEntryOnly}
+                onChange={(e) => setNearEntryOnly(e.target.checked)}
+                className="rounded accent-emerald-500"
+              />
+              <span>🎯 Sát điểm mua (≤ 1.5%)</span>
+            </label>
           </div>
 
           {/* Right: Sort By & View Mode Segment */}
@@ -499,8 +527,9 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
               <DarkSelect
                 value={sortBy}
                 onChange={(v) => setSortBy(v as SortField)}
-                className="!w-28 !py-0.5 text-[10.5px]"
+                className="!w-36 !py-0.5 text-[10.5px]"
                 options={[
+                  { value: "nearBuyPoint", label: "🎯 Gần điểm mua nhất" },
                   { value: "score", label: "Điểm hợp lưu" },
                   { value: "riskReward", label: "Tỷ lệ R:R" },
                   { value: "change", label: "% Thay đổi" },

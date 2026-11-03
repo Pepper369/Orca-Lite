@@ -63,7 +63,7 @@ export function Field({
   );
 }
 
-type ViewTab = "overview" | "quant" | "confluence" | "technical" | "valuation" | "profitability" | "health";
+type ViewTab = "overview" | "buy_point" | "quant" | "confluence" | "technical" | "valuation" | "profitability" | "health";
 
 export function QuantBadge({
   badge,
@@ -189,6 +189,7 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
   { id: "bottom_confluence", label: "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)", icon: <Sparkles className="size-3.5 text-cyan-400" />, desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
   { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "quant_edge", label: "Ưu thế Quant Pro", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
@@ -237,11 +238,20 @@ export function VnScreener({
   const [minDivYield, setMinDivYield] = useState("");
   const [maxDe, setMaxDe] = useState("");
   const [minMarketCap, setMinMarketCap] = useState("");
+  const [maxBuyDiff, setMaxBuyDiff] = useState("");
+  const [buyZoneStatus, setBuyZoneStatus] = useState("ALL");
 
   // Sort state
-  const initialSortKey = defaultPreset === "confluence" || defaultView === "confluence" ? "confluenceScore" : "marketCap";
+  const initialSortKey =
+    defaultPreset === "near_buy_point" || defaultView === "buy_point"
+      ? "absBuyDiff"
+      : defaultPreset === "confluence" || defaultView === "confluence"
+      ? "confluenceScore"
+      : "marketCap";
   const [sortKey, setSortKey] = useState<string>(initialSortKey);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
+    initialSortKey === "absBuyDiff" ? "asc" : "desc",
+  );
 
   // Applied params
   const [applied, setApplied] = useState({
@@ -261,6 +271,8 @@ export function VnScreener({
     minDivYield: "",
     maxDe: "",
     minMarketCap: "",
+    maxBuyDiff: "",
+    buyZoneStatus: "ALL",
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -268,7 +280,10 @@ export function VnScreener({
     setPreset(defaultPreset);
     setViewTab(defaultView);
     setSector(defaultSector ?? "");
-    if (defaultPreset === "confluence" || defaultView === "confluence") {
+    if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
+      setSortKey("absBuyDiff");
+      setSortOrder("asc");
+    } else if (defaultPreset === "confluence" || defaultView === "confluence") {
       setSortKey("confluenceScore");
       setSortOrder("desc");
     }
@@ -303,6 +318,8 @@ export function VnScreener({
     if (applied.minDivYield) p.set("minDivYield", applied.minDivYield);
     if (applied.maxDe) p.set("maxDe", applied.maxDe);
     if (applied.minMarketCap) p.set("minMarketCap", applied.minMarketCap);
+    if (applied.maxBuyDiff) p.set("maxBuyDiff", applied.maxBuyDiff);
+    if (applied.buyZoneStatus && applied.buyZoneStatus !== "ALL") p.set("buyZoneStatus", applied.buyZoneStatus);
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -336,6 +353,8 @@ export function VnScreener({
       minDivYield,
       maxDe,
       minMarketCap,
+      maxBuyDiff,
+      buyZoneStatus,
     });
     void mutate();
   }, [
@@ -355,6 +374,8 @@ export function VnScreener({
     minDivYield,
     maxDe,
     minMarketCap,
+    maxBuyDiff,
+    buyZoneStatus,
     mutate,
   ]);
 
@@ -375,6 +396,8 @@ export function VnScreener({
     setMinDivYield("");
     setMaxDe("");
     setMinMarketCap("");
+    setMaxBuyDiff("");
+    setBuyZoneStatus("ALL");
     setApplied({
       preset: "all",
       exchange: "ALL",
@@ -392,6 +415,8 @@ export function VnScreener({
       minDivYield: "",
       maxDe: "",
       minMarketCap: "",
+      maxBuyDiff: "",
+      buyZoneStatus: "ALL",
     });
     void mutate();
   }, [mutate]);
@@ -401,13 +426,17 @@ export function VnScreener({
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortOrder("desc");
+      setSortOrder(key === "absBuyDiff" || key === "buyPointDiffPct" ? "asc" : "desc");
     }
   };
 
   const handleSelectPreset = (p: ScreenerPreset) => {
     setPreset(p);
-    if (p === "confluence" || p === "bottom_confluence") {
+    if (p === "near_buy_point") {
+      setViewTab("buy_point");
+      setSortKey("absBuyDiff");
+      setSortOrder("asc");
+    } else if (p === "confluence" || p === "bottom_confluence") {
       setViewTab("confluence");
       setSortKey("confluenceScore");
       setSortOrder("desc");
@@ -441,6 +470,13 @@ export function VnScreener({
       "Cổ tức (%)",
       "Biên LN ròng (%)",
       "Nợ/Vốn CSH",
+      "Điểm Mua Tối Ưu",
+      "Lệch vs Điểm Mua (%)",
+      "Trạng Thái Điểm Mua",
+      "Chiến Lược Vào Lệnh",
+      "Cắt Lỗ (SL)",
+      "Chốt Lời (TP)",
+      "Tỷ Lệ R:R",
       "Điểm Orca",
     ];
     const csvRows = [
@@ -462,6 +498,13 @@ export function VnScreener({
           r.dividendYield ?? "",
           r.netMargin ?? "",
           r.debtEquity ?? "",
+          r.buyPoint ?? "",
+          r.buyPointDiffPct ?? "",
+          r.buyZoneStatus ?? "",
+          `"${(r.buyStrategy ?? "").replace(/"/g, '""')}"`,
+          r.stopLoss ?? "",
+          r.targetPrice ?? "",
+          r.riskReward ?? "",
           r.compositeScore ?? "",
         ].join(","),
       ),
@@ -670,7 +713,35 @@ export function VnScreener({
 
         {/* Collapsible Advanced Filters */}
         {showAdvanced && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5 border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-9 gap-2.5 border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200">
+            <label>
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Khoảng cách điểm mua</span>
+              <select
+                value={maxBuyDiff}
+                onChange={(e) => setMaxBuyDiff(e.target.value)}
+                className="input !w-full !py-1.5 text-[12px]"
+              >
+                <option value="">Tất cả khoảng cách</option>
+                <option value="1.0">≤ 1.0% (Đúng điểm mua)</option>
+                <option value="2.0">≤ 2.0% (Sát điểm mua)</option>
+                <option value="3.5">≤ 3.5% (Vùng gom an toàn)</option>
+                <option value="5.0">≤ 5.0%</option>
+              </select>
+            </label>
+            <label>
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Trạng thái điểm mua</span>
+              <select
+                value={buyZoneStatus}
+                onChange={(e) => setBuyZoneStatus(e.target.value)}
+                className="input !w-full !py-1.5 text-[12px]"
+              >
+                <option value="ALL">Mọi trạng thái</option>
+                <option value="AT_BUY_POINT">Ngay điểm mua (Zone)</option>
+                <option value="NEAR_BUY_POINT">Sát điểm mua (≤ 2.5%)</option>
+                <option value="WAIT_PULLBACK">Chờ chỉnh (&gt; 2.5%)</option>
+                <option value="BELOW_SUPPORT">Dưới hỗ trợ</option>
+              </select>
+            </label>
             <label>
               <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Tín hiệu MA</span>
               <select
@@ -706,6 +777,22 @@ export function VnScreener({
               }`}
             >
               Tổng quan
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("buy_point");
+                setSortKey("absBuyDiff");
+                setSortOrder("asc");
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "buy_point"
+                  ? "bg-panel-3 text-emerald-400 font-bold shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Zap className="size-3 text-emerald-400" />
+              Điểm Mua & Kế Hoạch
             </button>
             <button
               type="button"
@@ -826,6 +913,12 @@ export function VnScreener({
                     >
                       Vốn hóa (tỷ) {sortKey === "marketCap" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                    <th
+                      onClick={() => handleSort("absBuyDiff")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
                     <th className="py-2.5 text-center font-medium">Tín hiệu MA</th>
                     <th
                       onClick={() => handleSort("compositeScore")}
@@ -833,6 +926,41 @@ export function VnScreener({
                     >
                       Điểm Orca {sortKey === "compositeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                  </>
+                )}
+
+                {viewTab === "buy_point" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá Khớp {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("buyPoint")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary text-accent-primary"
+                    >
+                      Điểm Mua Tối Ưu {sortKey === "buyPoint" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("absBuyDiff")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Độ Lệch vs Giá {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-center font-medium">Trạng Thái</th>
+                    <th className="py-2.5 text-center font-medium">Vùng Gom Mua</th>
+                    <th className="py-2.5 text-left font-medium">Chiến Lược Vào Lệnh</th>
+                    <th className="py-2.5 text-right font-medium">Cắt Lỗ (SL)</th>
+                    <th className="py-2.5 text-right font-medium">Mục Tiêu (TP)</th>
+                    <th
+                      onClick={() => handleSort("riskReward")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Tỷ Suất R:R {sortKey === "riskReward" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 pr-3.5 text-center font-medium">Thao Tác</th>
                   </>
                 )}
 
@@ -1079,13 +1207,13 @@ export function VnScreener({
             <tbody>
               {isLoading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "confluence" ? 10 : 8} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     <Loading rows={4} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "confluence" ? 10 : 8} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     Không có mã nào thỏa mãn tiêu chí bộ lọc. Hãy thử nới lỏng các điều kiện lọc.
                   </td>
                 </tr>
@@ -1126,6 +1254,30 @@ export function VnScreener({
                         <td className="num py-2.5 text-right font-medium text-text-secondary">
                           {row.marketCap != null ? fmtNum(row.marketCap, 0) : "—"}
                         </td>
+                        <td className="num py-2.5 text-right font-mono">
+                          {row.buyPoint != null ? (
+                            <div className="flex flex-col items-end">
+                              <span className="font-bold text-accent-primary">{fmtNum(row.buyPoint, 2)}</span>
+                              {row.buyPointDiffPct != null && (
+                                <span
+                                  className={`text-[9.5px] font-bold ${
+                                    Math.abs(row.buyPointDiffPct) <= 1.0
+                                      ? "text-emerald-400"
+                                      : Math.abs(row.buyPointDiffPct) <= 2.5
+                                      ? "text-cyan-400"
+                                      : row.buyPointDiffPct > 0
+                                      ? "text-amber-400"
+                                      : "text-rose-400"
+                                  }`}
+                                >
+                                  {row.buyPointDiffPct > 0 ? `+${row.buyPointDiffPct}%` : `${row.buyPointDiffPct}%`}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="py-2.5 text-center">
                           <MaSignalBadge signal={row.maSignal} />
                         </td>
@@ -1141,6 +1293,80 @@ export function VnScreener({
                           >
                             {row.compositeScore}
                           </span>
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "buy_point" && (
+                      <>
+                        <td className="num py-2.5 text-right font-bold text-text-primary">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-black text-accent-primary font-mono">
+                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
+                        </td>
+                        <td className="py-2.5 text-center font-mono">
+                          {row.buyPointDiffPct != null ? (
+                            <span
+                              className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-bold border ${
+                                Math.abs(row.buyPointDiffPct) <= 1.0
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                  : Math.abs(row.buyPointDiffPct) <= 2.5
+                                  ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                                  : row.buyPointDiffPct > 0
+                                  ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                                  : "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                              }`}
+                            >
+                              {row.buyPointDiffPct > 0 ? `+${row.buyPointDiffPct}%` : `${row.buyPointDiffPct}%`}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          {row.buyZoneStatus === "AT_BUY_POINT" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300 whitespace-nowrap shadow-sm">
+                              <Zap className="size-3 text-emerald-300" /> NGAY ĐIỂM MUA
+                            </span>
+                          ) : row.buyZoneStatus === "NEAR_BUY_POINT" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold text-cyan-300 whitespace-nowrap">
+                              SÁT ĐIỂM MUA
+                            </span>
+                          ) : row.buyZoneStatus === "WAIT_PULLBACK" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-medium text-amber-300 whitespace-nowrap">
+                              CHỜ CHỈNH
+                            </span>
+                          ) : row.buyZoneStatus === "BELOW_SUPPORT" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 text-[10px] font-medium text-rose-300 whitespace-nowrap">
+                              DƯỚI HỖ TRỢ
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center font-mono text-[11px] text-text-secondary">
+                          {row.buyRange ? `${fmtNum(row.buyRange[0], 2)} – ${fmtNum(row.buyRange[1], 2)}` : "—"}
+                        </td>
+                        <td className="py-2.5 text-left text-[11px] font-medium text-text-primary truncate max-w-[180px]">
+                          {row.buyStrategy ?? "Bệ đỡ hội tụ"}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium text-rose-400 font-mono">
+                          {row.stopLoss != null ? fmtNum(row.stopLoss, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium text-emerald-400 font-mono">
+                          {row.targetPrice != null ? fmtNum(row.targetPrice, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-amber-400 font-mono">
+                          {row.riskReward != null ? `${row.riskReward}R` : "—"}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <Link
+                            href={`/stocks/${row.symbol}`}
+                            className="inline-flex items-center gap-1 rounded bg-panel-3 px-2 py-0.5 text-[10.5px] font-medium text-accent-primary hover:bg-accent-primary hover:text-white transition-colors"
+                          >
+                            <span>Chi tiết</span>
+                          </Link>
                         </td>
                       </>
                     )}

@@ -44,6 +44,16 @@ export interface MultiSourceStockItem {
   quantAnomalyTag?: string | null;
   confluenceScore?: number | null;
   confluenceBadge?: string | null;
+  // Giai đoạn 7: Điểm Mua Tối Ưu & Quản Trị Rủi Ro
+  buyPoint?: number | null;
+  buyPointDiffPct?: number | null;
+  absBuyDiff?: number | null;
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyRange?: [number, number] | null;
+  stopLoss?: number | null;
+  targetPricePlan?: number | null;
+  riskReward?: number | null;
+  buyStrategy?: string | null;
 }
 
 const TTL_MS = 30_000; // 30s fresh cache cho screener realtime
@@ -184,6 +194,15 @@ export async function getMultiSourceScreenerData(): Promise<{
           quantAnomalyTag: snap?.quantAnomalyTag ?? null,
           confluenceScore: snap?.confluenceScore ?? null,
           confluenceBadge: snap?.confluenceBadge ?? null,
+          buyPoint: snap?.buyPoint ?? null,
+          buyPointDiffPct: snap?.buyPointDiffPct ?? null,
+          absBuyDiff: snap?.absBuyDiff ?? null,
+          buyZoneStatus: snap?.buyZoneStatus ?? "NO_SETUP",
+          buyRange: snap?.buyRange ?? null,
+          stopLoss: snap?.stopLoss ?? null,
+          targetPricePlan: snap?.targetPrice ?? null,
+          riskReward: snap?.riskReward ?? null,
+          buyStrategy: snap?.buyStrategy ?? null,
         });
       });
 

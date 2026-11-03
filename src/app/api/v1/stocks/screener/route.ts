@@ -58,9 +58,13 @@ export async function GET(req: Request) {
     minQuantScore: num(url.searchParams.get("minQuantScore")),
     maxOuZScore: num(url.searchParams.get("maxOuZScore")),
     minRiskReward: num(url.searchParams.get("minRiskReward")),
+    maxBuyDiff: num(url.searchParams.get("maxBuyDiff")),
+    buyZoneStatus: url.searchParams.get("buyZoneStatus") ?? undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
-    order: (url.searchParams.get("order") === "asc" ? "asc" : "desc") as "asc" | "desc",
+    order: (url.searchParams.get("order")
+      ? url.searchParams.get("order") === "asc" ? "asc" : "desc"
+      : (url.searchParams.get("sort") === "absBuyDiff" || url.searchParams.get("sort") === "buyPointDiffPct") ? "asc" : "desc") as "asc" | "desc",
     limit: num(url.searchParams.get("limit")) ?? 50,
     offset: num(url.searchParams.get("offset")) ?? 0,
   };
