@@ -2,13 +2,9 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import {
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
   Wallet,
   PieChart,
   RefreshCw,
-  PlusCircle,
   Clock,
   CheckCircle2,
   AlertCircle,
@@ -17,11 +13,9 @@ import {
   X,
   History,
   Briefcase,
-  Layers,
   Sparkles,
   Share2,
   Sliders,
-  MinusCircle,
   Coins,
   RotateCcw,
   Check,
