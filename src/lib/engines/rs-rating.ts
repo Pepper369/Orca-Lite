@@ -158,12 +158,20 @@ export function calculateUniverseRsRatings(
   // 2. Sort ascending by raw score (lowest to highest)
   scoredItems.sort((a, b) => a.raw.rawScore - b.raw.rawScore);
 
-  // 3. Map into 1 - 99 percentile
+  // 3. Map into 1 - 99 percentile (with tie handling)
+  let lastScore: number | null = null;
+  let lastRating = 1;
   scoredItems.forEach((item, index) => {
     // Percentile rank: index 0 -> 1, index (total - 1) -> 99
     let rsRating = 1;
     if (total > 1) {
-      rsRating = Math.round(1 + (98 * index) / (total - 1));
+      if (lastScore !== null && Math.abs(item.raw.rawScore - lastScore) < 1e-9) {
+        rsRating = lastRating;
+      } else {
+        rsRating = Math.round(1 + (98 * index) / (total - 1));
+        lastScore = item.raw.rawScore;
+        lastRating = rsRating;
+      }
     }
     rsRating = Math.max(1, Math.min(99, rsRating));
 

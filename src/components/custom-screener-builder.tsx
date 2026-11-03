@@ -30,13 +30,26 @@ export interface CustomScreenerPreset {
 }
 
 const STORAGE_KEY = "orca_custom_screener_presets_v1";
+const MAX_SAVED_PRESETS = 30;
 
 export function loadCustomPresets(): CustomScreenerPreset[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as CustomScreenerPreset[];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p): p is CustomScreenerPreset =>
+        Boolean(
+          p &&
+            typeof p === "object" &&
+            typeof p.id === "string" &&
+            typeof p.name === "string" &&
+            p.filters &&
+            typeof p.filters === "object"
+        )
+    );
   } catch {
     return [];
   }
@@ -44,16 +57,24 @@ export function loadCustomPresets(): CustomScreenerPreset[] {
 
 export function persistCustomPreset(preset: CustomScreenerPreset) {
   if (typeof window === "undefined") return;
-  const current = loadCustomPresets();
-  const next = [preset, ...current.filter((p) => p.id !== preset.id)];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    const current = loadCustomPresets();
+    const next = [preset, ...current.filter((p) => p.id !== preset.id)].slice(0, MAX_SAVED_PRESETS);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // QuotaExceededError or private browsing
+  }
 }
 
 export function removeCustomPreset(id: string) {
   if (typeof window === "undefined") return;
-  const current = loadCustomPresets();
-  const next = current.filter((p) => p.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  try {
+    const current = loadCustomPresets();
+    const next = current.filter((p) => p.id !== id);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // safe
+  }
 }
 
 export interface CustomScreenerBuilderProps {
@@ -117,9 +138,10 @@ export function CustomScreenerBuilder({
   };
 
   const handleSaveAndApply = () => {
-    const name = presetName.trim() || `Bộ lọc của tôi #${savedPresets.length + 1}`;
+    const sanitizedName = presetName.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim().slice(0, 40);
+    const name = sanitizedName || `Bộ lọc của tôi #${savedPresets.length + 1}`;
     const newPreset: CustomScreenerPreset = {
-      id: `custom_${Date.now()}`,
+      id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       name,
       createdAt: Date.now(),
       filters: currentCompiledFilters(),

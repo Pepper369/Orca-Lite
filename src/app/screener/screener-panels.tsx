@@ -901,9 +901,19 @@ export function VnScreener({
   const rows = data?.items ?? [];
   const presetsCount = data?.presetsCount;
 
-  // Export CSV
+  // Export CSV with Formula Injection Neutralization
   const handleExportCsv = () => {
     if (!rows.length) return;
+    const toCsvCell = (val: unknown): string => {
+      if (val == null) return '""';
+      let s = String(val);
+      // Neutralize CSV formula injection (=, +, -, @, tab, CR)
+      if (/^[=+\-@\t\r]/.test(s)) {
+        s = "'" + s;
+      }
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+
     const headers = [
       "Mã",
       "Tên DN",
@@ -927,36 +937,42 @@ export function VnScreener({
       "Cắt Lỗ (SL)",
       "Chốt Lời (TP)",
       "Tỷ Lệ R:R",
-      "Điểm Orca",
+      "Orca Master",
+      "Smart Money",
+      "RS Rating",
+      "Piotroski",
     ];
     const csvRows = [
-      headers.join(","),
+      headers.map(toCsvCell).join(","),
       ...rows.map((r) =>
         [
           r.symbol,
-          `"${(r.name ?? "").replace(/"/g, '""')}"`,
-          r.exchange ?? "",
-          `"${r.sector ?? ""}"`,
-          r.price ?? "",
-          r.changePercent ?? "",
-          r.volume ?? "",
-          r.marketCap ?? "",
-          r.pe ?? "",
-          r.pb ?? "",
-          r.roe ?? "",
-          r.roa ?? "",
-          r.dividendYield ?? "",
-          r.netMargin ?? "",
-          r.debtEquity ?? "",
-          r.buyPoint ?? "",
-          r.buyPointDiffPct ?? "",
-          r.buyZoneStatus ?? "",
-          `"${(r.buyStrategy ?? "").replace(/"/g, '""')}"`,
-          r.stopLoss ?? "",
-          r.targetPrice ?? "",
-          r.riskReward ?? "",
-          r.compositeScore ?? "",
-        ].join(","),
+          r.name,
+          r.exchange,
+          r.sector,
+          r.price,
+          r.changePercent,
+          r.volume,
+          r.marketCap,
+          r.pe,
+          r.pb,
+          r.roe,
+          r.roa,
+          r.dividendYield,
+          r.netMargin,
+          r.debtEquity,
+          r.buyPoint,
+          r.buyPointDiffPct,
+          r.buyZoneStatus,
+          r.buyStrategy,
+          r.stopLoss,
+          r.targetPrice,
+          r.riskReward,
+          r.orcaMasterScore,
+          r.smartMoneyScore,
+          r.rsRating,
+          r.piotroskiFScore,
+        ].map(toCsvCell).join(","),
       ),
     ];
     const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });

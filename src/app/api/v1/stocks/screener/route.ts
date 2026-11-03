@@ -7,10 +7,13 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function num(v: string | null): number | undefined {
+function num(v: string | null, min?: number, max?: number): number | undefined {
   if (v == null || v === "") return undefined;
   const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+  if (!Number.isFinite(n)) return undefined;
+  if (min != null && n < min) return min;
+  if (max != null && n > max) return max;
+  return n;
 }
 
 /**
@@ -25,22 +28,23 @@ export async function GET(req: Request) {
   const preset = (url.searchParams.get("preset") ?? "all").toLowerCase() as ScreenerPreset;
   const exchange = url.searchParams.get("exchange") ?? undefined;
   const sector = url.searchParams.get("sector") ?? undefined;
-  const q = url.searchParams.get("q") ?? undefined;
+  const rawQ = url.searchParams.get("q");
+  const q = rawQ ? rawQ.trim().slice(0, 50) : undefined;
 
   const filters = {
     preset,
     exchange: exchange && exchange !== "ALL" ? exchange : undefined,
     sector: sector || undefined,
     q: q || undefined,
-    minPrice: num(url.searchParams.get("minPrice")),
-    maxPrice: num(url.searchParams.get("maxPrice")),
+    minPrice: num(url.searchParams.get("minPrice"), 0),
+    maxPrice: num(url.searchParams.get("maxPrice"), 0),
     minChg: num(url.searchParams.get("minChg")),
     maxChg: num(url.searchParams.get("maxChg")),
-    minVol: num(url.searchParams.get("minVol")),
-    maxVol: num(url.searchParams.get("maxVol")),
-    minTradingValue: num(url.searchParams.get("minTradingValue")),
-    minMarketCap: num(url.searchParams.get("minMarketCap")),
-    maxMarketCap: num(url.searchParams.get("maxMarketCap")),
+    minVol: num(url.searchParams.get("minVol"), 0),
+    maxVol: num(url.searchParams.get("maxVol"), 0),
+    minTradingValue: num(url.searchParams.get("minTradingValue"), 0),
+    minMarketCap: num(url.searchParams.get("minMarketCap"), 0),
+    maxMarketCap: num(url.searchParams.get("maxMarketCap"), 0),
     minPe: num(url.searchParams.get("minPe")),
     maxPe: num(url.searchParams.get("maxPe")),
     minPb: num(url.searchParams.get("minPb")),
@@ -49,19 +53,19 @@ export async function GET(req: Request) {
     maxRoe: num(url.searchParams.get("maxRoe")),
     minRoa: num(url.searchParams.get("minRoa")),
     maxRoa: num(url.searchParams.get("maxRoa")),
-    minDivYield: num(url.searchParams.get("minDivYield")),
-    maxDivYield: num(url.searchParams.get("maxDivYield")),
-    maxDe: num(url.searchParams.get("maxDe")),
-    minQualityScore: num(url.searchParams.get("minQualityScore")),
+    minDivYield: num(url.searchParams.get("minDivYield"), 0),
+    maxDivYield: num(url.searchParams.get("maxDivYield"), 0),
+    maxDe: num(url.searchParams.get("maxDe"), 0),
+    minQualityScore: num(url.searchParams.get("minQualityScore"), 0, 100),
     minRevenueYoy: num(url.searchParams.get("minRevenueYoy")),
     minNiYoy: num(url.searchParams.get("minNiYoy")),
-    minQuantScore: num(url.searchParams.get("minQuantScore")),
+    minQuantScore: num(url.searchParams.get("minQuantScore"), 0, 100),
     maxOuZScore: num(url.searchParams.get("maxOuZScore")),
-    minRiskReward: num(url.searchParams.get("minRiskReward")),
-    minOrcaMasterScore: num(url.searchParams.get("minOrcaMasterScore")),
-    minSmartMoneyScore: num(url.searchParams.get("minSmartMoneyScore")),
-    minRsRating: num(url.searchParams.get("minRsRating")),
-    minPiotroskiScore: num(url.searchParams.get("minPiotroskiScore")),
+    minRiskReward: num(url.searchParams.get("minRiskReward"), 0),
+    minOrcaMasterScore: num(url.searchParams.get("minOrcaMasterScore"), 0, 99),
+    minSmartMoneyScore: num(url.searchParams.get("minSmartMoneyScore"), 0, 100),
+    minRsRating: num(url.searchParams.get("minRsRating"), 1, 99),
+    minPiotroskiScore: num(url.searchParams.get("minPiotroskiScore"), 0, 9),
     maxBuyDiff: num(url.searchParams.get("maxBuyDiff")),
     buyZoneStatus: url.searchParams.get("buyZoneStatus") ?? undefined,
     mtfOnly: url.searchParams.get("mtfOnly") === "true" ? true : undefined,
@@ -71,8 +75,8 @@ export async function GET(req: Request) {
     order: (url.searchParams.get("order")
       ? url.searchParams.get("order") === "asc" ? "asc" : "desc"
       : (url.searchParams.get("sort") === "absBuyDiff" || url.searchParams.get("sort") === "buyPointDiffPct") ? "asc" : "desc") as "asc" | "desc",
-    limit: num(url.searchParams.get("limit")) ?? 50,
-    offset: num(url.searchParams.get("offset")) ?? 0,
+    limit: Math.min(200, Math.max(1, Math.floor(num(url.searchParams.get("limit")) ?? 50))),
+    offset: Math.max(0, Math.floor(num(url.searchParams.get("offset")) ?? 0)),
   };
 
   return safeApi({
@@ -124,6 +128,13 @@ export async function GET(req: Request) {
           limit: filters.limit,
           presetsCount: {
             all: 0,
+            orca_master_elite: 0,
+            smart_money_inflow: 0,
+            near_buy_point: 0,
+            rs_leaders: 0,
+            piotroski_diamonds: 0,
+            mtf_confluence: 0,
+            bottom_confluence: 0,
             quant_edge: 0,
             quant_mean_revert: 0,
             quant_low_beta: 0,

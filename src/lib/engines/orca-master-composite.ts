@@ -155,10 +155,18 @@ export function calculateUniverseOrcaMaster(
   // Sort ascending by raw score
   scored.sort((a, b) => a.rawScore - b.rawScore);
 
+  let lastRaw: number | null = null;
+  let lastComposite = 1;
   scored.forEach((s, idx) => {
     let compositeScore = 1;
     if (total > 1) {
-      compositeScore = Math.round(1 + (98 * idx) / (total - 1));
+      if (lastRaw !== null && Math.abs(s.rawScore - lastRaw) < 1e-9) {
+        compositeScore = lastComposite;
+      } else {
+        compositeScore = Math.round(1 + (98 * idx) / (total - 1));
+        lastRaw = s.rawScore;
+        lastComposite = compositeScore;
+      }
     }
     compositeScore = Math.max(1, Math.min(99, compositeScore));
 
