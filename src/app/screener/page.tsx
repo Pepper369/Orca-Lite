@@ -21,12 +21,14 @@ type Universe =
   | "rrg-rotation"
   | "four-m"
   | "canslim"
+  | "rs-leaders"
   | "crypto"
   | "wyckoff"
   | "minervini"
   | "elliott"
   | "valuation"
   | "fundamental"
+  | "piotroski"
   | "candlestick"
   | "ma-confluence"
   | "divergence"
@@ -61,6 +63,7 @@ export const SCREENER_GROUPS: {
     title: "Tăng trưởng & Hành vi giá",
     badge: "Trend & Patterns",
     items: [
+      { id: "rs-leaders", label: "👑 RS Leaders (O'Neil 80+)" },
       { id: "canslim", label: "CANSLIM" },
       { id: "four-m", label: "Bộ lọc 4M (Phil Town)" },
       { id: "minervini", label: "Minervini Trend Template" },
@@ -87,6 +90,7 @@ export const SCREENER_GROUPS: {
     title: "Cơ bản & Định giá",
     badge: "Valuation & Health",
     items: [
+      { id: "piotroski", label: "💎 F-Score Kim Cương & Altman Z" },
       { id: "valuation", label: "Định giá P/E & P/B" },
       { id: "fundamental", label: "Chỉ số tài chính cơ bản" },
     ],
@@ -304,6 +308,26 @@ function ScreenerInner() {
       break;
     case "canslim":
       body = <CanslimScreener defaultSector={sector} />;
+      break;
+    case "rs-leaders":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="rs_leaders"
+          defaultView="technical"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
+    case "piotroski":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="piotroski_diamonds"
+          defaultView="health"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "minervini":
       body = <MinerviniScreener defaultSector={sector} />;

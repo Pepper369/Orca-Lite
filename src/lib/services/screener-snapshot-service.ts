@@ -30,10 +30,22 @@ import {
   type MtfConsensusResult,
   type MtfQuoteInput,
 } from "../engines/mtf-consensus";
+import {
+  calculateUniverseRsRatings,
+  type StockRsResult,
+  type RsCategory,
+} from "../engines/rs-rating";
+import {
+  computePiotroskiAltman,
+  type PiotroskiResult,
+  type AltmanZResult,
+} from "../engines/piotroski-altman";
 
 export type ScreenerPreset =
   | "all"
   | "near_buy_point"
+  | "rs_leaders"
+  | "piotroski_diamonds"
   | "mtf_confluence"
   | "bottom_confluence"
   | "quant_edge"
@@ -76,6 +88,11 @@ export type ScreenerStockItem = {
   fcfTtm: number | null;
   qualityScore: number | null; // 0-100
   healthScore: number | null; // 0-100
+  // Fundamental Financial Health (Piotroski 0-9 & Altman Z''-Score)
+  piotroskiFScore: number | null;
+  piotroskiRating?: "EXCELLENT" | "GOOD" | "AVERAGE" | "WEAK";
+  altmanZScore: number | null;
+  altmanZone?: "SAFE" | "GREY" | "DISTRESS";
   // MA Technical Momentum
   ma10: number | null;
   ma20: number | null;
@@ -90,12 +107,19 @@ export type ScreenerStockItem = {
   candlePattern?: string | null;
   candlePatternScore?: number | null;
   candleAgeBars?: number | null;
+  vcpDepths?: number[] | null;
+  vcpLastDepth?: number | null;
+  vcpPivot?: number | null;
   confluenceScore: number; // 0-100
   confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE";
   hasBullishDivergence?: boolean;
   divergenceSummary?: string | null;
   foreignNetVal?: number | null; // in Billion VND
   foreignAccumulating?: boolean;
+  // William O'Neil Relative Strength (RS Rating 1 - 99)
+  rsRating: number | null;
+  rsCategory?: RsCategory;
+  rsTrend?: "IMPROVING" | "WEAKENING" | "NEUTRAL";
   rsRating20?: number | null;
   isMarketLeader?: boolean;
   // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
@@ -836,8 +860,26 @@ function detectPresets(item: {
   absBuyDiff?: number | null;
   isMtfAligned?: boolean;
   mtfConsensus?: string;
+  rsRating?: number | null;
+  piotroskiFScore?: number | null;
+  altmanZone?: string;
+  altmanZScore?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
+
+  // 0a. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
+  if (item.rsRating != null && item.rsRating >= 80) {
+    passes.push("rs_leaders");
+  }
+
+  // 0b. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
+  if (
+    item.piotroskiFScore != null &&
+    item.piotroskiFScore >= 7 &&
+    (item.altmanZone === "SAFE" || (item.altmanZScore != null && item.altmanZScore >= 2.0))
+  ) {
+    passes.push("piotroski_diamonds");
+  }
 
   // 1. Quant Edge Presets (Institutional Statistical Models)
   if (item.quantEdgeScore != null && item.quantEdgeScore >= 62) {
@@ -1178,7 +1220,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       ]).catch(() => ({ snapshots: [] }));
 
       const ohlcvTask = batchVnOhlcv([...symbols, "VNINDEX"], {
-        bars: 65,
+        bars: 120,
         concurrency: 8,
         perSymbolMs: 300,
         deadlineMs: 4_500,
@@ -1222,6 +1264,15 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         const i1 = indexBars[indexBars.length - 1].close;
         if (i0 > 0) indexPerf20 = ((i1 - i0) / i0) * 100;
       }
+
+      // Pre-calculate William O'Neil Universe RS Ratings (1 - 99)
+      const stockHistories: Record<string, any[]> = {};
+      for (const [symKey, data] of ohlcvMap.entries()) {
+        if (data?.bars?.length) {
+          stockHistories[symKey.toUpperCase()] = data.bars;
+        }
+      }
+      const rsMap = calculateUniverseRsRatings(stockHistories);
 
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
@@ -1299,7 +1350,6 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
             rsRating20 = Number((stockPerf20 - indexPerf20).toFixed(1));
           }
         }
-        const isMarketLeader = rsRating20 != null && rsRating20 > 5.0;
 
         const techFeatures = analyzeTechFeatures(
           parsed,
@@ -1322,6 +1372,26 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           techFeatures.volRatio20,
           compositeScore
         );
+
+        // William O'Neil RS Rating 1 - 99
+        const rsInfo = rsMap.get(sym);
+        const rsRating = rsInfo?.rsRating ?? null;
+        const rsCategory = rsInfo?.category;
+        const rsTrend = rsInfo?.rsTrend;
+        const isMarketLeader = rsRating != null ? rsRating >= 80 : (rsRating20 != null && rsRating20 > 5);
+
+        // Fundamental Health: Piotroski F-Score (0 - 9) & Altman Z''-Score
+        const fundHealth = f ? computePiotroskiAltman(f) : null;
+        const piotroskiFScore = fundHealth?.piotroski.fScore ?? null;
+        const piotroskiRating = fundHealth?.piotroski.rating;
+        const altmanZScore = fundHealth?.altman.zScore ?? null;
+        const altmanZone = fundHealth?.altman.zone;
+
+        // Enhanced VCP details
+        const topCP = techFeatures.topChartPattern;
+        const vcpDepths = topCP?.kind === "vcp" ? topCP.vcpDepths ?? null : null;
+        const vcpLastDepth = topCP?.kind === "vcp" ? topCP.lastContractionDepth ?? null : null;
+        const vcpPivot = topCP?.kind === "vcp" ? topCP.pivotPrice ?? null : null;
 
         const buyPointPlan = calculateBuyPointPlan(
           parsed,
@@ -1361,6 +1431,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
           buyZoneStatus: buyPointPlan.buyZoneStatus,
           absBuyDiff: buyPointPlan.absBuyDiff,
+          rsRating,
+          piotroskiFScore,
+          altmanZone,
+          altmanZScore,
         });
 
         items.push({
@@ -1389,6 +1463,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           fcfTtm,
           qualityScore,
           healthScore,
+          piotroskiFScore,
+          piotroskiRating,
+          altmanZScore,
+          altmanZone,
           ma10: techFeatures.ma10,
           ma20: techFeatures.ma20,
           ma50: techFeatures.ma50,
@@ -1401,12 +1479,18 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           candlePattern: techFeatures.candlePattern,
           candlePatternScore: techFeatures.candlePatternScore,
           candleAgeBars: techFeatures.candleAgeBars,
+          vcpDepths,
+          vcpLastDepth,
+          vcpPivot,
           hasBullishDivergence: techFeatures.hasBullishDivergence,
           divergenceSummary: techFeatures.divergenceSummary,
           confluenceScore: techFeatures.confluenceScore,
           confluenceBadge: techFeatures.confluenceBadge,
           foreignNetVal,
           foreignAccumulating,
+          rsRating,
+          rsCategory,
+          rsTrend,
           rsRating20,
           isMarketLeader,
           mtfConsensus: techFeatures.mtfConsensus,
@@ -1448,6 +1532,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
         near_buy_point: 0,
+        rs_leaders: 0,
+        piotroski_diamonds: 0,
         mtf_confluence: 0,
         bottom_confluence: 0,
         quant_edge: 0,
@@ -1500,6 +1586,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
     near_buy_point: 0,
+    rs_leaders: 0,
+    piotroski_diamonds: 0,
     mtf_confluence: 0,
     bottom_confluence: 0,
     quant_edge: 0,

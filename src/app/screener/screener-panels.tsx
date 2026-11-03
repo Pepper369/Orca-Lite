@@ -96,6 +96,110 @@ export function QuantBadge({
   return <span className="text-[10px] text-text-muted">{score ? `${score}đ` : "—"}</span>;
 }
 
+export function RsRatingBadge({
+  rating,
+  trend,
+}: {
+  rating?: number | null;
+  trend?: "IMPROVING" | "WEAKENING" | "NEUTRAL" | null;
+}) {
+  if (rating == null || isNaN(rating)) return <span className="text-[10px] text-text-muted">—</span>;
+
+  let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  let icon = null;
+
+  if (rating >= 90) {
+    colorClass = "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm font-bold";
+    icon = <Sparkles className="size-2.5 text-amber-300" />;
+  } else if (rating >= 80) {
+    colorClass = "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold";
+    icon = <TrendingUp className="size-2.5 text-emerald-300" />;
+  } else if (rating >= 60) {
+    colorClass = "bg-blue-500/15 text-blue-300 border-blue-500/30";
+  } else if (rating < 40) {
+    colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+  }
+
+  return (
+    <span
+      title={`Relative Strength Rating (1-99): ${rating}${trend ? ` (Xu hướng: ${trend})` : ""}`}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap num ${colorClass}`}
+    >
+      {icon}
+      <span>RS {rating}</span>
+      {trend === "IMPROVING" && <span className="text-[9px] text-emerald-400 font-black">▲</span>}
+      {trend === "WEAKENING" && <span className="text-[9px] text-rose-400 font-black">▼</span>}
+    </span>
+  );
+}
+
+export function PiotroskiBadge({
+  score,
+}: {
+  score?: number | null;
+  rating?: string | null;
+}) {
+  if (score == null || isNaN(score)) return <span className="text-[10px] text-text-muted">—</span>;
+
+  let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  if (score >= 8) {
+    colorClass = "bg-cyan-500/20 text-cyan-300 border-cyan-400/40 font-bold shadow-sm";
+  } else if (score >= 6) {
+    colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 font-semibold";
+  } else if (score < 4) {
+    colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+  }
+
+  return (
+    <span
+      title={`Piotroski F-Score: ${score}/9`}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] whitespace-nowrap num ${colorClass}`}
+    >
+      <ShieldCheck className="size-2.5" />
+      <span>F-{score}/9</span>
+    </span>
+  );
+}
+
+export function AltmanBadge({
+  zone,
+  zScore,
+}: {
+  zone?: "SAFE" | "GREY" | "DISTRESS" | string | null;
+  zScore?: number | null;
+}) {
+  if (!zone) return <span className="text-[10px] text-text-muted">—</span>;
+
+  if (zone === "SAFE") {
+    return (
+      <span
+        title={`Altman Z''-Score: ${zScore ?? "An toàn"}`}
+        className="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+      >
+        An Toàn {zScore ? `(Z=${zScore})` : ""}
+      </span>
+    );
+  }
+  if (zone === "DISTRESS") {
+    return (
+      <span
+        title={`Altman Z''-Score: ${zScore ?? "Nguy cơ"}`}
+        className="inline-flex items-center gap-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold whitespace-nowrap"
+      >
+        Nguy Cơ {zScore ? `(Z=${zScore})` : ""}
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`Altman Z''-Score: ${zScore ?? "Vùng xám"}`}
+      className="inline-flex items-center gap-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 text-[10px] whitespace-nowrap"
+    >
+      Vùng Xám {zScore ? `(Z=${zScore})` : ""}
+    </span>
+  );
+}
+
 export function ConfluenceBadge({
   badge,
   score,
@@ -190,6 +294,8 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
   { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
+  { id: "rs_leaders", label: "👑 Dẫn Dắt RS 80+ (O'Neil)", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
+  { id: "piotroski_diamonds", label: "💎 Kim Cương F-Score & Altman", icon: <ShieldCheck className="size-3.5 text-cyan-400" />, desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
   { id: "mtf_confluence", label: "Đồng Thuận Đa Khung H1-D1-W1", icon: <Zap className="size-3.5 text-amber-400" />, desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
   { id: "bottom_confluence", label: "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)", icon: <Sparkles className="size-3.5 text-cyan-400" />, desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
   { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
@@ -1073,22 +1179,28 @@ export function VnScreener({
                       ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
+                      onClick={() => handleSort("rsRating")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-amber-400"
+                    >
+                      RS (1-99) {sortKey === "rsRating" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("ma10")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      MA10 {sortKey === "ma10" && (sortOrder === "desc" ? "↓" : "↑")}
+                      MA10
                     </th>
                     <th
                       onClick={() => handleSort("ma20")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      MA20 {sortKey === "ma20" && (sortOrder === "desc" ? "↓" : "↑")}
+                      MA20
                     </th>
                     <th
                       onClick={() => handleSort("ma50")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      MA50 {sortKey === "ma50" && (sortOrder === "desc" ? "↓" : "↑")}
+                      MA50
                     </th>
                     <th
                       onClick={() => handleSort("volRatio20")}
@@ -1097,6 +1209,7 @@ export function VnScreener({
                       Vol/MA20
                     </th>
                     <th className="py-2.5 text-center font-medium">Tín hiệu MA</th>
+                    <th className="py-2.5 text-left font-medium">Mẫu hình VCP / Nến</th>
                     <th
                       onClick={() => handleSort("compositeScore")}
                       className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
@@ -1182,6 +1295,18 @@ export function VnScreener({
                 {viewTab === "health" && (
                   <>
                     <th
+                      onClick={() => handleSort("piotroskiFScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-cyan-400"
+                    >
+                      Piotroski (0-9) {sortKey === "piotroskiFScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("altmanZScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-emerald-400"
+                    >
+                      Altman Z'' {sortKey === "altmanZScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("debtEquity")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
@@ -1226,7 +1351,7 @@ export function VnScreener({
                 rows.map((row) => (
                   <tr key={row.symbol} className="row-hover border-b border-line/40 transition-colors">
                     <td className="px-3.5 py-2.5">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <Link
                           href={`/stocks/${row.symbol}`}
                           className="font-bold text-accent-primary hover:underline"
@@ -1237,6 +1362,9 @@ export function VnScreener({
                           <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
                             {row.exchange}
                           </span>
+                        )}
+                        {row.rsRating != null && (
+                          <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
                         )}
                       </div>
                       <div className="max-w-[140px] truncate text-[10px] text-text-muted">
@@ -1554,6 +1682,9 @@ export function VnScreener({
                         <td className="py-2.5 text-right">
                           <Chg value={row.changePercent} arrow={false} />
                         </td>
+                        <td className="py-2.5 text-center">
+                          <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
+                        </td>
                         <td className="num py-2.5 text-right text-text-primary">
                           {row.ma10 != null ? fmtNum(row.ma10, 2) : "—"}
                         </td>
@@ -1574,6 +1705,30 @@ export function VnScreener({
                         </td>
                         <td className="py-2.5 text-center">
                           <MaSignalBadge signal={row.maSignal} />
+                        </td>
+                        <td className="py-2.5 text-left text-[11px]">
+                          {row.vcpDepths && row.vcpDepths.length > 0 ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-bold text-accent-primary text-[10.5px]">
+                                VCP ({row.vcpDepths.length} nhịp: {row.vcpDepths.map((d) => `-${d}%`).join(" → ")})
+                              </span>
+                              {row.vcpPivot && (
+                                <span className="text-[9.5px] text-text-muted">
+                                  Pivot: <strong className="num text-text-primary">{fmtNum(row.vcpPivot, 2)}</strong>
+                                </span>
+                              )}
+                            </div>
+                          ) : row.chartPattern ? (
+                            <span className="inline-block rounded bg-accent-primary/10 border border-accent-primary/20 px-2 py-0.5 text-[10px] font-semibold text-accent-primary">
+                              {row.chartPattern}
+                            </span>
+                          ) : row.candlePattern ? (
+                            <span className="inline-block rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">
+                              ✦ {row.candlePattern}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted text-[10px]">—</span>
+                          )}
                         </td>
                         <td className="num py-2.5 pr-3.5 text-right">
                           <span
@@ -1639,6 +1794,12 @@ export function VnScreener({
 
                     {viewTab === "health" && (
                       <>
+                        <td className="py-2.5 text-center">
+                          <PiotroskiBadge score={row.piotroskiFScore} rating={row.piotroskiRating} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <AltmanBadge zone={row.altmanZone} zScore={row.altmanZScore} />
+                        </td>
                         <td className="num py-2.5 text-right font-medium text-text-primary">
                           {row.debtEquity != null ? fmtNum(row.debtEquity, 2) : "—"}
                         </td>
@@ -1678,6 +1839,12 @@ export function VnScreener({
                     <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
                       {row.exchange}
                     </span>
+                  )}
+                  {row.rsRating != null && (
+                    <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
+                  )}
+                  {row.piotroskiFScore != null && row.piotroskiFScore >= 7 && (
+                    <PiotroskiBadge score={row.piotroskiFScore} />
                   )}
                   {row.maSignal && row.maSignal !== "NEUTRAL" && (
                     <MaSignalBadge signal={row.maSignal} />

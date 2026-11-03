@@ -35,6 +35,9 @@ export interface DetectedChartPattern {
   ageBars: number; // Bars since pattern completed / triggered
   contractions?: number; // For VCP
   volumeDrying?: boolean;
+  vcpDepths?: number[]; // Array of contraction depths in % (e.g. [18.5, 8.2, 3.4])
+  lastContractionDepth?: number; // Final tight contraction depth %
+  pivotPrice?: number; // Specific pivot buy trigger level
 }
 
 export interface ChartPatternOptions {
@@ -142,6 +145,9 @@ function detectVcp(bars: OhlcvBar[], volMa20: (number | null)[]): DetectedChartP
     ageBars: n - 1 - recentHighs[recentHighs.length - 1]!.index,
     contractions: depths.length,
     volumeDrying: volDry,
+    vcpDepths: depths.map((d) => Math.round(d * 1000) / 10),
+    lastContractionDepth: Math.round(lastDepth * 1000) / 10,
+    pivotPrice: Math.round(pivotHigh * 100) / 100,
   };
 }
 
