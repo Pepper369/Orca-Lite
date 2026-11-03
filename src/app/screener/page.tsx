@@ -10,6 +10,8 @@ import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
   | "buy-point"
+  | "orca-master"
+  | "smart-money"
   | "multi-source"
   | "quant-edge"
   | "confluence"
@@ -48,6 +50,8 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
+      { id: "orca-master", label: "🏆 Orca Master (Top 90+)" },
+      { id: "smart-money", label: "🦈 Dòng Tiền Cá Mập" },
       { id: "buy-point", label: "🎯 Điểm Mua Tối Ưu (Buy Zone)" },
       { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
       { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
@@ -236,6 +240,26 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "orca-master":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="orca_master_elite"
+          defaultView="orca_master"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
+    case "smart-money":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="smart_money_inflow"
+          defaultView="smart_money"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
     case "buy-point":
       body = (
         <VnScreener

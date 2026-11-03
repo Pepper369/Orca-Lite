@@ -29,6 +29,7 @@ import {
   ChevronUp,
   RotateCcw,
   CheckCircle2,
+  Crown,
 } from "lucide-react";
 import type {
   ScreenerPreset,
@@ -63,7 +64,141 @@ export function Field({
   );
 }
 
-type ViewTab = "overview" | "buy_point" | "quant" | "confluence" | "technical" | "valuation" | "profitability" | "health";
+type ViewTab =
+  | "overview"
+  | "orca_master"
+  | "smart_money"
+  | "buy_point"
+  | "quant"
+  | "confluence"
+  | "technical"
+  | "valuation"
+  | "profitability"
+  | "health";
+
+export function OrcaMasterBadge({
+  score,
+  category,
+  strengthVi,
+}: {
+  score?: number | null;
+  category?: string | null;
+  strengthVi?: string | null;
+}) {
+  if (score == null || isNaN(score)) return <span className="text-[10px] text-text-muted">—</span>;
+
+  let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  let icon = null;
+
+  if (score >= 90) {
+    colorClass = "bg-gradient-to-r from-amber-500/25 to-yellow-500/25 text-amber-200 border-amber-400/50 shadow-sm font-black";
+    icon = <Crown className="size-2.5 text-amber-300" />;
+  } else if (score >= 80) {
+    colorClass = "bg-cyan-500/20 text-cyan-200 border-cyan-400/40 font-bold shadow-xs";
+    icon = <Sparkles className="size-2.5 text-cyan-300" />;
+  } else if (score >= 60) {
+    colorClass = "bg-blue-500/15 text-blue-300 border-blue-500/30 font-medium";
+  } else if (score < 40) {
+    colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+  }
+
+  return (
+    <span
+      title={`Orca Master Composite Rating: ${score}/99 (${category ?? ""})${strengthVi ? ` · Trụ cột: ${strengthVi}` : ""}`}
+      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
+    >
+      {icon}
+      <span>Master {score}</span>
+    </span>
+  );
+}
+
+export function SmartMoneyBadge({
+  signal,
+  signalVi,
+  score,
+  activeBuyRatioPct,
+}: {
+  signal?: string | null;
+  signalVi?: string | null;
+  score?: number | null;
+  activeBuyRatioPct?: number | null;
+}) {
+  if (!signal || signal === "NEUTRAL") {
+    if (activeBuyRatioPct != null) {
+      return (
+        <span className="text-[10px] text-text-muted num">
+          Mua CĐ {activeBuyRatioPct}%
+        </span>
+      );
+    }
+    return <span className="text-[10px] text-text-muted">—</span>;
+  }
+
+  if (signal === "HEAVY_ACCUMULATION") {
+    return (
+      <span
+        title={`Cá mập gom mạnh: Mua chủ động ${activeBuyRatioPct ?? ""}%`}
+        className="inline-flex items-center gap-1 rounded bg-purple-500/20 text-purple-200 border border-purple-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap shadow-xs"
+      >
+        <Zap className="size-2.5 text-purple-300" />
+        <span>Cá Mập Gom {activeBuyRatioPct ? `(${activeBuyRatioPct}%)` : ""}</span>
+      </span>
+    );
+  }
+
+  if (signal === "POCKET_PIVOT") {
+    return (
+      <span
+        title="Pocket Pivot: Dòng tiền lớn bùng nổ vol sớm trong nền giá"
+        className="inline-flex items-center gap-1 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
+      >
+        <TrendingUp className="size-2.5 text-emerald-300" />
+        <span>Pocket Pivot</span>
+      </span>
+    );
+  }
+
+  if (signal === "SPRING_ABSORPTION") {
+    return (
+      <span
+        title="Wyckoff Spring: Rũ bỏ cạn cung test thành công"
+        className="inline-flex items-center gap-1 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap"
+      >
+        <Sparkles className="size-2.5 text-cyan-300" />
+        <span>Wyckoff Spring</span>
+      </span>
+    );
+  }
+
+  if (signal === "FOREIGN_NET_BUY") {
+    return (
+      <span
+        title="Khối ngoại mua ròng liên tục"
+        className="inline-flex items-center gap-1 rounded bg-blue-500/15 text-blue-200 border border-blue-400/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+      >
+        <span>Khối Ngoại Gom</span>
+      </span>
+    );
+  }
+
+  if (signal === "DISTRIBUTION") {
+    return (
+      <span
+        title="Áp lực bán chủ động lớn / phân phối"
+        className="inline-flex items-center gap-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap"
+      >
+        <span>Phân Phối</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="text-[10px] text-text-muted">
+      {signalVi ?? "—"}
+    </span>
+  );
+}
 
 export function QuantBadge({
   badge,
@@ -293,6 +428,8 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
+  { id: "orca_master_elite", label: "🏆 Orca Master 80+", icon: <Crown className="size-3.5 text-amber-400" />, desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
+  { id: "smart_money_inflow", label: "🦈 Dòng Tiền Cá Mập", icon: <Zap className="size-3.5 text-purple-400" />, desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
   { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
   { id: "rs_leaders", label: "👑 Dẫn Dắt RS 80+ (O'Neil)", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
   { id: "piotroski_diamonds", label: "💎 Kim Cương F-Score & Altman", icon: <ShieldCheck className="size-3.5 text-cyan-400" />, desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
@@ -352,6 +489,10 @@ export function VnScreener({
   const initialSortKey =
     defaultPreset === "near_buy_point" || defaultView === "buy_point"
       ? "absBuyDiff"
+      : defaultPreset === "orca_master_elite" || defaultView === "orca_master"
+      ? "orcaMasterScore"
+      : defaultPreset === "smart_money_inflow" || defaultView === "smart_money"
+      ? "smartMoneyScore"
       : defaultPreset === "confluence" || defaultView === "confluence"
       ? "confluenceScore"
       : "marketCap";
@@ -390,6 +531,12 @@ export function VnScreener({
     if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
       setSortKey("absBuyDiff");
       setSortOrder("asc");
+    } else if (defaultPreset === "orca_master_elite" || defaultView === "orca_master") {
+      setSortKey("orcaMasterScore");
+      setSortOrder("desc");
+    } else if (defaultPreset === "smart_money_inflow" || defaultView === "smart_money") {
+      setSortKey("smartMoneyScore");
+      setSortOrder("desc");
     } else if (defaultPreset === "confluence" || defaultView === "confluence") {
       setSortKey("confluenceScore");
       setSortOrder("desc");
@@ -539,7 +686,15 @@ export function VnScreener({
 
   const handleSelectPreset = (p: ScreenerPreset) => {
     setPreset(p);
-    if (p === "near_buy_point") {
+    if (p === "orca_master_elite") {
+      setViewTab("orca_master");
+      setSortKey("orcaMasterScore");
+      setSortOrder("desc");
+    } else if (p === "smart_money_inflow") {
+      setViewTab("smart_money");
+      setSortKey("smartMoneyScore");
+      setSortOrder("desc");
+    } else if (p === "near_buy_point") {
       setViewTab("buy_point");
       setSortKey("absBuyDiff");
       setSortOrder("asc");
@@ -876,8 +1031,8 @@ export function VnScreener({
         )}
 
         {/* View Tabs Bar */}
-        <div className="flex items-center justify-between border-b border-line px-3 py-1.5 bg-panel">
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between border-b border-line px-3 py-1.5 bg-panel overflow-x-auto">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => setViewTab("overview")}
@@ -888,6 +1043,38 @@ export function VnScreener({
               }`}
             >
               Tổng quan
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("orca_master");
+                setSortKey("orcaMasterScore");
+                setSortOrder("desc");
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "orca_master"
+                  ? "bg-panel-3 text-amber-300 font-bold shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Crown className="size-3 text-amber-300" />
+              Orca Master
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("smart_money");
+                setSortKey("smartMoneyScore");
+                setSortOrder("desc");
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1 ${
+                viewTab === "smart_money"
+                  ? "bg-panel-3 text-purple-300 font-bold shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Zap className="size-3 text-purple-400" />
+              Dòng Tiền Cá Mập
             </button>
             <button
               type="button"
@@ -1037,6 +1224,104 @@ export function VnScreener({
                     >
                       Điểm Orca {sortKey === "compositeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
+                  </>
+                )}
+
+                {viewTab === "orca_master" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("changePercent")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("orcaMasterScore")}
+                      className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
+                    >
+                      Orca Master (1-99) {sortKey === "orcaMasterScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-left font-medium">Trụ Cột Dẫn Dắt</th>
+                    <th
+                      onClick={() => handleSort("rsRating")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-amber-400"
+                    >
+                      RS Leader {sortKey === "rsRating" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("smartMoneyScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-purple-400"
+                    >
+                      Dòng Tiền Cá Mập {sortKey === "smartMoneyScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("piotroskiFScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-cyan-400"
+                    >
+                      Piotroski (0-9) {sortKey === "piotroskiFScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("absBuyDiff")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 pr-3.5 text-center font-medium">Thao Tác</th>
+                  </>
+                )}
+
+                {viewTab === "smart_money" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("changePercent")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ± % {sortKey === "changePercent" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-center font-medium">Tín Hiệu Cá Mập</th>
+                    <th
+                      onClick={() => handleSort("smartMoneyScore")}
+                      className="py-2.5 text-center font-bold cursor-pointer hover:text-purple-400 text-purple-300"
+                    >
+                      Điểm Cá Mập (0-100) {sortKey === "smartMoneyScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("activeBuyRatioPct")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-emerald-400"
+                    >
+                      Mua Chủ Động % {sortKey === "activeBuyRatioPct" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("foreignNetVal")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-blue-400"
+                    >
+                      Khối Ngoại (Tỷ) {sortKey === "foreignNetVal" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("volRatio20")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Vol / MA20 {sortKey === "volRatio20" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("absBuyDiff")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 pr-3.5 text-center font-medium">Thao Tác</th>
                   </>
                 )}
 
@@ -1430,6 +1715,114 @@ export function VnScreener({
                       </>
                     )}
 
+                    {viewTab === "orca_master" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <OrcaMasterBadge
+                            score={row.orcaMasterScore}
+                            category={row.orcaMasterCategory}
+                            strengthVi={row.orcaMasterStrengthVi}
+                          />
+                        </td>
+                        <td className="py-2.5 text-left">
+                          <span className="text-[11px] text-text-secondary truncate max-w-[150px] inline-block font-medium">
+                            {row.orcaMasterStrengthVi ?? "Đa trụ cột đồng thuận"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SmartMoneyBadge
+                            signal={row.smartMoneySignal}
+                            signalVi={row.smartMoneySignalVi}
+                            score={row.smartMoneyScore}
+                            activeBuyRatioPct={row.activeBuyRatioPct}
+                          />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <PiotroskiBadge score={row.piotroskiFScore} rating={row.piotroskiRating} />
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-accent-primary">
+                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
+                          {row.absBuyDiff != null && (
+                            <span className="ml-1 text-[10px] text-text-muted">({row.absBuyDiff.toFixed(1)}%)</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenBacktest) onOpenBacktest(row.symbol);
+                            }}
+                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
+                          >
+                            Backtest
+                          </button>
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "smart_money" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SmartMoneyBadge
+                            signal={row.smartMoneySignal}
+                            signalVi={row.smartMoneySignalVi}
+                            score={row.smartMoneyScore}
+                            activeBuyRatioPct={row.activeBuyRatioPct}
+                          />
+                        </td>
+                        <td className="num py-2.5 text-center font-bold text-purple-300">
+                          {row.smartMoneyScore != null ? `${row.smartMoneyScore}đ` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold text-emerald-400">
+                          {row.activeBuyRatioPct != null ? `${row.activeBuyRatioPct}%` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.foreignNetVal != null ? (
+                            <span className={row.foreignNetVal > 0 ? "text-emerald-400" : row.foreignNetVal < 0 ? "text-rose-400" : "text-text-muted"}>
+                              {row.foreignNetVal > 0 ? "+" : ""}{row.foreignNetVal} tỷ
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.volRatio20 != null ? `${row.volRatio20.toFixed(2)}x` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-accent-primary">
+                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
+                          {row.chartPattern && (
+                            <span className="block text-[9px] text-text-muted font-normal truncate max-w-[110px]">{row.chartPattern}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenBacktest) onOpenBacktest(row.symbol);
+                            }}
+                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
+                          >
+                            Backtest
+                          </button>
+                        </td>
+                      </>
+                    )}
+
                     {viewTab === "buy_point" && (
                       <>
                         <td className="num py-2.5 text-right font-bold text-text-primary">
@@ -1746,6 +2139,114 @@ export function VnScreener({
                       </>
                     )}
 
+                    {viewTab === "orca_master" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <OrcaMasterBadge
+                            score={row.orcaMasterScore}
+                            category={row.orcaMasterCategory}
+                            strengthVi={row.orcaMasterStrengthVi}
+                          />
+                        </td>
+                        <td className="py-2.5 text-left">
+                          <span className="text-[11px] text-text-secondary truncate max-w-[150px] inline-block font-medium">
+                            {row.orcaMasterStrengthVi ?? "Đa trụ cột đồng thuận"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SmartMoneyBadge
+                            signal={row.smartMoneySignal}
+                            signalVi={row.smartMoneySignalVi}
+                            score={row.smartMoneyScore}
+                            activeBuyRatioPct={row.activeBuyRatioPct}
+                          />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <PiotroskiBadge score={row.piotroskiFScore} rating={row.piotroskiRating} />
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-accent-primary">
+                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
+                          {row.absBuyDiff != null && (
+                            <span className="ml-1 text-[10px] text-text-muted">({row.absBuyDiff.toFixed(1)}%)</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenBacktest) onOpenBacktest(row.symbol);
+                            }}
+                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
+                          >
+                            Backtest
+                          </button>
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "smart_money" && (
+                      <>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          <Chg value={row.changePercent} arrow={false} />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <SmartMoneyBadge
+                            signal={row.smartMoneySignal}
+                            signalVi={row.smartMoneySignalVi}
+                            score={row.smartMoneyScore}
+                            activeBuyRatioPct={row.activeBuyRatioPct}
+                          />
+                        </td>
+                        <td className="num py-2.5 text-center font-bold text-purple-300">
+                          {row.smartMoneyScore != null ? `${row.smartMoneyScore}đ` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold text-emerald-400">
+                          {row.activeBuyRatioPct != null ? `${row.activeBuyRatioPct}%` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-semibold">
+                          {row.foreignNetVal != null ? (
+                            <span className={row.foreignNetVal > 0 ? "text-emerald-400" : row.foreignNetVal < 0 ? "text-rose-400" : "text-text-muted"}>
+                              {row.foreignNetVal > 0 ? "+" : ""}{row.foreignNetVal} tỷ
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right text-text-secondary">
+                          {row.volRatio20 != null ? `${row.volRatio20.toFixed(2)}x` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold text-accent-primary">
+                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
+                          {row.chartPattern && (
+                            <span className="block text-[9px] text-text-muted font-normal truncate max-w-[110px]">{row.chartPattern}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onOpenBacktest) onOpenBacktest(row.symbol);
+                            }}
+                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
+                          >
+                            Backtest
+                          </button>
+                        </td>
+                      </>
+                    )}
+
                     {viewTab === "valuation" && (
                       <>
                         <td className="num py-2.5 text-right font-medium">
@@ -1839,6 +2340,12 @@ export function VnScreener({
                     <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
                       {row.exchange}
                     </span>
+                  )}
+                  {row.orcaMasterScore != null && row.orcaMasterScore >= 75 && (
+                    <OrcaMasterBadge score={row.orcaMasterScore} category={row.orcaMasterCategory} />
+                  )}
+                  {row.smartMoneySignal && row.smartMoneySignal !== "NEUTRAL" && (
+                    <SmartMoneyBadge signal={row.smartMoneySignal} signalVi={row.smartMoneySignalVi} score={row.smartMoneyScore} activeBuyRatioPct={row.activeBuyRatioPct} />
                   )}
                   {row.rsRating != null && (
                     <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />

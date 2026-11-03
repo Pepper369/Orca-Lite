@@ -40,10 +40,23 @@ import {
   type PiotroskiResult,
   type AltmanZResult,
 } from "../engines/piotroski-altman";
+import {
+  evaluateSmartMoneyFootprint,
+  type SmartMoneyResult,
+  type SmartMoneySignal,
+} from "../engines/smart-money-footprint";
+import {
+  calculateUniverseOrcaMaster,
+  type OrcaMasterResult,
+  type OrcaMasterCategory,
+  type OrcaMasterInput,
+} from "../engines/orca-master-composite";
 
 export type ScreenerPreset =
   | "all"
   | "near_buy_point"
+  | "orca_master_elite"
+  | "smart_money_inflow"
   | "rs_leaders"
   | "piotroski_diamonds"
   | "mtf_confluence"
@@ -153,6 +166,16 @@ export type ScreenerStockItem = {
   buyStrategy: string | null;
   presetsPassed: ScreenerPreset[];
   compositeScore: number; // 0-100
+  // Orca Composite Master Rating (1 - 99)
+  orcaMasterScore: number | null;
+  orcaMasterCategory?: OrcaMasterCategory;
+  orcaMasterStrengthVi?: string | null;
+  // Smart Money Footprint & Orderflow
+  smartMoneyScore: number | null; // 0 - 100
+  smartMoneySignal?: SmartMoneySignal;
+  smartMoneySignalVi?: string | null;
+  activeBuyRatioPct?: number | null;
+  smartMoneySummaryVi?: string | null;
 };
 
 export type ScreenerFilterParams = {
@@ -187,6 +210,10 @@ export type ScreenerFilterParams = {
   minQuantScore?: number;
   maxOuZScore?: number;
   minRiskReward?: number;
+  minOrcaMasterScore?: number;
+  minSmartMoneyScore?: number;
+  minRsRating?: number;
+  minPiotroskiScore?: number;
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
@@ -864,15 +891,33 @@ function detectPresets(item: {
   piotroskiFScore?: number | null;
   altmanZone?: string;
   altmanZScore?: number | null;
+  orcaMasterScore?: number | null;
+  smartMoneyScore?: number | null;
+  smartMoneySignal?: SmartMoneySignal | string | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
-  // 0a. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
+  // 0a. Orca Master Elite (Top 80+ Institutional Multi-Factor Rating)
+  if (item.orcaMasterScore != null && item.orcaMasterScore >= 80) {
+    passes.push("orca_master_elite");
+  }
+
+  // 0b. Dấu Chân Cá Mập (Smart Money Inflow & Institutional Footprint)
+  if (
+    (item.smartMoneyScore != null && item.smartMoneyScore >= 70) ||
+    item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+    item.smartMoneySignal === "POCKET_PIVOT" ||
+    item.smartMoneySignal === "SPRING_ABSORPTION"
+  ) {
+    passes.push("smart_money_inflow");
+  }
+
+  // 0c. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
   if (item.rsRating != null && item.rsRating >= 80) {
     passes.push("rs_leaders");
   }
 
-  // 0b. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
+  // 0d. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
   if (
     item.piotroskiFScore != null &&
     item.piotroskiFScore >= 7 &&
@@ -1276,6 +1321,53 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
+      const orcaInputs: OrcaMasterInput[] = [];
+      const intermediateEntries: {
+        sym: string;
+        sec: ReturnType<typeof getSecurity>;
+        q: any;
+        vc: any;
+        price: number | null;
+        change: number | null;
+        changePercent: number | null;
+        volume: number | null;
+        marketCap: number | null;
+        pe: number | null;
+        pb: number | null;
+        ps: number | null;
+        evEbitda: number | null;
+        dividendYield: number | null;
+        roe: number | null;
+        roa: number | null;
+        grossMargin: number | null;
+        netMargin: number | null;
+        debtEquity: number | null;
+        currentRatio: number | null;
+        revenueYoyPct: number | null;
+        niYoyPct: number | null;
+        fcfTtm: number | null;
+        qualityScore: number;
+        healthScore: number;
+        piotroskiFScore: number | null;
+        piotroskiRating?: "EXCELLENT" | "GOOD" | "AVERAGE" | "WEAK";
+        altmanZScore: number | null;
+        altmanZone?: "SAFE" | "GREY" | "DISTRESS";
+        techFeatures: ReturnType<typeof analyzeTechFeatures>;
+        quantFeatures: ReturnType<typeof analyzeQuantFeatures>;
+        vcpDepths: number[] | null;
+        vcpLastDepth: number | null;
+        vcpPivot: number | null;
+        buyPointPlan: ReturnType<typeof calculateBuyPointPlan>;
+        foreignNetVal: number | null;
+        foreignAccumulating: boolean;
+        rsRating: number | null;
+        rsCategory?: RsCategory;
+        rsTrend?: "IMPROVING" | "WEAKENING" | "NEUTRAL";
+        rsRating20: number | null;
+        isMarketLeader: boolean;
+        smartMoney: SmartMoneyResult;
+        compositeScore: number;
+      }[] = [];
 
       for (const sym of symbols) {
         const sec = getSecurity(sym);
@@ -1403,45 +1495,42 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           techFeatures.volRatio20
         );
 
-        const presetsPassed = detectPresets({
-          roe,
-          revenueYoyPct,
-          niYoyPct,
-          price,
-          changePercent,
-          dividendYield,
-          debtEquity,
-          pe,
-          pb,
-          netMargin,
-          volume,
-          maSignal: techFeatures.maSignal,
-          ma10: techFeatures.ma10,
-          ma20: techFeatures.ma20,
-          chartPattern: techFeatures.chartPattern,
-          candlePattern: techFeatures.candlePattern,
-          hasBullishDivergence: techFeatures.hasBullishDivergence,
-          squeezeState: techFeatures.squeezeState,
-          confluenceScore: techFeatures.confluenceScore,
-          quantEdgeScore: quantFeatures.quantEdgeScore,
-          ouZScore: quantFeatures.ouZScore,
-          ouHalfLife: quantFeatures.ouHalfLife,
-          beta: quantFeatures.beta,
-          qualityScore,
-          tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
-          buyZoneStatus: buyPointPlan.buyZoneStatus,
-          absBuyDiff: buyPointPlan.absBuyDiff,
-          rsRating,
-          piotroskiFScore,
-          altmanZone,
-          altmanZScore,
+        // Evaluate Smart Money Footprint
+        const smartMoney = evaluateSmartMoneyFootprint({
+          symbol: sym,
+          bars: parsed.ohlcvBars,
+          currentPrice: price,
+          foreignNetValBillion: foreignNetVal,
+          activeBuyRatioPct: foreignRow?.buyRatioPct ?? null,
+          foreignBuyValBillion: foreignRow?.buyValue ? foreignRow.buyValue / 1_000_000_000 : null,
+          foreignSellValBillion: foreignRow?.sellValue ? foreignRow.sellValue / 1_000_000_000 : null,
         });
 
-        items.push({
+        // Collect inputs for universe-wide Orca Master Composite percentile ranking
+        orcaInputs.push({
           symbol: sym,
-          name: q?.name ?? vc?.name ?? sec?.name ?? null,
-          sector: sec?.sector ?? sectorOf(sym) ?? vc?.sector ?? "Khác",
-          exchange: sec?.exchange ?? vc?.exchange ?? "HOSE",
+          rsRating,
+          smartMoneyScore: smartMoney.score,
+          piotroskiFScore,
+          altmanZScore,
+          altmanZone,
+          roe,
+          netMargin,
+          confluenceScore: techFeatures.confluenceScore,
+          isMtfAligned: techFeatures.isMtfAligned,
+          absBuyDiff: buyPointPlan.absBuyDiff,
+          isNearBuy: buyPointPlan.buyZoneStatus === "AT_BUY_POINT" || buyPointPlan.buyZoneStatus === "NEAR_BUY_POINT",
+          pe,
+          pb,
+          dividendYield,
+          maSignal: techFeatures.maSignal,
+        });
+
+        intermediateEntries.push({
+          sym,
+          sec,
+          q,
+          vc,
           price,
           change,
           changePercent,
@@ -1467,25 +1556,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           piotroskiRating,
           altmanZScore,
           altmanZone,
-          ma10: techFeatures.ma10,
-          ma20: techFeatures.ma20,
-          ma50: techFeatures.ma50,
-          maSignal: techFeatures.maSignal,
-          volRatio20: techFeatures.volRatio20,
-          adx14: techFeatures.adx14,
-          squeezeState: techFeatures.squeezeState,
-          superTrendDir: techFeatures.superTrendDir,
-          chartPattern: techFeatures.chartPattern,
-          candlePattern: techFeatures.candlePattern,
-          candlePatternScore: techFeatures.candlePatternScore,
-          candleAgeBars: techFeatures.candleAgeBars,
+          techFeatures,
+          quantFeatures,
           vcpDepths,
           vcpLastDepth,
           vcpPivot,
-          hasBullishDivergence: techFeatures.hasBullishDivergence,
-          divergenceSummary: techFeatures.divergenceSummary,
-          confluenceScore: techFeatures.confluenceScore,
-          confluenceBadge: techFeatures.confluenceBadge,
+          buyPointPlan,
           foreignNetVal,
           foreignAccumulating,
           rsRating,
@@ -1493,34 +1569,152 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           rsTrend,
           rsRating20,
           isMarketLeader,
-          mtfConsensus: techFeatures.mtfConsensus,
-          isMtfAligned: techFeatures.isMtfAligned,
-          mtfScore: techFeatures.mtfScore,
-          mtfBadgeVi: techFeatures.mtfBadgeVi,
-          mtfSummary: techFeatures.mtfSummary,
-          quantEdgeScore: quantFeatures.quantEdgeScore,
-          quantBadge: quantFeatures.quantBadge,
-          ouZScore: quantFeatures.ouZScore,
-          ouHalfLife: quantFeatures.ouHalfLife,
-          ouMu: quantFeatures.ouMu,
-          tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
-          tripleBarrierUpper: quantFeatures.tripleBarrierUpper,
-          tripleBarrierLower: quantFeatures.tripleBarrierLower,
-          cornishFisherVaR95: quantFeatures.cornishFisherVaR95,
-          returnSkewness: quantFeatures.returnSkewness,
-          quantAnomalyTag: quantFeatures.quantAnomalyTag,
-          beta: quantFeatures.beta,
-          buyPoint: buyPointPlan.buyPoint,
-          buyPointDiffPct: buyPointPlan.buyPointDiffPct,
-          absBuyDiff: buyPointPlan.absBuyDiff,
-          buyRange: buyPointPlan.buyRange,
-          buyZoneStatus: buyPointPlan.buyZoneStatus,
-          stopLoss: buyPointPlan.stopLoss,
-          targetPrice: buyPointPlan.targetPrice,
-          riskReward: buyPointPlan.riskReward,
-          buyStrategy: buyPointPlan.buyStrategy,
-          presetsPassed,
+          smartMoney,
           compositeScore,
+        });
+      }
+
+      // 4b. Multi-factor Universe Orca Master Composite percentile ranking (1 - 99)
+      const orcaMasterMap = calculateUniverseOrcaMaster(orcaInputs);
+
+      for (let i = 0; i < intermediateEntries.length; i++) {
+        const entry = intermediateEntries[i];
+        const orcaRes = orcaMasterMap.get(entry.sym);
+        const orcaMasterScore = orcaRes?.compositeScore ?? null;
+        const orcaMasterCategory = orcaRes?.category;
+        const orcaMasterStrengthVi = orcaRes?.primaryStrengthVi ?? null;
+
+        const presetsPassed = detectPresets({
+          roe: entry.roe,
+          revenueYoyPct: entry.revenueYoyPct,
+          niYoyPct: entry.niYoyPct,
+          price: entry.price,
+          changePercent: entry.changePercent,
+          dividendYield: entry.dividendYield,
+          debtEquity: entry.debtEquity,
+          pe: entry.pe,
+          pb: entry.pb,
+          netMargin: entry.netMargin,
+          volume: entry.volume,
+          maSignal: entry.techFeatures.maSignal,
+          ma10: entry.techFeatures.ma10,
+          ma20: entry.techFeatures.ma20,
+          chartPattern: entry.techFeatures.chartPattern,
+          candlePattern: entry.techFeatures.candlePattern,
+          hasBullishDivergence: entry.techFeatures.hasBullishDivergence,
+          squeezeState: entry.techFeatures.squeezeState,
+          confluenceScore: entry.techFeatures.confluenceScore,
+          quantEdgeScore: entry.quantFeatures.quantEdgeScore,
+          ouZScore: entry.quantFeatures.ouZScore,
+          ouHalfLife: entry.quantFeatures.ouHalfLife,
+          beta: entry.quantFeatures.beta,
+          qualityScore: entry.qualityScore,
+          tripleBarrierRiskReward: entry.quantFeatures.tripleBarrierRiskReward,
+          buyZoneStatus: entry.buyPointPlan.buyZoneStatus,
+          absBuyDiff: entry.buyPointPlan.absBuyDiff,
+          rsRating: entry.rsRating,
+          piotroskiFScore: entry.piotroskiFScore,
+          altmanZone: entry.altmanZone,
+          altmanZScore: entry.altmanZScore,
+          orcaMasterScore,
+          smartMoneyScore: entry.smartMoney.score,
+          smartMoneySignal: entry.smartMoney.signal,
+        });
+
+        items.push({
+          symbol: entry.sym,
+          name: entry.q?.name ?? entry.vc?.name ?? entry.sec?.name ?? null,
+          sector: entry.sec?.sector ?? sectorOf(entry.sym) ?? entry.vc?.sector ?? "Khác",
+          exchange: entry.sec?.exchange ?? entry.vc?.exchange ?? "HOSE",
+          price: entry.price,
+          change: entry.change,
+          changePercent: entry.changePercent,
+          volume: entry.volume,
+          marketCap: entry.marketCap,
+          pe: entry.pe,
+          pb: entry.pb,
+          ps: entry.ps,
+          evEbitda: entry.evEbitda,
+          dividendYield: entry.dividendYield,
+          roe: entry.roe,
+          roa: entry.roa,
+          grossMargin: entry.grossMargin,
+          netMargin: entry.netMargin,
+          debtEquity: entry.debtEquity,
+          currentRatio: entry.currentRatio,
+          revenueYoyPct: entry.revenueYoyPct,
+          niYoyPct: entry.niYoyPct,
+          fcfTtm: entry.fcfTtm,
+          qualityScore: entry.qualityScore,
+          healthScore: entry.healthScore,
+          piotroskiFScore: entry.piotroskiFScore,
+          piotroskiRating: entry.piotroskiRating,
+          altmanZScore: entry.altmanZScore,
+          altmanZone: entry.altmanZone,
+          ma10: entry.techFeatures.ma10,
+          ma20: entry.techFeatures.ma20,
+          ma50: entry.techFeatures.ma50,
+          maSignal: entry.techFeatures.maSignal,
+          volRatio20: entry.techFeatures.volRatio20,
+          adx14: entry.techFeatures.adx14,
+          squeezeState: entry.techFeatures.squeezeState,
+          superTrendDir: entry.techFeatures.superTrendDir,
+          chartPattern: entry.techFeatures.chartPattern,
+          candlePattern: entry.techFeatures.candlePattern,
+          candlePatternScore: entry.techFeatures.candlePatternScore,
+          candleAgeBars: entry.techFeatures.candleAgeBars,
+          vcpDepths: entry.vcpDepths,
+          vcpLastDepth: entry.vcpLastDepth,
+          vcpPivot: entry.vcpPivot,
+          hasBullishDivergence: entry.techFeatures.hasBullishDivergence,
+          divergenceSummary: entry.techFeatures.divergenceSummary,
+          confluenceScore: entry.techFeatures.confluenceScore,
+          confluenceBadge: entry.techFeatures.confluenceBadge,
+          foreignNetVal: entry.foreignNetVal,
+          foreignAccumulating: entry.foreignAccumulating,
+          rsRating: entry.rsRating,
+          rsCategory: entry.rsCategory,
+          rsTrend: entry.rsTrend,
+          rsRating20: entry.rsRating20,
+          isMarketLeader: entry.isMarketLeader,
+          mtfConsensus: entry.techFeatures.mtfConsensus,
+          isMtfAligned: entry.techFeatures.isMtfAligned,
+          mtfScore: entry.techFeatures.mtfScore,
+          mtfBadgeVi: entry.techFeatures.mtfBadgeVi,
+          mtfSummary: entry.techFeatures.mtfSummary,
+          quantEdgeScore: entry.quantFeatures.quantEdgeScore,
+          quantBadge: entry.quantFeatures.quantBadge,
+          ouZScore: entry.quantFeatures.ouZScore,
+          ouHalfLife: entry.quantFeatures.ouHalfLife,
+          ouMu: entry.quantFeatures.ouMu,
+          tripleBarrierRiskReward: entry.quantFeatures.tripleBarrierRiskReward,
+          tripleBarrierUpper: entry.quantFeatures.tripleBarrierUpper,
+          tripleBarrierLower: entry.quantFeatures.tripleBarrierLower,
+          cornishFisherVaR95: entry.quantFeatures.cornishFisherVaR95,
+          returnSkewness: entry.quantFeatures.returnSkewness,
+          quantAnomalyTag: entry.quantFeatures.quantAnomalyTag,
+          beta: entry.quantFeatures.beta,
+          buyPoint: entry.buyPointPlan.buyPoint,
+          buyPointDiffPct: entry.buyPointPlan.buyPointDiffPct,
+          absBuyDiff: entry.buyPointPlan.absBuyDiff,
+          buyRange: entry.buyPointPlan.buyRange,
+          buyZoneStatus: entry.buyPointPlan.buyZoneStatus,
+          stopLoss: entry.buyPointPlan.stopLoss,
+          targetPrice: entry.buyPointPlan.targetPrice,
+          riskReward: entry.buyPointPlan.riskReward,
+          buyStrategy: entry.buyPointPlan.buyStrategy,
+          compositeScore: entry.compositeScore,
+          // Orca Master Composite Rating
+          orcaMasterScore,
+          orcaMasterCategory,
+          orcaMasterStrengthVi,
+          // Smart Money Footprint
+          smartMoneyScore: entry.smartMoney.score,
+          smartMoneySignal: entry.smartMoney.signal,
+          smartMoneySignalVi: entry.smartMoney.signalVi,
+          activeBuyRatioPct: entry.smartMoney.activeBuyRatioPct,
+          smartMoneySummaryVi: entry.smartMoney.summaryVi,
+          presetsPassed,
         });
       }
 
@@ -1531,6 +1725,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        orca_master_elite: 0,
+        smart_money_inflow: 0,
         near_buy_point: 0,
         rs_leaders: 0,
         piotroski_diamonds: 0,
@@ -1585,6 +1781,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    orca_master_elite: 0,
+    smart_money_inflow: 0,
     near_buy_point: 0,
     rs_leaders: 0,
     piotroski_diamonds: 0,
@@ -1647,7 +1845,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -1731,6 +1929,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (minQuantScore != null && (x.quantEdgeScore == null || x.quantEdgeScore < minQuantScore)) continue;
     if (maxOuZScore != null && (x.ouZScore == null || x.ouZScore > maxOuZScore)) continue;
     if (minRiskReward != null && (x.tripleBarrierRiskReward == null || x.tripleBarrierRiskReward < minRiskReward)) continue;
+
+    // Sprint 1 & 2 Institutional Indicators
+    if (params.minOrcaMasterScore != null && (x.orcaMasterScore == null || x.orcaMasterScore < params.minOrcaMasterScore)) continue;
+    if (params.minSmartMoneyScore != null && (x.smartMoneyScore == null || x.smartMoneyScore < params.minSmartMoneyScore)) continue;
+    if (params.minRsRating != null && (x.rsRating == null || x.rsRating < params.minRsRating)) continue;
+    if (params.minPiotroskiScore != null && (x.piotroskiFScore == null || x.piotroskiFScore < params.minPiotroskiScore)) continue;
 
     // Buy Point filters
     if (params.maxBuyDiff != null && (x.absBuyDiff == null || x.absBuyDiff > params.maxBuyDiff)) continue;
