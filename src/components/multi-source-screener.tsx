@@ -514,9 +514,14 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-1 text-[10px] text-text-muted truncate max-w-[170px]">
+                            <div className="flex items-center gap-1 text-[10px] text-text-muted truncate max-w-[180px]">
                               <span>{item.buyStrategy ?? "Bệ đỡ hội tụ"}</span>
                               {item.riskReward && <span className="text-amber-400 font-semibold font-mono">({item.riskReward}R)</span>}
+                              {item.isMtfAligned && (
+                                <span className="rounded bg-gradient-to-r from-emerald-500/20 to-amber-500/20 px-1 py-0.2 text-[8.5px] font-bold text-emerald-300 border border-emerald-500/30">
+                                  H1·D1·W1 🟢
+                                </span>
+                              )}
                             </div>
                           </div>
                         ) : (

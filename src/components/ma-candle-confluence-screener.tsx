@@ -32,7 +32,7 @@ const SCENARIOS = [
 ] as const;
 
 type ViewMode = "table" | "group_scenario" | "group_quality";
-type SortField = "score" | "riskReward" | "change" | "volume" | "nearBuyPoint";
+type SortField = "score" | "riskReward" | "change" | "volume" | "nearBuyPoint" | "mtfScore";
 
 const BADGE_COLORS = {
   emerald: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -57,6 +57,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [freshOnly, setFreshOnly] = useState<boolean>(false); // T+0 only
   const [highRrOnly, setHighRrOnly] = useState<boolean>(false); // R:R >= 2.0
   const [nearEntryOnly, setNearEntryOnly] = useState<boolean>(false); // Diff <= 1.5%
+  const [mtfAlignedOnly, setMtfAlignedOnly] = useState<boolean>(false); // H1 + D1 + W1 Aligned Bull
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [sortBy, setSortBy] = useState<SortField>("nearBuyPoint");
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
@@ -162,6 +163,11 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
       });
     }
 
+    // 8c. Đồng thuận Đa khung H1+D1+W1
+    if (mtfAlignedOnly) {
+      list = list.filter((r) => r.isMtfAligned || r.mtfConsensus === "ALL_BULL");
+    }
+
     // 9. Sorting
     const sorted = [...list].sort((a, b) => {
       if (a.alertWorthy !== b.alertWorthy) return a.alertWorthy ? -1 : 1;
@@ -171,6 +177,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
           const diffB = b.price && b.entryPrice ? Math.abs((b.price - b.entryPrice) / b.price) : 999;
           return diffA - diffB;
         }
+        case "mtfScore":
+          return (b.mtfScore ?? 0) - (a.mtfScore ?? 0);
         case "score":
           return b.confluenceScore - a.confluenceScore;
         case "riskReward":
@@ -518,6 +526,18 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
               />
               <span>🎯 Sát điểm mua (≤ 1.5%)</span>
             </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-400 font-bold select-none">
+              <input
+                type="checkbox"
+                checked={mtfAlignedOnly}
+                onChange={(e) => setMtfAlignedOnly(e.target.checked)}
+                className="rounded accent-amber-500"
+              />
+              <span>⚡ Đồng thuận H1+D1+W1</span>
+            </label>
           </div>
 
           {/* Right: Sort By & View Mode Segment */}
@@ -527,9 +547,10 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
               <DarkSelect
                 value={sortBy}
                 onChange={(v) => setSortBy(v as SortField)}
-                className="!w-36 !py-0.5 text-[10.5px]"
+                className="!w-40 !py-0.5 text-[10.5px]"
                 options={[
                   { value: "nearBuyPoint", label: "🎯 Gần điểm mua nhất" },
+                  { value: "mtfScore", label: "⚡ Đồng thuận H1·D1·W1" },
                   { value: "score", label: "Điểm hợp lưu" },
                   { value: "riskReward", label: "Tỷ lệ R:R" },
                   { value: "change", label: "% Thay đổi" },
@@ -756,6 +777,21 @@ function ConfluenceRowItem({
                 ⚡ {row.divergenceSummary}
               </span>
             )}
+            {row.isMtfAligned ? (
+              <span
+                className="rounded bg-gradient-to-r from-emerald-500/25 to-amber-500/25 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 text-[9px] font-bold"
+                title={row.mtfSummary || "Đồng thuận Tăng Đa Khung: H1 🟢 · D1 🟢 · W1 🟢"}
+              >
+                ⚡ H1·D1·W1 🟢
+              </span>
+            ) : row.mtfConsensus === "D1_W1_BULL" ? (
+              <span
+                className="rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1 py-0.2 text-[9px] font-semibold"
+                title={row.mtfSummary || "Đồng thuận D1 + W1 Tăng"}
+              >
+                D1·W1 🟢
+              </span>
+            ) : null}
             {row.isMarketLeader && (
               <span className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1 py-0.2 text-[9px] font-semibold" title={`Khỏe hơn VN-Index: ${row.rsRating20 ? `+${row.rsRating20}%` : ''}`}>
                 RS Leader
@@ -990,6 +1026,97 @@ function ConfluenceRowItem({
                       {row.topChartPattern.targetPrice != null && (
                         <span>Mục tiêu hình học: <strong>{fmtNum(row.topChartPattern.targetPrice, 2)}</strong></span>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* MTF Alignment Box */}
+                {row.mtfDetails && (
+                  <div
+                    className={`mt-2 rounded border p-2 text-[10.5px] space-y-1.5 ${
+                      row.isMtfAligned
+                        ? "border-emerald-500/40 bg-emerald-500/10"
+                        : row.mtfConsensus === "D1_W1_BULL"
+                          ? "border-blue-500/30 bg-blue-500/10"
+                          : "border-line/60 bg-surface-base"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-semibold">
+                      <span className={row.isMtfAligned ? "text-emerald-300" : "text-text-primary"}>
+                        ⚡ Đồng thuận Đa Khung Thời Gian ({row.mtfScore}/100)
+                      </span>
+                      <span className="text-[10px] font-bold text-text-muted">{row.mtfBadgeVi}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[10px]">
+                      <div className="p-1 rounded bg-surface-elevated/60">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">W1 (Tuần)</span>
+                          <span
+                            className={
+                              row.mtfDetails.w1.bias === "BULL"
+                                ? "text-emerald-400 font-bold"
+                                : row.mtfDetails.w1.bias === "BEAR"
+                                  ? "text-rose-400"
+                                  : "text-amber-400"
+                            }
+                          >
+                            {row.mtfDetails.w1.bias === "BULL"
+                              ? "🟢 Tăng"
+                              : row.mtfDetails.w1.bias === "BEAR"
+                                ? "🔴 Giảm"
+                                : "🟡 Đi ngang"}
+                          </span>
+                        </div>
+                        <div className="text-[9.5px] text-text-muted mt-0.5 line-clamp-2">
+                          {row.mtfDetails.w1.reason}
+                        </div>
+                      </div>
+                      <div className="p-1 rounded bg-surface-elevated/60">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">D1 (Ngày)</span>
+                          <span
+                            className={
+                              row.mtfDetails.d1.bias === "BULL"
+                                ? "text-emerald-400 font-bold"
+                                : row.mtfDetails.d1.bias === "BEAR"
+                                  ? "text-rose-400"
+                                  : "text-amber-400"
+                            }
+                          >
+                            {row.mtfDetails.d1.bias === "BULL"
+                              ? "🟢 Tăng"
+                              : row.mtfDetails.d1.bias === "BEAR"
+                                ? "🔴 Giảm"
+                                : "🟡 Đi ngang"}
+                          </span>
+                        </div>
+                        <div className="text-[9.5px] text-text-muted mt-0.5 line-clamp-2">
+                          {row.mtfDetails.d1.reason}
+                        </div>
+                      </div>
+                      <div className="p-1 rounded bg-surface-elevated/60">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold">H1 (Giờ)</span>
+                          <span
+                            className={
+                              row.mtfDetails.h1.bias === "BULL"
+                                ? "text-emerald-400 font-bold"
+                                : row.mtfDetails.h1.bias === "BEAR"
+                                  ? "text-rose-400"
+                                  : "text-amber-400"
+                            }
+                          >
+                            {row.mtfDetails.h1.bias === "BULL"
+                              ? "🟢 Tăng"
+                              : row.mtfDetails.h1.bias === "BEAR"
+                                ? "🔴 Giảm"
+                                : "🟡 Đi ngang"}
+                          </span>
+                        </div>
+                        <div className="text-[9.5px] text-text-muted mt-0.5 line-clamp-2">
+                          {row.mtfDetails.h1.reason}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

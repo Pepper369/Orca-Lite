@@ -190,6 +190,7 @@ export function MaSignalBadge({ signal }: { signal: string | null | undefined })
 const PRESET_TABS: { id: ScreenerPreset; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: "all", label: "Tất cả", icon: <Sparkles className="size-3.5" />, desc: "Toàn bộ thị trường" },
   { id: "near_buy_point", label: "Sát Điểm Mua (Buy Zone)", icon: <Zap className="size-3.5 text-emerald-400" />, desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
+  { id: "mtf_confluence", label: "Đồng Thuận Đa Khung H1-D1-W1", icon: <Zap className="size-3.5 text-amber-400" />, desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
   { id: "bottom_confluence", label: "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)", icon: <Sparkles className="size-3.5 text-cyan-400" />, desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
   { id: "confluence", label: "Siêu Hội Tụ", icon: <Sparkles className="size-3.5 text-amber-400" />, desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "quant_edge", label: "Ưu thế Quant Pro", icon: <Zap className="size-3.5 text-cyan-400" />, desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
@@ -436,6 +437,10 @@ export function VnScreener({
       setViewTab("buy_point");
       setSortKey("absBuyDiff");
       setSortOrder("asc");
+    } else if (p === "mtf_confluence") {
+      setViewTab("confluence");
+      setSortKey("confluenceScore");
+      setSortOrder("desc");
     } else if (p === "confluence" || p === "bottom_confluence") {
       setViewTab("confluence");
       setSortKey("confluenceScore");
@@ -1348,8 +1353,13 @@ export function VnScreener({
                         <td className="py-2.5 text-center font-mono text-[11px] text-text-secondary">
                           {row.buyRange ? `${fmtNum(row.buyRange[0], 2)} – ${fmtNum(row.buyRange[1], 2)}` : "—"}
                         </td>
-                        <td className="py-2.5 text-left text-[11px] font-medium text-text-primary truncate max-w-[180px]">
-                          {row.buyStrategy ?? "Bệ đỡ hội tụ"}
+                        <td className="py-2.5 text-left text-[11px] font-medium text-text-primary truncate max-w-[190px]">
+                          <div>{row.buyStrategy ?? "Bệ đỡ hội tụ"}</div>
+                          {row.isMtfAligned && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400">
+                              ⚡ Đồng thuận H1·D1·W1
+                            </span>
+                          )}
                         </td>
                         <td className="num py-2.5 text-right font-medium text-rose-400 font-mono">
                           {row.stopLoss != null ? fmtNum(row.stopLoss, 2) : "—"}
@@ -1494,6 +1504,21 @@ export function VnScreener({
                               <span className="text-[10px] text-text-muted">—</span>
                             )}
                             <div className="flex flex-wrap gap-1 items-center">
+                              {row.isMtfAligned ? (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded bg-gradient-to-r from-emerald-500/25 to-amber-500/25 border border-emerald-500/40 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300"
+                                  title={row.mtfSummary || "Đồng thuận Tăng Đa Khung: H1 🟢 · D1 🟢 · W1 🟢"}
+                                >
+                                  ⚡ H1·D1·W1 🟢🟢🟢
+                                </span>
+                              ) : row.mtfConsensus === "D1_W1_BULL" ? (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.2 text-[9px] font-semibold text-blue-300"
+                                  title={row.mtfSummary || "Đồng thuận D1 + W1 Tăng"}
+                                >
+                                  D1·W1 🟢🟢⚪
+                                </span>
+                              ) : null}
                               {row.hasBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
                                   ⚡ {row.divergenceSummary || "Phân kỳ dương"}

@@ -54,6 +54,11 @@ export interface MultiSourceStockItem {
   targetPricePlan?: number | null;
   riskReward?: number | null;
   buyStrategy?: string | null;
+  // Giai đoạn 8: Đồng Thuận Đa Khung Thời Gian (H1 + D1 + W1)
+  mtfConsensus?: string | null;
+  isMtfAligned?: boolean | null;
+  mtfScore?: number | null;
+  mtfBadgeVi?: string | null;
 }
 
 const TTL_MS = 30_000; // 30s fresh cache cho screener realtime
@@ -203,6 +208,10 @@ export async function getMultiSourceScreenerData(): Promise<{
           targetPricePlan: snap?.targetPrice ?? null,
           riskReward: snap?.riskReward ?? null,
           buyStrategy: snap?.buyStrategy ?? null,
+          mtfConsensus: snap?.mtfConsensus ?? null,
+          isMtfAligned: snap?.isMtfAligned ?? null,
+          mtfScore: snap?.mtfScore ?? null,
+          mtfBadgeVi: snap?.mtfBadgeVi ?? null,
         });
       });
 

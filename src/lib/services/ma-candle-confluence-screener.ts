@@ -32,6 +32,8 @@ export interface MaCandleScreenOpts {
   foreignOnly?: boolean;
   leaderOnly?: boolean;
   patternOnly?: boolean;
+  mtfOnly?: boolean;
+  mtfConsensus?: string;
   limit?: number;
 }
 
@@ -95,6 +97,8 @@ export async function screenMaCandleConfluence(
     if (opts.foreignOnly && !row.foreignAccumulating) continue;
     if (opts.leaderOnly && !row.isMarketLeader) continue;
     if (opts.patternOnly && !row.topChartPattern) continue;
+    if (opts.mtfOnly && !row.isMtfAligned) continue;
+    if (opts.mtfConsensus && row.mtfConsensus !== opts.mtfConsensus) continue;
 
     rows.push(row);
   }

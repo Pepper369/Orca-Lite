@@ -60,6 +60,8 @@ export async function GET(req: Request) {
     minRiskReward: num(url.searchParams.get("minRiskReward")),
     maxBuyDiff: num(url.searchParams.get("maxBuyDiff")),
     buyZoneStatus: url.searchParams.get("buyZoneStatus") ?? undefined,
+    mtfOnly: url.searchParams.get("mtfOnly") === "true" ? true : undefined,
+    mtfConsensus: url.searchParams.get("mtfConsensus") ?? undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order")

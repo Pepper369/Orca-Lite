@@ -10,7 +10,7 @@ import { getVietcapCompany, type VietcapProfile } from "../providers/vietcap";
 import { sectorOf, getSecurity, type VnExchange, VN_SECURITIES } from "../vn/master";
 import { VN100 } from "../vn/vn100";
 import { mapPool } from "../financial/snapshots";
-import type { Meta } from "../types";
+import type { Meta, Quote } from "../types";
 
 import { batchVnOhlcv } from "./ohlcv-batch";
 import { sma, adx, ttmSqueeze, superTrend, rsi } from "../engines/oscillators";
@@ -24,10 +24,17 @@ import {
 } from "../engines/advanced-quant-math";
 import { computeAsymmetricPlan, tickRound } from "../engines/asymmetric-quant-engine";
 import type { DetectedChartPattern } from "../engines/chart-patterns";
+import {
+  evaluateMtfConsensus,
+  type MtfConsensusStatus,
+  type MtfConsensusResult,
+  type MtfQuoteInput,
+} from "../engines/mtf-consensus";
 
 export type ScreenerPreset =
   | "all"
   | "near_buy_point"
+  | "mtf_confluence"
   | "bottom_confluence"
   | "quant_edge"
   | "quant_mean_revert"
@@ -91,6 +98,12 @@ export type ScreenerStockItem = {
   foreignAccumulating?: boolean;
   rsRating20?: number | null;
   isMarketLeader?: boolean;
+  // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
+  mtfConsensus: MtfConsensusStatus;
+  isMtfAligned: boolean;
+  mtfScore: number;
+  mtfBadgeVi: string;
+  mtfSummary: string;
   // Quant Edge Engine Fields (Advanced Mathematical Statistics)
   quantEdgeScore?: number; // 0-100
   quantBadge?: "SUPER_QUANT" | "QUANT_EDGE" | "WATCH" | "NEUTRAL";
@@ -152,6 +165,8 @@ export type ScreenerFilterParams = {
   minRiskReward?: number;
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
+  mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
+  mtfConsensus?: "ALL_BULL" | "D1_W1_BULL" | "H1_D1_BULL" | "MIXED" | "BEAR_PRESSURE" | "ALL" | string;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -302,6 +317,8 @@ function analyzeTechFeatures(
   compositeScore: number,
   foreignAccumulating = false,
   rsPerf20: number | null = null,
+  quote?: MtfQuoteInput | null,
+  foreignBuyRatioPct?: number | null,
 ) {
   const maRes = analyzeMaFeatures(parsed, currentPrice);
   const { closes, highs, lows, ohlcvBars } = parsed;
@@ -321,6 +338,11 @@ function analyzeTechFeatures(
       divergenceSummary: null,
       confluenceScore: compositeScore,
       confluenceBadge: "NONE" as const,
+      mtfConsensus: "MIXED" as const,
+      isMtfAligned: false,
+      mtfScore: 50,
+      mtfBadgeVi: "Chưa đủ nến",
+      mtfSummary: "Chưa đủ dữ liệu đa khung",
     };
   }
 
@@ -436,10 +458,17 @@ function analyzeTechFeatures(
   if (rsPerf20 != null && rsPerf20 > 0) flowRsScore += 5;
   flowRsScore = Math.min(25, flowRsScore);
 
-  const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore));
+  // 5. Multi-Timeframe (H1 + D1 + W1) Consensus
+  const mtf = evaluateMtfConsensus(ohlcvBars, quote, {
+    foreignBuyRatio: foreignBuyRatioPct,
+    confluenceHint: trendScore + patternScore,
+  });
+
+  const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
+  const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore + mtfBonus));
 
   let confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" = "NONE";
-  if (confluenceScore >= 70) confluenceBadge = "SUPER_SETUP";
+  if (confluenceScore >= 70 || (confluenceScore >= 66 && mtf.isAligned)) confluenceBadge = "SUPER_SETUP";
   else if (confluenceScore >= 52) confluenceBadge = "POTENTIAL_BREAKOUT";
   else if (confluenceScore >= 42) confluenceBadge = "WATCH";
 
@@ -457,6 +486,11 @@ function analyzeTechFeatures(
     divergenceSummary,
     confluenceScore,
     confluenceBadge,
+    mtfConsensus: mtf.consensus,
+    isMtfAligned: mtf.isAligned,
+    mtfScore: mtf.score,
+    mtfBadgeVi: mtf.badgeVi,
+    mtfSummary: mtf.summary,
   };
 }
 
@@ -800,6 +834,8 @@ function detectPresets(item: {
   tripleBarrierRiskReward?: number | null;
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
   absBuyDiff?: number | null;
+  isMtfAligned?: boolean;
+  mtfConsensus?: string;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -936,6 +972,11 @@ function detectPresets(item: {
 
   if (isNearBuy && hasSetupConfluence && isLiquid) {
     passes.push("near_buy_point");
+  }
+
+  // 12. Đồng Thuận Đa Khung Thời Gian (H1 + D1 + W1 Aligned Bull)
+  if (item.isMtfAligned || item.mtfConsensus === "ALL_BULL") {
+    passes.push("mtf_confluence");
   }
 
   return passes;
@@ -1260,7 +1301,15 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         }
         const isMarketLeader = rsRating20 != null && rsRating20 > 5.0;
 
-        const techFeatures = analyzeTechFeatures(parsed, price, compositeScore, foreignAccumulating, rsRating20);
+        const techFeatures = analyzeTechFeatures(
+          parsed,
+          price,
+          compositeScore,
+          foreignAccumulating,
+          rsRating20,
+          q,
+          foreignRow?.buyRatioPct,
+        );
 
         const beta: number | null = null;
         const quantFeatures = analyzeQuantFeatures(
@@ -1360,6 +1409,11 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           foreignAccumulating,
           rsRating20,
           isMarketLeader,
+          mtfConsensus: techFeatures.mtfConsensus,
+          isMtfAligned: techFeatures.isMtfAligned,
+          mtfScore: techFeatures.mtfScore,
+          mtfBadgeVi: techFeatures.mtfBadgeVi,
+          mtfSummary: techFeatures.mtfSummary,
           quantEdgeScore: quantFeatures.quantEdgeScore,
           quantBadge: quantFeatures.quantBadge,
           ouZScore: quantFeatures.ouZScore,
@@ -1394,6 +1448,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
         near_buy_point: 0,
+        mtf_confluence: 0,
         bottom_confluence: 0,
         quant_edge: 0,
         quant_mean_revert: 0,
@@ -1445,6 +1500,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
     near_buy_point: 0,
+    mtf_confluence: 0,
     bottom_confluence: 0,
     quant_edge: 0,
     quant_mean_revert: 0,
@@ -1503,7 +1559,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -1591,6 +1647,10 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     // Buy Point filters
     if (params.maxBuyDiff != null && (x.absBuyDiff == null || x.absBuyDiff > params.maxBuyDiff)) continue;
     if (params.buyZoneStatus && params.buyZoneStatus !== "ALL" && x.buyZoneStatus !== params.buyZoneStatus) continue;
+
+    // Multi-Timeframe filters
+    if (params.mtfOnly && !x.isMtfAligned) continue;
+    if (params.mtfConsensus && params.mtfConsensus !== "ALL" && x.mtfConsensus !== params.mtfConsensus) continue;
 
     filtered.push(x);
   }

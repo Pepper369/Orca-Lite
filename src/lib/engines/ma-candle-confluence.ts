@@ -5,6 +5,12 @@ import { ema, rsi, macd } from "./oscillators";
 import { detectDivergences, SHORT_3_4D } from "./divergence";
 import { getSecurity, sectorOf } from "../vn/master";
 import type { OhlcvBar, Quote, DivergenceSignal } from "../types";
+import {
+  evaluateMtfConsensus,
+  type MtfConsensusStatus,
+  type MtfConsensusResult,
+  type MtfTimeframeDetail,
+} from "./mtf-consensus";
 
 export type MaCandleScenario =
   | "ALL"
@@ -29,6 +35,7 @@ export interface AnalyzeMaCandleExtra {
     buyRatioPct: number;
   } | null;
   indexBars?: OhlcvBar[] | null;
+  h1Bars?: OhlcvBar[] | null;
 }
 
 export interface MaCandleConfluenceRow {
@@ -92,6 +99,18 @@ export interface MaCandleConfluenceRow {
     momentum: number;
     flow: number;
     rs: number;
+  };
+
+  // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
+  mtfConsensus: MtfConsensusStatus;
+  isMtfAligned: boolean;
+  mtfScore: number;
+  mtfSummary: string;
+  mtfBadgeVi: string;
+  mtfDetails: {
+    w1: MtfTimeframeDetail;
+    d1: MtfTimeframeDetail;
+    h1: MtfTimeframeDetail;
   };
 
   // Trade Setup Calculator
@@ -592,6 +611,21 @@ export function analyzeMaCandleRow(
     confluenceTags.push("Siêu hợp lưu Mẫu hình + MA");
   }
 
+  // 8c. Multi-Timeframe (H1 + D1 + W1) Consensus Evaluation
+  const mtf = evaluateMtfConsensus(bars, quote, {
+    h1Bars: extra?.h1Bars,
+    foreignBuyRatio,
+    confluenceHint: trendScore + candleScore,
+  });
+
+  if (mtf.isAligned) {
+    confluenceTags.push("Đồng thuận Đa Khung H1+D1+W1");
+  } else if (mtf.consensus === "D1_W1_BULL") {
+    confluenceTags.push("Đồng thuận D1+W1");
+  } else if (mtf.consensus === "H1_D1_BULL") {
+    confluenceTags.push("Sóng ngắn H1+D1");
+  }
+
   // 9. Total Confluence Score Calculation (0-100)
   const pillars = {
     trend: Math.min(25, trendScore),
@@ -602,7 +636,9 @@ export function analyzeMaCandleRow(
   };
 
   const rawSum = pillars.trend + pillars.candle + pillars.momentum + pillars.flow + pillars.rs;
-  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum)));
+  // MTF Alignment bonus: +6 for perfect H1+D1+W1 alignment, +3 for D1+W1 alignment
+  const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
+  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus)));
 
   // 10. Trade Setup Calculator
   const distToMaPct =
@@ -629,8 +665,13 @@ export function analyzeMaCandleRow(
 
   // Setup Quality Classification
   const isAplus =
-    confluenceScore >= 75 &&
-    ((volRatio ?? 0) >= 1.15 || foreignAccumulating || isMarketLeader || bestBullDiv != null || hasMultiLayerConfluence) &&
+    confluenceScore >= 74 &&
+    ((volRatio ?? 0) >= 1.15 ||
+      foreignAccumulating ||
+      isMarketLeader ||
+      bestBullDiv != null ||
+      hasMultiLayerConfluence ||
+      mtf.isAligned) &&
     (scenario === "BOTTOM_BULLISH_DIVERGENCE" ||
       scenario === "CHART_PATTERN_BREAKOUT" ||
       scenario === "SMC_SWEEP_RECLAIM" ||
@@ -687,6 +728,14 @@ export function analyzeMaCandleRow(
     confluenceScore,
     setupQuality,
     confluenceTags,
+
+    // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
+    mtfConsensus: mtf.consensus,
+    isMtfAligned: mtf.isAligned,
+    mtfScore: mtf.score,
+    mtfSummary: mtf.summary,
+    mtfBadgeVi: mtf.badgeVi,
+    mtfDetails: mtf.details,
 
     foreignNetVal: foreignNetValBillion,
     foreignBuyRatio,
