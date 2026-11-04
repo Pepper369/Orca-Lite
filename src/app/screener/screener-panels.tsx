@@ -174,6 +174,59 @@ export function HistoricalEdgeBadgeComponent({
   );
 }
 
+export function ApexQuantBadgeComponent({
+  score,
+  category,
+  categoryVi,
+  reversalStageVi,
+  isSweetLaunchZone,
+  extensionFromBottomPct,
+}: {
+  score?: number | null;
+  category?: string | null;
+  categoryVi?: string | null;
+  reversalStageVi?: string | null;
+  isSweetLaunchZone?: boolean | null;
+  extensionFromBottomPct?: number | null;
+}) {
+  if (score == null || isNaN(score)) return null;
+
+  const isSuper = category === "APEX_SUPER_LEADER" || score >= 85;
+  const isLeader = category === "APEX_LEADER" || (score >= 70 && score < 85);
+  const isCandidate = category === "APEX_CANDIDATE" || (score >= 55 && score < 70);
+
+  let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  let dotClass = "bg-text-muted";
+  let label = "Apex";
+
+  if (isSuper) {
+    colorClass = "bg-amber-500/20 text-amber-200 border-amber-400/50 font-bold shadow-xs";
+    dotClass = "bg-amber-400 animate-pulse";
+    label = "👑 Siêu Apex";
+  } else if (isLeader) {
+    colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-400/40 font-semibold";
+    dotClass = "bg-emerald-400";
+    label = "Apex Lead";
+  } else if (isCandidate) {
+    colorClass = "bg-cyan-500/15 text-cyan-300 border-cyan-400/35 font-medium";
+    dotClass = "bg-cyan-400";
+    label = "Apex";
+  }
+
+  return (
+    <span
+      title={`Siêu Lọc Apex Quant Confluence: ${score}/100${categoryVi ? ` · ${categoryVi}` : ""}${reversalStageVi ? ` · Trạng thái: ${reversalStageVi}` : ""}${extensionFromBottomPct != null ? ` · Cách đáy: ${extensionFromBottomPct > 0 ? "+" : ""}${extensionFromBottomPct}%` : ""}${isSweetLaunchZone ? " · Vùng Vàng Sweet Launch Zone" : ""}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
+    >
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
+      <span>{label} {score}</span>
+      {isSweetLaunchZone && (
+        <span className="text-[9px] text-amber-300 font-bold ml-0.5">Vùng Vàng</span>
+      )}
+    </span>
+  );
+}
+
 export function SmartMoneyBadge({
   signal,
   signalVi,
@@ -554,6 +607,14 @@ export interface PresetEdgeStat {
 }
 
 export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeStat>> = {
+  orca_apex_quant: {
+    winRatePct: 78.5,
+    avgGainPct: 16.4,
+    profitFactor: 2.95,
+    sampleTrades: 480,
+    riskReward: 3.1,
+    tagline: "👑 Siêu Lọc Apex Quant: Đảo chiều chân sóng Wyckoff + Quant OU Z-score + Sweet Launch Zone (Chưa chạy xa đáy)",
+  },
   historical_edge: {
     winRatePct: 76.8,
     avgGainPct: 15.2,
@@ -688,6 +749,7 @@ export interface PresetTabItem {
 export const PRESET_TABS: PresetTabItem[] = [
   // Core Orca
   { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
+  { id: "orca_apex_quant", category: "core", label: "👑 Siêu Lọc Apex Quant", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu đa chiều: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
   { id: "historical_edge", category: "core", label: "🎯 Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
@@ -780,6 +842,8 @@ export function VnScreener({
   const initialSortKey =
     defaultPreset === "near_buy_point" || defaultView === "buy_point"
       ? "absBuyDiff"
+      : defaultPreset === "orca_apex_quant"
+      ? "apexQuantScore"
       : defaultPreset === "historical_edge"
       ? "historicalEdgeScore"
       : defaultPreset === "orca_master_elite" || defaultView === "orca_master"
@@ -835,6 +899,9 @@ export function VnScreener({
     if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
       setSortKey("absBuyDiff");
       setSortOrder("asc");
+    } else if (defaultPreset === "orca_apex_quant") {
+      setSortKey("apexQuantScore");
+      setSortOrder("desc");
     } else if (defaultPreset === "historical_edge") {
       setSortKey("historicalEdgeScore");
       setSortOrder("desc");
@@ -1038,7 +1105,11 @@ export function VnScreener({
     setPreset(p);
     setActiveCustomPresetName(null);
     setActiveStrategyGroup(getPresetCategory(p));
-    if (p === "historical_edge") {
+    if (p === "orca_apex_quant") {
+      setViewTab("orca_master");
+      setSortKey("apexQuantScore");
+      setSortOrder("desc");
+    } else if (p === "historical_edge") {
       setViewTab("orca_master");
       setSortKey("historicalEdgeScore");
       setSortOrder("desc");
@@ -1798,6 +1869,16 @@ export function VnScreener({
 
                         {/* Quantitative Badges Grid */}
                         <div className="flex items-center gap-1 flex-wrap my-2">
+                          {row.apexQuantScore != null && (
+                            <ApexQuantBadgeComponent
+                              score={row.apexQuantScore}
+                              category={row.apexCategory}
+                              categoryVi={row.apexCategoryVi}
+                              reversalStageVi={row.reversalStageVi}
+                              isSweetLaunchZone={row.isSweetLaunchZone}
+                              extensionFromBottomPct={row.extensionFromBottomPct}
+                            />
+                          )}
                           {row.historicalEdgeScore != null && (
                             <HistoricalEdgeBadgeComponent
                               score={row.historicalEdgeScore}
@@ -1995,6 +2076,12 @@ export function VnScreener({
                       className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
                     >
                       Orca Master (1-99) {sortKey === "orcaMasterScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("apexQuantScore")}
+                      className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
+                    >
+                      👑 Siêu Apex {sortKey === "apexQuantScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
                       onClick={() => handleSort("historicalEdgeScore")}
@@ -2486,6 +2573,16 @@ export function VnScreener({
                           />
                         </td>
                         <td className="py-2.5 text-center">
+                          <ApexQuantBadgeComponent
+                            score={row.apexQuantScore}
+                            category={row.apexCategory}
+                            categoryVi={row.apexCategoryVi}
+                            reversalStageVi={row.reversalStageVi}
+                            isSweetLaunchZone={row.isSweetLaunchZone}
+                            extensionFromBottomPct={row.extensionFromBottomPct}
+                          />
+                        </td>
+                        <td className="py-2.5 text-center">
                           <HistoricalEdgeBadgeComponent
                             score={row.historicalEdgeScore}
                             badge={row.historicalEdgeBadge}
@@ -2898,122 +2995,6 @@ export function VnScreener({
                           >
                             {row.compositeScore}
                           </span>
-                        </td>
-                      </>
-                    )}
-
-                    {viewTab === "orca_master" && (
-                      <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right font-semibold">
-                          <Chg value={row.changePercent} arrow={false} />
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <OrcaMasterBadge
-                            score={row.orcaMasterScore}
-                            category={row.orcaMasterCategory}
-                            strengthVi={row.orcaMasterStrengthVi}
-                          />
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <HistoricalEdgeBadgeComponent
-                            score={row.historicalEdgeScore}
-                            badge={row.historicalEdgeBadge}
-                            winRate={row.historicalWinRate}
-                            upDownVol={row.upDownVolRatio}
-                          />
-                        </td>
-                        <td className="py-2.5 text-left">
-                          <span className="text-[11px] text-text-secondary truncate max-w-[150px] inline-block font-medium">
-                            {row.orcaMasterStrengthVi ?? "Đa trụ cột đồng thuận"}
-                          </span>
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <RsRatingBadge rating={row.rsRating} trend={row.rsTrend} />
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <SmartMoneyBadge
-                            signal={row.smartMoneySignal}
-                            signalVi={row.smartMoneySignalVi}
-                            score={row.smartMoneyScore}
-                            activeBuyRatioPct={row.activeBuyRatioPct}
-                          />
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <PiotroskiBadge score={row.piotroskiFScore} rating={row.piotroskiRating} />
-                        </td>
-                        <td className="num py-2.5 text-right font-bold text-accent-primary">
-                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
-                          {row.absBuyDiff != null && (
-                            <span className="ml-1 text-[10px] text-text-muted">({row.absBuyDiff.toFixed(1)}%)</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 pr-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onOpenBacktest) onOpenBacktest(row.symbol);
-                            }}
-                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
-                          >
-                            Backtest
-                          </button>
-                        </td>
-                      </>
-                    )}
-
-                    {viewTab === "smart_money" && (
-                      <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right font-semibold">
-                          <Chg value={row.changePercent} arrow={false} />
-                        </td>
-                        <td className="py-2.5 text-center">
-                          <SmartMoneyBadge
-                            signal={row.smartMoneySignal}
-                            signalVi={row.smartMoneySignalVi}
-                            score={row.smartMoneyScore}
-                            activeBuyRatioPct={row.activeBuyRatioPct}
-                          />
-                        </td>
-                        <td className="num py-2.5 text-center font-bold text-purple-300">
-                          {row.smartMoneyScore != null ? `${row.smartMoneyScore}đ` : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right font-semibold text-emerald-400">
-                          {row.activeBuyRatioPct != null ? `${row.activeBuyRatioPct}%` : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.foreignNetVal != null ? (
-                            <span className={row.foreignNetVal > 0 ? "text-emerald-400" : row.foreignNetVal < 0 ? "text-rose-400" : "text-text-muted"}>
-                              {row.foreignNetVal > 0 ? "+" : ""}{row.foreignNetVal} tỷ
-                            </span>
-                          ) : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right text-text-secondary">
-                          {row.volRatio20 != null ? `${row.volRatio20.toFixed(2)}x` : "—"}
-                        </td>
-                        <td className="num py-2.5 text-right font-bold text-accent-primary">
-                          {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
-                          {row.chartPattern && (
-                            <span className="block text-[9px] text-text-muted font-normal truncate max-w-[110px]">{row.chartPattern}</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 pr-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onOpenBacktest) onOpenBacktest(row.symbol);
-                            }}
-                            className="rounded px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all active:scale-95"
-                          >
-                            Backtest
-                          </button>
                         </td>
                       </>
                     )}

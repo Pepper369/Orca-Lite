@@ -62,9 +62,15 @@ import {
   type HistoricalEdgeBadge,
   type HistoricalEdgeMetrics,
 } from "../engines/historical-price-action-trainer";
+import {
+  evaluateApexQuant,
+  type ApexQuantCategory,
+  type ApexQuantResult,
+} from "../engines/orca-apex-quant-engine";
 
 export type ScreenerPreset =
   | "all"
+  | "orca_apex_quant"
   | "historical_edge"
   | "near_buy_point"
   | "orca_master_elite"
@@ -212,6 +218,15 @@ export type ScreenerStockItem = {
   historicalEdgeScore?: number | null;
   historicalEdgeBadge?: HistoricalEdgeBadge;
   historicalEdgeVerdictVi?: string | null;
+  // Apex Quant Confluence & Bottom Reversal Engine
+  apexQuantScore?: number | null; // 1 - 99
+  apexCategory?: ApexQuantCategory | string | null;
+  apexCategoryVi?: string | null;
+  reversalStageVi?: string | null;
+  extensionFromBottomPct?: number | null;
+  isSweetLaunchZone?: boolean | null;
+  isWyckoffSpring?: boolean | null;
+  isMaReclaim?: boolean | null;
 };
 
 export type ScreenerFilterParams = {
@@ -253,6 +268,9 @@ export type ScreenerFilterParams = {
   minHistoricalEdgeScore?: number;
   minHistoricalWinRate?: number;
   minUpDownVolRatio?: number;
+  minApexScore?: number;
+  maxExtensionBottom?: number;
+  sweetZoneOnly?: boolean;
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
@@ -943,10 +961,20 @@ function detectPresets(item: {
   historicalEdgeScore?: number | null;
   historicalWinRate?: number | null;
   upDownVolRatio?: number | null;
+  apexQuantScore?: number | null;
+  isSweetLaunchZone?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
-  // 0. Lợi Thế Thực Nghiệm Lịch Sử (Historical Price Action Edge & Trained High Conviction)
+  // 0. Siêu Lọc Apex Quant Confluence (Score >= 74 or Sweet Zone Reversal >= 65)
+  if (
+    (item.apexQuantScore != null && item.apexQuantScore >= 74) ||
+    (item.apexQuantScore != null && item.apexQuantScore >= 65 && item.isSweetLaunchZone)
+  ) {
+    passes.push("orca_apex_quant");
+  }
+
+  // 0a. Lợi Thế Thực Nghiệm Lịch Sử (Historical Price Action Edge & Trained High Conviction)
   if (
     (item.historicalEdgeScore != null && item.historicalEdgeScore >= 70) ||
     (item.historicalWinRate != null && item.historicalWinRate >= 60 && (item.upDownVolRatio ?? 1) >= 1.15)
@@ -1446,6 +1474,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         sparkBars?: { o: number; h: number; l: number; c: number; v: number }[];
         mtfCandle: MtfCandleClusterResult;
         trainedHistorical: HistoricalEdgeMetrics;
+        apexQuant: ApexQuantResult;
       }[] = [];
 
       for (const sym of symbols) {
@@ -1617,6 +1646,20 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           ma50: techFeatures.ma50,
         });
 
+        // 4. State-of-the-art Apex Quant Confluence & Early Bottom Reversal Engine
+        const apexQuant = evaluateApexQuant({
+          symbol: sym,
+          bars: parsed.ohlcvBars,
+          currentPrice: price ?? (parsed.closes[parsed.closes.length - 1] || 0),
+          quote: q,
+          activeBuyRatioPct: foreignRow?.buyRatioPct ?? null,
+          foreignNetValBillion: foreignNetVal,
+          rsRating,
+          piotroskiFScore,
+          altmanZone,
+          isMtfAligned: techFeatures.isMtfAligned,
+        });
+
         intermediateEntries.push({
           sym,
           sec,
@@ -1666,6 +1709,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           sparkBars: parsed.ohlcvBars.slice(-20).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume })),
           mtfCandle,
           trainedHistorical,
+          apexQuant,
         });
       }
 
@@ -1720,6 +1764,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           historicalEdgeScore: entry.trainedHistorical.historicalEdgeScore,
           historicalWinRate: entry.trainedHistorical.historicalWinRatePct,
           upDownVolRatio: entry.trainedHistorical.upDownVolRatio,
+          apexQuantScore: entry.apexQuant.apexScore,
+          isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
         });
 
         items.push({
@@ -1835,6 +1881,15 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           historicalEdgeScore: entry.trainedHistorical.historicalEdgeScore,
           historicalEdgeBadge: entry.trainedHistorical.historicalEdgeBadge,
           historicalEdgeVerdictVi: entry.trainedHistorical.verdictVi,
+          // Apex Quant Confluence & Reversal Engine
+          apexQuantScore: entry.apexQuant.apexScore,
+          apexCategory: entry.apexQuant.category,
+          apexCategoryVi: entry.apexQuant.categoryVi,
+          reversalStageVi: entry.apexQuant.reversalMetrics.reversalStageVi,
+          extensionFromBottomPct: entry.apexQuant.reversalMetrics.extensionFromBottomPct,
+          isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
+          isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
+          isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
           presetsPassed,
         });
       }
@@ -1846,6 +1901,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        orca_apex_quant: 0,
         historical_edge: 0,
         orca_master_elite: 0,
         smart_money_inflow: 0,
@@ -1905,6 +1961,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    orca_apex_quant: 0,
     historical_edge: 0,
     orca_master_elite: 0,
     smart_money_inflow: 0,
@@ -2081,6 +2138,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.minHistoricalEdgeScore != null && (x.historicalEdgeScore == null || x.historicalEdgeScore < params.minHistoricalEdgeScore)) continue;
     if (params.minHistoricalWinRate != null && (x.historicalWinRate == null || x.historicalWinRate < params.minHistoricalWinRate)) continue;
     if (params.minUpDownVolRatio != null && (x.upDownVolRatio == null || x.upDownVolRatio < params.minUpDownVolRatio)) continue;
+
+    // Apex Quant Confluence & Reversal Filters
+    if (params.minApexScore != null && (x.apexQuantScore == null || x.apexQuantScore < params.minApexScore)) continue;
+    if (params.maxExtensionBottom != null && (x.extensionFromBottomPct == null || x.extensionFromBottomPct > params.maxExtensionBottom)) continue;
+    if (params.sweetZoneOnly && !x.isSweetLaunchZone) continue;
 
     filtered.push(x);
   }

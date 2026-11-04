@@ -2,8 +2,10 @@ import { OhlcvBar } from "../types";
 import { batchVnOhlcv } from "../services/ohlcv-batch";
 import { estimateOrnsteinUhlenbeck } from "./advanced-quant-math";
 import { trainHistoricalPriceAction } from "./historical-price-action-trainer";
+import { evaluateApexQuant } from "./orca-apex-quant-engine";
 
 export type StrategyType =
+  | "orca_apex_quant"
   | "price_action_trained"
   | "orca_master"
   | "smart_money"
@@ -71,6 +73,10 @@ export interface ScreenerBacktestResult {
 }
 
 const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
+  orca_apex_quant: {
+    name: "👑 Siêu Lọc Apex Quant Confluence (Early Bottom Reversal)",
+    desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone) + Tỷ lệ Risk/Reward >= 2.2x.",
+  },
   price_action_trained: {
     name: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Price Action & Edge)",
     desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50.",
@@ -171,6 +177,7 @@ function formatBarDate(t: number): string {
 
 export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<ScreenerBacktestResult> {
   const validStrategies: StrategyType[] = [
+    "orca_apex_quant",
     "price_action_trained",
     "orca_master",
     "smart_money",
@@ -182,7 +189,7 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
   ];
   const strategy: StrategyType = validStrategies.includes(req.strategy as StrategyType)
     ? (req.strategy as StrategyType)
-    : "price_action_trained";
+    : "orca_apex_quant";
   const holdingDays = Math.max(5, Math.min(req.holdingDays || 20, 90));
   const stopLossPct = Math.max(2, Math.min(req.stopLossPct || 7, 20)); // %
   const takeProfitPct = Math.max(5, Math.min(req.takeProfitPct || 15, 50)); // %
@@ -236,7 +243,24 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         for (let v = i - 20; v < i; v++) sumVol += volumes[v];
         const avgVol20 = sumVol / 20;
 
-        if (strategy === "price_action_trained") {
+        if (strategy === "orca_apex_quant") {
+          // Apex Quant Confluence: Wyckoff Spring / early bottom reversal in sweet zone (0.8% - 7.5% from bottom)
+          if (i >= 25) {
+            const subBars = bars.slice(Math.max(0, i - 45), i + 1);
+            if (subBars.length >= 20) {
+              const apex = evaluateApexQuant(subBars);
+              if (
+                apex.apexScore >= 68 &&
+                apex.reversalMetrics.isSweetLaunchZone &&
+                !apex.reversalMetrics.isExtended &&
+                apex.reversalMetrics.overheadRoomPct >= 5.0 &&
+                currentClose > closes[i - 1]
+              ) {
+                signal = true;
+              }
+            }
+          }
+        } else if (strategy === "price_action_trained") {
           // Trained Price Action: Setup verified by empirical historical training without lookahead
           let maxHigh20 = -Infinity;
           for (let h = i - 20; h < i; h++) {

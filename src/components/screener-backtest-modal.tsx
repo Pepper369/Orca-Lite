@@ -14,6 +14,7 @@ interface ScreenerBacktestModalProps {
 }
 
 const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
+  { id: "orca_apex_quant", label: "👑 Siêu Lọc Apex Quant Confluence (Early Bottom)", desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone)" },
   { id: "price_action_trained", label: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Edge)", desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50" },
   { id: "orca_master", label: "🏆 Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
   { id: "smart_money", label: "🦈 Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
@@ -25,7 +26,7 @@ const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
 ];
 
 export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModalProps) {
-  const [strategy, setStrategy] = useState<StrategyType>("price_action_trained");
+  const [strategy, setStrategy] = useState<StrategyType>("orca_apex_quant");
   const [holdingDays, setHoldingDays] = useState<number>(20);
   const [stopLossPct, setStopLossPct] = useState<number>(7);
   const [takeProfitPct, setTakeProfitPct] = useState<number>(15);
