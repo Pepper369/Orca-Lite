@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
+  | "historical-edge"
   | "buy-point"
   | "orca-master"
   | "smart-money"
@@ -50,6 +51,7 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
+      { id: "historical-edge", label: "🎯 Lợi Thế Lịch Sử (Trained Edge)" },
       { id: "orca-master", label: "Orca Master (Top 90+)" },
       { id: "smart-money", label: "Dòng Tiền Cá Mập" },
       { id: "buy-point", label: "Điểm Mua Tối Ưu (Buy Zone)" },
@@ -240,6 +242,16 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "historical-edge":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="historical_edge"
+          defaultView="orca_master"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
     case "orca-master":
       body = (
         <VnScreener

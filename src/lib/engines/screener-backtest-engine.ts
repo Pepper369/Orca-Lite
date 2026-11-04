@@ -1,8 +1,17 @@
 import { OhlcvBar } from "../types";
 import { batchVnOhlcv } from "../services/ohlcv-batch";
 import { estimateOrnsteinUhlenbeck } from "./advanced-quant-math";
+import { trainHistoricalPriceAction } from "./historical-price-action-trainer";
 
-export type StrategyType = "breakout" | "canslim" | "ma_cross" | "value" | "quant_edge" | "orca_master" | "smart_money";
+export type StrategyType =
+  | "price_action_trained"
+  | "orca_master"
+  | "smart_money"
+  | "quant_edge"
+  | "breakout"
+  | "canslim"
+  | "ma_cross"
+  | "value";
 
 export interface BacktestRequest {
   strategy?: StrategyType;
@@ -52,13 +61,31 @@ export interface ScreenerBacktestResult {
   equityCurve: EquityPoint[];
   trades: BacktestTrade[];
   analyzedSymbols: string[];
+  symbolStats?: Record<string, { trades: number; winRatePct: number; returnPct: number }>;
+  historicalEdgeSummary?: {
+    avgWinRatePct: number;
+    avgUpDownRatio: number;
+    highEdgeSymbols: string[];
+  };
   generatedAt: string;
 }
 
 const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
+  price_action_trained: {
+    name: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Price Action & Edge)",
+    desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50.",
+  },
+  orca_master: {
+    name: "🏆 Orca Master Composite Elite (Đa Trụ Cột Đỉnh Cao)",
+    desc: "Mô hình tổng hợp 5 trụ cột: RS Rating O'Neil >= 80, Trật tự kênh tăng EMA20 > EMA50, thanh khoản đột biến > 1.2x TB20 và dòng tiền cá mập tích lũy.",
+  },
+  smart_money: {
+    name: "🦈 Dấu Chân Cá Mập & Pocket Pivot (Smart Money Inflow)",
+    desc: "Tín hiệu Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng phiên tăng vượt đỉnh volume mọi phiên giảm trong 10 phiên trước đó và giá giữ vững trên EMA20.",
+  },
   breakout: {
     name: "Breakout Volume Spike (Đột phá nền giá)",
-    desc: "Mua khi giá vượt đỉnh 20 phiên kèm khối lượng giao dịch gấp 1.5x khối lượng trung bình 20 phiên.",
+    desc: "Mua khi giá vượt đỉnh 20 phiên kèm khối lượng giao dịch gấp 1.3x khối lượng trung bình 20 phiên.",
   },
   canslim: {
     name: "CANSLIM Momentum (Xu hướng tăng trưởng)",
@@ -75,14 +102,6 @@ const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = 
   quant_edge: {
     name: "Ưu Thế Quant Mean Reversion (Ornstein-Uhlenbeck & Triple-Barrier)",
     desc: "Mô hình định lượng OU: Bắt đáy thống kê khi độ lệch Z-Score <= -1.4, chu kỳ bán rã t½ trong khoảng 2-35 phiên và giá có nến xác nhận bật tăng.",
-  },
-  orca_master: {
-    name: "🏆 Orca Master Composite Elite (Đa Trụ Cột Đỉnh Cao)",
-    desc: "Mô hình tổng hợp 5 trụ cột: RS Rating O'Neil >= 80, Trật tự kênh tăng EMA20 > EMA50, thanh khoản đột biến > 1.2x TB20 và dòng tiền cá mập tích lũy.",
-  },
-  smart_money: {
-    name: "🦈 Dấu Chân Cá Mập & Pocket Pivot (Smart Money Inflow)",
-    desc: "Tín hiệu Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng phiên tăng vượt đỉnh volume mọi phiên giảm trong 10 phiên trước đó và giá giữ vững trên EMA20.",
   },
 };
 
@@ -151,10 +170,19 @@ function formatBarDate(t: number): string {
 }
 
 export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<ScreenerBacktestResult> {
-  const validStrategies: StrategyType[] = ["breakout", "canslim", "ma_cross", "value", "quant_edge"];
+  const validStrategies: StrategyType[] = [
+    "price_action_trained",
+    "orca_master",
+    "smart_money",
+    "quant_edge",
+    "breakout",
+    "canslim",
+    "ma_cross",
+    "value",
+  ];
   const strategy: StrategyType = validStrategies.includes(req.strategy as StrategyType)
     ? (req.strategy as StrategyType)
-    : "breakout";
+    : "price_action_trained";
   const holdingDays = Math.max(5, Math.min(req.holdingDays || 20, 90));
   const stopLossPct = Math.max(2, Math.min(req.stopLossPct || 7, 20)); // %
   const takeProfitPct = Math.max(5, Math.min(req.takeProfitPct || 15, 50)); // %
@@ -208,7 +236,35 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         for (let v = i - 20; v < i; v++) sumVol += volumes[v];
         const avgVol20 = sumVol / 20;
 
-        if (strategy === "breakout") {
+        if (strategy === "price_action_trained") {
+          // Trained Price Action: Setup verified by empirical historical training without lookahead
+          let maxHigh20 = -Infinity;
+          for (let h = i - 20; h < i; h++) {
+            if (highs[h] > maxHigh20) maxHigh20 = highs[h];
+          }
+          const isBreakout = currentClose > maxHigh20 && volumes[i] >= avgVol20 * 1.2 && currentClose > closes[i - 1];
+          const isPocketPivot = volumes[i] >= avgVol20 * 1.15 && currentClose >= ema20[i] * 0.985 && currentClose > closes[i - 1];
+          const isMaBounce = closes[i - 1] <= ema20[i - 1] * 1.01 && currentClose > ema20[i] && currentClose > closes[i - 1];
+
+          if (isBreakout || isPocketPivot || isMaBounce) {
+            // Train historical price action on preceding window up to bar i (strictly no lookahead)
+            const subBars = bars.slice(Math.max(0, i - 60), i + 1);
+            if (subBars.length >= 30) {
+              const trained = trainHistoricalPriceAction(subBars, {
+                targetProfitPct: takeProfitPct,
+                stopLossPct: stopLossPct,
+                maxHoldingBars: holdingDays,
+              });
+              if (
+                trained.historicalEdgeScore >= 52 &&
+                trained.upDownVolRatio >= 1.02 &&
+                trained.fakeoutRiskPct <= 45
+              ) {
+                signal = true;
+              }
+            }
+          }
+        } else if (strategy === "breakout") {
           // Breakout 20-day high + volume spike > 1.3x avg
           let maxHigh20 = -Infinity;
           for (let h = i - 20; h < i; h++) {
@@ -435,6 +491,31 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
 
   const meta = STRATEGY_METADATA[strategy] || STRATEGY_METADATA.breakout;
 
+  // 5. Per-symbol statistics & historical edge summary
+  const symbolStats: Record<string, { trades: number; winRatePct: number; returnPct: number }> = {};
+  for (const { symbol } of validEntries) {
+    const symTrades = allTrades.filter(t => t.symbol === symbol);
+    const count = symTrades.length;
+    const wins = symTrades.filter(t => t.outcome === "WIN").length;
+    const wr = count > 0 ? Number(((wins / count) * 100).toFixed(1)) : 0;
+    const ret = Number(symTrades.reduce((acc, t) => acc + t.returnPct, 0).toFixed(1));
+    symbolStats[symbol] = { trades: count, winRatePct: wr, returnPct: ret };
+  }
+
+  const highEdgeSymbols: string[] = [];
+  let sumTrainedWinRate = 0;
+  let sumUpDown = 0;
+  for (const { symbol, bars } of validEntries) {
+    const trained = trainHistoricalPriceAction(bars);
+    sumTrainedWinRate += trained.historicalWinRatePct;
+    sumUpDown += trained.upDownVolRatio;
+    if (trained.historicalEdgeBadge === "HIGH_EDGE" || trained.historicalEdgeBadge === "POSITIVE_EDGE") {
+      highEdgeSymbols.push(symbol);
+    }
+  }
+  const avgWinRatePct = validEntries.length > 0 ? Number((sumTrainedWinRate / validEntries.length).toFixed(1)) : 50;
+  const avgUpDownRatio = validEntries.length > 0 ? Number((sumUpDown / validEntries.length).toFixed(2)) : 1.0;
+
   return {
     strategy,
     strategyName: meta.name,
@@ -455,6 +536,12 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
     equityCurve,
     trades: allTrades.slice(-20), // return recent 20 trades for UI preview
     analyzedSymbols: validEntries.map(e => e.symbol),
+    symbolStats,
+    historicalEdgeSummary: {
+      avgWinRatePct,
+      avgUpDownRatio,
+      highEdgeSymbols,
+    },
     generatedAt: new Date().toISOString(),
   };
 }

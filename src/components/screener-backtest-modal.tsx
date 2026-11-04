@@ -14,8 +14,9 @@ interface ScreenerBacktestModalProps {
 }
 
 const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
-  { id: "orca_master", label: "Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
-  { id: "smart_money", label: "Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
+  { id: "price_action_trained", label: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Edge)", desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50" },
+  { id: "orca_master", label: "🏆 Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
+  { id: "smart_money", label: "🦈 Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
   { id: "quant_edge", label: "Ưu Thế Quant OU (Mean Reversion)", desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ bán rã t½ tối ưu" },
   { id: "breakout", label: "Breakout Khối lượng", desc: "Vượt đỉnh 20 phiên + Khối lượng đột biến > 1.3x TB20" },
   { id: "canslim", label: "CANSLIM Momentum", desc: "Đà tăng trưởng: RSI > 52, EMA20 > EMA50, thanh khoản tích cực" },
@@ -24,7 +25,7 @@ const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
 ];
 
 export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModalProps) {
-  const [strategy, setStrategy] = useState<StrategyType>("breakout");
+  const [strategy, setStrategy] = useState<StrategyType>("price_action_trained");
   const [holdingDays, setHoldingDays] = useState<number>(20);
   const [stopLossPct, setStopLossPct] = useState<number>(7);
   const [takeProfitPct, setTakeProfitPct] = useState<number>(15);
@@ -297,6 +298,37 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                   </div>
                 </div>
               </div>
+
+              {/* Historical Edge Training Card */}
+              {data.historicalEdgeSummary && (
+                <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2 font-semibold text-emerald-400">
+                      <Zap className="size-3.5" />
+                      <span>Hiệu Quả Huấn Luyện Hành Động Giá Lịch Sử (Trained Edge)</span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      Tỷ lệ thắng thực nghiệm TB: <span className="font-semibold text-foreground">{data.historicalEdgeSummary.avgWinRatePct}%</span> • Tích lũy Up/Down: <span className="font-semibold text-emerald-400">{data.historicalEdgeSummary.avgUpDownRatio}x</span>
+                    </div>
+                  </div>
+                  {data.historicalEdgeSummary.highEdgeSymbols.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[11px] text-muted-foreground">Cổ phiếu có lợi thế lịch sử cao nhất:</span>
+                      {data.historicalEdgeSummary.highEdgeSymbols.map((sym) => {
+                        const stat = data.symbolStats?.[sym];
+                        return (
+                          <span key={sym} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-surface border border-emerald-500/30 text-[11px] text-foreground font-mono">
+                            <span className="font-bold text-emerald-400">{sym}</span>
+                            {stat && stat.trades > 0 && (
+                              <span className="text-[10px] text-muted-foreground">({stat.winRatePct}% Win)</span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Equity Chart */}
               {renderEquityChart()}

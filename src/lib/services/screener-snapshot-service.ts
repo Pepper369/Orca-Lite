@@ -57,9 +57,15 @@ import {
   type MtfCandleClusterStatus,
   type VsaSignalType,
 } from "../engines/mtf-candle-cluster";
+import {
+  trainHistoricalPriceAction,
+  type HistoricalEdgeBadge,
+  type HistoricalEdgeMetrics,
+} from "../engines/historical-price-action-trainer";
 
 export type ScreenerPreset =
   | "all"
+  | "historical_edge"
   | "near_buy_point"
   | "orca_master_elite"
   | "smart_money_inflow"
@@ -198,6 +204,14 @@ export type ScreenerStockItem = {
   vsaSignalVi?: string | null;
   overheadRoomPct?: number | null;
   nearestResistance?: number | null;
+  // Historical Price Action Training & Empirical Edge
+  historicalWinRate?: number | null;
+  upDownVolRatio?: number | null;
+  supportBounceRate?: number | null;
+  fakeoutRiskPct?: number | null;
+  historicalEdgeScore?: number | null;
+  historicalEdgeBadge?: HistoricalEdgeBadge;
+  historicalEdgeVerdictVi?: string | null;
 };
 
 export type ScreenerFilterParams = {
@@ -236,6 +250,9 @@ export type ScreenerFilterParams = {
   minSmartMoneyScore?: number;
   minRsRating?: number;
   minPiotroskiScore?: number;
+  minHistoricalEdgeScore?: number;
+  minHistoricalWinRate?: number;
+  minUpDownVolRatio?: number;
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
@@ -923,8 +940,19 @@ function detectPresets(item: {
   mtfCandleClusterStatus?: MtfCandleClusterStatus;
   mtfCandleScore?: number;
   vsaSignal?: VsaSignalType;
+  historicalEdgeScore?: number | null;
+  historicalWinRate?: number | null;
+  upDownVolRatio?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
+
+  // 0. Lợi Thế Thực Nghiệm Lịch Sử (Historical Price Action Edge & Trained High Conviction)
+  if (
+    (item.historicalEdgeScore != null && item.historicalEdgeScore >= 70) ||
+    (item.historicalWinRate != null && item.historicalWinRate >= 60 && (item.upDownVolRatio ?? 1) >= 1.15)
+  ) {
+    passes.push("historical_edge");
+  }
 
   // 0a. Orca Master Elite (Top 80+ Institutional Multi-Factor Rating)
   if (item.orcaMasterScore != null && item.orcaMasterScore >= 80) {
@@ -1417,6 +1445,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         sparkline?: number[];
         sparkBars?: { o: number; h: number; l: number; c: number; v: number }[];
         mtfCandle: MtfCandleClusterResult;
+        trainedHistorical: HistoricalEdgeMetrics;
       }[] = [];
 
       for (const sym of symbols) {
@@ -1556,6 +1585,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           foreignSellValBillion: foreignRow?.sellValue ? foreignRow.sellValue / 1_000_000_000 : null,
         });
 
+        // Train and calibrate historical price action (120-bar lookback empirical edge)
+        const trainedHistorical = trainHistoricalPriceAction(parsed.ohlcvBars);
+
         // Collect inputs for universe-wide Orca Master Composite percentile ranking
         orcaInputs.push({
           symbol: sym,
@@ -1574,6 +1606,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           pb,
           dividendYield,
           maSignal: techFeatures.maSignal,
+          historicalEdgeScore: trainedHistorical.historicalEdgeScore,
+          upDownVolRatio: trainedHistorical.upDownVolRatio,
         });
 
         const mtfCandle = evaluateMtfCandleCluster({
@@ -1631,6 +1665,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           sparkline: parsed.closes.slice(-20),
           sparkBars: parsed.ohlcvBars.slice(-20).map(b => ({ o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume })),
           mtfCandle,
+          trainedHistorical,
         });
       }
 
@@ -1682,6 +1717,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           mtfCandleClusterStatus: entry.mtfCandle.clusterStatus,
           mtfCandleScore: entry.mtfCandle.clusterScore,
           vsaSignal: entry.mtfCandle.vsaSignal,
+          historicalEdgeScore: entry.trainedHistorical.historicalEdgeScore,
+          historicalWinRate: entry.trainedHistorical.historicalWinRatePct,
+          upDownVolRatio: entry.trainedHistorical.upDownVolRatio,
         });
 
         items.push({
@@ -1789,6 +1827,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           vsaSignalVi: entry.mtfCandle.vsaSignalVi,
           overheadRoomPct: entry.mtfCandle.overheadRoomPct,
           nearestResistance: entry.mtfCandle.nearestResistance,
+          // Historical Price Action Training & Empirical Edge
+          historicalWinRate: entry.trainedHistorical.historicalWinRatePct,
+          upDownVolRatio: entry.trainedHistorical.upDownVolRatio,
+          supportBounceRate: entry.trainedHistorical.supportBounceRatePct,
+          fakeoutRiskPct: entry.trainedHistorical.fakeoutRiskPct,
+          historicalEdgeScore: entry.trainedHistorical.historicalEdgeScore,
+          historicalEdgeBadge: entry.trainedHistorical.historicalEdgeBadge,
+          historicalEdgeVerdictVi: entry.trainedHistorical.verdictVi,
           presetsPassed,
         });
       }
@@ -1800,6 +1846,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        historical_edge: 0,
         orca_master_elite: 0,
         smart_money_inflow: 0,
         near_buy_point: 0,
@@ -1858,6 +1905,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    historical_edge: 0,
     orca_master_elite: 0,
     smart_money_inflow: 0,
     near_buy_point: 0,
@@ -2028,6 +2076,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.minMtfCandleScore != null && (x.mtfCandleScore == null || x.mtfCandleScore < params.minMtfCandleScore)) continue;
     if (params.vsaOnly && !x.vsaSignal) continue;
     if (params.minOverheadRoom != null && (x.overheadRoomPct == null || x.overheadRoomPct < params.minOverheadRoom)) continue;
+
+    // Historical Price Action Training Filters
+    if (params.minHistoricalEdgeScore != null && (x.historicalEdgeScore == null || x.historicalEdgeScore < params.minHistoricalEdgeScore)) continue;
+    if (params.minHistoricalWinRate != null && (x.historicalWinRate == null || x.historicalWinRate < params.minHistoricalWinRate)) continue;
+    if (params.minUpDownVolRatio != null && (x.upDownVolRatio == null || x.upDownVolRatio < params.minUpDownVolRatio)) continue;
 
     filtered.push(x);
   }

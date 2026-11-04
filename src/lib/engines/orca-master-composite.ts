@@ -38,6 +38,8 @@ export interface OrcaMasterInput {
   pb?: number | null;
   dividendYield?: number | null;
   maSignal?: "GOLDEN_CROSS" | "BULLISH_ALIGN" | "DEATH_CROSS" | "NEUTRAL" | null;
+  historicalEdgeScore?: number | null; // 0 - 100: Empirical track record from past price action training
+  upDownVolRatio?: number | null;      // 50-bar accumulation/distribution volume ratio
 }
 
 export interface OrcaMasterResult {
@@ -72,10 +74,20 @@ export function computeRawOrcaScore(input: OrcaMasterInput): {
   if (input.maSignal === "GOLDEN_CROSS") techScore += 8;
   else if (input.maSignal === "BULLISH_ALIGN") techScore += 6;
   else if (input.maSignal === "DEATH_CROSS") techScore -= 15;
+
+  // Calibrate with trained historical edge
+  if (input.historicalEdgeScore != null) {
+    if (input.historicalEdgeScore >= 75) techScore += 8;
+    else if (input.historicalEdgeScore < 45) techScore -= 12;
+  }
   techScore = Math.max(5, Math.min(99, techScore));
 
   // 2. Pillar 2: Smart Money Orderflow (25%)
   let smScore = input.smartMoneyScore ?? 50;
+  if (input.upDownVolRatio != null) {
+    if (input.upDownVolRatio >= 1.25) smScore += 8;
+    else if (input.upDownVolRatio < 0.8) smScore -= 10;
+  }
   smScore = Math.max(5, Math.min(99, smScore));
 
   // 3. Pillar 3: Fundamental Quality (20%)
@@ -100,6 +112,11 @@ export function computeRawOrcaScore(input: OrcaMasterInput): {
     timingScore += 10;
   } else if (input.absBuyDiff != null && input.absBuyDiff > 5.0) {
     timingScore -= 8;
+  }
+  // Historical edge confirmation for timing
+  if (input.historicalEdgeScore != null) {
+    if (input.historicalEdgeScore >= 75) timingScore += 6;
+    else if (input.historicalEdgeScore < 45) timingScore -= 8;
   }
   timingScore = Math.max(5, Math.min(99, timingScore));
 
@@ -193,6 +210,7 @@ export function calculateUniverseOrcaMaster(
     if (s.breakdown.fundamentalScore >= 75) strengths.push("Cơ Bản Tốt");
     if (s.breakdown.timingScore >= 75) strengths.push("Điểm Vào Chuẩn");
     if (s.breakdown.valuationScore >= 70) strengths.push("Định Giá Rẻ");
+    if (s.item.historicalEdgeScore != null && s.item.historicalEdgeScore >= 75) strengths.push("Lợi Thế Lịch Sử Cao");
 
     const primaryStrengthVi = strengths.length > 0 ? strengths.join(" · ") : "Đa nhân tố cân bằng";
     const summaryVi = `Orca Master ${compositeScore}/99 (${categoryVi}): ${primaryStrengthVi}.`;

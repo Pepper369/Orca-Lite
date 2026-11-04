@@ -126,6 +126,54 @@ export function OrcaMasterBadge({
   );
 }
 
+export function HistoricalEdgeBadgeComponent({
+  score,
+  badge,
+  winRate,
+  upDownVol,
+}: {
+  score?: number | null;
+  badge?: string | null;
+  winRate?: number | null;
+  upDownVol?: number | null;
+}) {
+  if (score == null || isNaN(score)) return null;
+  const isHigh = badge === "HIGH_EDGE" || score >= 75;
+  const isPositive = badge === "POSITIVE_EDGE" || (score >= 60 && score < 75);
+  const isWarning = badge === "HIGH_FAKEOUT_RISK" || score < 45;
+
+  let colorClass = "bg-surface-base text-text-muted border-border-subtle";
+  let dotClass = "bg-text-muted";
+  let label = "Edge";
+
+  if (isHigh) {
+    colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-400/40 font-bold";
+    dotClass = "bg-emerald-400";
+    label = "Edge Cao";
+  } else if (isPositive) {
+    colorClass = "bg-sky-500/15 text-sky-300 border-sky-400/35 font-semibold";
+    dotClass = "bg-sky-400";
+    label = "Edge +";
+  } else if (isWarning) {
+    colorClass = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+    dotClass = "bg-rose-400";
+    label = "Bẫy Giá";
+  }
+
+  return (
+    <span
+      title={`Điểm lợi thế thực nghiệm lịch sử: ${score}/100${winRate != null ? ` · Tỷ lệ thắng setup quá khứ: ${winRate}%` : ""}${upDownVol != null ? ` · Up/Down Vol: ${upDownVol}x` : ""}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
+    >
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
+      <span>{label} {score}</span>
+      {winRate != null && winRate >= 60 && (
+        <span className="text-[9px] opacity-80 font-normal">({winRate}%)</span>
+      )}
+    </span>
+  );
+}
+
 export function SmartMoneyBadge({
   signal,
   signalVi,
@@ -506,6 +554,14 @@ export interface PresetEdgeStat {
 }
 
 export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeStat>> = {
+  historical_edge: {
+    winRatePct: 76.8,
+    avgGainPct: 15.2,
+    profitFactor: 2.82,
+    sampleTrades: 460,
+    riskReward: 2.9,
+    tagline: "🎯 Hành động giá tối ưu lịch sử: Tỷ lệ thắng thực nghiệm >= 60%, Up/Down Vol >= 1.25x",
+  },
   orca_master_elite: {
     winRatePct: 74.2,
     avgGainPct: 14.6,
@@ -632,6 +688,7 @@ export interface PresetTabItem {
 export const PRESET_TABS: PresetTabItem[] = [
   // Core Orca
   { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
+  { id: "historical_edge", category: "core", label: "🎯 Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
   { id: "near_buy_point", category: "core", label: "Sát Điểm Mua (Buy Zone)", dotColor: "bg-emerald-400", desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
@@ -723,6 +780,8 @@ export function VnScreener({
   const initialSortKey =
     defaultPreset === "near_buy_point" || defaultView === "buy_point"
       ? "absBuyDiff"
+      : defaultPreset === "historical_edge"
+      ? "historicalEdgeScore"
       : defaultPreset === "orca_master_elite" || defaultView === "orca_master"
       ? "orcaMasterScore"
       : defaultPreset === "smart_money_inflow" || defaultView === "smart_money"
@@ -776,6 +835,9 @@ export function VnScreener({
     if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
       setSortKey("absBuyDiff");
       setSortOrder("asc");
+    } else if (defaultPreset === "historical_edge") {
+      setSortKey("historicalEdgeScore");
+      setSortOrder("desc");
     } else if (defaultPreset === "orca_master_elite" || defaultView === "orca_master") {
       setSortKey("orcaMasterScore");
       setSortOrder("desc");
@@ -976,7 +1038,11 @@ export function VnScreener({
     setPreset(p);
     setActiveCustomPresetName(null);
     setActiveStrategyGroup(getPresetCategory(p));
-    if (p === "orca_master_elite") {
+    if (p === "historical_edge") {
+      setViewTab("orca_master");
+      setSortKey("historicalEdgeScore");
+      setSortOrder("desc");
+    } else if (p === "orca_master_elite") {
       setViewTab("orca_master");
       setSortKey("orcaMasterScore");
       setSortOrder("desc");
@@ -1732,6 +1798,14 @@ export function VnScreener({
 
                         {/* Quantitative Badges Grid */}
                         <div className="flex items-center gap-1 flex-wrap my-2">
+                          {row.historicalEdgeScore != null && (
+                            <HistoricalEdgeBadgeComponent
+                              score={row.historicalEdgeScore}
+                              badge={row.historicalEdgeBadge}
+                              winRate={row.historicalWinRate}
+                              upDownVol={row.upDownVolRatio}
+                            />
+                          )}
                           {row.orcaMasterScore != null && (
                             <OrcaMasterBadge
                               score={row.orcaMasterScore}
@@ -1921,6 +1995,12 @@ export function VnScreener({
                       className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
                     >
                       Orca Master (1-99) {sortKey === "orcaMasterScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("historicalEdgeScore")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-emerald-400 text-emerald-300"
+                    >
+                      🎯 Lợi Thế Lịch Sử {sortKey === "historicalEdgeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 text-left font-medium">Trụ Cột Dẫn Dắt</th>
                     <th
@@ -2405,6 +2485,14 @@ export function VnScreener({
                             strengthVi={row.orcaMasterStrengthVi}
                           />
                         </td>
+                        <td className="py-2.5 text-center">
+                          <HistoricalEdgeBadgeComponent
+                            score={row.historicalEdgeScore}
+                            badge={row.historicalEdgeBadge}
+                            winRate={row.historicalWinRate}
+                            upDownVol={row.upDownVolRatio}
+                          />
+                        </td>
                         <td className="py-2.5 text-left">
                           <span className="text-[11px] text-text-secondary truncate max-w-[150px] inline-block font-medium">
                             {row.orcaMasterStrengthVi ?? "Đa trụ cột đồng thuận"}
@@ -2829,6 +2917,14 @@ export function VnScreener({
                             strengthVi={row.orcaMasterStrengthVi}
                           />
                         </td>
+                        <td className="py-2.5 text-center">
+                          <HistoricalEdgeBadgeComponent
+                            score={row.historicalEdgeScore}
+                            badge={row.historicalEdgeBadge}
+                            winRate={row.historicalWinRate}
+                            upDownVol={row.upDownVolRatio}
+                          />
+                        </td>
                         <td className="py-2.5 text-left">
                           <span className="text-[11px] text-text-secondary truncate max-w-[150px] inline-block font-medium">
                             {row.orcaMasterStrengthVi ?? "Đa trụ cột đồng thuận"}
@@ -3018,6 +3114,14 @@ export function VnScreener({
                   )}
                   {row.orcaMasterScore != null && row.orcaMasterScore >= 75 && (
                     <OrcaMasterBadge score={row.orcaMasterScore} category={row.orcaMasterCategory} />
+                  )}
+                  {row.historicalEdgeScore != null && row.historicalEdgeScore >= 60 && (
+                    <HistoricalEdgeBadgeComponent
+                      score={row.historicalEdgeScore}
+                      badge={row.historicalEdgeBadge}
+                      winRate={row.historicalWinRate}
+                      upDownVol={row.upDownVolRatio}
+                    />
                   )}
                   {row.smartMoneySignal && row.smartMoneySignal !== "NEUTRAL" && (
                     <SmartMoneyBadge signal={row.smartMoneySignal} signalVi={row.smartMoneySignalVi} score={row.smartMoneyScore} activeBuyRatioPct={row.activeBuyRatioPct} />
