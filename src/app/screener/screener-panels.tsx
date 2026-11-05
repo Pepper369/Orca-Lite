@@ -202,11 +202,11 @@ export function ApexQuantBadgeComponent({
   if (isSuper) {
     colorClass = "bg-amber-500/20 text-amber-200 border-amber-400/50 font-bold shadow-xs";
     dotClass = "bg-amber-400 animate-pulse";
-    label = "👑 Siêu Apex";
+    label = "👑 Chân Sóng";
   } else if (isLeader) {
     colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-400/40 font-semibold";
     dotClass = "bg-emerald-400";
-    label = "Apex Lead";
+    label = "Chân Sóng";
   } else if (isCandidate) {
     colorClass = "bg-cyan-500/15 text-cyan-300 border-cyan-400/35 font-medium";
     dotClass = "bg-cyan-400";
@@ -215,7 +215,7 @@ export function ApexQuantBadgeComponent({
 
   return (
     <span
-      title={`Siêu Lọc Apex Quant Confluence: ${score}/100${categoryVi ? ` · ${categoryVi}` : ""}${reversalStageVi ? ` · Trạng thái: ${reversalStageVi}` : ""}${extensionFromBottomPct != null ? ` · Cách đáy: ${extensionFromBottomPct > 0 ? "+" : ""}${extensionFromBottomPct}%` : ""}${isSweetLaunchZone ? " · Vùng Vàng Sweet Launch Zone" : ""}`}
+      title={`Chân Sóng Apex: ${score}/100${categoryVi ? ` · ${categoryVi}` : ""}${reversalStageVi ? ` · Trạng thái: ${reversalStageVi}` : ""}${extensionFromBottomPct != null ? ` · Cách đáy: ${extensionFromBottomPct > 0 ? "+" : ""}${extensionFromBottomPct}%` : ""}${isSweetLaunchZone ? " · Vùng Vàng Sweet Launch Zone" : ""}`}
       className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] whitespace-nowrap num tracking-tight ${colorClass}`}
     >
       <span className={`size-1.5 rounded-full ${dotClass}`} />
@@ -613,7 +613,7 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     profitFactor: 2.95,
     sampleTrades: 480,
     riskReward: 3.1,
-    tagline: "👑 Siêu Lọc Apex Quant: Đảo chiều chân sóng Wyckoff + Quant OU Z-score + Sweet Launch Zone (Chưa chạy xa đáy)",
+    tagline: "👑 Chân Sóng Apex: Đảo chiều chân sóng Wyckoff + Quant OU Z-score + Sweet Launch Zone (Chưa chạy xa đáy)",
   },
   historical_edge: {
     winRatePct: 76.8,
@@ -749,7 +749,7 @@ export interface PresetTabItem {
 export const PRESET_TABS: PresetTabItem[] = [
   // Core Orca
   { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
-  { id: "orca_apex_quant", category: "core", label: "👑 Siêu Lọc Apex Quant", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu đa chiều: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
+  { id: "orca_apex_quant", category: "core", label: "👑 Chân Sóng Apex", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
   { id: "historical_edge", category: "core", label: "🎯 Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
@@ -2081,7 +2081,7 @@ export function VnScreener({
                       onClick={() => handleSort("apexQuantScore")}
                       className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
                     >
-                      👑 Siêu Apex {sortKey === "apexQuantScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                      👑 Chân Sóng Apex {sortKey === "apexQuantScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
                       onClick={() => handleSort("historicalEdgeScore")}

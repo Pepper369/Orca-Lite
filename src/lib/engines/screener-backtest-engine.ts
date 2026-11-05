@@ -74,7 +74,7 @@ export interface ScreenerBacktestResult {
 
 const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
   orca_apex_quant: {
-    name: "👑 Siêu Lọc Apex Quant Confluence (Early Bottom Reversal)",
+    name: "👑 Chân Sóng Apex (Early Bottom Reversal)",
     desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone) + Tỷ lệ Risk/Reward >= 2.2x.",
   },
   price_action_trained: {

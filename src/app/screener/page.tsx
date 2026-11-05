@@ -52,7 +52,7 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
-      { id: "apex-quant", label: "👑 Siêu Lọc Apex Quant Confluence" },
+      { id: "apex-quant", label: "👑 Chân Sóng Apex" },
       { id: "historical-edge", label: "🎯 Lợi Thế Lịch Sử (Trained Edge)" },
       { id: "orca-master", label: "Orca Master (Top 90+)" },
       { id: "smart-money", label: "Dòng Tiền Cá Mập" },
