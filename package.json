@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --conditions=react-server --test src/lib/__tests__/pillar1-mesh-and-tape.test.ts",
+    "test": "tsx --conditions=react-server --test src/lib/__tests__/pillar*.test.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

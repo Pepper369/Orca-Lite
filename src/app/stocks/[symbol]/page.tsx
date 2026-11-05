@@ -46,6 +46,7 @@ import { BOOTSTRAP_VN30_QUOTES } from "@/lib/bootstrap-data";
 import { StarRatingsPanel } from "@/components/stocks/star-ratings-panel";
 import { DriverAttributionWidget } from "@/components/stocks/driver-attribution-widget";
 import { ExposureChainPanel } from "@/components/stocks/exposure-chain-panel";
+import { T2RiskWidget } from "@/components/stocks/t2-risk-widget";
 
 const TechRecoPanel = dynamic(
   () => import("@/components/stocks/tech-reco-panel").then((m) => m.TechRecoPanel),
@@ -703,6 +704,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
         <div className="p-3 sm:p-4">
           {activeTab === "overview" && (
             <div className="space-y-3.5">
+              <ErrorBoundary name="t2-risk" resetKey={detail.symbol}>
+                <T2RiskWidget symbol={detail.symbol} />
+              </ErrorBoundary>
               <ErrorBoundary name="star-ratings" resetKey={detail.symbol}>
                 <StarRatingsPanel ratings={detail.starRatings} symbol={detail.symbol} />
               </ErrorBoundary>
