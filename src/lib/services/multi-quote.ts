@@ -5,6 +5,7 @@ import { getVpsQuotes } from "../providers/vps";
 import { getVietcapQuotes } from "../providers/vietcap";
 import { getSsiIboardQuotes } from "../providers/ssi-iboard";
 import { getPublicQuotes } from "../providers/public-vn-feed";
+import { fetchEntradeQuotes } from "./zero-failure-mesh";
 import { recordMarketSource, type MarketSourceId } from "../realtime/market-source-monitor";
 import { isCircuitOpen } from "../health";
 
@@ -39,6 +40,7 @@ export type MultiQuoteResult = {
 
 const PRICE_PRIORITY: Record<string, number> = {
   vps: 100,
+  entrade: 98,
   "ssi-iboard": 95,
   vndirect: 90,
   vietcap: 50,
@@ -266,11 +268,15 @@ export async function getMultiQuotes(symbols: string[]): Promise<MultiQuoteResul
   let conflicts = 0;
   const mode = multiSourceMode();
 
-  // Tier 1: PUBLIC primary — song song, không API key
+  // Tier 1: PUBLIC primary — song song, không API key (Zero-Failure Data Mesh)
   const tier1: { src: string; p: Promise<SourceBatch> }[] = [
     {
       src: "vps",
       p: runSource("vps", () => asPack(() => getVpsQuotes(uniq)), TIER1_TIMEOUT_MS),
+    },
+    {
+      src: "entrade",
+      p: runSource("entrade", () => asPack(() => fetchEntradeQuotes(uniq)), TIER1_TIMEOUT_MS),
     },
     {
       src: "ssi-iboard",
