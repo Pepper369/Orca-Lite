@@ -183,3 +183,18 @@ test("Orca Apex Quant Engine incorporates Ribbon Squeeze, Absorption, and Precis
   assert.ok(enhancedResult.highlights.some((r) => r.includes("Hấp thụ cung đột biến")));
   assert.ok(enhancedResult.highlights.some((r) => r.includes("Đồng thuận đa khung H1-D1-W1")));
 });
+
+test("Consolidated Screener Presets - Preserves taxonomy and removes duplicate noise", () => {
+  const { PRESET_TABS } = require("../../app/screener/screener-panels");
+  // Check that core streamlined presets exist
+  const ids = PRESET_TABS.map((t: any) => t.id);
+  assert.ok(ids.includes("apex_buy_now"));
+  assert.ok(ids.includes("mtf_confluence"));
+  assert.ok(ids.includes("canslim"));
+  assert.ok(ids.includes("bottom_confluence"));
+  assert.ok(ids.includes("ttm_squeeze"));
+
+  // Check that duplicate redundant tabs have been consolidated
+  assert.ok(!ids.includes("mtf_candle_cluster"), "mtf_candle_cluster should be unified into mtf_confluence");
+  assert.ok(!ids.includes("growth"), "growth should be unified into canslim");
+});

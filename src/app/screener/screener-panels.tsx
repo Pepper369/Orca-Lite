@@ -960,13 +960,12 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "sector_leading", category: "core", label: "Ngành Dẫn Dắt RRG", dotColor: "bg-emerald-400", desc: "Cổ phiếu thuộc ngành Dẫn dắt (Leading Quadrant RRG) với RS-Ratio & RS-Momentum vượt trội VN-Index" },
 
   // Price Action & MTF
-  { id: "mtf_candle_cluster", category: "price_action", label: "Cụm Nến Đa Khung", dotColor: "bg-rose-400", desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
-  { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-emerald-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
-  { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-amber-400", desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
-  { id: "bottom_confluence", category: "price_action", label: "Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy Đỉnh Cao: Hỗ trợ MA/Reclaim MA + Cụm nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
+  { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-emerald-400", desc: "Đồng thuận đa khung tuyệt đối: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng tăng kèm cụm nến đảo chiều" },
+  { id: "bottom_confluence", category: "price_action", label: "Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
   { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
+  { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-teal-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
+  { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM) & Ribbon", dotColor: "bg-purple-400", desc: "Độ nén biến động kép: Bollinger nén trong Keltner (TTM) hoặc dải MA Ribbon hội tụ co cụm <= 2.8%" },
   { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
-  { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM)", dotColor: "bg-purple-400", desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
   { id: "breakout", category: "price_action", label: "Bùng Nổ Khối Lượng", dotColor: "bg-purple-400", desc: "Giá tăng > 2% kèm vol lớn vượt đỉnh" },
   { id: "ma_cross", category: "price_action", label: "Giao Cắt MA Vàng", dotColor: "bg-emerald-400", desc: "Golden Cross & Trật tự MA tăng" },
 
@@ -978,9 +977,8 @@ export const PRESET_TABS: PresetTabItem[] = [
 
   // Fundamental & CANSLIM
   { id: "rs_leaders", category: "fundamental", label: "Dẫn Dắt RS 80+ (O'Neil)", dotColor: "bg-amber-400", desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
+  { id: "canslim", category: "fundamental", label: "CANSLIM & Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST vượt trội > 20% & ROE dẫn dắt" },
   { id: "piotroski_diamonds", category: "fundamental", label: "Piotroski & Altman Z", dotColor: "bg-cyan-400", desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
-  { id: "canslim", category: "fundamental", label: "CANSLIM Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST & ROE vượt trội" },
-  { id: "growth", category: "fundamental", label: "Siêu Tăng Trưởng LNST", dotColor: "bg-amber-400", desc: "LNST / Doanh thu tăng trưởng > 20%" },
   { id: "value", category: "fundamental", label: "Giá Trị Biên An Toàn", dotColor: "bg-blue-400", desc: "P/E < 11, P/B < 1.3, an toàn vốn" },
   { id: "dividend", category: "fundamental", label: "Cổ Tức Tiền Mặt Cao", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
 ];
@@ -1048,6 +1046,68 @@ export function VnScreener({
   const [absorptionSpikeOnly, setAbsorptionSpikeOnly] = useState(false);
   const [vsaNoSupplyOnly, setVsaNoSupplyOnly] = useState(false);
   const [precisionMtfOnly, setPrecisionMtfOnly] = useState(false);
+
+  // Consolidated compound filter helper states
+  const [buyPositionCombo, setBuyPositionCombo] = useState("ALL");
+  const [volatilityCombo, setVolatilityCombo] = useState("ALL");
+  const [vsaCombo, setVsaCombo] = useState("ALL");
+
+  const handleBuyPositionChange = (val: string) => {
+    setBuyPositionCombo(val);
+    if (val === "AT_BUY_POINT") {
+      setBuyZoneStatus("AT_BUY_POINT");
+      setMaxBuyDiff("1.0");
+    } else if (val === "NEAR_BUY_POINT") {
+      setBuyZoneStatus("NEAR_BUY_POINT");
+      setMaxBuyDiff("2.5");
+    } else if (val === "SAFE_ACCUMULATION") {
+      setBuyZoneStatus("ALL");
+      setMaxBuyDiff("3.5");
+    } else if (val === "WAIT_PULLBACK") {
+      setBuyZoneStatus("WAIT_PULLBACK");
+      setMaxBuyDiff("");
+    } else if (val === "BELOW_SUPPORT") {
+      setBuyZoneStatus("BELOW_SUPPORT");
+      setMaxBuyDiff("");
+    } else {
+      setBuyZoneStatus("ALL");
+      setMaxBuyDiff("");
+    }
+  };
+
+  const handleVolatilityChange = (val: string) => {
+    setVolatilityCombo(val);
+    if (val === "FIRED") {
+      setSqueezeFilter("FIRED");
+      setMaRibbonSqueezeOnly(false);
+    } else if (val === "SQUEEZE_ON") {
+      setSqueezeFilter("ON");
+      setMaRibbonSqueezeOnly(false);
+    } else if (val === "RIBBON_SQUEEZE") {
+      setSqueezeFilter("ALL");
+      setMaRibbonSqueezeOnly(true);
+    } else if (val === "COIL_SUPER") {
+      setSqueezeFilter("ON");
+      setMaRibbonSqueezeOnly(true);
+    } else {
+      setSqueezeFilter("ALL");
+      setMaRibbonSqueezeOnly(false);
+    }
+  };
+
+  const handleVsaChange = (val: string) => {
+    setVsaCombo(val);
+    if (val === "ABSORPTION") {
+      setAbsorptionSpikeOnly(true);
+      setVsaNoSupplyOnly(false);
+    } else if (val === "NO_SUPPLY") {
+      setAbsorptionSpikeOnly(false);
+      setVsaNoSupplyOnly(true);
+    } else {
+      setAbsorptionSpikeOnly(false);
+      setVsaNoSupplyOnly(false);
+    }
+  };
 
   // Sort state
   const initialSortKey =
@@ -1313,6 +1373,9 @@ export function VnScreener({
     setAbsorptionSpikeOnly(false);
     setVsaNoSupplyOnly(false);
     setPrecisionMtfOnly(false);
+    setBuyPositionCombo("ALL");
+    setVolatilityCombo("ALL");
+    setVsaCombo("ALL");
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1855,129 +1918,126 @@ export function VnScreener({
 
         {/* Collapsible Advanced Filters */}
         {showAdvanced && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-9 gap-2.5 border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200">
-            <label>
-              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Khoảng cách điểm mua</span>
-              <select
-                value={maxBuyDiff}
-                onChange={(e) => setMaxBuyDiff(e.target.value)}
-                className="input !w-full !py-1.5 text-[12px]"
-              >
-                <option value="">Tất cả khoảng cách</option>
-                <option value="1.0">≤ 1.0% (Đúng điểm mua)</option>
-                <option value="2.0">≤ 2.0% (Sát điểm mua)</option>
-                <option value="3.5">≤ 3.5% (Vùng gom an toàn)</option>
-                <option value="5.0">≤ 5.0%</option>
-              </select>
-            </label>
-            <label>
-              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Trạng thái điểm mua</span>
-              <select
-                value={buyZoneStatus}
-                onChange={(e) => setBuyZoneStatus(e.target.value)}
-                className="input !w-full !py-1.5 text-[12px]"
-              >
-                <option value="ALL">Mọi trạng thái</option>
-                <option value="AT_BUY_POINT">Ngay điểm mua (Zone)</option>
-                <option value="NEAR_BUY_POINT">Sát điểm mua (≤ 2.5%)</option>
-                <option value="WAIT_PULLBACK">Chờ chỉnh (&gt; 2.5%)</option>
-                <option value="BELOW_SUPPORT">Dưới hỗ trợ</option>
-              </select>
-            </label>
-            <label>
-              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Tín hiệu MA</span>
-              <select
-                value={maSignal}
-                onChange={(e) => setMaSignal(e.target.value)}
-                className="input !w-full !py-1.5 text-[12px]"
-              >
-                <option value="ALL">Tất cả tín hiệu MA</option>
-                <option value="GOLDEN_CROSS">Giao cắt Vàng (Golden)</option>
-                <option value="BULLISH_ALIGN">Kênh tăng (Trật tự MA)</option>
-                <option value="DEATH_CROSS">Cắt Tử thần (Death Cross)</option>
-              </select>
-            </label>
-            <label>
-              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Ngành RRG</span>
-              <select
-                value={rrgQuadrant}
-                onChange={(e) => setRrgQuadrant(e.target.value)}
-                className="input !w-full !py-1.5 text-[12px]"
-              >
-                <option value="ALL">Tất cả góc RRG</option>
-                <option value="LEADING">Dẫn dắt (Leading)</option>
-                <option value="IMPROVING">Cải thiện (Improving)</option>
-                <option value="WEAKENING">Suy yếu (Weakening)</option>
-                <option value="LAGGING">Tụt hậu (Lagging)</option>
-              </select>
-            </label>
-            <label>
-              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Squeeze (TTM)</span>
-              <select
-                value={squeezeFilter}
-                onChange={(e) => setSqueezeFilter(e.target.value)}
-                className="input !w-full !py-1.5 text-[12px]"
-              >
-                <option value="ALL">Tất cả Squeeze</option>
-                <option value="FIRED">Nổ Squeeze Tăng (Fired)</option>
-                <option value="ON">Đang nén (Squeeze On)</option>
-              </select>
-            </label>
-            <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
-            <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
-            <Field label="ROE tối thiểu (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
-            <Field label="Cổ tức tối thiểu (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
-            <Field label="Nợ/Vốn CSH tối đa" value={maxDe} onChange={setMaxDe} small placeholder="1.2" />
-            <Field label="Vốn hóa min (tỷ)" value={minMarketCap} onChange={setMinMarketCap} small placeholder="1000" />
+          <div className="border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200 space-y-3">
+            {/* Row 1: Core Strategy Selectors (Merged & Streamlined) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Vị Thế Vùng Mua
+                </span>
+                <select
+                  value={buyPositionCombo}
+                  onChange={(e) => handleBuyPositionChange(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Mọi vị thế điểm mua</option>
+                  <option value="AT_BUY_POINT">⚡ Ngay điểm mua (Zone ≤ 1.0%)</option>
+                  <option value="NEAR_BUY_POINT">🎯 Sát điểm mua (≤ 2.5%)</option>
+                  <option value="SAFE_ACCUMULATION">🛡️ Vùng gom an toàn (≤ 3.5%)</option>
+                  <option value="WAIT_PULLBACK">⏳ Chờ điều chỉnh (&gt; 2.5%)</option>
+                  <option value="BELOW_SUPPORT">⚠️ Dưới hỗ trợ</option>
+                </select>
+              </label>
 
-            {/* Quick Quant Precision Toggles (Biên độ 3, 4, 5) */}
-            <div className="col-span-full flex flex-wrap items-center gap-3 pt-2.5 mt-1 border-t border-line/40 text-[11px]">
-              <span className="text-[10px] uppercase font-bold text-text-muted">Biên độ Nâng cao:</span>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-indigo-300 hover:text-indigo-200 select-none">
-                <input
-                  type="checkbox"
-                  checked={maRibbonSqueezeOnly}
-                  onChange={(e) => setMaRibbonSqueezeOnly(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="font-semibold">Nén Ribbon MA (BĐ3)</span>
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Nén Biến Động (Coil)
+                </span>
+                <select
+                  value={volatilityCombo}
+                  onChange={(e) => handleVolatilityChange(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Mọi trạng thái nén</option>
+                  <option value="FIRED">🚀 Nổ Squeeze Tăng (Fired Bull)</option>
+                  <option value="SQUEEZE_ON">🌀 Đang nén TTM Squeeze</option>
+                  <option value="RIBBON_SQUEEZE">📐 Nén Dải Ribbon MA (≤ 2.8%)</option>
+                  <option value="COIL_SUPER">⚡ Siêu nén kép (TTM + Ribbon)</option>
+                </select>
               </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
-                <input
-                  type="checkbox"
-                  checked={maReclaimOnly}
-                  onChange={(e) => setMaReclaimOnly(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="font-semibold">Reclaim Spring MA (BĐ3)</span>
+
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Dấu Chân VSA & Dòng Tiền
+                </span>
+                <select
+                  value={vsaCombo}
+                  onChange={(e) => handleVsaChange(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Mọi khối lượng VSA</option>
+                  <option value="ABSORPTION">🌊 Hấp thụ cung đột biến (≥ 1.3x)</option>
+                  <option value="NO_SUPPLY">🔬 Cạn cung kiểm định (≤ 0.65x)</option>
+                </select>
               </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
-                <input
-                  type="checkbox"
-                  checked={absorptionSpikeOnly}
-                  onChange={(e) => setAbsorptionSpikeOnly(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="font-semibold">Hấp Thụ Cung (BĐ4)</span>
+
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Ngành Dẫn Dắt RRG
+                </span>
+                <select
+                  value={rrgQuadrant}
+                  onChange={(e) => setRrgQuadrant(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Tất cả ngành RRG</option>
+                  <option value="LEADING">Dẫn dắt (Leading RRG)</option>
+                  <option value="IMPROVING">Cải thiện (Improving)</option>
+                  <option value="WEAKENING">Suy yếu (Weakening)</option>
+                  <option value="LAGGING">Tụt hậu (Lagging)</option>
+                </select>
               </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 hover:text-teal-200 select-none">
-                <input
-                  type="checkbox"
-                  checked={vsaNoSupplyOnly}
-                  onChange={(e) => setVsaNoSupplyOnly(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="font-semibold">Cạn Cung VSA (BĐ4)</span>
+
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Tín Hiệu MA & Kênh
+                </span>
+                <select
+                  value={maSignal}
+                  onChange={(e) => setMaSignal(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Tất cả tín hiệu MA</option>
+                  <option value="GOLDEN_CROSS">⭐ Giao cắt Vàng (Golden Cross)</option>
+                  <option value="BULLISH_ALIGN">📈 Kênh tăng (Trật tự MA)</option>
+                  <option value="DEATH_CROSS">⚠️ Cắt Tử thần (Death Cross)</option>
+                </select>
               </label>
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-emerald-200 select-none">
-                <input
-                  type="checkbox"
-                  checked={precisionMtfOnly}
-                  onChange={(e) => setPrecisionMtfOnly(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="font-semibold">Đồng Thuận 3 Khung (BĐ5)</span>
-              </label>
+            </div>
+
+            {/* Row 2: Fundamental & Valuation Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 pt-2 border-t border-line/40">
+              <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
+              <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
+              <Field label="ROE tối thiểu (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
+              <Field label="Cổ tức tối thiểu (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
+              <Field label="Nợ/VCSH tối đa" value={maxDe} onChange={setMaxDe} small placeholder="1.2" />
+              <Field label="Vốn hóa min (tỷ)" value={minMarketCap} onChange={setMinMarketCap} small placeholder="1000" />
+            </div>
+
+            {/* Row 3: Actionable Precision Switches */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line/40 text-[11px]">
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="text-[10px] uppercase font-bold text-text-muted">Kích hoạt Nhanh:</span>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-emerald-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={precisionMtfOnly}
+                    onChange={(e) => setPrecisionMtfOnly(e.target.checked)}
+                    className="rounded accent-emerald-500"
+                  />
+                  <span className="font-semibold">Đồng Thuận 3 Khung H1·D1·W1 (BĐ5)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={maReclaimOnly}
+                    onChange={(e) => setMaReclaimOnly(e.target.checked)}
+                    className="rounded accent-cyan-500"
+                  />
+                  <span className="font-semibold">Quét Rũ Reclaim Spring MA (BĐ3)</span>
+                </label>
+              </div>
             </div>
           </div>
         )}

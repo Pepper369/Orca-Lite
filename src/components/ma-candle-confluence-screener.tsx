@@ -464,159 +464,117 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-surface-elevated/15 text-[11px]">
           {/* Quick Condition Toggles */}
           <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={chartPatternOnly}
-                onChange={(e) => setChartPatternOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-purple-400 font-semibold">Mẫu hình giá (VCP/Cốc/VĐV)</span>
-            </label>
+            {/* Nhóm 1: Tín Hiệu Điểm Mua & Kích Hoạt */}
+            <div className="inline-flex items-center rounded-lg border border-line/60 bg-panel-2/60 p-0.5 gap-0.5">
+              <button
+                type="button"
+                onClick={() => setFreshOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-semibold transition cursor-pointer ${
+                  freshOnly ? "bg-accent-primary text-white shadow-xs" : "text-text-secondary hover:text-text-primary"
+                }`}
+                title="Chỉ lọc các tín hiệu mới kích hoạt trong phiên nay (T+0)"
+              >
+                Mới T+0
+              </button>
+              <button
+                type="button"
+                onClick={() => setNearEntryOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-semibold transition cursor-pointer ${
+                  nearEntryOnly ? "bg-emerald-500 text-white shadow-xs" : "text-emerald-400 hover:text-emerald-300"
+                }`}
+                title="Giá sát điểm mua (chênh lệch ≤ 1.5%)"
+              >
+                Sát Điểm Mua
+              </button>
+              <button
+                type="button"
+                onClick={() => setMtfAlignedOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-semibold transition cursor-pointer ${
+                  mtfAlignedOnly ? "bg-amber-500 text-white shadow-xs" : "text-amber-400 hover:text-amber-300"
+                }`}
+                title="Đồng thuận cả 3 khung thời gian H1·D1·W1"
+              >
+                3 Khung H1-D1-W1
+              </button>
+            </div>
 
-            <span className="text-text-muted">|</span>
+            {/* Nhóm 2: Mẫu Hình & Hình Học Giá */}
+            <div className="inline-flex items-center rounded-lg border border-line/60 bg-panel-2/60 p-0.5 gap-0.5">
+              <button
+                type="button"
+                onClick={() => setDivergenceOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  divergenceOnly ? "bg-cyan-500 text-white shadow-xs" : "text-cyan-400 hover:text-cyan-300"
+                }`}
+                title="Phân kỳ dương RSI/MACD tại đáy"
+              >
+                Phân Kỳ Dương
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartPatternOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  chartPatternOnly ? "bg-purple-500 text-white shadow-xs" : "text-purple-400 hover:text-purple-300"
+                }`}
+                title="Mẫu hình tích lũy VCP, Cốc tay cầm, Hai đáy"
+              >
+                Mẫu Hình Giá
+              </button>
+              <button
+                type="button"
+                onClick={() => setRibbonSqueezeOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  ribbonSqueezeOnly ? "bg-indigo-500 text-white shadow-xs" : "text-indigo-400 hover:text-indigo-300"
+                }`}
+                title="Dải MA Ribbon co cụm nén chặt (≤ 2.8%)"
+              >
+                Nén Ribbon
+              </button>
+              <button
+                type="button"
+                onClick={() => setReclaimOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  reclaimOnly ? "bg-cyan-600 text-white shadow-xs" : "text-cyan-300 hover:text-cyan-200"
+                }`}
+                title="Quét rũ râu nến thủng MA rồi dứt khoát lấy lại MA"
+              >
+                Reclaim MA
+              </button>
+            </div>
 
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={volumeOnly}
-                onChange={(e) => setVolumeOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span>Dòng tiền lớn (Vol &gt; 1.2x)</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={divergenceOnly}
-                onChange={(e) => setDivergenceOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-cyan-400 font-medium">Phân kỳ dương</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={foreignOnly}
-                onChange={(e) => setForeignOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-emerald-400 font-medium">Khối ngoại gom ròng</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={leaderOnly}
-                onChange={(e) => setLeaderOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-cyan-400 font-medium">Khỏe hơn VN-Index</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={freshOnly}
-                onChange={(e) => setFreshOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span>Mới phiên nay (T+0)</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-text-secondary hover:text-text-primary select-none">
-              <input
-                type="checkbox"
-                checked={highRrOnly}
-                onChange={(e) => setHighRrOnly(e.target.checked)}
-                className="rounded"
-              />
-              <span>R:R cao (≥ 1:2.0)</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-400 font-bold select-none">
-              <input
-                type="checkbox"
-                checked={nearEntryOnly}
-                onChange={(e) => setNearEntryOnly(e.target.checked)}
-                className="rounded accent-emerald-500"
-              />
-              <span>Sát điểm mua (≤ 1.5%)</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-400 font-bold select-none">
-              <input
-                type="checkbox"
-                checked={mtfAlignedOnly}
-                onChange={(e) => setMtfAlignedOnly(e.target.checked)}
-                className="rounded accent-amber-500"
-              />
-              <span>Đồng thuận H1+D1+W1</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-indigo-400 font-medium select-none">
-              <input
-                type="checkbox"
-                checked={ribbonSqueezeOnly}
-                onChange={(e) => setRibbonSqueezeOnly(e.target.checked)}
-                className="rounded accent-indigo-500"
-              />
-              <span>Nén Ribbon MA</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-400 font-medium select-none">
-              <input
-                type="checkbox"
-                checked={reclaimOnly}
-                onChange={(e) => setReclaimOnly(e.target.checked)}
-                className="rounded accent-cyan-500"
-              />
-              <span>Reclaim MA</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 font-medium select-none">
-              <input
-                type="checkbox"
-                checked={absorptionOnly}
-                onChange={(e) => setAbsorptionOnly(e.target.checked)}
-                className="rounded accent-amber-400"
-              />
-              <span>Hấp Thụ Cung</span>
-            </label>
-
-            <span className="text-text-muted">|</span>
-
-            <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 font-medium select-none">
-              <input
-                type="checkbox"
-                checked={vsaTestOnly}
-                onChange={(e) => setVsaTestOnly(e.target.checked)}
-                className="rounded accent-teal-400"
-              />
-              <span>Cạn Cung VSA</span>
-            </label>
+            {/* Nhóm 3: Dấu Chân Dòng Tiền & VSA */}
+            <div className="inline-flex items-center rounded-lg border border-line/60 bg-panel-2/60 p-0.5 gap-0.5">
+              <button
+                type="button"
+                onClick={() => setAbsorptionOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  absorptionOnly ? "bg-amber-500 text-white shadow-xs" : "text-amber-300 hover:text-amber-200"
+                }`}
+                title="Hấp thụ cung đột biến (Vol ≥ 1.3x TB20)"
+              >
+                Hấp Thụ Cung
+              </button>
+              <button
+                type="button"
+                onClick={() => setVsaTestOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  vsaTestOnly ? "bg-teal-500 text-white shadow-xs" : "text-teal-300 hover:text-teal-200"
+                }`}
+                title="VSA No Supply Test: Cạn kiệt lượng bán trôi nổi tại hỗ trợ"
+              >
+                Cạn Cung VSA
+              </button>
+              <button
+                type="button"
+                onClick={() => setForeignOnly((p) => !p)}
+                className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
+                  foreignOnly ? "bg-emerald-600 text-white shadow-xs" : "text-emerald-400 hover:text-emerald-300"
+                }`}
+                title="Khối ngoại mua ròng tích cực"
+              >
+                Khối Ngoại Gom
+              </button>
+            </div>
           </div>
 
           {/* Right: Sort By & View Mode Segment */}

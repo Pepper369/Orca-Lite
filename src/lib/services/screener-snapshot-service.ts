@@ -332,6 +332,10 @@ export type ScreenerFilterParams = {
   absorptionSpikeOnly?: boolean;
   vsaNoSupplyOnly?: boolean;
   precisionMtfOnly?: boolean;
+  // Consolidated Compound Filters (Gộp các bộ lọc cùng chức năng)
+  buyPosition?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "SAFE_ACCUMULATION" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
+  volatilityCoil?: "ALL" | "FIRED" | "SQUEEZE_ON" | "RIBBON_SQUEEZE" | "COIL_SUPER" | string;
+  vsaPattern?: "ALL" | "ABSORPTION" | "NO_SUPPLY" | "ACTIVE_BUY" | string;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -2557,6 +2561,21 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.maxBuyDiff != null && (x.absBuyDiff == null || x.absBuyDiff > params.maxBuyDiff)) continue;
     if (params.buyZoneStatus && params.buyZoneStatus !== "ALL" && x.buyZoneStatus !== params.buyZoneStatus) continue;
 
+    // Consolidated Buy Position Filter
+    if (params.buyPosition && params.buyPosition !== "ALL") {
+      if (params.buyPosition === "AT_BUY_POINT") {
+        if (x.buyZoneStatus !== "AT_BUY_POINT" && (x.absBuyDiff == null || x.absBuyDiff > 1.0)) continue;
+      } else if (params.buyPosition === "NEAR_BUY_POINT") {
+        if (x.buyZoneStatus !== "NEAR_BUY_POINT" && x.buyZoneStatus !== "AT_BUY_POINT" && (x.absBuyDiff == null || x.absBuyDiff > 2.5)) continue;
+      } else if (params.buyPosition === "SAFE_ACCUMULATION") {
+        if (x.absBuyDiff == null || x.absBuyDiff > 3.5) continue;
+      } else if (params.buyPosition === "WAIT_PULLBACK") {
+        if (x.buyZoneStatus !== "WAIT_PULLBACK") continue;
+      } else if (params.buyPosition === "BELOW_SUPPORT") {
+        if (x.buyZoneStatus !== "BELOW_SUPPORT") continue;
+      }
+    }
+
     // Multi-Timeframe filters
     if (params.mtfOnly && !x.isMtfAligned) continue;
     if (params.mtfConsensus && params.mtfConsensus !== "ALL" && x.mtfConsensus !== params.mtfConsensus) continue;
@@ -2587,12 +2606,27 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.squeezeOnly && !x.isSqueezeOn) continue;
     if (params.squeezeFiredOnly && !x.isSqueezeFiredBull) continue;
 
+    // Consolidated Volatility Coil Filter (TTM + Ribbon Squeeze)
+    if (params.volatilityCoil && params.volatilityCoil !== "ALL") {
+      if (params.volatilityCoil === "FIRED" && !x.isSqueezeFiredBull) continue;
+      if (params.volatilityCoil === "SQUEEZE_ON" && !x.isSqueezeOn) continue;
+      if (params.volatilityCoil === "RIBBON_SQUEEZE" && !x.isMaRibbonSqueeze) continue;
+      if (params.volatilityCoil === "COIL_SUPER" && (!x.isSqueezeOn || !x.isMaRibbonSqueeze)) continue;
+    }
+
     // MA Geometry, Volume Absorption & Precision MTF Filters (Biên độ 3, 4, 5)
     if (params.maRibbonSqueezeOnly && !x.isMaRibbonSqueeze) continue;
     if (params.maReclaimOnly && !x.isMaReclaimSpring) continue;
     if (params.absorptionSpikeOnly && !x.isAbsorptionSpike) continue;
     if (params.vsaNoSupplyOnly && !x.isVsaNoSupplyTest) continue;
     if (params.precisionMtfOnly && !x.isPrecisionMtfAligned) continue;
+
+    // Consolidated VSA Pattern Filter (Absorption + No Supply + Active Buy)
+    if (params.vsaPattern && params.vsaPattern !== "ALL") {
+      if (params.vsaPattern === "ABSORPTION" && !x.isAbsorptionSpike && x.vsaSignal !== "ABSORPTION") continue;
+      if (params.vsaPattern === "NO_SUPPLY" && !x.isVsaNoSupplyTest && x.vsaSignal !== "NO_SUPPLY") continue;
+      if (params.vsaPattern === "ACTIVE_BUY" && (x.activeBuyRatioPct == null || x.activeBuyRatioPct < 55)) continue;
+    }
 
     filtered.push(x);
   }
