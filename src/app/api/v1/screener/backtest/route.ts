@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runScreenerBacktest, StrategyType } from "@/lib/engines/screener-backtest-engine";
+import { runScreenerBacktest, StrategyType, MarketRegimeType } from "@/lib/engines/screener-backtest-engine";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 300; // Cache for 5 mins
@@ -7,16 +7,23 @@ export const revalidate = 300; // Cache for 5 mins
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const strategy = (searchParams.get("strategy") || "breakout") as StrategyType;
+    const strategy = (searchParams.get("strategy") || "orca_apex_quant") as StrategyType;
+    const marketRegime = (searchParams.get("marketRegime") || "all") as MarketRegimeType;
     const holdingDays = searchParams.get("holdingDays") ? parseInt(searchParams.get("holdingDays")!, 10) : 20;
     const stopLossPct = searchParams.get("stopLossPct") ? parseFloat(searchParams.get("stopLossPct")!) : 7;
     const takeProfitPct = searchParams.get("takeProfitPct") ? parseFloat(searchParams.get("takeProfitPct")!) : 15;
+    const rawSymbols = searchParams.get("symbols");
+    const symbols = rawSymbols ? rawSymbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) : undefined;
+    const bars = searchParams.get("bars") ? parseInt(searchParams.get("bars")!, 10) : undefined;
 
     const result = await runScreenerBacktest({
       strategy,
+      marketRegime,
       holdingDays,
       stopLossPct,
       takeProfitPct,
+      symbols,
+      bars,
     });
 
     return NextResponse.json(result, {

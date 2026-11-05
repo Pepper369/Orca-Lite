@@ -127,12 +127,18 @@ export async function getVnQuotes(symbols: string[]): Promise<Quote[]> {
 
 /* ---------------------------------- OHLCV ---------------------------------- */
 
-export async function getVnOhlcv(symbol: string, limit = 250): Promise<OhlcvBar[]> {
+export async function getVnOhlcv(
+  symbol: string,
+  limit = 250,
+  from?: string,
+  to?: string,
+): Promise<OhlcvBar[]> {
   const s = encodeURIComponent(symbol.toUpperCase());
+  const dateQuery = from && to ? `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "";
   const payload = await vnGet<unknown>([
-    `/v1/symbols/${s}/ohlcv?limit=${limit}`,
-    `/v1/market/ohlcv/${s}?limit=${limit}`,
-    `/api/v1/ohlcv/${s}?limit=${limit}`,
+    `/v1/symbols/${s}/ohlcv?limit=${limit}${dateQuery}`,
+    `/v1/market/ohlcv/${s}?limit=${limit}${dateQuery}`,
+    `/api/v1/ohlcv/${s}?limit=${limit}${dateQuery}`,
   ]);
   const rows = asArray(payload);
   const bars = rows

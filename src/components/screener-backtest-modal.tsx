@@ -1,8 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, useTransition } from "react";
-import { Zap, X } from "lucide-react";
-import type { ScreenerBacktestResult, StrategyType, BacktestTrade } from "@/lib/engines/screener-backtest-engine";
+import { Zap, X, ShieldAlert, TrendingUp, Layers, CheckCircle2, Sliders } from "lucide-react";
+import type {
+  ScreenerBacktestResult,
+  StrategyType,
+  MarketRegimeType,
+  BacktestTrade,
+} from "@/lib/engines/screener-backtest-engine";
+import { REGIME_CONFIGS } from "@/lib/engines/screener-backtest-engine";
+
 function formatPercent(val: number): string {
   const sign = val > 0 ? "+" : "";
   return `${sign}${val.toFixed(1)}%`;
@@ -25,8 +32,17 @@ const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
   { id: "value", label: "Bắt đáy Giá trị", desc: "Mua gom khi RSI < 45 và nến đảo chiều cắt vượt EMA20" },
 ];
 
+const MARKET_REGIMES: { id: MarketRegimeType; label: string; icon: string }[] = [
+  { id: "all", label: "🌟 Toàn Chu Kỳ (2020 - Nay)", icon: "🌟" },
+  { id: "uptrend_2020_2021", label: "🚀 Siêu Sóng Uptrend (2020 - 2021)", icon: "🚀" },
+  { id: "downtrend_2022", label: "🔻 Khủng Hoảng Downtrend (2022)", icon: "🔻" },
+  { id: "sideway_2023_2024", label: "⚖️ Tích Lũy Phân Hóa (2023 - 2024)", icon: "⚖️" },
+  { id: "recent_2025_2026", label: "📈 Chu Kỳ Hiện Tại (2025 - 2026)", icon: "📈" },
+];
+
 export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModalProps) {
   const [strategy, setStrategy] = useState<StrategyType>("orca_apex_quant");
+  const [marketRegime, setMarketRegime] = useState<MarketRegimeType>("all");
   const [holdingDays, setHoldingDays] = useState<number>(20);
   const [stopLossPct, setStopLossPct] = useState<number>(7);
   const [takeProfitPct, setTakeProfitPct] = useState<number>(15);
@@ -36,11 +52,19 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const runSimulation = async (strat = strategy, hold = holdingDays, sl = stopLossPct, tp = takeProfitPct) => {
+  const runSimulation = async (
+    strat = strategy,
+    regime = marketRegime,
+    hold = holdingDays,
+    sl = stopLossPct,
+    tp = takeProfitPct
+  ) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/screener/backtest?strategy=${strat}&holdingDays=${hold}&stopLossPct=${sl}&takeProfitPct=${tp}`);
+      const res = await fetch(
+        `/api/v1/screener/backtest?strategy=${strat}&marketRegime=${regime}&holdingDays=${hold}&stopLossPct=${sl}&takeProfitPct=${tp}`
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: ScreenerBacktestResult = await res.json();
       setData(json);
@@ -164,7 +188,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                 key={s.id}
                 onClick={() => {
                   setStrategy(s.id);
-                  runSimulation(s.id, holdingDays, stopLossPct, takeProfitPct);
+                  runSimulation(s.id, marketRegime, holdingDays, stopLossPct, takeProfitPct);
                 }}
                 className={`p-3 text-left rounded-xl border transition-all ${
                   strategy === s.id
@@ -178,6 +202,40 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
             ))}
           </div>
 
+          {/* Market Regime Filter Bar */}
+          <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-surface/30 border border-border/40 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-foreground flex items-center gap-1.5">
+                <Layers className="size-3.5 text-primary" />
+                Chu kỳ Thị trường & Pha Lịch Sử (Market Regimes):
+              </span>
+              {data?.dataSourceUsed && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <CheckCircle2 className="size-3 text-emerald-400" />
+                  {data.dataSourceUsed} • Trạng thái: <strong className="text-emerald-400">{data.dataHealth}</strong>
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {MARKET_REGIMES.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    setMarketRegime(r.id);
+                    runSimulation(strategy, r.id, holdingDays, stopLossPct, takeProfitPct);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    marketRegime === r.id
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-surface/50 border-border/60 text-muted-foreground hover:text-foreground hover:bg-surface"
+                  }`}
+                >
+                  <span>{r.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Parameter Sliders / Toggles */}
           <div className="flex flex-wrap items-center gap-4 p-3.5 rounded-xl bg-surface/30 border border-border/40 text-xs">
             <div className="flex items-center gap-2">
@@ -187,7 +245,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setHoldingDays(val);
-                  runSimulation(strategy, val, stopLossPct, takeProfitPct);
+                  runSimulation(strategy, marketRegime, val, stopLossPct, takeProfitPct);
                 }}
                 className="bg-card border border-border rounded px-2.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
@@ -205,7 +263,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setStopLossPct(val);
-                  runSimulation(strategy, holdingDays, val, takeProfitPct);
+                  runSimulation(strategy, marketRegime, holdingDays, val, takeProfitPct);
                 }}
                 className="bg-card border border-border rounded px-2.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
@@ -222,7 +280,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setTakeProfitPct(val);
-                  runSimulation(strategy, holdingDays, stopLossPct, val);
+                  runSimulation(strategy, marketRegime, holdingDays, stopLossPct, val);
                 }}
                 className="bg-card border border-border rounded px-2.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
@@ -328,6 +386,112 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                       })}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Multi-Cycle Performance Matrix */}
+              {data.regimeMatrix && data.regimeMatrix.length > 0 && (
+                <div className="p-4 rounded-xl bg-surface/40 border border-border/50 text-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-semibold text-foreground">
+                      <TrendingUp className="size-4 text-emerald-400" />
+                      <span>Kiểm Định Đa Chu Kỳ Thị Trường (Multi-Cycle Performance Matrix)</span>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">
+                      So sánh hiệu suất chiến lược qua 4 giai đoạn chu kỳ TTCK Việt Nam
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-border/40">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-surface/60 text-muted-foreground border-b border-border/30 text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-3">Pha Thị Trường</th>
+                          <th className="py-2.5 px-3 text-center">Niên độ</th>
+                          <th className="py-2.5 px-3 text-center">Lệnh</th>
+                          <th className="py-2.5 px-3 text-center">Win Rate</th>
+                          <th className="py-2.5 px-3 text-right">Lợi Nhuận</th>
+                          <th className="py-2.5 px-3 text-right">Alpha vs VN-Index</th>
+                          <th className="py-2.5 px-3 text-center">Max Drawdown</th>
+                          <th className="py-2.5 px-3">Đánh giá Định lượng</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/20">
+                        {data.regimeMatrix.map((rm) => (
+                          <tr
+                            key={rm.regime}
+                            className={`hover:bg-surface/50 transition-colors ${
+                              marketRegime === rm.regime ? "bg-primary/10 font-medium" : ""
+                            }`}
+                          >
+                            <td className="py-2.5 px-3 text-foreground font-semibold flex items-center gap-1.5">
+                              {rm.regime === "uptrend_2020_2021" && "🚀"}
+                              {rm.regime === "downtrend_2022" && "🔻"}
+                              {rm.regime === "sideway_2023_2024" && "⚖️"}
+                              {rm.regime === "recent_2025_2026" && "📈"}
+                              <span>{rm.regimeName}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-muted-foreground font-mono text-[11px]">{rm.period}</td>
+                            <td className="py-2.5 px-3 text-center text-foreground font-medium">{rm.totalTrades}</td>
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded-full font-bold text-[11px] ${
+                                rm.winRatePct >= 60 ? "bg-emerald-500/10 text-emerald-400" : "bg-sky-500/10 text-sky-400"
+                              }`}>
+                                {rm.winRatePct}%
+                              </span>
+                            </td>
+                            <td className={`py-2.5 px-3 text-right font-bold ${rm.totalReturnPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {formatPercent(rm.totalReturnPct)}
+                            </td>
+                            <td className={`py-2.5 px-3 text-right font-semibold ${rm.alphaPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {formatPercent(rm.alphaPct)}
+                            </td>
+                            <td className="py-2.5 px-3 text-center text-rose-400">-{rm.maxDrawdownPct}%</td>
+                            <td className="py-2.5 px-3 text-muted-foreground text-[11px]">{rm.verdict}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Adaptive Quant Tuning Recommendation Card */}
+              {data.adaptiveWeightRecommendation && (
+                <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 text-xs space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 font-semibold text-primary">
+                      <Sliders className="size-4" />
+                      <span>Gợi Ý Trọng Số Thích Ứng (Adaptive Quant Weights) cho chu kỳ: <strong>{data.adaptiveWeightRecommendation.regimeLabel}</strong></span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                      <span>Vùng Vàng Sweet Zone: <strong className="text-emerald-400">≤ {data.adaptiveWeightRecommendation.sweetZoneMaxExtensionPct}%</strong></span>
+                      <span>Khoảng cách cản trên: <strong className="text-emerald-400">≥ {data.adaptiveWeightRecommendation.minOverheadRoomPct}%</strong></span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <div className="p-2 rounded-lg bg-surface/60 border border-border/40">
+                      <div className="text-[10px] text-muted-foreground">Wyckoff & Sweet Zone</div>
+                      <div className="text-sm font-bold text-foreground mt-0.5">{data.adaptiveWeightRecommendation.weights.wyckoffSweetZoneWeight} / 30đ</div>
+                    </div>
+                    <div className="p-2 rounded-lg bg-surface/60 border border-border/40">
+                      <div className="text-[10px] text-muted-foreground">Quant OU Mean Reversion</div>
+                      <div className="text-sm font-bold text-foreground mt-0.5">{data.adaptiveWeightRecommendation.weights.quantMeanReversionWeight} / 25đ</div>
+                    </div>
+                    <div className="p-2 rounded-lg bg-surface/60 border border-border/40">
+                      <div className="text-[10px] text-muted-foreground">Smart Money & Pocket Pivot</div>
+                      <div className="text-sm font-bold text-foreground mt-0.5">{data.adaptiveWeightRecommendation.weights.smartMoneyInflowWeight} / 25đ</div>
+                    </div>
+                    <div className="p-2 rounded-lg bg-surface/60 border border-border/40">
+                      <div className="text-[10px] text-muted-foreground">Historical Edge & F-Score</div>
+                      <div className="text-sm font-bold text-foreground mt-0.5">{data.adaptiveWeightRecommendation.weights.historicalPriceActionWeight} / 20đ</div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground italic bg-surface/40 p-2.5 rounded-lg border border-border/30">
+                    💡 <strong>Lý do định lượng:</strong> {data.adaptiveWeightRecommendation.rationale}
+                  </p>
                 </div>
               )}
 
