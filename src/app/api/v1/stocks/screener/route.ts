@@ -86,6 +86,11 @@ export async function GET(req: Request) {
     sectorLeadingOnly: url.searchParams.get("sectorLeadingOnly") === "true" ? true : undefined,
     squeezeOnly: url.searchParams.get("squeezeOnly") === "true" ? true : undefined,
     squeezeFiredOnly: url.searchParams.get("squeezeFiredOnly") === "true" ? true : undefined,
+    maRibbonSqueezeOnly: url.searchParams.get("maRibbonSqueezeOnly") === "true" ? true : undefined,
+    maReclaimOnly: url.searchParams.get("maReclaimOnly") === "true" ? true : undefined,
+    absorptionSpikeOnly: url.searchParams.get("absorptionSpikeOnly") === "true" ? true : undefined,
+    vsaNoSupplyOnly: url.searchParams.get("vsaNoSupplyOnly") === "true" ? true : undefined,
+    precisionMtfOnly: url.searchParams.get("precisionMtfOnly") === "true" ? true : undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order")

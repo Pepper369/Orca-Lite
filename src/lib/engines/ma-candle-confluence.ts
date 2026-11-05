@@ -43,6 +43,8 @@ export interface AnalyzeMaCandleExtra {
   sectorRsMomentum?: number | null;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   squeezeBars?: number | null;
+  activeBuyRatioPct?: number | null;
+  isPrecisionMtfAligned?: boolean | null;
 }
 
 export interface MaCandleConfluenceRow {
@@ -129,6 +131,7 @@ export interface MaCandleConfluenceRow {
   // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
   mtfConsensus: MtfConsensusStatus;
   isMtfAligned: boolean;
+  isPrecisionMtfAligned?: boolean;
   mtfScore: number;
   mtfSummary: string;
   mtfBadgeVi: string;
@@ -137,6 +140,17 @@ export interface MaCandleConfluenceRow {
     d1: MtfTimeframeDetail;
     h1: MtfTimeframeDetail;
   };
+
+  // Biên độ 3: MA Geometry & Ribbon Squeeze
+  isMaReclaimSpring?: boolean;
+  maRibbonSpreadPct?: number | null;
+  isMaRibbonSqueeze?: boolean;
+  maSlope5Pct?: number | null;
+
+  // Biên độ 4: Volume Absorption & VSA
+  isAbsorptionSpike?: boolean;
+  isVsaNoSupplyTest?: boolean;
+  activeBuyRatioPct?: number | null;
 
   // Trade Setup Calculator
   entryPrice: number;
@@ -376,16 +390,38 @@ export function analyzeMaCandleRow(
     (sma10 != null && lastBar.low < sma10 * 0.992 && close >= sma10 * 0.998) ||
     (sma200 != null && lastBar.low < sma200 * 0.992 && close >= sma200 * 0.998);
 
+  // Biên độ 3: Động Học Nến, Rút Chân Reclaim MA & MA Ribbon Squeeze
+  const candleRange = Math.max(0.001, lastBar.high - lastBar.low);
+  const lowerShadowRatio = (Math.min(lastBar.open, close) - lastBar.low) / candleRange;
+  const isMaSpringPinbar = isMaReclaim && lowerShadowRatio >= 0.35;
+
+  const maRibbonSpreadPct =
+    sma10 != null && sma20 != null && sma50 != null && sma50 > 0
+      ? Number((((Math.max(sma10, sma20, sma50) - Math.min(sma10, sma20, sma50)) / ((sma10 + sma20 + sma50) / 3)) * 100).toFixed(2))
+      : null;
+  const isMaRibbonSqueeze = maRibbonSpreadPct != null && maRibbonSpreadPct <= 2.8;
+
+  const maSlope5Pct = slope20 != null ? Number((slope20 * 100).toFixed(2)) : null;
+
   const maSlopeStatus: "UP" | "FLAT" | "STEEP_DOWN" =
     slope20 < -0.15 ? "STEEP_DOWN" : slope20 > 0.05 ? "UP" : "FLAT";
 
+  // Biên độ 4: Xác Nhận Khối Lượng Hấp Thụ & VSA Test
+  const isAbsorptionSpike = volRatio != null && volRatio >= 1.30 && close >= (lastBar.open ?? close);
+  const isVsaNoSupplyTest =
+    volRatio != null && volRatio <= 0.65 && Math.abs(close - (lastBar.open ?? close)) / (lastBar.open || 1) <= 0.018;
+
+  const activeBuyRatioPct =
+    extra?.activeBuyRatioPct ??
+    extra?.foreign?.buyRatioPct ??
+    (quote as { activeBuyRatioPct?: number })?.activeBuyRatioPct ??
+    null;
+
   let volumeNature: "ABSORPTION_SPIKE" | "NO_SUPPLY_TEST" | "NORMAL" = "NORMAL";
-  if (volRatio != null) {
-    if (volRatio >= 1.25 && close >= (lastBar.open ?? close)) {
-      volumeNature = "ABSORPTION_SPIKE";
-    } else if (volRatio <= 0.70 && Math.abs(close - (lastBar.open ?? close)) / (lastBar.open || 1) <= 0.018) {
-      volumeNature = "NO_SUPPLY_TEST";
-    }
+  if (isAbsorptionSpike) {
+    volumeNature = "ABSORPTION_SPIKE";
+  } else if (isVsaNoSupplyTest) {
+    volumeNature = "NO_SUPPLY_TEST";
   }
 
   // Triple-Lock Confluence Tier (Tam Hợp Lưu Tuyệt Đối: MA Lock + Candle Lock + Divergence Lock)
@@ -781,7 +817,32 @@ export function analyzeMaCandleRow(
     confluenceTags.push("Cảnh báo Squeeze Xả");
   }
 
-  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus + tierBonus + rrgBonus + squeezeBonus)));
+  // Biên độ 3: MA Geometry & Ribbon Squeeze Bonuses
+  const maRibbonBonus = isMaRibbonSqueeze ? 4 : 0;
+  if (isMaRibbonSqueeze) confluenceTags.push("Nén Dải MA Ribbon");
+
+  const springBonus = isMaSpringPinbar ? 3 : 0;
+  if (isMaSpringPinbar) confluenceTags.push("Quét Rũ Reclaim MA");
+
+  // Biên độ 4: Volume Absorption & VSA Test Bonuses
+  const absorptionBonus = isAbsorptionSpike ? 4 : 0;
+  if (isAbsorptionSpike) confluenceTags.push("Hấp Thụ Cung Đột Biến");
+
+  const vsaBonus = isVsaNoSupplyTest ? 3 : 0;
+  if (isVsaNoSupplyTest) confluenceTags.push("Cạn Cung VSA Test");
+
+  const activeBuyBonus = activeBuyRatioPct != null && activeBuyRatioPct >= 55 ? 3 : 0;
+  if (activeBuyRatioPct != null && activeBuyRatioPct >= 55) {
+    confluenceTags.push(`Mua Chủ Động ${Math.round(activeBuyRatioPct)}%`);
+  }
+
+  const isPrecisionMtfAligned = Boolean(extra?.isPrecisionMtfAligned ?? (mtf.isAligned || mtf.consensus === "ALL_BULL"));
+  if (isPrecisionMtfAligned && !confluenceTags.includes("Đồng Thuận 3 Khung H1·D1·W1")) {
+    confluenceTags.push("Đồng Thuận 3 Khung H1·D1·W1");
+  }
+
+  const extraConfluenceBonus = maRibbonBonus + springBonus + absorptionBonus + vsaBonus + activeBuyBonus;
+  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus + tierBonus + rrgBonus + squeezeBonus + extraConfluenceBonus)));
 
   // 10. Trade Setup Calculator
   const distToMaPct =
@@ -882,10 +943,22 @@ export function analyzeMaCandleRow(
     // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
     mtfConsensus: mtf.consensus,
     isMtfAligned: mtf.isAligned,
+    isPrecisionMtfAligned,
     mtfScore: mtf.score,
     mtfSummary: mtf.summary,
     mtfBadgeVi: mtf.badgeVi,
     mtfDetails: mtf.details,
+
+    // Biên độ 3: MA Geometry & Ribbon Squeeze
+    isMaReclaimSpring: isMaSpringPinbar,
+    maRibbonSpreadPct,
+    isMaRibbonSqueeze,
+    maSlope5Pct,
+
+    // Biên độ 4: Volume Absorption & VSA
+    isAbsorptionSpike,
+    isVsaNoSupplyTest,
+    activeBuyRatioPct,
 
     foreignNetVal: foreignNetValBillion,
     foreignBuyRatio,

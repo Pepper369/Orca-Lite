@@ -61,6 +61,10 @@ export interface ApexQuantInput {
   sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   squeezeBars?: number | null;
+  isMaRibbonSqueeze?: boolean | null;
+  isAbsorptionSpike?: boolean | null;
+  isVsaNoSupplyTest?: boolean | null;
+  isPrecisionMtfAligned?: boolean | null;
 }
 
 export interface ApexQuantResult {
@@ -87,6 +91,10 @@ export interface ApexQuantResult {
   squeezeBars?: number | null;
   isSqueezeFiredBull: boolean;
   isSqueezeOn: boolean;
+  isMaRibbonSqueeze?: boolean;
+  isAbsorptionSpike?: boolean;
+  isVsaNoSupplyTest?: boolean;
+  isPrecisionMtfAligned?: boolean;
   verdictVi: string;
   highlights: string[];
 }
@@ -251,7 +259,7 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   const normalized: ApexQuantInput = Array.isArray(input) ? { bars: input } : input;
   const bars = normalized.bars;
   const symbol = normalized.symbol || "STOCK";
-  const currentPrice = normalized.currentPrice ?? (bars[bars.length - 1]?.close || 0);
+  const currentPrice = normalized.currentPrice ?? (bars && bars.length > 0 ? bars[bars.length - 1]?.close : 0);
   const {
     quote,
     activeBuyRatioPct,
@@ -348,6 +356,12 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
     pillar1 -= 18;
     highlights.push("Cảnh báo Squeeze xả gãy nền");
   }
+
+  // MA Ribbon Squeeze (Biên độ 3)
+  if (normalized.isMaRibbonSqueeze) {
+    pillar1 += 12;
+    highlights.push("Nén dải MA Ribbon hội tụ");
+  }
   pillar1 = Math.max(10, Math.min(99, pillar1));
 
   // =========================================================================
@@ -379,9 +393,19 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
     pillar3 += 18;
     highlights.push(divSummary);
   }
-  if (isMtfAligned) {
+  if (normalized.isPrecisionMtfAligned || isMtfAligned) {
     pillar3 += 15;
     highlights.push("Đồng thuận đa khung H1-D1-W1");
+  }
+
+  // Volume Absorption & VSA No Supply (Biên độ 4)
+  if (normalized.isAbsorptionSpike) {
+    pillar3 += 12;
+    highlights.push("Hấp thụ cung đột biến (Absorption)");
+  }
+  if (normalized.isVsaNoSupplyTest) {
+    pillar3 += 10;
+    highlights.push("Cạn cung kiểm định (VSA No Supply)");
   }
 
   const qAny = quote as { activeBuyRatio?: number } | null | undefined;
@@ -507,6 +531,10 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
     squeezeBars,
     isSqueezeFiredBull,
     isSqueezeOn,
+    isMaRibbonSqueeze: Boolean(normalized.isMaRibbonSqueeze),
+    isAbsorptionSpike: Boolean(normalized.isAbsorptionSpike),
+    isVsaNoSupplyTest: Boolean(normalized.isVsaNoSupplyTest),
+    isPrecisionMtfAligned: Boolean(normalized.isPrecisionMtfAligned || isMtfAligned),
     verdictVi,
     highlights,
   };

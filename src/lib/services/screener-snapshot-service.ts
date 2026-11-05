@@ -257,6 +257,16 @@ export type ScreenerStockItem = {
   isSqueezeFiredBull?: boolean;
   isSqueezeOn?: boolean;
   squeezeMomentumSlope?: "ACCELERATING_BULL" | "DECELERATING_BULL" | "ACCELERATING_BEAR" | "DECELERATING_BEAR" | "FLAT" | null;
+  // MA Geometry & Ribbon Squeeze (Biên độ 3)
+  isMaRibbonSqueeze?: boolean;
+  maRibbonSpreadPct?: number | null;
+  isMaReclaimSpring?: boolean;
+  maSlope5Pct?: number | null;
+  // Volume Absorption & VSA Test (Biên độ 4)
+  isAbsorptionSpike?: boolean;
+  isVsaNoSupplyTest?: boolean;
+  // Precision MTF Alignment (Biên độ 5)
+  isPrecisionMtfAligned?: boolean;
 };
 
 export type ScreenerFilterParams = {
@@ -316,6 +326,12 @@ export type ScreenerFilterParams = {
   sectorLeadingOnly?: boolean;
   squeezeOnly?: boolean;
   squeezeFiredOnly?: boolean;
+  // MA Geometry, Volume Absorption & Precision MTF Filters (Biên độ 3, 4, 5)
+  maRibbonSqueezeOnly?: boolean;
+  maReclaimOnly?: boolean;
+  absorptionSpikeOnly?: boolean;
+  vsaNoSupplyOnly?: boolean;
+  precisionMtfOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -494,6 +510,13 @@ function analyzeTechFeatures(
       confluenceBadge: "NONE" as const,
       mtfConsensus: "MIXED" as const,
       isMtfAligned: false,
+      isPrecisionMtfAligned: false,
+      isMaRibbonSqueeze: false,
+      maRibbonSpreadPct: null,
+      isMaReclaimSpring: false,
+      maSlope5Pct: null,
+      isAbsorptionSpike: false,
+      isVsaNoSupplyTest: false,
       mtfScore: 50,
       mtfBadgeVi: "Chưa đủ nến",
       mtfSummary: "Chưa đủ dữ liệu đa khung",
@@ -631,6 +654,40 @@ function analyzeTechFeatures(
     confluenceHint: trendScore + patternScore,
   });
 
+  // Biên độ 3: MA Geometry & Ribbon Squeeze
+  const maRibbonSpreadPct =
+    maRes.ma10 != null && maRes.ma20 != null && maRes.ma50 != null && maRes.ma50 > 0
+      ? Number((((Math.max(maRes.ma10, maRes.ma20, maRes.ma50) - Math.min(maRes.ma10, maRes.ma20, maRes.ma50)) / ((maRes.ma10 + maRes.ma20 + maRes.ma50) / 3)) * 100).toFixed(2))
+      : null;
+  const isMaRibbonSqueeze = maRibbonSpreadPct != null && maRibbonSpreadPct <= 2.8;
+
+  const lastBar = ohlcvBars[n - 1];
+  const candleRange = Math.max(0.001, lastBar.high - lastBar.low);
+  const lowerShadowRatio = (Math.min(lastBar.open, lastBar.close) - lastBar.low) / candleRange;
+  const isMaReclaim =
+    (maRes.ma20 != null && lastBar.low < maRes.ma20 * 0.992 && lastBar.close >= maRes.ma20 * 0.998) ||
+    (maRes.ma50 != null && lastBar.low < maRes.ma50 * 0.992 && lastBar.close >= maRes.ma50 * 0.998) ||
+    (maRes.ma10 != null && lastBar.low < maRes.ma10 * 0.992 && lastBar.close >= maRes.ma10 * 0.998);
+  const isMaReclaimSpring = isMaReclaim && lowerShadowRatio >= 0.35;
+
+  let maSlope5Pct: number | null = null;
+  if (n >= 25 && maRes.ma20 != null) {
+    const pastMa20 = sma(closes.slice(0, n - 5), 20);
+    const pastVal = pastMa20[pastMa20.length - 1];
+    if (pastVal && pastVal > 0) {
+      maSlope5Pct = Number((((maRes.ma20 - pastVal) / pastVal) * 100).toFixed(2));
+    }
+  }
+
+  // Biên độ 4: Volume Absorption & VSA Test
+  const isAbsorptionSpike = (maRes.volRatio20 ?? 0) >= 1.30 && lastBar.close >= lastBar.open;
+  const isVsaNoSupplyTest =
+    (maRes.volRatio20 ?? 0) <= 0.65 &&
+    Math.abs(lastBar.close - lastBar.open) / (lastBar.open || 1) <= 0.018;
+
+  // Biên độ 5: Precision MTF Alignment
+  const isPrecisionMtfAligned = mtf.isAligned || mtf.consensus === "ALL_BULL";
+
   const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
   const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore + mtfBonus));
 
@@ -660,6 +717,13 @@ function analyzeTechFeatures(
     confluenceBadge,
     mtfConsensus: mtf.consensus,
     isMtfAligned: mtf.isAligned,
+    isPrecisionMtfAligned,
+    isMaRibbonSqueeze,
+    maRibbonSpreadPct,
+    isMaReclaimSpring,
+    maSlope5Pct,
+    isAbsorptionSpike,
+    isVsaNoSupplyTest,
     mtfScore: mtf.score,
     mtfBadgeVi: mtf.badgeVi,
     mtfSummary: mtf.summary,
@@ -1040,6 +1104,13 @@ function detectPresets(item: {
   isSqueezeFiredBull?: boolean | null;
   isSqueezeOn?: boolean | null;
   squeezeBars?: number | null;
+  isMaRibbonSqueeze?: boolean | null;
+  maRibbonSpreadPct?: number | null;
+  isMaReclaimSpring?: boolean | null;
+  maSlope5Pct?: number | null;
+  isAbsorptionSpike?: boolean | null;
+  isVsaNoSupplyTest?: boolean | null;
+  isPrecisionMtfAligned?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1058,7 +1129,9 @@ function detectPresets(item: {
   const hasApexConfluence =
     (item.apexQuantScore != null && item.apexQuantScore >= 68) ||
     item.confluenceScore >= 52 ||
-    (item.orcaMasterScore != null && item.orcaMasterScore >= 72);
+    (item.orcaMasterScore != null && item.orcaMasterScore >= 72) ||
+    item.isMaRibbonSqueeze === true ||
+    item.isMaReclaimSpring === true;
 
   const hasVolumeIgnition =
     (item.volRatio20 != null && item.volRatio20 >= 1.15) ||
@@ -1066,6 +1139,8 @@ function detectPresets(item: {
     (item.foreignNetVal != null && item.foreignNetVal > 0.3) ||
     (item.upDownVolRatio != null && item.upDownVolRatio >= 1.12) ||
     item.isSqueezeFiredBull === true ||
+    item.isAbsorptionSpike === true ||
+    item.isVsaNoSupplyTest === true ||
     item.smartMoneySignal === "POCKET_PIVOT" ||
     item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
     item.vsaSignal === "NO_SUPPLY" ||
@@ -1077,6 +1152,7 @@ function detectPresets(item: {
       (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0));
 
   const hasMtfConsensus =
+    item.isPrecisionMtfAligned === true ||
     item.isMtfAligned === true ||
     item.mtfConsensus === "ALL_BULL" ||
     item.mtfConsensus === "H1_D1_BULL" ||
@@ -1865,6 +1941,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           sectorRrgQuadrant,
           squeezeState: techFeatures.squeezeState,
           squeezeBars: techFeatures.squeezeBars,
+          isMaRibbonSqueeze: techFeatures.isMaRibbonSqueeze,
+          isAbsorptionSpike: techFeatures.isAbsorptionSpike,
+          isVsaNoSupplyTest: techFeatures.isVsaNoSupplyTest,
+          isPrecisionMtfAligned: techFeatures.isPrecisionMtfAligned,
         });
 
         intermediateEntries.push({
@@ -1996,6 +2076,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isSqueezeFiredBull: entry.techFeatures.isSqueezeFiredBull,
           isSqueezeOn: entry.techFeatures.isSqueezeOn,
           squeezeBars: entry.techFeatures.squeezeBars,
+          isMaRibbonSqueeze: entry.techFeatures.isMaRibbonSqueeze,
+          maRibbonSpreadPct: entry.techFeatures.maRibbonSpreadPct,
+          isMaReclaimSpring: entry.techFeatures.isMaReclaimSpring,
+          maSlope5Pct: entry.techFeatures.maSlope5Pct,
+          isAbsorptionSpike: entry.techFeatures.isAbsorptionSpike,
+          isVsaNoSupplyTest: entry.techFeatures.isVsaNoSupplyTest,
+          isPrecisionMtfAligned: entry.techFeatures.isPrecisionMtfAligned,
         });
 
         const hasCandleReversalSnap = Boolean(
@@ -2032,6 +2119,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           if (entry.techFeatures.isSqueezeFiredBull) rawTriggerScore += 5;
           if (entry.isSectorLeading) rawTriggerScore += 4;
           if (entry.isSectorLagging) rawTriggerScore -= 5;
+          // Biên độ 3, 4, 5 Boosts
+          if (entry.techFeatures.isMaRibbonSqueeze) rawTriggerScore += 4;
+          if (entry.techFeatures.isMaReclaimSpring) rawTriggerScore += 3;
+          if (entry.techFeatures.isAbsorptionSpike) rawTriggerScore += 4;
+          else if (entry.techFeatures.isVsaNoSupplyTest) rawTriggerScore += 3;
+          if (entry.techFeatures.isPrecisionMtfAligned) rawTriggerScore += 4;
           buyTriggerScore = Math.max(1, Math.min(99, rawTriggerScore));
 
           const reasons: string[] = [];
@@ -2044,6 +2137,17 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
             reasons.push("Nổ Squeeze bứt phá");
           } else if (entry.techFeatures.isSqueezeOn && (entry.techFeatures.squeezeBars == null || entry.techFeatures.squeezeBars >= 4)) {
             reasons.push(`Nén Squeeze (${entry.techFeatures.squeezeBars ?? 6}P)`);
+          }
+          if (entry.techFeatures.isMaRibbonSqueeze) {
+            reasons.push("Nén Dải MA Ribbon");
+          }
+          if (entry.techFeatures.isMaReclaimSpring) {
+            reasons.push("Rút chân Reclaim MA");
+          }
+          if (entry.techFeatures.isAbsorptionSpike) {
+            reasons.push("Hấp thụ cung vol lớn");
+          } else if (entry.techFeatures.isVsaNoSupplyTest) {
+            reasons.push("Cạn cung VSA Test");
           }
           if (entry.isSectorLeading) {
             reasons.push("Ngành dẫn dắt RRG");
@@ -2207,6 +2311,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isSectorLeading: entry.isSectorLeading,
           isSectorLagging: entry.isSectorLagging,
           sectorResonanceBonus: entry.sectorResonanceBonus,
+          // Biên độ 3, 4, 5 Fields
+          isMaRibbonSqueeze: entry.techFeatures.isMaRibbonSqueeze,
+          maRibbonSpreadPct: entry.techFeatures.maRibbonSpreadPct,
+          isMaReclaimSpring: entry.techFeatures.isMaReclaimSpring,
+          maSlope5Pct: entry.techFeatures.maSlope5Pct,
+          isAbsorptionSpike: entry.techFeatures.isAbsorptionSpike,
+          isVsaNoSupplyTest: entry.techFeatures.isVsaNoSupplyTest,
+          isPrecisionMtfAligned: entry.techFeatures.isPrecisionMtfAligned,
           presetsPassed,
         });
       }
@@ -2474,6 +2586,13 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.sectorLeadingOnly && !x.isSectorLeading) continue;
     if (params.squeezeOnly && !x.isSqueezeOn) continue;
     if (params.squeezeFiredOnly && !x.isSqueezeFiredBull) continue;
+
+    // MA Geometry, Volume Absorption & Precision MTF Filters (Biên độ 3, 4, 5)
+    if (params.maRibbonSqueezeOnly && !x.isMaRibbonSqueeze) continue;
+    if (params.maReclaimOnly && !x.isMaReclaimSpring) continue;
+    if (params.absorptionSpikeOnly && !x.isAbsorptionSpike) continue;
+    if (params.vsaNoSupplyOnly && !x.isVsaNoSupplyTest) continue;
+    if (params.precisionMtfOnly && !x.isPrecisionMtfAligned) continue;
 
     filtered.push(x);
   }

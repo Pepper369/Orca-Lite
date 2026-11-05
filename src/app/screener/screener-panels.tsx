@@ -620,6 +620,93 @@ export function SectorRrgBadge({
   return null;
 }
 
+export function MaGeometryBadge({
+  isRibbonSqueeze,
+  isReclaimSpring,
+  ribbonSpreadPct,
+}: {
+  isRibbonSqueeze?: boolean;
+  isReclaimSpring?: boolean;
+  ribbonSpreadPct?: number | null;
+}) {
+  if (!isRibbonSqueeze && !isReclaimSpring) return null;
+  return (
+    <div className="inline-flex items-center gap-1">
+      {isRibbonSqueeze && (
+        <span
+          title={`Dải MA Ribbon nén chặt (${ribbonSpreadPct ? `${ribbonSpreadPct}%` : "≤2.8%"}) · Hội tụ MA10-MA20-MA50`}
+          className="inline-flex items-center gap-1 rounded bg-indigo-500/20 border border-indigo-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-indigo-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-indigo-400" />
+          Ribbon Nén
+        </span>
+      )}
+      {isReclaimSpring && (
+        <span
+          title="Quét rũ râu nến thủng MA rồi rút chân dứt khoát lấy lại MA (Spring Hunt)"
+          className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-cyan-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-cyan-400" />
+          Reclaim MA
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function VolumeAbsorptionBadge({
+  isAbsorptionSpike,
+  isVsaNoSupply,
+  activeBuyRatioPct,
+}: {
+  isAbsorptionSpike?: boolean;
+  isVsaNoSupply?: boolean;
+  activeBuyRatioPct?: number | null;
+}) {
+  if (!isAbsorptionSpike && !isVsaNoSupply) return null;
+  return (
+    <div className="inline-flex items-center gap-1">
+      {isAbsorptionSpike && (
+        <span
+          title={`Khối lượng hấp thụ cung đột biến (≥ 1.3x TB20)${activeBuyRatioPct ? ` · Mua chủ động: ${Math.round(activeBuyRatioPct)}%` : ""}`}
+          className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-amber-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-amber-400" />
+          Hấp Thụ Cung
+        </span>
+      )}
+      {isVsaNoSupply && (
+        <span
+          title="VSA No Supply Test: Cạn kiệt lượng bán trôi nổi tại hỗ trợ MA"
+          className="inline-flex items-center gap-1 rounded bg-teal-500/20 border border-teal-400/40 px-1.5 py-0.5 text-[9.5px] font-medium text-teal-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-teal-400" />
+          Cạn Cung VSA
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function PrecisionMtfBadge({
+  isPrecisionMtfAligned,
+  mtfSummary,
+}: {
+  isPrecisionMtfAligned?: boolean;
+  mtfSummary?: string | null;
+}) {
+  if (!isPrecisionMtfAligned) return null;
+  return (
+    <span
+      title={mtfSummary || "Đồng thuận 3 Khung Thời Gian H1 (Giờ) · D1 (Ngày) · W1 (Tuần) tuyệt đối"}
+      className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-emerald-500/25 via-teal-500/20 to-amber-500/25 border border-emerald-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-300 whitespace-nowrap"
+    >
+      <span className="size-1.5 rounded-full bg-emerald-400" />
+      H1·D1·W1 🟢🟢🟢
+    </span>
+  );
+}
+
 export function SuperTrendBadge({ dir }: { dir: "up" | "down" | null | undefined }) {
   if (dir === "up") {
     return <span className="text-[11px] font-bold text-emerald-400">▲ Tăng</span>;
@@ -956,6 +1043,11 @@ export function VnScreener({
   const [mtfOnly, setMtfOnly] = useState(false);
   const [rrgQuadrant, setRrgQuadrant] = useState("ALL");
   const [squeezeFilter, setSqueezeFilter] = useState("ALL");
+  const [maRibbonSqueezeOnly, setMaRibbonSqueezeOnly] = useState(false);
+  const [maReclaimOnly, setMaReclaimOnly] = useState(false);
+  const [absorptionSpikeOnly, setAbsorptionSpikeOnly] = useState(false);
+  const [vsaNoSupplyOnly, setVsaNoSupplyOnly] = useState(false);
+  const [precisionMtfOnly, setPrecisionMtfOnly] = useState(false);
 
   // Sort state
   const initialSortKey =
@@ -1007,6 +1099,11 @@ export function VnScreener({
     mtfOnly: false,
     rrgQuadrant: "ALL",
     squeezeFilter: "ALL",
+    maRibbonSqueezeOnly: false,
+    maReclaimOnly: false,
+    absorptionSpikeOnly: false,
+    vsaNoSupplyOnly: false,
+    precisionMtfOnly: false,
     mtfCandleOnly: false,
     minMtfCandleScore: "",
     vsaOnly: false,
@@ -1086,6 +1183,11 @@ export function VnScreener({
     } else if (applied.squeezeFilter === "ON") {
       p.set("squeezeOnly", "true");
     }
+    if (applied.maRibbonSqueezeOnly) p.set("maRibbonSqueezeOnly", "true");
+    if (applied.maReclaimOnly) p.set("maReclaimOnly", "true");
+    if (applied.absorptionSpikeOnly) p.set("absorptionSpikeOnly", "true");
+    if (applied.vsaNoSupplyOnly) p.set("vsaNoSupplyOnly", "true");
+    if (applied.precisionMtfOnly) p.set("precisionMtfOnly", "true");
     if (applied.mtfCandleOnly) p.set("mtfCandleOnly", "true");
     if (applied.minMtfCandleScore) p.set("minMtfCandleScore", applied.minMtfCandleScore);
     if (applied.vsaOnly) p.set("vsaOnly", "true");
@@ -1133,6 +1235,11 @@ export function VnScreener({
       mtfOnly,
       rrgQuadrant,
       squeezeFilter,
+      maRibbonSqueezeOnly,
+      maReclaimOnly,
+      absorptionSpikeOnly,
+      vsaNoSupplyOnly,
+      precisionMtfOnly,
       mtfCandleOnly: false,
       minMtfCandleScore: "",
       vsaOnly: false,
@@ -1166,6 +1273,11 @@ export function VnScreener({
     mtfOnly,
     rrgQuadrant,
     squeezeFilter,
+    maRibbonSqueezeOnly,
+    maReclaimOnly,
+    absorptionSpikeOnly,
+    vsaNoSupplyOnly,
+    precisionMtfOnly,
     mutate,
   ]);
 
@@ -1196,6 +1308,11 @@ export function VnScreener({
     setMtfOnly(false);
     setRrgQuadrant("ALL");
     setSqueezeFilter("ALL");
+    setMaRibbonSqueezeOnly(false);
+    setMaReclaimOnly(false);
+    setAbsorptionSpikeOnly(false);
+    setVsaNoSupplyOnly(false);
+    setPrecisionMtfOnly(false);
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1224,6 +1341,11 @@ export function VnScreener({
       mtfOnly: false,
       rrgQuadrant: "ALL",
       squeezeFilter: "ALL",
+      maRibbonSqueezeOnly: false,
+      maReclaimOnly: false,
+      absorptionSpikeOnly: false,
+      vsaNoSupplyOnly: false,
+      precisionMtfOnly: false,
       mtfCandleOnly: false,
       minMtfCandleScore: "",
       vsaOnly: false,
@@ -1807,6 +1929,56 @@ export function VnScreener({
             <Field label="Cổ tức tối thiểu (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
             <Field label="Nợ/Vốn CSH tối đa" value={maxDe} onChange={setMaxDe} small placeholder="1.2" />
             <Field label="Vốn hóa min (tỷ)" value={minMarketCap} onChange={setMinMarketCap} small placeholder="1000" />
+
+            {/* Quick Quant Precision Toggles (Biên độ 3, 4, 5) */}
+            <div className="col-span-full flex flex-wrap items-center gap-3 pt-2.5 mt-1 border-t border-line/40 text-[11px]">
+              <span className="text-[10px] uppercase font-bold text-text-muted">Biên độ Nâng cao:</span>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-indigo-300 hover:text-indigo-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={maRibbonSqueezeOnly}
+                  onChange={(e) => setMaRibbonSqueezeOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Nén Ribbon MA (BĐ3)</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={maReclaimOnly}
+                  onChange={(e) => setMaReclaimOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Reclaim Spring MA (BĐ3)</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={absorptionSpikeOnly}
+                  onChange={(e) => setAbsorptionSpikeOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Hấp Thụ Cung (BĐ4)</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 hover:text-teal-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={vsaNoSupplyOnly}
+                  onChange={(e) => setVsaNoSupplyOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Cạn Cung VSA (BĐ4)</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-emerald-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={precisionMtfOnly}
+                  onChange={(e) => setPrecisionMtfOnly(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Đồng Thuận 3 Khung (BĐ5)</span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -2083,6 +2255,20 @@ export function VnScreener({
                               Phân Kỳ Kép
                             </span>
                           )}
+                          <PrecisionMtfBadge
+                            isPrecisionMtfAligned={row.isPrecisionMtfAligned}
+                            mtfSummary={row.mtfSummary}
+                          />
+                          <MaGeometryBadge
+                            isRibbonSqueeze={row.isMaRibbonSqueeze}
+                            isReclaimSpring={row.isMaReclaimSpring}
+                            ribbonSpreadPct={row.maRibbonSpreadPct}
+                          />
+                          <VolumeAbsorptionBadge
+                            isAbsorptionSpike={row.isAbsorptionSpike}
+                            isVsaNoSupply={row.isVsaNoSupplyTest}
+                            activeBuyRatioPct={row.activeBuyRatioPct}
+                          />
                           {row.apexQuantScore != null && (
                             <ApexQuantBadgeComponent
                               score={row.apexQuantScore}
@@ -3137,14 +3323,18 @@ export function VnScreener({
                               <span className="text-[10px] text-text-muted">—</span>
                             )}
                             <div className="flex flex-wrap gap-1 items-center">
-                              {row.isMtfAligned ? (
+                              <PrecisionMtfBadge
+                                isPrecisionMtfAligned={row.isPrecisionMtfAligned}
+                                mtfSummary={row.mtfSummary}
+                              />
+                              {!row.isPrecisionMtfAligned && row.isMtfAligned ? (
                                 <span
                                   className="inline-flex items-center gap-0.5 rounded bg-gradient-to-r from-emerald-500/25 to-amber-500/25 border border-emerald-500/40 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300"
                                   title={row.mtfSummary || "Đồng thuận Tăng Đa Khung: H1 🟢 · D1 🟢 · W1 🟢"}
                                 >
                                   H1·D1·W1 🟢🟢🟢
                                 </span>
-                              ) : row.mtfConsensus === "D1_W1_BULL" ? (
+                              ) : !row.isPrecisionMtfAligned && row.mtfConsensus === "D1_W1_BULL" ? (
                                 <span
                                   className="inline-flex items-center gap-0.5 rounded bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.2 text-[9px] font-semibold text-blue-300"
                                   title={row.mtfSummary || "Đồng thuận D1 + W1 Tăng"}
@@ -3152,6 +3342,16 @@ export function VnScreener({
                                   D1·W1 🟢🟢⚪
                                 </span>
                               ) : null}
+                              <MaGeometryBadge
+                                isRibbonSqueeze={row.isMaRibbonSqueeze}
+                                isReclaimSpring={row.isMaReclaimSpring}
+                                ribbonSpreadPct={row.maRibbonSpreadPct}
+                              />
+                              <VolumeAbsorptionBadge
+                                isAbsorptionSpike={row.isAbsorptionSpike}
+                                isVsaNoSupply={row.isVsaNoSupplyTest}
+                                activeBuyRatioPct={row.activeBuyRatioPct}
+                              />
                               {row.hasBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
                                   {row.divergenceSummary || "Phân kỳ dương"}

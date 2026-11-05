@@ -58,6 +58,10 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
   const [highRrOnly, setHighRrOnly] = useState<boolean>(false); // R:R >= 2.0
   const [nearEntryOnly, setNearEntryOnly] = useState<boolean>(false); // Diff <= 1.5%
   const [mtfAlignedOnly, setMtfAlignedOnly] = useState<boolean>(false); // H1 + D1 + W1 Aligned Bull
+  const [ribbonSqueezeOnly, setRibbonSqueezeOnly] = useState<boolean>(false); // MA Ribbon Squeeze <= 2.8%
+  const [absorptionOnly, setAbsorptionOnly] = useState<boolean>(false); // Volume Absorption >= 1.3x
+  const [vsaTestOnly, setVsaTestOnly] = useState<boolean>(false); // VSA No Supply <= 0.65x
+  const [reclaimOnly, setReclaimOnly] = useState<boolean>(false); // MA Reclaim Spring
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [sortBy, setSortBy] = useState<SortField>("nearBuyPoint");
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
@@ -165,7 +169,23 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
 
     // 8c. Đồng thuận Đa khung H1+D1+W1
     if (mtfAlignedOnly) {
-      list = list.filter((r) => r.isMtfAligned || r.mtfConsensus === "ALL_BULL");
+      list = list.filter((r) => r.isPrecisionMtfAligned || r.isMtfAligned || r.mtfConsensus === "ALL_BULL");
+    }
+
+    // 8d. Biên độ 3: Nén Ribbon MA & Reclaim Spring
+    if (ribbonSqueezeOnly) {
+      list = list.filter((r) => r.isMaRibbonSqueeze);
+    }
+    if (reclaimOnly) {
+      list = list.filter((r) => r.isMaReclaimSpring);
+    }
+
+    // 8e. Biên độ 4: Hấp thụ cung & VSA No Supply
+    if (absorptionOnly) {
+      list = list.filter((r) => r.isAbsorptionSpike);
+    }
+    if (vsaTestOnly) {
+      list = list.filter((r) => r.isVsaNoSupplyTest);
     }
 
     // 9. Sorting
@@ -205,6 +225,11 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     freshOnly,
     highRrOnly,
     nearEntryOnly,
+    mtfAlignedOnly,
+    ribbonSqueezeOnly,
+    reclaimOnly,
+    absorptionOnly,
+    vsaTestOnly,
     searchQuery,
     sortBy,
   ]);
@@ -259,6 +284,12 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
     setLeaderOnly(false);
     setFreshOnly(false);
     setHighRrOnly(false);
+    setNearEntryOnly(false);
+    setMtfAlignedOnly(false);
+    setRibbonSqueezeOnly(false);
+    setAbsorptionOnly(false);
+    setVsaTestOnly(false);
+    setReclaimOnly(false);
   }, []);
 
   if (isLoading && !res) return <Loading rows={8} />;
@@ -537,6 +568,54 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 className="rounded accent-amber-500"
               />
               <span>Đồng thuận H1+D1+W1</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-indigo-400 font-medium select-none">
+              <input
+                type="checkbox"
+                checked={ribbonSqueezeOnly}
+                onChange={(e) => setRibbonSqueezeOnly(e.target.checked)}
+                className="rounded accent-indigo-500"
+              />
+              <span>Nén Ribbon MA</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-400 font-medium select-none">
+              <input
+                type="checkbox"
+                checked={reclaimOnly}
+                onChange={(e) => setReclaimOnly(e.target.checked)}
+                className="rounded accent-cyan-500"
+              />
+              <span>Reclaim MA</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 font-medium select-none">
+              <input
+                type="checkbox"
+                checked={absorptionOnly}
+                onChange={(e) => setAbsorptionOnly(e.target.checked)}
+                className="rounded accent-amber-400"
+              />
+              <span>Hấp Thụ Cung</span>
+            </label>
+
+            <span className="text-text-muted">|</span>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 font-medium select-none">
+              <input
+                type="checkbox"
+                checked={vsaTestOnly}
+                onChange={(e) => setVsaTestOnly(e.target.checked)}
+                className="rounded accent-teal-400"
+              />
+              <span>Cạn Cung VSA</span>
             </label>
           </div>
 
@@ -851,6 +930,46 @@ function ConfluenceRowItem({
                 Nén {row.squeezeBars ? `${row.squeezeBars}P` : "Squeeze"}
               </span>
             )}
+            {row.isMaRibbonSqueeze && (
+              <span
+                className="rounded bg-indigo-500/20 border border-indigo-400/50 px-1 py-0.2 text-[9px] font-bold text-indigo-300"
+                title={`Dải MA Ribbon nén chặt (${row.maRibbonSpreadPct ? `${row.maRibbonSpreadPct}%` : "≤2.8%"})`}
+              >
+                Ribbon Nén
+              </span>
+            )}
+            {row.isMaReclaimSpring && (
+              <span
+                className="rounded bg-cyan-500/20 border border-cyan-400/50 px-1 py-0.2 text-[9px] font-bold text-cyan-300"
+                title="Quét rũ thủng MA rồi rút chân dứt khoát lấy lại MA (Spring Hunt)"
+              >
+                Reclaim MA
+              </span>
+            )}
+            {row.isAbsorptionSpike && (
+              <span
+                className="rounded bg-amber-500/20 border border-amber-400/50 px-1 py-0.2 text-[9px] font-bold text-amber-300"
+                title={`Khối lượng hấp thụ cung đột biến (≥ 1.3x TB20)${row.activeBuyRatioPct ? ` · Mua CĐ: ${Math.round(row.activeBuyRatioPct)}%` : ""}`}
+              >
+                Hấp Thụ Cung
+              </span>
+            )}
+            {row.isVsaNoSupplyTest && (
+              <span
+                className="rounded bg-teal-500/20 border border-teal-400/50 px-1 py-0.2 text-[9px] font-bold text-teal-300"
+                title="VSA No Supply Test: Cạn kiệt lượng bán trôi nổi tại hỗ trợ MA"
+              >
+                Cạn Cung VSA
+              </span>
+            )}
+            {row.isPrecisionMtfAligned && (
+              <span
+                className="rounded bg-gradient-to-r from-emerald-500/25 to-teal-500/25 border border-emerald-400/50 px-1 py-0.2 text-[9px] font-bold text-emerald-300"
+                title="Đồng thuận 3 Khung Thời Gian H1·D1·W1 tuyệt đối"
+              >
+                H1·D1·W1 🟢🟢🟢
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[10.5px] text-text-muted truncate max-w-[130px]">
@@ -1042,23 +1161,28 @@ function ConfluenceRowItem({
                     <span className="text-text-muted">Độ dốc MA neo: </span>
                     <span className="font-medium text-text-secondary">
                       {row.maSlope === "UP" ? "↗ Đang dốc lên" : row.maSlope === "FLAT" ? "→ Đi ngang" : "↘ Đang dốc xuống"}
+                      {row.maSlope5Pct != null ? ` (${row.maSlope5Pct > 0 ? `+${row.maSlope5Pct}` : row.maSlope5Pct}%/5p)` : ""}
                     </span>
                   </div>
                   <div>
                     <span className="text-text-muted">Trạng thái Ribbon: </span>
                     <span className="font-medium text-text-secondary">
-                      {row.maAlignment === "BULLISH_RIBBON" ? "Ribbon Tăng Trưởng" : "Thường"}
+                      {row.isMaRibbonSqueeze ? `Nén chặt (${row.maRibbonSpreadPct ? `${row.maRibbonSpreadPct}%` : "≤2.8%"})` : row.maAlignment === "BULLISH_RIBBON" ? "Ribbon Tăng Trưởng" : "Thường"}
                     </span>
                   </div>
                   <div>
-                    <span className="text-text-muted">Khối lượng Vol Ratio: </span>
+                    <span className="text-text-muted">Khối lượng Vol: </span>
                     <span className="font-medium text-text-secondary">
-                      {row.volRatio ? `${row.volRatio}x MA20 vol` : "Bình thường"}
+                      {row.isAbsorptionSpike ? `Hấp thụ cung (${row.volRatio ?? "1.3"}x)` : row.isVsaNoSupplyTest ? `Cạn cung VSA (${row.volRatio ?? "0.65"}x)` : row.volRatio ? `${row.volRatio}x MA20 vol` : "Bình thường"}
+                      {row.activeBuyRatioPct != null ? ` · Mua CĐ: ${Math.round(row.activeBuyRatioPct)}%` : ""}
                     </span>
                   </div>
                   <div>
                     <span className="text-text-muted">Độ tin cậy nến: </span>
-                    <span className="font-medium text-text-secondary uppercase">{row.candleReliability}</span>
+                    <span className="font-medium text-text-secondary uppercase">
+                      {row.candleReliability}
+                      {row.isMaReclaimSpring ? " · Reclaim Spring" : ""}
+                    </span>
                   </div>
                 </div>
 
