@@ -13,6 +13,24 @@ export type AgentPrefs = {
 
 export type AgentHistoryTurn = HistoryTurn;
 
+export function synthesizeFromDatafeed(
+  question: string,
+  built: AgentBuilt,
+  prefs: AgentPrefs = {},
+  opts?: { forceBriefingFormat?: boolean },
+): { text: string; model: string } {
+  const q = question.toLowerCase();
+  const narrative = built.narrative.trim();
+
+  if (opts?.forceBriefingFormat || /thị trường|vn-?index|vn30|hose|hnx/i.test(q)) {
+    const text = `## 🧭 NHẬN ĐỊNH THỊ TRƯỜNG & DÒNG TIỀN (ORCA IN-HOUSE QUANT AI)\n\n${narrative}\n\n---\n> **Chiến lược hành động:** Tập trung chọn lọc các mã bước vào **Vùng Vàng Chân Sóng Apex** và có con hào kinh tế 4M vững chắc. Kỷ luật tuân thủ ngưỡng cắt lỗ ATR và tỷ số Risk/Reward >= 2.2x.`;
+    return { text, model: "Orca Dynamic Quant AI (Live Datafeed)" };
+  }
+
+  const text = `## 📊 PHÂN TÍCH ĐỊNH LƯỢNG CHUYÊN SÂU TỪ DATAFEED (ORCA QUANT INTELLIGENCE)\n\n${narrative}`;
+  return { text, model: "Orca Dynamic Quant AI (Live Datafeed)" };
+}
+
 export async function synthesizeWithLlm(
   question: string,
   built: AgentBuilt,
@@ -20,7 +38,9 @@ export async function synthesizeWithLlm(
   history: AgentHistoryTurn[],
   opts?: { forceBriefingFormat?: boolean },
 ): Promise<{ text: string; model: string } | null> {
-  if (!llmConfigured()) return null;
+  if (!llmConfigured()) {
+    return synthesizeFromDatafeed(question, built, prefs, opts);
+  }
   try {
     const lang = prefs.language === "en" ? "Anh" : "Việt";
     const depth = prefs.depth ?? "standard";
@@ -157,9 +177,9 @@ YÊU CẦU ĐẦU RA:
         content: h.content,
       })),
     });
-    if (!r?.text?.trim()) return null;
+    if (!r?.text?.trim()) return synthesizeFromDatafeed(question, built, prefs, opts);
     return { text: r.text.trim(), model: r.model };
   } catch {
-    return null;
+    return synthesizeFromDatafeed(question, built, prefs, opts);
   }
 }

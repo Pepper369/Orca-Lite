@@ -266,7 +266,7 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
               }`}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Nhận định AI Gemini ({data.model ? "Flash 2.0" : "Engine"})
+              Nhận định Trí Tuệ AI ({data.model ? (data.model.includes("Quant") ? "Orca Quant AI" : "AI Studio") : "Live Datafeed"})
             </button>
             <button
               type="button"

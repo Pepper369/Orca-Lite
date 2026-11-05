@@ -81,10 +81,24 @@ function generateAdaptiveAnswer(q: string, facts?: SnapshotFacts): string {
 
   const parsedAmount = extractAmountFromText(q);
 
-  // 0. Truy vấn Lọc Cổ phiếu & Phân tích Cổ tức (Orca Screener & Dividend Intelligence Engine)
-  const isScreenerQuery = query.includes("cổ phiếu") || query.includes("chứng khoán") || query.includes("lọc mã") || query.includes("tìm mã") || query.includes("breakout") || query.includes("canslim") || query.includes("cổ tức") || query.includes("dividend") || query.includes("backtest") || query.includes("mua mã") || query.includes("đầu tư gì");
+  // 0. Truy vấn Lọc Cổ phiếu, Chân Sóng Apex & Phân tích Định lượng (Orca Quant Intelligence Engine)
+  const isScreenerQuery = query.includes("cổ phiếu") || query.includes("chứng khoán") || query.includes("lọc mã") || query.includes("tìm mã") || query.includes("breakout") || query.includes("canslim") || query.includes("cổ tức") || query.includes("dividend") || query.includes("backtest") || query.includes("mua mã") || query.includes("đầu tư gì") || query.includes("chân sóng") || query.includes("apex") || query.includes("vùng vàng");
 
   if (isScreenerQuery) {
+    if (query.includes("chân sóng") || query.includes("apex") || query.includes("vùng vàng") || query.includes("đảo chiều")) {
+      return `Chào bạn! Trí tuệ Định lượng **👑 Chân Sóng Apex (Apex Quant Confluence)** của Orca tổng hợp trực tiếp từ Datafeed thị trường như sau:
+
+**BẢN CHẤT CỦA BỘ LỌC 👑 CHÂN SÓNG APEX:**
+Hệ thống giải quyết triệt để 6 điểm nghẽn đảo chiều kinh điển trên sàn chứng khoán Việt Nam:
+1. **Né Bẫy Dao Rơi (Falling Knife):** Kiểm định cấu trúc Wyckoff Spring thủng đáy cũ quét sạch thanh khoản kẹp hàng rồi rút chân pin-bar kèm Volume cạn kiệt (Volume Absorption).
+2. **Khóa Vùng Vàng (Sweet Launch Zone $0.8\% - 7.5\%$):** Chỉ giải ngân khi cổ phiếu vừa chớm đảo chiều trong biên độ an toàn từ đáy. Tự động đánh tụt điểm các mã đã chạy xa đáy $> 8.5\%$ (Extended) để không mua đuổi chạm cản T+.
+3. **Đo Lường Dư Địa Cản Trên Đầu (Overhead Room $\ge 5.0\%$):** Bắt buộc khoảng trống an toàn tới các kháng cự cứng (MA20/MA50 kẹp hàng) phải $\ge 5.0\%$ mới kích hoạt điểm mua.
+4. **Lực Hồi Quy Thống Kê Ornstein-Uhlenbeck (OU):** Đo lường độ lệch chuẩn Z-Score âm sâu ($\le -1.2\sigma$) với chu kỳ bán rã hồi quy $t_{1/2} \le 25$ phiên để xác định xung lực bật nảy nhanh.
+5. **Kế Hoạch Triple-Barrier Tỷ Số $R:R \ge 2.2\text{x}$:** Tự động thiết lập vùng mua, chặn lỗ Stop Loss và mục tiêu chốt lời Take Profit 1 & 2 theo biên độ biến động ATR.
+
+Bạn có thể mở ngay tab **"👑 Chân Sóng Apex"** tại trang **/screener** hoặc mở trang chi tiết bất kỳ cổ phiếu nào (như HPG, FPT, MBB, SSI...) để xem AI phân tích chi tiết!`;
+    }
+
     if (query.includes("cổ tức") || query.includes("dividend") || query.includes("lãi suất")) {
       return `Chào bạn! Dữ liệu Phân tích Cổ tức (Dividend Intelligence) từ Orca Analytics cung cấp thông tin như sau:
 

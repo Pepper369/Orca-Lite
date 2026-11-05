@@ -6,6 +6,7 @@ import type { Meta } from "../types";
 import { getSectorTrendForSymbol } from "./sector-trend";
 import { getVnStockDetail } from "./stocks";
 import { evaluateFourM, type FourMScore } from "../engines/four-m";
+import { generateOrcaDynamicAiReport } from "../engines/orca-dynamic-ai-intelligence";
 
 function toTs(ts?: string | number | null): number | null {
   if (ts == null) return null;
@@ -463,122 +464,52 @@ export async function analyzeFinancialHealthAi(
   const detailRes = await getVnStockDetail(symbol);
   if (!detailRes?.detail) return null;
 
+  const detail = detailRes.detail;
   const sector = await getSectorTrendForSymbol(symbol).catch(() => null);
-  const ctx = buildContext(symbol, detailRes.detail, sector);
 
-  const hasFs =
-    (detailRes.detail.financials.income?.length ?? 0) > 0 ||
-    (detailRes.detail.financials.balance?.length ?? 0) > 0;
-
-  if (!hasFs && !detailRes.detail.financialHealth) {
-    return {
-      analysis: {
-        symbol,
-        narrative: `${symbol}: chưa có snapshot BCTC để phân tích.`,
-        structured: null,
-        fourM: ctx.fourM,
-        tcbsHealth: ctx.tcbsHealth,
-        model: null,
-        latencyMs: null,
-        usedLlm: false,
-        sourceNote: "No financial snapshot",
-      },
-      meta: buildMeta({
-        source: detailRes.meta.source,
-        sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp),
-        cached: detailRes.meta.cached,
-        stale: true,
-        note: "Thiếu BCTC",
-      }),
-    };
-  }
-
-  if (!llmConfigured()) {
-    return {
-      analysis: deterministicFallback(ctx),
-      meta: buildMeta({
-        source: detailRes.meta.source,
-        sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp),
-        cached: detailRes.meta.cached,
-        stale: detailRes.meta.stale,
-        note: "AI Studio/OpenRouter chưa cấu hình — deterministic 4M/TCBS",
-      }),
-    };
-  }
-
-  const user = `Phân tích BCTC 1-click & định giá 4M cho ${symbol}. Đọc kỹ fourM, tcbsHealth, chartSeries (DT-LN, biên, dòng tiền OCF/FCF) và trả về nhận định chuẩn CFA kèm block JSON.\n\nCONTEXT:\n${JSON.stringify(ctx)}`;
-
-  let llm = await llmChat("report", {
-    system: SYS_ANALYSIS,
-    user,
-    temperature: 0.35,
-    maxTokens: 1800,
-    timeoutMs: 55_000,
+  // 1. Direct Synthesis from Live Datafeed using Orca Dynamic Quant AI Intelligence
+  const report = generateOrcaDynamicAiReport({
+    symbol,
+    name: detail.name,
+    quote: detail.quote,
+    bars: detail.bars,
+    technical: detail.technical,
+    financials: detail.financials,
+    financialHealth: detail.financialHealth,
+    financialGrowth: detail.financialGrowth,
+    ratioMap: detail.ratioMap,
+    sectorTrend: sector?.row
+      ? {
+          sector: sector.sector,
+          trendScore: sector.row.trendScore,
+          trendLabelVi: sector.row.trendLabelVi,
+          avgChangePercent: sector.row.avgChangePercent,
+          advances: sector.row.advances,
+          declines: sector.row.declines,
+        }
+      : null,
+    foreignFlow: detail.foreignFlow as any,
+    orderBook: detail.orderBook as any,
   });
-
-  if (!llm) {
-    llm = await llmChat("analysis", {
-      system: SYS_ANALYSIS,
-      user,
-      temperature: 0.35,
-      maxTokens: 1800,
-      timeoutMs: 55_000,
-    });
-  }
-
-  if (llm) {
-    const facts = collectFactNumbers(ctx);
-    const val = validateOutput(llm.text, facts, 0.08);
-    if (!val.ok && val.unsupported.length > 0) {
-      const repair = await llmChat("report", {
-        system: `${SYS_ANALYSIS}\nSTRICT REPAIR: chỉ dùng số liệu trong CONTEXT. Claim lỗi: ${val.unsupported
-          .slice(0, 6)
-          .map((u) => u.raw)
-          .join(", ")}. Vẫn giữ văn phong sắc bén, thực chiến.`,
-        user,
-        temperature: 0.2,
-        maxTokens: 1600,
-        timeoutMs: 50_000,
-      });
-      if (repair) llm = repair;
-    }
-  }
-
-  if (!llm) {
-    const fb = deterministicFallback(ctx);
-    return {
-      analysis: { ...fb, sourceNote: "LLM fallback — Engine 4M/TCBS deterministic" },
-      meta: buildMeta({
-        source: detailRes.meta.source,
-        sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp),
-        cached: detailRes.meta.cached,
-        stale: detailRes.meta.stale,
-        note: "LLM unavailable",
-      }),
-    };
-  }
-
-  const structured = tryParseStructured(llm.text);
-  const narrative = llm.text.replace(/```json[\s\S]*?```/gi, "").trim();
 
   return {
     analysis: {
-      symbol,
-      narrative,
-      structured,
-      fourM: ctx.fourM,
-      tcbsHealth: ctx.tcbsHealth,
-      model: llm.model,
-      latencyMs: llm.latencyMs,
-      usedLlm: true,
-      sourceNote: `${llm.model} · Quick Audit 4M + TCBS`,
+      symbol: report.symbol,
+      narrative: report.narrative,
+      structured: report.structured,
+      fourM: report.fourM,
+      tcbsHealth: report.tcbsHealth,
+      model: report.model,
+      latencyMs: report.latencyMs,
+      usedLlm: false,
+      sourceNote: report.sourceNote,
     },
     meta: buildMeta({
-      source: `${detailRes.meta.source}+llm:${llm.model}`,
+      source: `${detailRes.meta.source}+orca-dynamic-quant-ai`,
       sourceTimestampMs: toTs(detailRes.meta.sourceTimestamp) ?? Date.now(),
-      cached: false,
+      cached: detailRes.meta.cached,
       stale: detailRes.meta.stale,
-      note: `AI Quick Audit 4M/TCBS · ${llm.latencyMs}ms · ${llm.model}`,
+      note: `Orca In-House Quant AI Engine · ${report.latencyMs}ms · Live Datafeed`,
     }),
   };
 }
