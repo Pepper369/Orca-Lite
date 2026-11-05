@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { getVnStockDetail } from "@/lib/services/stocks";
 import { getVnIndices } from "@/lib/services/stocks-board";
 import { generateOrcaDynamicAiReport } from "@/lib/engines/orca-dynamic-ai-intelligence";
+import { executeContextualAiPipeline } from "@/lib/engines/orca-contextual-reasoning-engine";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -478,7 +479,23 @@ export async function POST(req: Request) {
     const fixed = facts.fixedExpenses ?? 0;
     const totalExp = facts.totalExpenses ?? 0;
 
-    // 1. Phân tích Cổ phiếu thời gian thực từ Live Datafeed (Orca Dynamic Quant AI - Zero Hallucination)
+    // 0. Pipeline Huấn luyện Thấu hiểu Ngữ cảnh Chuyên sâu (Contextual Intelligence Pipeline)
+    // Bao gồm: So sánh đối đầu 2 mã, Phân tích cổ phiếu theo trọng tâm, Luân chuyển dòng tiền nhóm ngành, Kịch bản đời thực
+    const contextualResult = await executeContextualAiPipeline(question, facts);
+    if (contextualResult) {
+      return ok({
+        answer: contextualResult.answer,
+        domain: contextualResult.domain,
+        stockAngle: contextualResult.stockAngle,
+        personalTopic: contextualResult.personalTopic,
+        structured: contextualResult.structured,
+        model: contextualResult.model,
+        latencyMs: contextualResult.latencyMs,
+        sourceNote: contextualResult.sourceNote,
+      });
+    }
+
+    // 1. Phân tích Cổ phiếu thời gian thực từ Live Datafeed (Fallback)
     const ticker = extractTickerFromQuery(question);
     if (ticker) {
       try {
