@@ -76,6 +76,11 @@ import {
   type SectorRrgCoord,
   type RrgQuadrant,
 } from "../engines/rrg-engine";
+import {
+  computeFundamentalMatrix,
+  type FaCategory,
+  type FundamentalMatrixResult,
+} from "../engines/fundamental-quant-matrix";
 
 export type ScreenerPreset =
   | "all"
@@ -104,7 +109,12 @@ export type ScreenerPreset =
   | "growth"
   | "value"
   | "breakout"
-  | "ma_cross";
+  | "ma_cross"
+  | "fa_fortress"
+  | "earnings_quality"
+  | "magic_formula"
+  | "consensus_upside"
+  | "tight_closes_vdu";
 
 export type ScreenerStockItem = {
   symbol: string;
@@ -267,6 +277,29 @@ export type ScreenerStockItem = {
   isVsaNoSupplyTest?: boolean;
   // Precision MTF Alignment (Biên độ 5)
   isPrecisionMtfAligned?: boolean;
+  // Advanced Technical Recognition Engine (Nâng Cấp Nhận Diện Kỹ Thuật)
+  isTightCloses?: boolean;
+  tightCloseSpreadPct?: number | null;
+  isVolumeDryUp?: boolean;
+  isRsNewHigh20?: boolean;
+  isWyckoffLps?: boolean;
+  // Fundamental Quant Matrix (Nâng Cấp Phân Tích Cơ Bản FA)
+  roic?: number | null; // Return on Invested Capital (%)
+  cfoToNetProfit?: number | null; // CFO / Net Profit
+  isQualityEarnings?: boolean;
+  ocfBillion?: number | null; // Dòng tiền thuần HĐKD (Tỷ VNĐ)
+  fcfYieldPct?: number | null; // FCF Yield (%)
+  interestCoverage?: number | null; // Hệ số phủ lãi vay (ICR)
+  isSafeDebt?: boolean;
+  isNetCash?: boolean; // Tiền mặt ròng > Nợ vay
+  netDebtToEbitda?: number | null;
+  peg?: number | null; // P/E / Tăng trưởng LN ròng (Peter Lynch)
+  consensusTargetPrice?: number | null; // Giá mục tiêu CTCK
+  consensusUpsidePct?: number | null; // Upside định giá CTCK (%)
+  magicFormulaScore?: number | null; // Magic Formula Greenblatt (1-99)
+  faCategory?: FaCategory;
+  faBadgeVi?: string | null;
+  faSummaryVi?: string | null;
 };
 
 export type ScreenerFilterParams = {
@@ -336,6 +369,18 @@ export type ScreenerFilterParams = {
   buyPosition?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "SAFE_ACCUMULATION" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   volatilityCoil?: "ALL" | "FIRED" | "SQUEEZE_ON" | "RIBBON_SQUEEZE" | "COIL_SUPER" | string;
   vsaPattern?: "ALL" | "ABSORPTION" | "NO_SUPPLY" | "ACTIVE_BUY" | string;
+  faProfile?: "ALL" | "FORTRESS" | "CASH_MACHINE" | "MOAT_QUALITY" | "UNDERVALUED_GROWTH" | "CONSENSUS_UPSIDE" | "VALUE_DIVIDEND" | "HIGH_RISK" | string;
+  techPattern?: "ALL" | "TIGHT_CLOSES" | "VDU" | "RS_NEW_HIGH" | "WYCKOFF_LPS" | string;
+  minRoic?: number;
+  minInterestCoverage?: number;
+  minCfoToNp?: number;
+  minConsensusUpside?: number;
+  maxPeg?: number;
+  netCashOnly?: boolean;
+  tightClosesOnly?: boolean;
+  vduOnly?: boolean;
+  rsNewHighOnly?: boolean;
+  wyckoffLpsOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -521,6 +566,11 @@ function analyzeTechFeatures(
       maSlope5Pct: null,
       isAbsorptionSpike: false,
       isVsaNoSupplyTest: false,
+      isTightCloses: false,
+      tightCloseSpreadPct: null,
+      isVolumeDryUp: false,
+      isRsNewHigh20: false,
+      isWyckoffLps: false,
       mtfScore: 50,
       mtfBadgeVi: "Chưa đủ nến",
       mtfSummary: "Chưa đủ dữ liệu đa khung",
@@ -692,8 +742,38 @@ function analyzeTechFeatures(
   // Biên độ 5: Precision MTF Alignment
   const isPrecisionMtfAligned = mtf.isAligned || mtf.consensus === "ALL_BULL";
 
+  // Nâng cao 1: Nén Giá Phẳng Minervini Tight Closes (3-4 phiên co cụm biên độ <= 1.2% quanh MA)
+  let isTightCloses = false;
+  let tightCloseSpreadPct: number | null = null;
+  if (n >= 4) {
+    const recent4 = closes.slice(n - 4);
+    const maxC = Math.max(...recent4);
+    const minC = Math.min(...recent4);
+    if (minC > 0) {
+      tightCloseSpreadPct = Number((((maxC - minC) / minC) * 100).toFixed(2));
+      if (tightCloseSpreadPct <= 1.25 && (maRes.ma20 == null || (currentPrice != null && currentPrice >= maRes.ma20 * 0.98))) {
+        isTightCloses = true;
+      }
+    }
+  }
+
+  // Nâng cao 2: Cạn kiệt thanh khoản Volume Dry-Up (VDU <= 0.60 vol20 trong nền)
+  const isVolumeDryUp =
+    (maRes.volRatio20 != null && maRes.volRatio20 <= 0.60) &&
+    (currentPrice != null && maRes.ma20 != null && Math.abs(currentPrice - maRes.ma20) / maRes.ma20 <= 0.035);
+
+  // Nâng cao 3: RS Rating / Đường Sức mạnh tương đối dẫn dắt lập đỉnh mới
+  const isRsNewHigh20 = Boolean(rsPerf20 != null && rsPerf20 >= 6.0);
+
+  // Nâng cao 4: Wyckoff LPS (Last Point of Support / Test cung kiệt von trên hỗ trợ)
+  const isWyckoffLps =
+    Boolean(maRes.ma20 && currentPrice && currentPrice >= maRes.ma20 * 0.985 && currentPrice <= maRes.ma20 * 1.03) &&
+    (maRes.volRatio20 != null && maRes.volRatio20 <= 0.82) &&
+    (lastBar.close >= lastBar.open || lowerShadowRatio >= 0.3);
+
   const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
-  const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore + mtfBonus));
+  const techPatternBonus = (isTightCloses ? 3 : 0) + (isVolumeDryUp ? 3 : 0) + (isWyckoffLps ? 3 : 0) + (isRsNewHigh20 ? 3 : 0);
+  const confluenceScore = Math.min(100, Math.max(20, trendScore + patternScore + momScore + flowRsScore + mtfBonus + Math.min(techPatternBonus, 6)));
 
   let confluenceBadge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" = "NONE";
   if (confluenceScore >= 70 || (confluenceScore >= 66 && mtf.isAligned)) confluenceBadge = "SUPER_SETUP";
@@ -728,6 +808,11 @@ function analyzeTechFeatures(
     maSlope5Pct,
     isAbsorptionSpike,
     isVsaNoSupplyTest,
+    isTightCloses,
+    tightCloseSpreadPct,
+    isVolumeDryUp,
+    isRsNewHigh20,
+    isWyckoffLps,
     mtfScore: mtf.score,
     mtfBadgeVi: mtf.badgeVi,
     mtfSummary: mtf.summary,
@@ -1115,6 +1200,19 @@ function detectPresets(item: {
   isAbsorptionSpike?: boolean | null;
   isVsaNoSupplyTest?: boolean | null;
   isPrecisionMtfAligned?: boolean | null;
+  isTightCloses?: boolean | null;
+  isVolumeDryUp?: boolean | null;
+  isRsNewHigh20?: boolean | null;
+  isWyckoffLps?: boolean | null;
+  faCategory?: FaCategory;
+  roic?: number | null;
+  interestCoverage?: number | null;
+  cfoToNetProfit?: number | null;
+  fcfTtm?: number | null;
+  isNetCash?: boolean | null;
+  peg?: number | null;
+  consensusUpsidePct?: number | null;
+  magicFormulaScore?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1135,7 +1233,9 @@ function detectPresets(item: {
     item.confluenceScore >= 52 ||
     (item.orcaMasterScore != null && item.orcaMasterScore >= 72) ||
     item.isMaRibbonSqueeze === true ||
-    item.isMaReclaimSpring === true;
+    item.isMaReclaimSpring === true ||
+    item.isTightCloses === true ||
+    item.isWyckoffLps === true;
 
   const hasVolumeIgnition =
     (item.volRatio20 != null && item.volRatio20 >= 1.15) ||
@@ -1145,6 +1245,8 @@ function detectPresets(item: {
     item.isSqueezeFiredBull === true ||
     item.isAbsorptionSpike === true ||
     item.isVsaNoSupplyTest === true ||
+    item.isVolumeDryUp === true ||
+    item.isRsNewHigh20 === true ||
     item.smartMoneySignal === "POCKET_PIVOT" ||
     item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
     item.vsaSignal === "NO_SUPPLY" ||
@@ -1402,6 +1504,49 @@ function detectPresets(item: {
   // 12. Đồng Thuận Đa Khung Thời Gian (H1 + D1 + W1 Aligned Bull)
   if (item.isMtfAligned || item.mtfConsensus === "ALL_BULL") {
     passes.push("mtf_confluence");
+  }
+
+  // 13. Pháo Đài Tài Chính (FA Fortress)
+  if (
+    item.faCategory === "FORTRESS" ||
+    (item.isNetCash && (item.interestCoverage == null || item.interestCoverage >= 4.0) && (item.debtEquity == null || item.debtEquity <= 1.0))
+  ) {
+    passes.push("fa_fortress");
+  }
+
+  // 14. Dòng Tiền Thực Chất (Earnings Quality: CFO/LNST >= 1.0 & FCF dương)
+  if (
+    item.faCategory === "CASH_MACHINE" ||
+    (item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.95 && (item.fcfTtm == null || item.fcfTtm > 0))
+  ) {
+    passes.push("earnings_quality");
+  }
+
+  // 15. Magic Formula (Joel Greenblatt: ROIC >= 15% & P/E rẻ)
+  if (
+    item.faCategory === "MOAT_QUALITY" ||
+    (item.magicFormulaScore != null && item.magicFormulaScore >= 72) ||
+    ((item.roic != null && item.roic >= 15) && (item.pe != null && item.pe <= 14))
+  ) {
+    passes.push("magic_formula");
+  }
+
+  // 16. Định Giá Hời CTCK (Consensus Upside >= 20%)
+  if (
+    item.faCategory === "CONSENSUS_UPSIDE" ||
+    (item.consensusUpsidePct != null && item.consensusUpsidePct >= 20.0)
+  ) {
+    passes.push("consensus_upside");
+  }
+
+  // 17. Nén Giá Phẳng & Cạn Von (Minervini Tight Closes & VDU)
+  if (
+    (item.isTightCloses && item.isVolumeDryUp) ||
+    (item.isTightCloses && (item.volRatio20 == null || item.volRatio20 <= 0.85)) ||
+    (item.isVolumeDryUp && item.confluenceScore >= 50) ||
+    item.isWyckoffLps === true
+  ) {
+    passes.push("tight_closes_vdu");
   }
 
   return passes;
@@ -1751,6 +1896,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         isSectorLeading: boolean;
         isSectorLagging: boolean;
         sectorResonanceBonus: number;
+        faMatrix: FundamentalMatrixResult;
       }[] = [];
 
       for (const sym of symbols) {
@@ -1862,6 +2008,18 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         const piotroskiRating = fundHealth?.piotroski.rating;
         const altmanZScore = fundHealth?.altman.zScore ?? null;
         const altmanZone = fundHealth?.altman.zone;
+
+        // Fundamental Quant Matrix (ROIC, ICR, CFO/LNST, PEG, Consensus Target Upside, Magic Formula)
+        const faMatrix = computeFundamentalMatrix({
+          snap: f,
+          price,
+          pe,
+          pb,
+          dividendYield,
+          niYoyPct,
+          marketCapBillion: marketCap,
+          vietcapProfile: vc,
+        });
 
         // Enhanced VCP details
         const topCP = techFeatures.topChartPattern;
@@ -2007,6 +2165,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isSectorLeading,
           isSectorLagging,
           sectorResonanceBonus: sectorResonance.scoreBonus,
+          faMatrix,
         });
       }
 
@@ -2087,6 +2246,19 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isAbsorptionSpike: entry.techFeatures.isAbsorptionSpike,
           isVsaNoSupplyTest: entry.techFeatures.isVsaNoSupplyTest,
           isPrecisionMtfAligned: entry.techFeatures.isPrecisionMtfAligned,
+          isTightCloses: entry.techFeatures.isTightCloses,
+          isVolumeDryUp: entry.techFeatures.isVolumeDryUp,
+          isRsNewHigh20: entry.techFeatures.isRsNewHigh20,
+          isWyckoffLps: entry.techFeatures.isWyckoffLps,
+          faCategory: entry.faMatrix.faCategory,
+          roic: entry.faMatrix.roic,
+          interestCoverage: entry.faMatrix.interestCoverage,
+          cfoToNetProfit: entry.faMatrix.cfoToNetProfit,
+          fcfTtm: entry.fcfTtm,
+          isNetCash: entry.faMatrix.isNetCash,
+          peg: entry.faMatrix.peg,
+          consensusUpsidePct: entry.faMatrix.consensusUpsidePct,
+          magicFormulaScore: entry.faMatrix.magicFormulaScore,
         });
 
         const hasCandleReversalSnap = Boolean(
@@ -2129,6 +2301,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           if (entry.techFeatures.isAbsorptionSpike) rawTriggerScore += 4;
           else if (entry.techFeatures.isVsaNoSupplyTest) rawTriggerScore += 3;
           if (entry.techFeatures.isPrecisionMtfAligned) rawTriggerScore += 4;
+          // Nâng cấp Nhận diện Kỹ thuật & FA Pháo Đài Boosts
+          if (entry.techFeatures.isTightCloses) rawTriggerScore += 3;
+          if (entry.techFeatures.isVolumeDryUp) rawTriggerScore += 3;
+          if (entry.techFeatures.isWyckoffLps) rawTriggerScore += 3;
+          if (entry.techFeatures.isRsNewHigh20) rawTriggerScore += 3;
+          if (entry.faMatrix.isNetCash) rawTriggerScore += 2;
+          if (entry.faMatrix.cfoToNetProfit != null && entry.faMatrix.cfoToNetProfit >= 1.0) rawTriggerScore += 2;
           buyTriggerScore = Math.max(1, Math.min(99, rawTriggerScore));
 
           const reasons: string[] = [];
@@ -2136,6 +2315,18 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
             reasons.push("Chạm chuẩn điểm mua");
           } else if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) {
             reasons.push("Vùng Vàng chân sóng");
+          }
+          if (entry.techFeatures.isTightCloses) {
+            reasons.push("Nén giá phẳng Minervini");
+          }
+          if (entry.techFeatures.isVolumeDryUp) {
+            reasons.push("Cạn vol VDU nền");
+          }
+          if (entry.techFeatures.isWyckoffLps) {
+            reasons.push("Wyckoff LPS test cung");
+          }
+          if (entry.techFeatures.isRsNewHigh20) {
+            reasons.push("RS Rating vượt đỉnh");
           }
           if (entry.techFeatures.isSqueezeFiredBull) {
             reasons.push("Nổ Squeeze bứt phá");
@@ -2152,6 +2343,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
             reasons.push("Hấp thụ cung vol lớn");
           } else if (entry.techFeatures.isVsaNoSupplyTest) {
             reasons.push("Cạn cung VSA Test");
+          }
+          if (entry.faMatrix.faBadgeVi) {
+            reasons.push(entry.faMatrix.faBadgeVi);
           }
           if (entry.isSectorLeading) {
             reasons.push("Ngành dẫn dắt RRG");
@@ -2323,6 +2517,29 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isAbsorptionSpike: entry.techFeatures.isAbsorptionSpike,
           isVsaNoSupplyTest: entry.techFeatures.isVsaNoSupplyTest,
           isPrecisionMtfAligned: entry.techFeatures.isPrecisionMtfAligned,
+          // Advanced Technical Recognition Engine (Nâng Cấp Nhận Diện Kỹ Thuật)
+          isTightCloses: entry.techFeatures.isTightCloses,
+          tightCloseSpreadPct: entry.techFeatures.tightCloseSpreadPct,
+          isVolumeDryUp: entry.techFeatures.isVolumeDryUp,
+          isRsNewHigh20: entry.techFeatures.isRsNewHigh20,
+          isWyckoffLps: entry.techFeatures.isWyckoffLps,
+          // Fundamental Quant Matrix (Nâng Cấp Phân Tích Cơ Bản FA)
+          roic: entry.faMatrix.roic,
+          cfoToNetProfit: entry.faMatrix.cfoToNetProfit,
+          isQualityEarnings: entry.faMatrix.isQualityEarnings,
+          ocfBillion: entry.faMatrix.ocfBillion,
+          fcfYieldPct: entry.faMatrix.fcfYieldPct,
+          interestCoverage: entry.faMatrix.interestCoverage,
+          isSafeDebt: entry.faMatrix.isSafeDebt,
+          isNetCash: entry.faMatrix.isNetCash,
+          netDebtToEbitda: entry.faMatrix.netDebtToEbitda,
+          peg: entry.faMatrix.peg,
+          consensusTargetPrice: entry.faMatrix.consensusTargetPrice,
+          consensusUpsidePct: entry.faMatrix.consensusUpsidePct,
+          magicFormulaScore: entry.faMatrix.magicFormulaScore,
+          faCategory: entry.faMatrix.faCategory,
+          faBadgeVi: entry.faMatrix.faBadgeVi,
+          faSummaryVi: entry.faMatrix.faSummaryVi,
           presetsPassed,
         });
       }
@@ -2360,6 +2577,11 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         value: 0,
         breakout: 0,
         ma_cross: 0,
+        fa_fortress: 0,
+        earnings_quality: 0,
+        magic_formula: 0,
+        consensus_upside: 0,
+        tight_closes_vdu: 0,
       };
 
       const sectorSet = new Set<string>();
@@ -2422,6 +2644,11 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
     value: 0,
     breakout: 0,
     ma_cross: 0,
+    fa_fortress: 0,
+    earnings_quality: 0,
+    magic_formula: 0,
+    consensus_upside: 0,
+    tight_closes_vdu: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -2466,7 +2693,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -2627,6 +2854,29 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
       if (params.vsaPattern === "NO_SUPPLY" && !x.isVsaNoSupplyTest && x.vsaSignal !== "NO_SUPPLY") continue;
       if (params.vsaPattern === "ACTIVE_BUY" && (x.activeBuyRatioPct == null || x.activeBuyRatioPct < 55)) continue;
     }
+
+    // Consolidated Fundamental Quant Matrix Filters (FA)
+    if (params.faProfile && params.faProfile !== "ALL") {
+      if (x.faCategory !== params.faProfile) continue;
+    }
+    if (params.minRoic != null && (x.roic == null || x.roic < params.minRoic)) continue;
+    if (params.minInterestCoverage != null && (x.interestCoverage == null || x.interestCoverage < params.minInterestCoverage)) continue;
+    if (params.minCfoToNp != null && (x.cfoToNetProfit == null || x.cfoToNetProfit < params.minCfoToNp)) continue;
+    if (params.minConsensusUpside != null && (x.consensusUpsidePct == null || x.consensusUpsidePct < params.minConsensusUpside)) continue;
+    if (params.maxPeg != null && (x.peg == null || x.peg > params.maxPeg)) continue;
+    if (params.netCashOnly && !x.isNetCash) continue;
+
+    // Advanced Technical Pattern Recognition Filters
+    if (params.techPattern && params.techPattern !== "ALL") {
+      if (params.techPattern === "TIGHT_CLOSES" && !x.isTightCloses) continue;
+      if (params.techPattern === "VDU" && !x.isVolumeDryUp) continue;
+      if (params.techPattern === "RS_NEW_HIGH" && !x.isRsNewHigh20) continue;
+      if (params.techPattern === "WYCKOFF_LPS" && !x.isWyckoffLps) continue;
+    }
+    if (params.tightClosesOnly && !x.isTightCloses) continue;
+    if (params.vduOnly && !x.isVolumeDryUp) continue;
+    if (params.rsNewHighOnly && !x.isRsNewHigh20) continue;
+    if (params.wyckoffLpsOnly && !x.isWyckoffLps) continue;
 
     filtered.push(x);
   }

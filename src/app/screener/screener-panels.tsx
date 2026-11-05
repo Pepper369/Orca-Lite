@@ -707,6 +707,130 @@ export function PrecisionMtfBadge({
   );
 }
 
+export function FaHealthBadge({
+  faCategory,
+  faBadgeVi,
+  faSummaryVi,
+  isNetCash,
+  roic,
+  cfoToNp,
+}: {
+  faCategory?: string | null;
+  faBadgeVi?: string | null;
+  faSummaryVi?: string | null;
+  isNetCash?: boolean | null;
+  roic?: number | null;
+  cfoToNp?: number | null;
+}) {
+  if (!faCategory || faCategory === "STANDARD") {
+    if (isNetCash) {
+      return (
+        <span
+          title="Tiền mặt ròng > Tổng nợ vay tài chính"
+          className="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 text-[9.5px] font-medium whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-emerald-400" />
+          Tiền Mặt Ròng
+        </span>
+      );
+    }
+    return null;
+  }
+
+  let colorClass = "bg-panel-2 text-text-secondary border-border-subtle";
+  let dotClass = "bg-text-muted";
+
+  if (faCategory === "FORTRESS") {
+    colorClass = "bg-emerald-500/20 text-emerald-200 border-emerald-400/40 font-bold";
+    dotClass = "bg-emerald-400";
+  } else if (faCategory === "CASH_MACHINE") {
+    colorClass = "bg-cyan-500/20 text-cyan-200 border-cyan-400/40 font-bold";
+    dotClass = "bg-cyan-400";
+  } else if (faCategory === "MOAT_QUALITY") {
+    colorClass = "bg-amber-500/20 text-amber-200 border-amber-400/40 font-bold";
+    dotClass = "bg-amber-400";
+  } else if (faCategory === "UNDERVALUED_GROWTH") {
+    colorClass = "bg-purple-500/20 text-purple-200 border-purple-400/40 font-medium";
+    dotClass = "bg-purple-400";
+  } else if (faCategory === "CONSENSUS_UPSIDE") {
+    colorClass = "bg-indigo-500/20 text-indigo-200 border-indigo-400/40 font-semibold";
+    dotClass = "bg-indigo-400";
+  } else if (faCategory === "VALUE_DIVIDEND") {
+    colorClass = "bg-teal-500/20 text-teal-200 border-teal-400/40 font-medium";
+    dotClass = "bg-teal-400";
+  } else if (faCategory === "HIGH_RISK") {
+    colorClass = "bg-rose-500/20 text-rose-300 border-rose-500/40 font-bold";
+    dotClass = "bg-rose-400";
+  }
+
+  return (
+    <span
+      title={faSummaryVi || `Phân loại cơ bản: ${faBadgeVi ?? faCategory}`}
+      className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[9.5px] whitespace-nowrap ${colorClass}`}
+    >
+      <span className={`size-1.5 rounded-full ${dotClass}`} />
+      <span>{faBadgeVi ?? faCategory}</span>
+      {roic != null && roic >= 15 && <span className="opacity-80">· ROIC {roic.toFixed(0)}%</span>}
+    </span>
+  );
+}
+
+export function TechPatternBadge({
+  isTightCloses,
+  tightCloseSpreadPct,
+  isVolumeDryUp,
+  isWyckoffLps,
+  isRsNewHigh20,
+}: {
+  isTightCloses?: boolean;
+  tightCloseSpreadPct?: number | null;
+  isVolumeDryUp?: boolean;
+  isWyckoffLps?: boolean;
+  isRsNewHigh20?: boolean;
+}) {
+  if (!isTightCloses && !isVolumeDryUp && !isWyckoffLps && !isRsNewHigh20) return null;
+  return (
+    <div className="inline-flex items-center gap-1 flex-wrap">
+      {isTightCloses && (
+        <span
+          title={`Minervini Tight Closes: Biên độ nén 4 phiên chỉ ${tightCloseSpreadPct != null ? `${tightCloseSpreadPct}%` : "≤1.25%"} sát MA20`}
+          className="inline-flex items-center gap-1 rounded bg-teal-500/20 border border-teal-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-teal-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-teal-400" />
+          Nén Phẳng {tightCloseSpreadPct ? `(${tightCloseSpreadPct}%)` : ""}
+        </span>
+      )}
+      {isVolumeDryUp && (
+        <span
+          title="Cạn kiệt thanh khoản Volume Dry-Up (VDU ≤ 0.60x MA20) trong vùng tích lũy sát MA20"
+          className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-cyan-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-cyan-400" />
+          Cạn Von VDU
+        </span>
+      )}
+      {isWyckoffLps && (
+        <span
+          title="Wyckoff LPS (Last Point of Support): Kiểm định cung kiệt von bật lên trên hỗ trợ MA20"
+          className="inline-flex items-center gap-1 rounded bg-indigo-500/20 border border-indigo-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-indigo-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-indigo-400" />
+          Wyckoff LPS
+        </span>
+      )}
+      {isRsNewHigh20 && (
+        <span
+          title="Sức mạnh giá RS Rating dẫn dắt vượt đỉnh 20 phiên"
+          className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-amber-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-amber-400" />
+          RS Đỉnh Mới
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function SuperTrendBadge({ dir }: { dir: "up" | "down" | null | undefined }) {
   if (dir === "up") {
     return <span className="text-[11px] font-bold text-emerald-400">▲ Tăng</span>;
@@ -921,6 +1045,46 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     riskReward: 2.3,
     tagline: "Tăng trưởng doanh thu, LNST & ROE vượt trội",
   },
+  tight_closes_vdu: {
+    winRatePct: 76.2,
+    avgGainPct: 15.8,
+    profitFactor: 2.88,
+    sampleTrades: 380,
+    riskReward: 3.0,
+    tagline: "Nén giá phẳng Minervini Tight Closes & Cạn kiệt thanh khoản VDU trước chân sóng",
+  },
+  fa_fortress: {
+    winRatePct: 72.5,
+    avgGainPct: 13.4,
+    profitFactor: 2.55,
+    sampleTrades: 320,
+    riskReward: 2.6,
+    tagline: "Pháo đài tiền mặt ròng Net Cash & Hệ số phủ lãi vay ICR an toàn tuyệt đối",
+  },
+  earnings_quality: {
+    winRatePct: 73.8,
+    avgGainPct: 14.1,
+    profitFactor: 2.62,
+    sampleTrades: 350,
+    riskReward: 2.7,
+    tagline: "Lợi nhuận đi kèm dòng tiền mặt thực chất: CFO/LNST >= 1.0x & Dòng tiền tự do FCF dương",
+  },
+  magic_formula: {
+    winRatePct: 75.1,
+    avgGainPct: 16.2,
+    profitFactor: 2.75,
+    sampleTrades: 390,
+    riskReward: 2.8,
+    tagline: "Công thức kỳ diệu Joel Greenblatt: ROIC con hào kinh tế Moat cao + P/E định giá rẻ",
+  },
+  consensus_upside: {
+    winRatePct: 70.4,
+    avgGainPct: 15.5,
+    profitFactor: 2.42,
+    sampleTrades: 410,
+    riskReward: 2.7,
+    tagline: "Biên an toàn định giá: Mục tiêu đồng thuận CTCK Upside >= 20%",
+  },
 };
 
 export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
@@ -968,6 +1132,7 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
   { id: "breakout", category: "price_action", label: "Bùng Nổ Khối Lượng", dotColor: "bg-purple-400", desc: "Giá tăng > 2% kèm vol lớn vượt đỉnh" },
   { id: "ma_cross", category: "price_action", label: "Giao Cắt MA Vàng", dotColor: "bg-emerald-400", desc: "Golden Cross & Trật tự MA tăng" },
+  { id: "tight_closes_vdu", category: "price_action", label: "Nén Minervini & Cạn Von", dotColor: "bg-teal-400", desc: "Nén giá phẳng Tight Closes (≤ 1.25%) kết hợp Cạn kiệt thanh khoản VDU (≤ 0.60x MA20) & Wyckoff LPS" },
 
   // Quant Pro
   { id: "quant_edge", category: "quant", label: "Ưu Thế Quant Pro", dotColor: "bg-cyan-400", desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
@@ -979,6 +1144,10 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "rs_leaders", category: "fundamental", label: "Dẫn Dắt RS 80+ (O'Neil)", dotColor: "bg-amber-400", desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
   { id: "canslim", category: "fundamental", label: "CANSLIM & Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST vượt trội > 20% & ROE dẫn dắt" },
   { id: "piotroski_diamonds", category: "fundamental", label: "Piotroski & Altman Z", dotColor: "bg-cyan-400", desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
+  { id: "fa_fortress", category: "fundamental", label: "Pháo Đài Tài Chính", dotColor: "bg-emerald-400", desc: "Pháo đài tiền mặt ròng (Net Cash > Nợ), Phủ lãi vay ICR >= 4.0x, Đòn bẩy an toàn tuyệt đối" },
+  { id: "earnings_quality", category: "fundamental", label: "Dòng Tiền Thực Chất", dotColor: "bg-cyan-400", desc: "Chất lượng lợi nhuận cao: Dòng tiền thuần HĐKD CFO / LNST >= 1.0x & Dòng tiền tự do FCF dương" },
+  { id: "magic_formula", category: "fundamental", label: "Magic Formula (Greenblatt)", dotColor: "bg-amber-400", desc: "Công thức kỳ diệu Joel Greenblatt: Tỷ suất sinh lời vốn đầu tư ROIC >= 15% kết hợp Định giá P/E rẻ" },
+  { id: "consensus_upside", category: "fundamental", label: "Định Giá Hời CTCK", dotColor: "bg-indigo-400", desc: "Upside định giá mục tiêu từ các CTCK hàng đầu (Vietcap, VNDirect...) >= 20% so với thị giá hiện tại" },
   { id: "value", category: "fundamental", label: "Giá Trị Biên An Toàn", dotColor: "bg-blue-400", desc: "P/E < 11, P/B < 1.3, an toàn vốn" },
   { id: "dividend", category: "fundamental", label: "Cổ Tức Tiền Mặt Cao", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
 ];
@@ -1051,6 +1220,14 @@ export function VnScreener({
   const [buyPositionCombo, setBuyPositionCombo] = useState("ALL");
   const [volatilityCombo, setVolatilityCombo] = useState("ALL");
   const [vsaCombo, setVsaCombo] = useState("ALL");
+  const [faProfileCombo, setFaProfileCombo] = useState("ALL");
+  const [techPatternCombo, setTechPatternCombo] = useState("ALL");
+  const [minRoic, setMinRoic] = useState("");
+  const [minConsensusUpside, setMinConsensusUpside] = useState("");
+  const [maxPeg, setMaxPeg] = useState("");
+  const [netCashOnly, setNetCashOnly] = useState(false);
+  const [tightClosesOnly, setTightClosesOnly] = useState(false);
+  const [vduOnly, setVduOnly] = useState(false);
 
   const handleBuyPositionChange = (val: string) => {
     setBuyPositionCombo(val);
@@ -1168,6 +1345,14 @@ export function VnScreener({
     minMtfCandleScore: "",
     vsaOnly: false,
     minOverheadRoom: "",
+    faProfileCombo: "ALL",
+    techPatternCombo: "ALL",
+    minRoic: "",
+    minConsensusUpside: "",
+    maxPeg: "",
+    netCashOnly: false,
+    tightClosesOnly: false,
+    vduOnly: false,
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -1248,6 +1433,14 @@ export function VnScreener({
     if (applied.absorptionSpikeOnly) p.set("absorptionSpikeOnly", "true");
     if (applied.vsaNoSupplyOnly) p.set("vsaNoSupplyOnly", "true");
     if (applied.precisionMtfOnly) p.set("precisionMtfOnly", "true");
+    if (applied.faProfileCombo && applied.faProfileCombo !== "ALL") p.set("faProfile", applied.faProfileCombo);
+    if (applied.techPatternCombo && applied.techPatternCombo !== "ALL") p.set("techPattern", applied.techPatternCombo);
+    if (applied.minRoic) p.set("minRoic", applied.minRoic);
+    if (applied.minConsensusUpside) p.set("minConsensusUpside", applied.minConsensusUpside);
+    if (applied.maxPeg) p.set("maxPeg", applied.maxPeg);
+    if (applied.netCashOnly) p.set("netCashOnly", "true");
+    if (applied.tightClosesOnly) p.set("tightClosesOnly", "true");
+    if (applied.vduOnly) p.set("vduOnly", "true");
     if (applied.mtfCandleOnly) p.set("mtfCandleOnly", "true");
     if (applied.minMtfCandleScore) p.set("minMtfCandleScore", applied.minMtfCandleScore);
     if (applied.vsaOnly) p.set("vsaOnly", "true");
@@ -1304,6 +1497,14 @@ export function VnScreener({
       minMtfCandleScore: "",
       vsaOnly: false,
       minOverheadRoom: "",
+      faProfileCombo,
+      techPatternCombo,
+      minRoic,
+      minConsensusUpside,
+      maxPeg,
+      netCashOnly,
+      tightClosesOnly,
+      vduOnly,
     });
     void mutate();
   }, [
@@ -1338,6 +1539,14 @@ export function VnScreener({
     absorptionSpikeOnly,
     vsaNoSupplyOnly,
     precisionMtfOnly,
+    faProfileCombo,
+    techPatternCombo,
+    minRoic,
+    minConsensusUpside,
+    maxPeg,
+    netCashOnly,
+    tightClosesOnly,
+    vduOnly,
     mutate,
   ]);
 
@@ -1376,6 +1585,14 @@ export function VnScreener({
     setBuyPositionCombo("ALL");
     setVolatilityCombo("ALL");
     setVsaCombo("ALL");
+    setFaProfileCombo("ALL");
+    setTechPatternCombo("ALL");
+    setMinRoic("");
+    setMinConsensusUpside("");
+    setMaxPeg("");
+    setNetCashOnly(false);
+    setTightClosesOnly(false);
+    setVduOnly(false);
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1413,6 +1630,14 @@ export function VnScreener({
       minMtfCandleScore: "",
       vsaOnly: false,
       minOverheadRoom: "",
+      faProfileCombo: "ALL",
+      techPatternCombo: "ALL",
+      minRoic: "",
+      minConsensusUpside: "",
+      maxPeg: "",
+      netCashOnly: false,
+      tightClosesOnly: false,
+      vduOnly: false,
     });
     void mutate();
   }, [mutate]);
@@ -1920,7 +2145,7 @@ export function VnScreener({
         {showAdvanced && (
           <div className="border-b border-line p-3.5 bg-panel-3/40 animate-in fade-in duration-200 space-y-3">
             {/* Row 1: Core Strategy Selectors (Merged & Streamlined) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
               <label>
                 <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
                   Vị Thế Vùng Mua
@@ -1973,6 +2198,42 @@ export function VnScreener({
 
               <label>
                 <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Hồ Sơ Cơ Bản FA
+                </span>
+                <select
+                  value={faProfileCombo}
+                  onChange={(e) => setFaProfileCombo(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Mọi hồ sơ cơ bản</option>
+                  <option value="FORTRESS">🏰 Pháo Đài Tiền Mặt (Net Cash)</option>
+                  <option value="CASH_MACHINE">💰 Cỗ Máy Tiền Mặt (CFO/LNST ≥ 1.0)</option>
+                  <option value="MOAT_QUALITY">💎 Con Hào Kinh Tế (ROIC ≥ 15%)</option>
+                  <option value="UNDERVALUED_GROWTH">🚀 Định Giá Rẻ PEG ≤ 1.0</option>
+                  <option value="CONSENSUS_UPSIDE">🎯 Định Giá Hời CTCK (≥ 20%)</option>
+                  <option value="VALUE_DIVIDEND">💵 Giá Trị & Cổ Tức Cao</option>
+                </select>
+              </label>
+
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
+                  Mẫu Hình Kỹ Thuật
+                </span>
+                <select
+                  value={techPatternCombo}
+                  onChange={(e) => setTechPatternCombo(e.target.value)}
+                  className="input !w-full !py-1.5 text-[12px] font-medium"
+                >
+                  <option value="ALL">Mọi mẫu hình kỹ thuật</option>
+                  <option value="TIGHT_CLOSES">📐 Nén Phẳng Minervini (≤ 1.25%)</option>
+                  <option value="VDU">💧 Cạn Von Nền VDU (≤ 0.60x)</option>
+                  <option value="WYCKOFF_LPS">🔬 Wyckoff LPS Test Cung</option>
+                  <option value="RS_NEW_HIGH">🏆 RS Dẫn Dắt Vượt Đỉnh</option>
+                </select>
+              </label>
+
+              <label>
+                <span className="mb-0.5 block text-[10px] uppercase font-bold tracking-wider text-text-muted">
                   Ngành Dẫn Dắt RRG
                 </span>
                 <select
@@ -2006,11 +2267,14 @@ export function VnScreener({
             </div>
 
             {/* Row 2: Fundamental & Valuation Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 pt-2 border-t border-line/40">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2.5 pt-2 border-t border-line/40">
               <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
               <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
-              <Field label="ROE tối thiểu (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
-              <Field label="Cổ tức tối thiểu (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
+              <Field label="PEG tối đa" value={maxPeg} onChange={setMaxPeg} small placeholder="1.2" />
+              <Field label="ROE min (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
+              <Field label="ROIC min (%)" value={minRoic} onChange={setMinRoic} small placeholder="15" />
+              <Field label="CTCK Upside (%)" value={minConsensusUpside} onChange={setMinConsensusUpside} small placeholder="20" />
+              <Field label="Cổ tức min (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
               <Field label="Nợ/VCSH tối đa" value={maxDe} onChange={setMaxDe} small placeholder="1.2" />
               <Field label="Vốn hóa min (tỷ)" value={minMarketCap} onChange={setMinMarketCap} small placeholder="1000" />
             </div>
@@ -2036,6 +2300,33 @@ export function VnScreener({
                     className="rounded accent-cyan-500"
                   />
                   <span className="font-semibold">Quét Rũ Reclaim Spring MA (BĐ3)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 hover:text-teal-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={tightClosesOnly}
+                    onChange={(e) => setTightClosesOnly(e.target.checked)}
+                    className="rounded accent-teal-500"
+                  />
+                  <span className="font-semibold">Nén Giá Phẳng Minervini</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-400 hover:text-cyan-300 select-none">
+                  <input
+                    type="checkbox"
+                    checked={vduOnly}
+                    onChange={(e) => setVduOnly(e.target.checked)}
+                    className="rounded accent-cyan-400"
+                  />
+                  <span className="font-semibold">Cạn Kiệt Von (VDU nền)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={netCashOnly}
+                    onChange={(e) => setNetCashOnly(e.target.checked)}
+                    className="rounded accent-amber-500"
+                  />
+                  <span className="font-semibold">Pháo Đài Tiền Mặt Ròng (Net Cash)</span>
                 </label>
               </div>
             </div>
@@ -2818,6 +3109,12 @@ export function VnScreener({
                       P/E {sortKey === "pe" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
+                      onClick={() => handleSort("peg")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      PEG {sortKey === "peg" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("pb")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
@@ -2836,6 +3133,12 @@ export function VnScreener({
                       Cổ tức (%) {sortKey === "dividendYield" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
+                      onClick={() => handleSort("consensusUpsidePct")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-emerald-400 text-emerald-300"
+                    >
+                      Upside CTCK (%) {sortKey === "consensusUpsidePct" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("marketCap")}
                       className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
@@ -2851,6 +3154,18 @@ export function VnScreener({
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
                       ROE (%) {sortKey === "roe" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("roic")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-emerald-400 text-emerald-300"
+                    >
+                      ROIC Moat (%) {sortKey === "roic" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("cfoToNetProfit")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-cyan-400 text-cyan-300"
+                    >
+                      CFO / LNST {sortKey === "cfoToNetProfit" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
                       onClick={() => handleSort("roa")}
@@ -2881,6 +3196,7 @@ export function VnScreener({
 
                 {viewTab === "health" && (
                   <>
+                    <th className="py-2.5 text-center font-bold text-emerald-300">Hồ Sơ FA</th>
                     <th
                       onClick={() => handleSort("piotroskiFScore")}
                       className="py-2.5 text-center font-medium cursor-pointer hover:text-cyan-400"
@@ -2894,6 +3210,12 @@ export function VnScreener({
                       Altman Z'' {sortKey === "altmanZScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
+                      onClick={() => handleSort("interestCoverage")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-emerald-400 text-emerald-300"
+                    >
+                      Phủ Lãi Vay (ICR) {sortKey === "interestCoverage" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("debtEquity")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
@@ -2902,20 +3224,15 @@ export function VnScreener({
                     <th onClick={() => handleSort("currentRatio")} className="py-2.5 text-right font-medium">
                       Thanh toán (CR)
                     </th>
+                    <th className="py-2.5 text-center font-medium">Tiền Mặt Ròng</th>
                     <th onClick={() => handleSort("fcfTtm")} className="py-2.5 text-right font-medium">
                       FCF TTM (tỷ)
                     </th>
                     <th
                       onClick={() => handleSort("qualityScore")}
-                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
-                    >
-                      Chất lượng BCTC
-                    </th>
-                    <th
-                      onClick={() => handleSort("compositeScore")}
                       className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      Điểm Orca
+                      Chất lượng BCTC
                     </th>
                   </>
                 )}
@@ -3412,6 +3729,13 @@ export function VnScreener({
                                 isVsaNoSupply={row.isVsaNoSupplyTest}
                                 activeBuyRatioPct={row.activeBuyRatioPct}
                               />
+                              <TechPatternBadge
+                                isTightCloses={row.isTightCloses}
+                                tightCloseSpreadPct={row.tightCloseSpreadPct}
+                                isVolumeDryUp={row.isVolumeDryUp}
+                                isWyckoffLps={row.isWyckoffLps}
+                                isRsNewHigh20={row.isRsNewHigh20}
+                              />
                               {row.hasBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
                                   {row.divergenceSummary || "Phân kỳ dương"}
@@ -3519,6 +3843,15 @@ export function VnScreener({
                         <td className="num py-2.5 text-right font-semibold text-text-primary">
                           {row.pe != null ? fmtNum(row.pe, 1) : "—"}
                         </td>
+                        <td className="num py-2.5 text-right font-medium text-text-secondary">
+                          {row.peg != null ? (
+                            <span className={row.peg <= 1.0 && row.peg > 0 ? "text-emerald-400 font-bold" : "text-text-secondary"}>
+                              {fmtNum(row.peg, 2)}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="num py-2.5 text-right text-text-secondary">
                           {row.pb != null ? fmtNum(row.pb, 1) : "—"}
                         </td>
@@ -3527,6 +3860,15 @@ export function VnScreener({
                         </td>
                         <td className="num py-2.5 text-right text-emerald-400 font-medium">
                           {row.dividendYield != null ? `${fmtNum(row.dividendYield, 1)}%` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold font-mono">
+                          {row.consensusUpsidePct != null ? (
+                            <span className={row.consensusUpsidePct >= 15 ? "text-emerald-400" : "text-text-secondary"}>
+                              +{fmtNum(row.consensusUpsidePct, 1)}%
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="num py-2.5 pr-3.5 text-right text-text-secondary">
                           {row.marketCap != null ? fmtNum(row.marketCap, 0) : "—"}
@@ -3538,6 +3880,24 @@ export function VnScreener({
                       <>
                         <td className="num py-2.5 text-right font-semibold text-text-primary">
                           {row.roe != null ? `${fmtNum(row.roe, 1)}%` : "—"}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold font-mono">
+                          {row.roic != null ? (
+                            <span className={row.roic >= 15 ? "text-emerald-400" : "text-text-primary"}>
+                              {fmtNum(row.roic, 1)}%
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-bold font-mono">
+                          {row.cfoToNetProfit != null ? (
+                            <span className={row.cfoToNetProfit >= 1.0 ? "text-cyan-400" : "text-text-secondary"}>
+                              {fmtNum(row.cfoToNetProfit, 2)}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="num py-2.5 text-right text-text-secondary">
                           {row.roa != null ? `${fmtNum(row.roa, 1)}%` : "—"}
@@ -3560,10 +3920,37 @@ export function VnScreener({
                     {viewTab === "health" && (
                       <>
                         <td className="py-2.5 text-center">
+                          <FaHealthBadge
+                            faCategory={row.faCategory}
+                            faBadgeVi={row.faBadgeVi}
+                            faSummaryVi={row.faSummaryVi}
+                            isNetCash={row.isNetCash}
+                            roic={row.roic}
+                            cfoToNp={row.cfoToNetProfit}
+                          />
+                        </td>
+                        <td className="py-2.5 text-center">
                           <PiotroskiBadge score={row.piotroskiFScore} rating={row.piotroskiRating} />
                         </td>
                         <td className="py-2.5 text-center">
                           <AltmanBadge zone={row.altmanZone} zScore={row.altmanZScore} />
+                        </td>
+                        <td className="num py-2.5 text-right font-bold font-mono">
+                          {row.interestCoverage != null ? (
+                            <span
+                              className={
+                                row.interestCoverage >= 4.0
+                                  ? "text-emerald-400"
+                                  : row.interestCoverage < 1.5
+                                  ? "text-rose-400"
+                                  : "text-text-primary"
+                              }
+                            >
+                              {fmtNum(row.interestCoverage, 1)}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="num py-2.5 text-right font-medium text-text-primary">
                           {row.debtEquity != null ? fmtNum(row.debtEquity, 2) : "—"}
@@ -3571,14 +3958,20 @@ export function VnScreener({
                         <td className="num py-2.5 text-right text-text-secondary">
                           {row.currentRatio != null ? fmtNum(row.currentRatio, 2) : "—"}
                         </td>
+                        <td className="py-2.5 text-center">
+                          {row.isNetCash ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              Net Cash
+                            </span>
+                          ) : (
+                            <span className="text-[10.5px] text-text-muted">Vay ròng</span>
+                          )}
+                        </td>
                         <td className="num py-2.5 text-right text-text-muted">
                           {row.fcfTtm != null ? fmtNum(row.fcfTtm, 0) : "—"}
                         </td>
-                        <td className="num py-2.5 text-right font-medium text-text-secondary">
+                        <td className="num py-2.5 pr-3.5 text-right font-medium text-text-secondary">
                           {row.qualityScore != null ? `${row.qualityScore}/100` : "—"}
-                        </td>
-                        <td className="num py-2.5 pr-3.5 text-right font-bold text-accent-primary">
-                          {row.compositeScore}
                         </td>
                       </>
                     )}
@@ -3639,6 +4032,25 @@ export function VnScreener({
                       vsaSignal={row.vsaSignal}
                       vsaSignalVi={row.vsaSignalVi}
                       overheadRoomPct={row.overheadRoomPct}
+                    />
+                  )}
+                  {row.faCategory && row.faCategory !== "STANDARD" && (
+                    <FaHealthBadge
+                      faCategory={row.faCategory}
+                      faBadgeVi={row.faBadgeVi}
+                      faSummaryVi={row.faSummaryVi}
+                      isNetCash={row.isNetCash}
+                      roic={row.roic}
+                      cfoToNp={row.cfoToNetProfit}
+                    />
+                  )}
+                  {(row.isTightCloses || row.isVolumeDryUp || row.isWyckoffLps) && (
+                    <TechPatternBadge
+                      isTightCloses={row.isTightCloses}
+                      tightCloseSpreadPct={row.tightCloseSpreadPct}
+                      isVolumeDryUp={row.isVolumeDryUp}
+                      isWyckoffLps={row.isWyckoffLps}
+                      isRsNewHigh20={row.isRsNewHigh20}
                     />
                   )}
                 </div>
