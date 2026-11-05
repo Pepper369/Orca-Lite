@@ -228,6 +228,9 @@ export type ScreenerStockItem = {
   isSweetLaunchZone?: boolean | null;
   isWyckoffSpring?: boolean | null;
   isMaReclaim?: boolean | null;
+  // Next-Gen Confluence Engine (Hợp lưu MA + Nến đảo chiều + Phân kỳ)
+  isDiamondConfluence?: boolean | null;
+  isDualDivergence?: boolean | null;
   // Real-Time Actionable Buy Trigger Engine (Kích hoạt điểm mua tức thời)
   isBuyTriggerNow?: boolean | null;
   buyTriggerScore?: number | null; // 1 - 99
@@ -454,6 +457,7 @@ function analyzeTechFeatures(
       candlePatternScore: null,
       candleAgeBars: null,
       hasBullishDivergence: false,
+      isDualDivergence: false,
       divergenceSummary: null,
       confluenceScore: compositeScore,
       confluenceBadge: "NONE" as const,
@@ -546,6 +550,7 @@ function analyzeTechFeatures(
 
   // Bullish Divergence Detection (RSI / MACD / Stoch)
   let hasBullishDivergence = false;
+  let isDualDivergence = false;
   let divergenceSummary: string | null = null;
   if (ohlcvBars && ohlcvBars.length >= 18) {
     try {
@@ -553,16 +558,24 @@ function analyzeTechFeatures(
         ...SHORT_3_4D,
         lookback: Math.min(ohlcvBars.length, 50),
       });
-      const bull = divSignals.find(
+      const bullSignals = divSignals.filter(
         (s) =>
           s.kind.includes("bullish") &&
           s.status !== "invalidated" &&
           (s.barsAgo == null || s.barsAgo <= 8),
       );
-      if (bull) {
+      if (bullSignals.length > 0) {
         hasBullishDivergence = true;
-        divergenceSummary = `Phân kỳ ${bull.oscillator.toUpperCase()}${bull.barsAgo != null ? ` (T+${bull.barsAgo})` : ""}`;
-        momScore = Math.min(25, momScore + 8);
+        const divOscs = Array.from(new Set(bullSignals.map((b) => b.oscillator.toUpperCase())));
+        const hasRsi = divOscs.includes("RSI");
+        const hasMacd = divOscs.some((o) => o.includes("MACD"));
+        isDualDivergence = hasRsi && hasMacd;
+
+        const primary = bullSignals[0]!;
+        divergenceSummary = isDualDivergence
+          ? `Phân kỳ kép RSI+MACD${primary.barsAgo != null ? ` (T+${primary.barsAgo})` : ""}`
+          : `Phân kỳ ${primary.oscillator.toUpperCase()}${primary.barsAgo != null ? ` (T+${primary.barsAgo})` : ""}`;
+        momScore = Math.min(25, momScore + (isDualDivergence ? 12 : 8));
       }
     } catch {
       // safe
@@ -602,6 +615,7 @@ function analyzeTechFeatures(
     candlePatternScore,
     candleAgeBars,
     hasBullishDivergence,
+    isDualDivergence,
     divergenceSummary,
     confluenceScore,
     confluenceBadge,
@@ -979,6 +993,8 @@ function detectPresets(item: {
   superTrendDir?: "up" | "down" | null;
   mtfScore?: number | null;
   riskReward?: number | null;
+  candlePatternScore?: number | null;
+  isDualDivergence?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1171,22 +1187,30 @@ function detectPresets(item: {
     passes.push("confluence");
   }
 
-  // 8b. Bottom Confluence (Hợp lưu Đáy: MA + Cụm nến đảo chiều + Phân kỳ dương)
+  // 8b. Bottom Confluence (Hợp lưu Đáy: Tam Hợp Lưu MA + Cụm nến đảo chiều + Phân kỳ dương)
   const hasCandleReversal = Boolean(
+    (item.candlePatternScore != null && item.candlePatternScore >= 60) ||
     item.candlePattern ||
     (item.chartPattern && !item.chartPattern.includes("Nền"))
   );
-  const hasMaSupport =
-    item.ma10 != null &&
-    item.price != null &&
-    ((item.ma20 != null && item.price >= item.ma20 * 0.95) ||
-      item.price >= item.ma10 * 0.98 ||
-      item.maSignal === "GOLDEN_CROSS" ||
-      item.maSignal === "BULLISH_ALIGN");
+  const hasMaSupport = Boolean(
+    (item.ma10 != null && item.price != null && item.price >= item.ma10 * 0.98) ||
+    (item.ma20 != null && item.price != null && item.price >= item.ma20 * 0.96) ||
+    item.isMaReclaim === true ||
+    item.maSignal === "GOLDEN_CROSS" ||
+    item.maSignal === "BULLISH_ALIGN"
+  );
+
+  const isDiamondConfluence = Boolean(
+    item.hasBullishDivergence && hasCandleReversal && hasMaSupport
+  );
 
   if (
     item.hasBullishDivergence &&
-    (hasCandleReversal || hasMaSupport || item.confluenceScore >= 45)
+    (isDiamondConfluence ||
+      (hasCandleReversal && hasMaSupport) ||
+      (hasCandleReversal && (item.confluenceScore >= 50 || item.isSweetLaunchZone)) ||
+      (hasMaSupport && item.confluenceScore >= 52))
   ) {
     passes.push("bottom_confluence");
   }
@@ -1842,7 +1866,26 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           superTrendDir: entry.techFeatures.superTrendDir,
           mtfScore: entry.techFeatures.mtfScore,
           riskReward: entry.buyPointPlan.riskReward,
+          candlePatternScore: entry.techFeatures.candlePatternScore,
+          isDualDivergence: entry.techFeatures.isDualDivergence,
         });
+
+        const hasCandleReversalSnap = Boolean(
+          (entry.techFeatures.candlePatternScore != null && entry.techFeatures.candlePatternScore >= 60) ||
+          entry.techFeatures.candlePattern ||
+          (entry.techFeatures.chartPattern && !entry.techFeatures.chartPattern.includes("Nền"))
+        );
+        const hasMaSupportSnap = Boolean(
+          (entry.techFeatures.ma10 != null && entry.price != null && entry.price >= entry.techFeatures.ma10 * 0.98) ||
+          (entry.techFeatures.ma20 != null && entry.price != null && entry.price >= entry.techFeatures.ma20 * 0.96) ||
+          entry.apexQuant.reversalMetrics.isMaReclaim === true ||
+          entry.techFeatures.maSignal === "GOLDEN_CROSS" ||
+          entry.techFeatures.maSignal === "BULLISH_ALIGN"
+        );
+        const isDiamondConfluence = Boolean(
+          entry.techFeatures.hasBullishDivergence && hasCandleReversalSnap && hasMaSupportSnap
+        );
+        const isDualDivergence = Boolean(entry.techFeatures.isDualDivergence);
 
         const isBuyTriggerNow = presetsPassed.includes("apex_buy_now");
         let buyTriggerScore: number | null = null;
@@ -2008,6 +2051,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
           isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
           isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
+          isDiamondConfluence,
+          isDualDivergence,
           isBuyTriggerNow,
           buyTriggerScore,
           buyTriggerReasonVi,

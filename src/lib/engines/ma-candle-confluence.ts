@@ -12,6 +12,8 @@ import {
   type MtfTimeframeDetail,
 } from "./mtf-consensus";
 
+export type ConfluenceTier = "DIAMOND_TRIPLE" | "GOLD_DOUBLE" | "SILVER_SINGLE";
+
 export type MaCandleScenario =
   | "ALL"
   | "BOTTOM_BULLISH_DIVERGENCE" // Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương
@@ -78,10 +80,17 @@ export interface MaCandleConfluenceRow {
   divergenceSignal?: DivergenceSignal | null;
   divergenceSummary?: string | null;
   isBottomReversal?: boolean;
+  isDualDivergence?: boolean;
+  divergenceOscillators?: string[];
 
-  // Confluence Score & Quality
+  // Confluence Score, Quality & Tier
   confluenceScore: number;
   setupQuality: "A+" | "A" | "B";
+  confluenceTier?: ConfluenceTier;
+  isDiamondTriple?: boolean;
+  isMaReclaim?: boolean;
+  maSlopeStatus?: "UP" | "FLAT" | "STEEP_DOWN";
+  volumeNature?: "ABSORPTION_SPIKE" | "NO_SUPPLY_TEST" | "NORMAL";
   confluenceTags: string[];
 
   // Advanced Confluence Pillars & Momentum (New State-of-the-Art)
@@ -299,6 +308,7 @@ export function analyzeMaCandleRow(
 
   // Check Bullish Divergence (RSI / MACD / Stoch)
   let bestBullDiv: DivergenceSignal | null = null;
+  let allBullDivs: DivergenceSignal[] = [];
   if (bars.length >= 18) {
     try {
       const divSignals = detectDivergences(bars, {
@@ -312,6 +322,7 @@ export function analyzeMaCandleRow(
           (s.barsAgo == null || s.barsAgo <= 10),
       );
       if (bullDivs.length > 0) {
+        allBullDivs = bullDivs;
         bestBullDiv = bullDivs[0]!;
       } else {
         const fullDivs = detectDivergences(bars, {
@@ -327,11 +338,86 @@ export function analyzeMaCandleRow(
             s.status !== "invalidated" &&
             (s.barsAgo == null || s.barsAgo <= 25),
         );
-        if (bullFull.length > 0) bestBullDiv = bullFull[0]!;
+        if (bullFull.length > 0) {
+          allBullDivs = bullFull;
+          bestBullDiv = bullFull[0]!;
+        }
       }
     } catch {
       // resilient
     }
+  }
+
+  // Next-Gen Confluence Indicators: Multi-Oscillator, MA Reclaim, Geometry & Volume Nature
+  const divergenceOscillators = Array.from(new Set(allBullDivs.map((d) => d.oscillator.toUpperCase())));
+  const hasRsiDiv = divergenceOscillators.some((o) => o === "RSI");
+  const hasMacdDiv = divergenceOscillators.some((o) => o.includes("MACD"));
+  const isDualDivergence = hasRsiDiv && hasMacdDiv;
+
+  const isMaReclaim =
+    (sma20 != null && lastBar.low < sma20 * 0.992 && close >= sma20 * 0.998) ||
+    (sma50 != null && lastBar.low < sma50 * 0.992 && close >= sma50 * 0.998) ||
+    (sma10 != null && lastBar.low < sma10 * 0.992 && close >= sma10 * 0.998) ||
+    (sma200 != null && lastBar.low < sma200 * 0.992 && close >= sma200 * 0.998);
+
+  const maSlopeStatus: "UP" | "FLAT" | "STEEP_DOWN" =
+    slope20 < -0.15 ? "STEEP_DOWN" : slope20 > 0.05 ? "UP" : "FLAT";
+
+  let volumeNature: "ABSORPTION_SPIKE" | "NO_SUPPLY_TEST" | "NORMAL" = "NORMAL";
+  if (volRatio != null) {
+    if (volRatio >= 1.25 && close >= (lastBar.open ?? close)) {
+      volumeNature = "ABSORPTION_SPIKE";
+    } else if (volRatio <= 0.70 && Math.abs(close - (lastBar.open ?? close)) / (lastBar.open || 1) <= 0.018) {
+      volumeNature = "NO_SUPPLY_TEST";
+    }
+  }
+
+  // Triple-Lock Confluence Tier (Tam Hợp Lưu Tuyệt Đối: MA Lock + Candle Lock + Divergence Lock)
+  const hasMaLock =
+    near20 ||
+    near50 ||
+    testedBelow200 ||
+    reclaimed200 ||
+    isSmcSweep ||
+    isMaReclaim ||
+    (sma20 != null && close >= sma20 * 0.985);
+
+  const hasCandleLock =
+    topPattern.reliability === "high" ||
+    topPattern.score >= 70 ||
+    ["Bullish Engulfing", "Hammer", "Morning Star", "Piercing", "Dragonfly Doji", "Inverted Hammer"].includes(topPattern.name);
+
+  const hasDivergenceLock =
+    bestBullDiv != null && (bestBullDiv.barsAgo == null || bestBullDiv.barsAgo <= 6);
+
+  let confluenceTier: ConfluenceTier = "SILVER_SINGLE";
+  let isDiamondTriple = false;
+
+  if (hasMaLock && hasCandleLock && hasDivergenceLock) {
+    confluenceTier = "DIAMOND_TRIPLE";
+    isDiamondTriple = true;
+    confluenceTags.push("👑 Tam Hợp Lưu Kim Cương");
+  } else if (
+    (hasMaLock && hasCandleLock) ||
+    (hasMaLock && hasDivergenceLock) ||
+    (hasCandleLock && hasDivergenceLock)
+  ) {
+    confluenceTier = "GOLD_DOUBLE";
+    confluenceTags.push("Song Hợp Lưu Vàng");
+  } else {
+    confluenceTier = "SILVER_SINGLE";
+  }
+
+  if (isDualDivergence) {
+    confluenceTags.push("Phân kỳ kép (RSI+MACD)");
+  }
+  if (isMaReclaim) {
+    confluenceTags.push("Quét thủng rút chân lấy lại MA");
+  }
+  if (volumeNature === "ABSORPTION_SPIKE") {
+    confluenceTags.push("Hấp thụ cung vol lớn");
+  } else if (volumeNature === "NO_SUPPLY_TEST") {
+    confluenceTags.push("Cạn cung kiệt quệ (No Supply)");
   }
 
   const isBottomDivergence =
@@ -341,15 +427,20 @@ export function analyzeMaCandleRow(
       testedBelow200 ||
       reclaimed200 ||
       isSmcSweep ||
+      isMaReclaim ||
       (sma10 != null && close >= sma10 * 0.98) ||
       (sma20 != null && close >= sma20 * 0.94) ||
       close >= patternLow);
 
   if (isBottomDivergence) {
     scenario = "BOTTOM_BULLISH_DIVERGENCE";
-    scenarioLabel = "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)";
-    scenarioBadgeTone = "cyan";
-    anchorMa = near50 ? "MA50" : testedBelow200 ? "MA200" : sma20 ? "MA20" : "MA10";
+    scenarioLabel = isDiamondTriple
+      ? "👑 Tam Hợp Lưu Đáy"
+      : isDualDivergence
+      ? "Hợp Lưu Đáy (Phân Kỳ Kép)"
+      : "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)";
+    scenarioBadgeTone = isDiamondTriple ? "amber" : "cyan";
+    anchorMa = near50 ? "MA50" : testedBelow200 ? "MA200" : isMaReclaim ? (sweptBelow50 ? "MA50" : "MA20") : sma20 ? "MA20" : "MA10";
     anchorMaPrice = near50 ? sma50 : testedBelow200 ? sma200 : sma20 ?? sma10;
     confluenceTags.push(`Phân kỳ ${bestBullDiv!.oscillator.toUpperCase()}${bestBullDiv!.barsAgo != null ? ` (T+${bestBullDiv!.barsAgo})` : ""}`);
   } else if (testedBelow200 && reclaimed200) {
@@ -638,7 +729,9 @@ export function analyzeMaCandleRow(
   const rawSum = pillars.trend + pillars.candle + pillars.momentum + pillars.flow + pillars.rs;
   // MTF Alignment bonus: +6 for perfect H1+D1+W1 alignment, +3 for D1+W1 alignment
   const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
-  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus)));
+  // Next-Gen Confluence Tier Bonuses: Diamond Triple +5, Dual Divergence +4, MA Reclaim +3, Steep Down -4
+  const tierBonus = (isDiamondTriple ? 5 : 0) + (isDualDivergence ? 4 : 0) + (isMaReclaim ? 3 : 0) + (maSlopeStatus === "STEEP_DOWN" ? -4 : 0);
+  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus + tierBonus)));
 
   // 10. Trade Setup Calculator
   const distToMaPct =
@@ -724,9 +817,16 @@ export function analyzeMaCandleRow(
       ? `${bestBullDiv.kind === "regular_bullish" ? "Phân kỳ thường" : "Phân kỳ ẩn"} ${bestBullDiv.oscillator.toUpperCase()}${bestBullDiv.barsAgo != null ? ` (T+${bestBullDiv.barsAgo})` : ""}`
       : null,
     isBottomReversal: Boolean(bestBullDiv || scenario === "BOTTOM_BULLISH_DIVERGENCE" || scenario === "MA200_RECLAIM"),
+    isDualDivergence,
+    divergenceOscillators,
 
     confluenceScore,
     setupQuality,
+    confluenceTier,
+    isDiamondTriple,
+    isMaReclaim,
+    maSlopeStatus,
+    volumeNature,
     confluenceTags,
 
     // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)

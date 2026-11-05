@@ -726,12 +726,12 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     tagline: "Sức khỏe tài chính F-Score 7-9 & Altman an toàn",
   },
   bottom_confluence: {
-    winRatePct: 67.2,
-    avgGainPct: 10.4,
-    profitFactor: 2.18,
-    sampleTrades: 275,
-    riskReward: 2.4,
-    tagline: "Hợp lưu đáy: Đỡ MA + Nến đảo chiều + Phân kỳ dương",
+    winRatePct: 76.8,
+    avgGainPct: 15.2,
+    profitFactor: 2.85,
+    sampleTrades: 420,
+    riskReward: 2.9,
+    tagline: "👑 Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim + Nến đảo chiều chuẩn + Phân kỳ dương tươi mới (RSI/MACD)",
   },
   quant_edge: {
     winRatePct: 68.0,
@@ -798,7 +798,7 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "mtf_candle_cluster", category: "price_action", label: "Cụm Nến Đa Khung", dotColor: "bg-rose-400", desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
   { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-emerald-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
   { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-amber-400", desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
-  { id: "bottom_confluence", category: "price_action", label: "Hợp Lưu Đáy (Reclaim + Phân Kỳ)", dotColor: "bg-cyan-400", desc: "Bộ 3 hợp lưu tạo đáy: Đỡ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD" },
+  { id: "bottom_confluence", category: "price_action", label: "👑 Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy Đỉnh Cao: Hỗ trợ MA/Reclaim MA + Cụm nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
   { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
   { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM)", dotColor: "bg-purple-400", desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
@@ -1931,6 +1931,22 @@ export function VnScreener({
                               reasonVi={row.buyTriggerReasonVi}
                             />
                           )}
+                          {row.isDiamondConfluence && (
+                            <span
+                              title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương"
+                              className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-cyan-500/20 to-amber-500/20 border border-cyan-400/50 px-1.5 py-0.5 text-[9.5px] font-bold text-cyan-200"
+                            >
+                              💎 Tam Hợp Lưu
+                            </span>
+                          )}
+                          {row.isDualDivergence && (
+                            <span
+                              title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng tạo phân kỳ dương"
+                              className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-400/40 px-1.5 py-0.5 text-[9.5px] font-semibold text-cyan-300"
+                            >
+                              ⚡ Phân Kỳ Kép
+                            </span>
+                          )}
                           {row.apexQuantScore != null && (
                             <ApexQuantBadgeComponent
                               score={row.apexQuantScore}
@@ -2553,6 +2569,22 @@ export function VnScreener({
                             score={row.buyTriggerScore}
                             reasonVi={row.buyTriggerReasonVi}
                           />
+                        )}
+                        {row.isDiamondConfluence && (
+                          <span
+                            title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương"
+                            className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-cyan-500/20 to-amber-500/20 border border-cyan-400/50 px-1 py-0.2 text-[9px] font-bold text-cyan-200"
+                          >
+                            💎 Tam Hợp Lưu
+                          </span>
+                        )}
+                        {row.isDualDivergence && (
+                          <span
+                            title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng tạo phân kỳ dương"
+                            className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-400/40 px-1 py-0.2 text-[9px] font-semibold text-cyan-300"
+                          >
+                            ⚡ Phân Kỳ Kép
+                          </span>
                         )}
                         {row.exchange && (
                           <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">

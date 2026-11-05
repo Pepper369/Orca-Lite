@@ -215,3 +215,30 @@ test("MA & Candle Confluence: Identifies Multi-layer Confluence with Classical C
   assert.equal(result.setupQuality, "A+");
   assert.ok(result.confluenceTags.some((t) => t.includes("Vai Đầu Vai")), "Should include chart pattern tag");
 });
+
+test("MA & Candle Confluence: Next-Gen Diamond Triple Lock & Volume Nature", () => {
+  const bars: OhlcvBar[] = [];
+  const t0 = 1_700_000_000_000;
+  let p = 100;
+  for (let i = 0; i < 78; i++) {
+    if (i < 25) p = 100 - i * 0.8;
+    else if (i < 40) p = 80 + (i - 25) * 0.9;
+    else if (i < 55) p = 93.5 - (i - 40) * 1.1;
+    else p = 77 + (i - 55) * 0.6;
+    const noise = Math.sin(i / 2) * 0.15;
+    const c = p + noise;
+    bars.push({ time: t0 + i * 86400000, open: c * 0.998, high: c * 1.008, low: c * 0.992, close: c, volume: 1000 });
+  }
+  const lastC = bars[bars.length - 1].close;
+  // Penetrate MA, then strong Bullish Engulfing reversal bar
+  bars.push({ time: t0 + 78 * 86400000, open: lastC, high: lastC * 1.002, low: lastC * 0.985, close: lastC * 0.988, volume: 800 });
+  bars.push({ time: t0 + 79 * 86400000, open: lastC * 0.985, high: lastC * 1.03, low: lastC * 0.982, close: lastC * 1.025, volume: 3000 });
+
+  const result = analyzeMaCandleRow("TEST_DIAMOND_TRIPLE", bars);
+  assert.ok(result, "Should detect confluence");
+  assert.ok(result.confluenceTier, "Should have confluenceTier defined");
+  assert.ok(["DIAMOND_TRIPLE", "GOLD_DOUBLE"].includes(result.confluenceTier!), "Should achieve at least GOLD_DOUBLE or DIAMOND_TRIPLE");
+  assert.ok(result.volumeNature === "ABSORPTION_SPIKE" || result.volRatio! >= 1.25, "High volume bar should be flagged");
+  assert.ok(result.confluenceScore >= 70, "Confluence score should be strong");
+});
+

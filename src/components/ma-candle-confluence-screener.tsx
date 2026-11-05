@@ -797,6 +797,22 @@ function ConfluenceRowItem({
                 RS Leader
               </span>
             )}
+            {row.isDiamondTriple && (
+              <span
+                className="rounded bg-gradient-to-r from-cyan-500/30 to-amber-500/30 text-amber-200 border border-amber-400/60 px-1.5 py-0.2 text-[9px] font-bold shadow-xs animate-pulse"
+                title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương tươi mới"
+              >
+                👑 Tam Hợp Lưu
+              </span>
+            )}
+            {row.isDualDivergence && (
+              <span
+                className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 px-1 py-0.2 text-[9px] font-semibold"
+                title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng lúc tạo phân kỳ dương"
+              >
+                ⚡ Phân Kỳ Kép
+              </span>
+            )}
             {row.foreignAccumulating && (
               <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.2 text-[9px] font-semibold" title={`Khối ngoại mua ròng ${row.foreignNetVal ? `${row.foreignNetVal} tỷ` : ''}`}>
                 NN Gom
