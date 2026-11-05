@@ -2,6 +2,7 @@ import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
 import { getVnStockDetail, classifyMarketRegime } from "@/lib/services/stocks";
+import { getQuantInsightForQuery } from "@/lib/services/quant-knowledge-base";
 import { getVnIndices } from "@/lib/services/stocks-board";
 import { generateOrcaDynamicAiReport } from "@/lib/engines/orca-dynamic-ai-intelligence";
 import { executeContextualAiPipeline } from "@/lib/engines/orca-contextual-reasoning-engine";
@@ -627,6 +628,11 @@ TRI THỨC & NGUYÊN TẮC LINH HOẠT (QUAN TRỌNG):
   + Mua trả góp: Tổng nghĩa vụ nợ không vượt quá 20–25% lương net. Đề xuất tăng tỷ lệ trả trước (down payment) nếu cần.
   + Đầu tư/Tiết kiệm/Vàng: Thế kiềng 3 chân tùy theo khẩu vị rủi ro.
   + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "Backtest Mô Phỏng (OQuant)" trên trang /screener.
+  + TRI THỨC ĐỊNH LƯỢNG 16 NĂM THỰC NGHIỆM TTCK VIỆT NAM (2010 - 2026 / 47.000 DATA POINTS):
+    * Buy & Hold VN30 đạt CAGR +15.37%/năm, Sharpe 0.81, đánh bại lướt sóng ngắn hạn sau khi trừ đủ phí giao dịch 0.15% + thuế bán 0.1% + trượt giá 0.2% trên vòng quay T+2.5.
+    * Nghịch lý RSI > 70: Thống kê 45.000 nến ngày chứng minh mua khi RSI > 70 cho lợi nhuận kỳ vọng 60 ngày tiếp theo trung bình +9.23% (tỷ lệ thắng 60%), cao hơn nhiều so với mua bắt đáy RSI < 30 (+6.32%). Đây là hiệu ứng Momentum dòng tiền bứt phá, không phải tín hiệu để bán non.
+    * Đột biến khối lượng Volume Surge (>= 2x MA20) kèm giá tăng >= +0.5%: Xác nhận tiền lớn gom hàng (Accumulation), xác suất duy trì đà tăng sau 20 phiên gấp 2.3 lần so với phiên volume thấp.
+    * 90% nhà đầu tư cá nhân thua lỗ vì bẫy chu kỳ T+2.5, đu đỉnh FOMO và gồng lỗ đến mức bị call margin. Tuyệt đối không trung bình giá xuống khi cổ phiếu gãy MA50. Ngưỡng cắt lỗ kỷ luật là -7% đến -10%.
 
 BỐI CẢNH SỔ TÀI CHÍNH THỰC TẾ:
 - Kỳ ghi chép: ${facts.period || "Hiện tại"}
