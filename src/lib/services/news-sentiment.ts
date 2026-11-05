@@ -44,18 +44,18 @@ export interface NewsSentimentResult {
 
 /** Weighted lexicon — Vietnamese financial press + English crypto/macro. */
 const BULL: [RegExp, number, string][] = [
-  [/\b(tăng mạnh|bứt phá|kỷ lục|vượt kỳ vọng|lãi kỷ lục|lợi nhuận đột biến)\b/i, 3, "tăng mạnh"],
-  [/\b(tăng trưởng|tăng giá|phục hồi|khởi sắc|tích cực|lạc quan|cải thiện)\b/i, 2, "tích cực"],
-  [/\b(lãi|lợi nhuận|doanh thu tăng|phê duyệt|mở rộng|ký kết|trúng thầu|cổ tức)\b/i, 1.5, "kết quả tốt"],
+  [/\b(tăng mạnh|bứt phá|kỷ lục|vượt kỳ vọng|lãi kỷ lục|lợi nhuận đột biến|tăng trần|vượt đỉnh|bùng nổ|thăng hoa)\b/i, 3, "tăng mạnh"],
+  [/\b(tăng trưởng|tăng giá|phục hồi|khởi sắc|tích cực|lạc quan|cải thiện|mua ròng|nâng hạng|lan tỏa|sôi động|xanh rực)\b/i, 2, "tích cực"],
+  [/\b(lãi|lợi nhuận|doanh thu tăng|phê duyệt|mở rộng|ký kết|trúng thầu|cổ tức|chia cổ tức|hấp dẫn)\b/i, 1.5, "kết quả tốt"],
   [/\b(surge|rally|breakout|record high|beat estimates|bullish|upgrade)\b/i, 2.5, "bullish EN"],
   [/\b(growth|profit|gain|recovery|optimistic|expansion)\b/i, 1.5, "positive EN"],
   [/\b(hỗ trợ|đột phá|xung lực|dòng tiền mạnh)\b/i, 1.2, "hỗ trợ"],
 ];
 
 const BEAR: [RegExp, number, string][] = [
-  [/\b(sụt giảm|lao dốc|bán tháo|phá sản|vỡ nợ|cắt giảm mạnh|thua lỗ nặng)\b/i, 3, "sụt giảm"],
-  [/\b(giảm giá|suy yếu|tiêu cực|bi quan|rủi ro|cảnh báo|điều chỉnh)\b/i, 2, "tiêu cực"],
-  [/\b(lỗ|thua lỗ|doanh thu giảm|nợ xấu|chậm trả|kiện tụng|phạt|truy thu)\b/i, 1.5, "kết quả xấu"],
+  [/\b(sụt giảm|lao dốc|bán tháo|phá sản|vỡ nợ|cắt giảm mạnh|thua lỗ nặng|giảm sàn|tháo chạy|sụp đổ|giảm sốc|giảm sâu)\b/i, 3, "sụt giảm"],
+  [/\b(giảm giá|suy yếu|tiêu cực|bi quan|rủi ro|cảnh báo|điều chỉnh|đỏ sàn|hoảng loạn|rút vốn)\b/i, 2, "tiêu cực"],
+  [/\b(lỗ|thua lỗ|doanh thu giảm|nợ xấu|chậm trả|kiện tụng|phạt|truy thu|đình chỉ|đóng cửa)\b/i, 1.5, "kết quả xấu"],
   [/\b(crash|plunge|selloff|default|bankruptcy|bearish|downgrade|recession)\b/i, 2.5, "bearish EN"],
   [/\b(loss|decline|risk|warning|lawsuit|fraud|investigation)\b/i, 1.5, "negative EN"],
   [/\b(áp lực|bán ròng|khối ngoại bán|thanh khoản kém)\b/i, 1.2, "áp lực"],

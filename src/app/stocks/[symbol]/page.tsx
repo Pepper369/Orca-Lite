@@ -43,6 +43,9 @@ import { MarketBreadthCard } from "@/components/stocks/market-breadth-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { getSecurity } from "@/lib/vn/master";
 import { BOOTSTRAP_VN30_QUOTES } from "@/lib/bootstrap-data";
+import { StarRatingsPanel } from "@/components/stocks/star-ratings-panel";
+import { DriverAttributionWidget } from "@/components/stocks/driver-attribution-widget";
+import { ExposureChainPanel } from "@/components/stocks/exposure-chain-panel";
 
 const TechRecoPanel = dynamic(
   () => import("@/components/stocks/tech-reco-panel").then((m) => m.TechRecoPanel),
@@ -552,6 +555,9 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       financialTtm: null,
       detailedRatios: null,
       ratioMap: {},
+      exposure: null,
+      attribution: null,
+      starRatings: null,
       metricsSources: [],
       notes: ["instant-bootstrap"],
     };
@@ -697,6 +703,16 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
         <div className="p-3 sm:p-4">
           {activeTab === "overview" && (
             <div className="space-y-3.5">
+              <ErrorBoundary name="star-ratings" resetKey={detail.symbol}>
+                <StarRatingsPanel ratings={detail.starRatings} symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="driver-attribution" resetKey={detail.symbol}>
+                <DriverAttributionWidget attribution={detail.attribution} symbol={detail.symbol} />
+              </ErrorBoundary>
+              <ErrorBoundary name="exposure-chain" resetKey={detail.symbol}>
+                <ExposureChainPanel exposure={detail.exposure} symbol={detail.symbol} />
+              </ErrorBoundary>
+
               <div className="grid gap-3 lg:grid-cols-2">
                 <ErrorBoundary name="tech-reco" resetKey={detail.symbol}>
                   <TechRecoPanel symbol={detail.symbol} />

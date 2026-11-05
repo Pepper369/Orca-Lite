@@ -5,7 +5,8 @@ import { useApi } from "@/lib/hooks";
 import type { NewsArticle } from "@/lib/types";
 import type { NewsSentimentResult } from "@/lib/services/news-sentiment";
 import { Badge, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
-import { Brain, Newspaper } from "lucide-react";
+import { Brain, Newspaper, Layers } from "lucide-react";
+import { clusterNewsTitles } from "@/lib/services/vietnamese-financial-nlu";
 
 const TABS: { key: string; label: string }[] = [
   { key: "", label: "Tất cả" },
@@ -19,6 +20,7 @@ type NewsData = { articles: NewsArticle[]; errors: string[] };
 
 export default function NewsPage() {
   const [tab, setTab] = useState("");
+  const [dedup, setDedup] = useState(true);
   const qs = tab ? `&category=${tab}` : "";
   const { data, meta, isLoading } = useApi<NewsData>(`/api/v1/news?limit=50${qs}`, {
     refreshInterval: 2 * 60_000,
@@ -35,6 +37,21 @@ export default function NewsPage() {
     return m;
   }, [sent]);
 
+  const displayArticles = useMemo(() => {
+    if (!data?.articles?.length) return [];
+    if (!dedup) return data.articles.map((a) => ({ ...a, _relatedCount: 0 }));
+
+    const titles = data.articles.map((a) => a.title);
+    const clusters = clusterNewsTitles(titles, 0.28);
+    return clusters.map((cluster) => {
+      const primary = data.articles[cluster[0]];
+      return {
+        ...primary,
+        _relatedCount: cluster.length - 1,
+      };
+    });
+  }, [data?.articles, dedup]);
+
   const agg = sent?.aggregate;
 
   return (
@@ -49,16 +66,31 @@ export default function NewsPage() {
             Tổng hợp RSS đa nguồn — CafeF, VnExpress, VietnamBiz, CoinTelegraph — gắn mã/ngành và chấm sentiment từ
             tiêu đề/tóm tắt.
           </p>
-          <div className="mt-1 flex max-w-full gap-1 overflow-x-auto pb-0.5">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`rounded-md px-2.5 py-1 text-[12px] ${tab === t.key ? "bg-accent/15 text-accent" : "text-ink-3 hover:text-ink"}`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex max-w-full gap-1 overflow-x-auto pb-0.5">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={`rounded-md px-2.5 py-1 text-[12px] ${tab === t.key ? "bg-accent/15 text-accent" : "text-ink-3 hover:text-ink"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setDedup(!dedup)}
+              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition ${
+                dedup
+                  ? "border-accent/40 bg-accent/10 text-accent"
+                  : "border-line text-ink-3 hover:text-ink"
+              }`}
+              title="Gom cụm các tin cùng chủ đề từ nhiều báo để giảm tin rác"
+            >
+              <Layers className="size-3.5" />
+              <span>Gom cụm chủ đề ({dedup ? "Bật" : "Tắt"})</span>
+            </button>
           </div>
           <MetaLine meta={meta} />
         </div>
@@ -157,7 +189,7 @@ export default function NewsPage() {
       ) : (
         <Panel pad={false}>
           <ul className="divide-y divide-line/50">
-            {data.articles.map((a) => {
+            {displayArticles.map((a) => {
               const s = byId.get(a.id);
               return (
                 <li key={a.id} className="row-hover px-3.5 py-3">
@@ -190,6 +222,11 @@ export default function NewsPage() {
                       )}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         <Badge>{a.source}</Badge>
+                        {a._relatedCount > 0 && (
+                          <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                            +{a._relatedCount} tin cùng chủ đề
+                          </span>
+                        )}
                         {s && (
                           <Badge tone={s.tone === "up" ? "up" : s.tone === "down" ? "down" : "neutral"}>
                             {s.label} {s.score > 0 ? "+" : ""}

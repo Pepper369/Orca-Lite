@@ -24,6 +24,9 @@ import { getVnQuotes, getVnOhlcv } from "./stocks-board";
 import { fetchOhlcvResilient } from "./screener-ohlcv";
 import { cached } from "../cache";
 import { WORKERS_BUDGET } from "../data-engine/workers-budget";
+import { analyzeExposure, type ExposureAnalysis } from "./exposure-chain";
+import { attributeDrivers, type DriverAttribution } from "./driver-attribution";
+import { computeStarRatings, type StarRatings } from "./star-ratings";
 
 export interface ScreenerSyncInfo {
   buyPoint: number | null;
@@ -91,6 +94,9 @@ export interface VnStockDetail {
     [key: string]: unknown;
   } | null;
   ratioMap: Record<string, unknown>;
+  exposure?: ExposureAnalysis | null;
+  attribution?: DriverAttribution | null;
+  starRatings?: StarRatings | null;
   metricsSources: string[];
   notes: string[];
 }
@@ -503,6 +509,37 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     detailedRatios,
     ratioMap,
     screenerSync,
+    exposure: analyzeExposure(sym),
+    attribution: attributeDrivers({
+      priceChangePct: quote?.changePercent ?? 0,
+      foreignNetVnd:
+        typeof (foreignFlow?.latest as unknown as { netVal?: number })?.netVal === "number"
+          ? ((foreignFlow?.latest as unknown as { netVal: number }).netVal ?? 0)
+          : 0,
+      marketDeltaPct: 0,
+      sectorDeltaPct: 0,
+      rsi: technical?.rsi14 ?? undefined,
+      maSignal:
+        technical?.tradeSignal?.action === "buy"
+          ? "BUY"
+          : technical?.tradeSignal?.action === "sell"
+          ? "SELL"
+          : "HOLD",
+      volumeRatio:
+        bars.length >= 21
+          ? (quote?.volume ?? 0) /
+            Math.max(1, bars.slice(-21, -1).reduce((s, b) => s + b.volume, 0) / 20)
+          : 1,
+    }),
+    starRatings: computeStarRatings({
+      closes: bars.map((b) => b.close),
+      volumes: bars.map((b) => b.volume),
+      score: technical?.trend?.score ?? 50,
+      rsi: technical?.rsi14 ?? undefined,
+      ma20: technical?.sma?.sma20,
+      ma50: technical?.sma?.sma50,
+      ma200: technical?.sma?.sma200,
+    }),
     metricsSources: sources,
     notes,
   };
@@ -541,6 +578,9 @@ function emptyShell(sym: string, note: string): { detail: VnStockDetail; meta: M
       detailedRatios: null,
       ratioMap: {},
       screenerSync: null,
+      exposure: analyzeExposure(sym),
+      attribution: null,
+      starRatings: null,
       metricsSources: [],
       notes: [note],
     },

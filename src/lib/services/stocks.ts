@@ -18,3 +18,32 @@ export {
   getVnStockDetail,
   type VnStockDetail,
 } from "./stocks-detail";
+
+export {
+  analyzeExposure,
+  getExposureMapping,
+  type ExposureAnalysis,
+  type ExposureMapping,
+} from "./exposure-chain";
+
+export {
+  attributeDrivers,
+  type DriverAttribution,
+  type DriverFeatures,
+} from "./driver-attribution";
+
+export {
+  computeStarRatings,
+  type StarRatings,
+} from "./star-ratings";
+
+export {
+  classifyMarketRegime,
+  type MarketRegimeResult,
+  type MarketRegimeType,
+} from "./market-regime";
+
+export {
+  clusterNewsTitles,
+  extractFinancialIntent,
+} from "./vietnamese-financial-nlu";

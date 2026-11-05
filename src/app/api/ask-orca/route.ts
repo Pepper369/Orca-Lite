@@ -1,7 +1,7 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
-import { getVnStockDetail } from "@/lib/services/stocks";
+import { getVnStockDetail, classifyMarketRegime } from "@/lib/services/stocks";
 import { getVnIndices } from "@/lib/services/stocks-board";
 import { generateOrcaDynamicAiReport } from "@/lib/engines/orca-dynamic-ai-intelligence";
 import { executeContextualAiPipeline } from "@/lib/engines/orca-contextual-reasoning-engine";
@@ -516,8 +516,38 @@ export async function POST(req: Request) {
             orderBook: detail.orderBook as any,
           });
 
+          let narrativeAnswer = report.narrative;
+          const quantExtras: string[] = [];
+
+          if (detail.starRatings) {
+            quantExtras.push(
+              `⭐ **ĐÁNH GIÁ KỸ THUẬT 6 CHIỀU (SSI MODEL):** **${detail.starRatings.overallGauge}/100 điểm** (${detail.starRatings.verdictVi})\n` +
+              `• Sức mạnh giá: ${detail.starRatings.priceStrength}/5⭐ | Xu hướng: ${detail.starRatings.trendStrength}/5⭐ | Vị thế RSI: ${detail.starRatings.shortTermPos}/5⭐\n` +
+              `• Dòng tiền lớn: ${detail.starRatings.moneyFlow}/5⭐ | Độ ổn định: ${detail.starRatings.volatilityRating}/5⭐ | Tích lũy nền: ${detail.starRatings.baseRange}/5⭐`
+            );
+          }
+
+          if (detail.attribution?.summaryVi) {
+            quantExtras.push(
+              `🎯 **BÓC TÁCH ĐỘNG LỰC GIÁ (ATTRIBUTION):** ${detail.attribution.summaryVi}\n` +
+              `• Tỷ trọng đóng góp: Khối ngoại ${detail.attribution.foreignPct}% · Sóng ngành ${detail.attribution.sectorPct}% · VN-Index ${detail.attribution.marketPct}% · Tin tức ${detail.attribution.newsPct}% · Kỹ thuật ${detail.attribution.technicalPct}% · Thanh khoản ${detail.attribution.volumePct}%`
+            );
+          }
+
+          if (detail.exposure?.hasMapping && detail.exposure.summaryVi) {
+            quantExtras.push(
+              `🌐 **CHUỖI TÁC ĐỘNG VĨ MÔ & CHUỖI CUNG ỨNG:**\n` +
+              `• ${detail.exposure.summaryVi}\n` +
+              `• Các biến số liên kết: ${detail.exposure.output.concat(detail.exposure.input, detail.exposure.peer, detail.exposure.context).map((d) => `${d.mapping.labelVi} (r = ${d.mapping.historicalR})`).slice(0, 3).join(" · ")}`
+            );
+          }
+
+          if (quantExtras.length > 0) {
+            narrativeAnswer += `\n\n---\n### 🔬 PHÂN TÍCH ĐỊNH LƯỢNG NÂNG CAO:\n` + quantExtras.join("\n\n");
+          }
+
           return ok({
-            answer: report.narrative,
+            answer: narrativeAnswer,
             structured: report.structured,
             fourM: report.fourM,
             tcbsHealth: report.tcbsHealth,
@@ -545,10 +575,20 @@ export async function POST(req: Request) {
             return `• **${item.code}**: **${item.value.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} điểm** (${pt} | ${chg})`;
           });
 
+          const vnIndex = indicesRes.items.find((i) => i.code === "VNINDEX" || i.code === "VN-INDEX");
+          const regime = classifyMarketRegime({
+            vnindexChange: vnIndex?.changePercent ?? 0,
+          });
+
           const answer = `Chào bạn! Dưới đây là diễn biến thị trường chứng khoán Việt Nam cập nhật trực tiếp từ Datafeed thời gian thực:
 
 **DIỄN BIẾN CÁC CHỈ SỐ THỊ TRƯỜNG CHÍNH:**
 ${lines.join("\n")}
+
+**CHẾ ĐỘ THỊ TRƯỜNG (MARKET REGIME CLASSIFIER):**
+• **Trạng thái:** **${regime.labelVi}** ${regime.subTypeVi ? `(${regime.subTypeVi})` : ""}
+• **Đặc điểm:** ${regime.descriptionVi}
+• **Tín hiệu kích hoạt:** ${regime.triggerDetail}
 
 **ĐÁNH GIÁ ĐỊNH LƯỢNG DÒNG TIỀN (ORCA IN-HOUSE QUANT):**
 1. **Trạng thái thị trường:** Các chỉ số phản ánh thanh khoản và độ rộng dòng tiền thực tế trên sàn HOSE, HNX và UPCoM từ nguồn cấp dữ liệu trực tiếp.
