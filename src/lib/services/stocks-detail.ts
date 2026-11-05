@@ -25,6 +25,30 @@ import { fetchOhlcvResilient } from "./screener-ohlcv";
 import { cached } from "../cache";
 import { WORKERS_BUDGET } from "../data-engine/workers-budget";
 
+export interface ScreenerSyncInfo {
+  buyPoint: number | null;
+  buyPointDiffPct: number | null;
+  absBuyDiff: number | null;
+  buyRange: [number, number] | null;
+  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  stopLoss: number | null;
+  targetPrice: number | null;
+  riskReward: number | null;
+  buyStrategy: string | null;
+  isBuyTriggerNow?: boolean | null;
+  buyTriggerScore?: number | null;
+  buyTriggerReasonVi?: string | null;
+  confluenceScore?: number | null;
+  confluenceBadge?: string | null;
+  mtfScore?: number | null;
+  mtfBadgeVi?: string | null;
+  rsRating?: number | null;
+  smartMoneySignal?: string | null;
+  vsaSignal?: string | null;
+  asymmetricScore?: number | null;
+  syncTimestampMs?: number;
+}
+
 export interface VnStockDetail {
   symbol: string;
   name: string | null;
@@ -37,6 +61,7 @@ export interface VnStockDetail {
   profile: VndCompanyProfile | null;
   orderBook: VnOrderBook | null;
   foreignFlow: { latest: unknown; history: unknown } | null;
+  screenerSync?: ScreenerSyncInfo | null;
   consensus?: {
     targetPrice: number | null;
     rating: string | null;
@@ -364,6 +389,98 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
   if (failed.length) notes.push(`missing: ${failed.join(",")}`);
   if (alphaBeta) notes.push("alpha-beta ok");
 
+  // 7. Đồng bộ điểm mua-bán & vị thế vùng mua trực tiếp với Screener Engine
+  let screenerSync: ScreenerSyncInfo | null = null;
+  try {
+    const { getLastMasterSnapshot } = await import("./screener-snapshot-service");
+    const screenerItem = getLastMasterSnapshot()?.items.find((i) => i.symbol === sym);
+    const curPrice = quote?.price ?? screenerItem?.price ?? technical?.last ?? 0;
+
+    if (screenerItem && screenerItem.buyPoint && screenerItem.buyPoint > 0) {
+      let liveDiffPct = screenerItem.buyPointDiffPct;
+      let liveAbsDiff = screenerItem.absBuyDiff;
+      let liveZoneStatus = screenerItem.buyZoneStatus;
+
+      if (curPrice > 0) {
+        liveDiffPct = Number((((curPrice - screenerItem.buyPoint) / curPrice) * 100).toFixed(1));
+        liveAbsDiff = Math.abs(liveDiffPct);
+        if (screenerItem.buyRange) {
+          if (liveAbsDiff <= 1.0 || (curPrice >= screenerItem.buyRange[0] && curPrice <= screenerItem.buyRange[1])) {
+            liveZoneStatus = "AT_BUY_POINT";
+          } else if (liveAbsDiff <= 2.5) {
+            liveZoneStatus = "NEAR_BUY_POINT";
+          } else if (liveDiffPct > 2.5) {
+            liveZoneStatus = "WAIT_PULLBACK";
+          } else {
+            liveZoneStatus = "BELOW_SUPPORT";
+          }
+        }
+      }
+
+      screenerSync = {
+        buyPoint: screenerItem.buyPoint,
+        buyPointDiffPct: liveDiffPct,
+        absBuyDiff: liveAbsDiff,
+        buyRange: screenerItem.buyRange,
+        buyZoneStatus: liveZoneStatus,
+        stopLoss: screenerItem.stopLoss,
+        targetPrice: screenerItem.targetPrice,
+        riskReward: screenerItem.riskReward,
+        buyStrategy: screenerItem.buyStrategy,
+        isBuyTriggerNow: screenerItem.isBuyTriggerNow,
+        buyTriggerScore: screenerItem.buyTriggerScore,
+        buyTriggerReasonVi: screenerItem.buyTriggerReasonVi,
+        confluenceScore: screenerItem.confluenceScore,
+        confluenceBadge: screenerItem.confluenceBadge,
+        mtfScore: screenerItem.mtfScore,
+        mtfBadgeVi: screenerItem.mtfBadgeVi,
+        rsRating: screenerItem.rsRating,
+        smartMoneySignal: screenerItem.smartMoneySignal,
+        vsaSignal: screenerItem.vsaSignal,
+        asymmetricScore: screenerItem.apexQuantScore ?? null,
+        syncTimestampMs: Date.now(),
+      };
+
+      if (technical?.tradeSignal?.plan) {
+        technical.tradeSignal.plan.buyPoint = screenerItem.buyPoint;
+        technical.tradeSignal.plan.entry = screenerItem.buyPoint;
+        technical.tradeSignal.plan.buyRange = screenerItem.buyRange;
+        technical.tradeSignal.plan.entryZone = screenerItem.buyRange ?? technical.tradeSignal.plan.entryZone;
+        technical.tradeSignal.plan.buyZoneStatus = liveZoneStatus;
+        technical.tradeSignal.plan.buyPointDiffPct = liveDiffPct;
+        technical.tradeSignal.plan.currentPriceDiffPct = liveDiffPct;
+        technical.tradeSignal.plan.absBuyDiff = liveAbsDiff;
+        if (screenerItem.stopLoss) technical.tradeSignal.plan.stopLoss = screenerItem.stopLoss;
+        if (screenerItem.targetPrice) technical.tradeSignal.plan.takeProfit = screenerItem.targetPrice;
+        if (screenerItem.riskReward) technical.tradeSignal.plan.riskReward = screenerItem.riskReward;
+        if (screenerItem.buyStrategy) technical.tradeSignal.plan.entryStrategyVi = screenerItem.buyStrategy;
+        technical.tradeSignal.plan.isBuyTriggerNow = screenerItem.isBuyTriggerNow;
+        technical.tradeSignal.plan.buyTriggerScore = screenerItem.buyTriggerScore;
+        technical.tradeSignal.plan.buyTriggerReasonVi = screenerItem.buyTriggerReasonVi;
+      }
+    } else if (technical?.tradeSignal?.plan) {
+      const p = technical.tradeSignal.plan;
+      screenerSync = {
+        buyPoint: p.buyPoint ?? p.entry,
+        buyPointDiffPct: p.buyPointDiffPct ?? p.currentPriceDiffPct,
+        absBuyDiff: p.absBuyDiff ?? Math.abs(p.currentPriceDiffPct ?? 0),
+        buyRange: p.buyRange ?? p.entryZone,
+        buyZoneStatus: p.buyZoneStatus ?? "NEAR_BUY_POINT",
+        stopLoss: p.stopLoss,
+        targetPrice: p.takeProfit,
+        riskReward: p.riskReward,
+        buyStrategy: p.entryStrategyVi,
+        isBuyTriggerNow: p.isBuyTriggerNow ?? false,
+        buyTriggerScore: p.buyTriggerScore ?? null,
+        buyTriggerReasonVi: p.buyTriggerReasonVi ?? null,
+        asymmetricScore: p.asymmetricScore ?? null,
+        syncTimestampMs: Date.now(),
+      };
+    }
+  } catch {
+    /* ignore fallback */
+  }
+
   const detail: VnStockDetail = {
     symbol: sym,
     name,
@@ -385,6 +502,7 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     financialTtm,
     detailedRatios,
     ratioMap,
+    screenerSync,
     metricsSources: sources,
     notes,
   };
@@ -422,6 +540,7 @@ function emptyShell(sym: string, note: string): { detail: VnStockDetail; meta: M
       financialTtm: null,
       detailedRatios: null,
       ratioMap: {},
+      screenerSync: null,
       metricsSources: [],
       notes: [note],
     },

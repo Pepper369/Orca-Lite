@@ -32,6 +32,7 @@ import {
   BarChart3,
   ArrowLeft,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { AddToWatchlist } from "@/components/watchlist-button";
 import { OrcaChart } from "@/components/orca-chart";
@@ -289,10 +290,12 @@ const MONEY_FLOW_VI: Record<string, string> = {
 const DecisionStrip = memo(function DecisionStrip({
   quote,
   technical,
+  screenerSync,
   meta,
 }: {
   quote: VnStockDetail["quote"];
   technical: VnStockDetail["technical"];
+  screenerSync?: VnStockDetail["screenerSync"];
   meta: Meta | null;
 }) {
   const trend = technical?.trend;
@@ -318,19 +321,54 @@ const DecisionStrip = memo(function DecisionStrip({
 
   const fmt = (n: number) => n.toLocaleString("vi-VN", { maximumFractionDigits: 2 });
 
+  // Tính khoảng cách thời gian thực giữa giá thị trường vs Điểm mua khuyến nghị
+  const curPrice = quote?.price ?? technical?.last ?? 0;
+  const buyPt = screenerSync?.buyPoint ?? plan?.buyPoint ?? plan?.entry ?? 0;
+  const buyRange = screenerSync?.buyRange ?? plan?.buyRange ?? plan?.entryZone;
+  const liveDiffPct =
+    curPrice > 0 && buyPt > 0
+      ? Number((((curPrice - buyPt) / curPrice) * 100).toFixed(1))
+      : (screenerSync?.buyPointDiffPct ?? plan?.buyPointDiffPct ?? plan?.currentPriceDiffPct ?? 0);
+  const absDiff = Math.abs(liveDiffPct);
+
+  let liveZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+  if (buyRange && (absDiff <= 1.0 || (curPrice >= buyRange[0] && curPrice <= buyRange[1]))) {
+    liveZoneStatus = "AT_BUY_POINT";
+  } else if (absDiff <= 2.5) {
+    liveZoneStatus = "NEAR_BUY_POINT";
+  } else if (liveDiffPct > 2.5) {
+    liveZoneStatus = "WAIT_PULLBACK";
+  } else {
+    liveZoneStatus = "BELOW_SUPPORT";
+  }
+
+  const isTriggerNow = Boolean(plan?.isBuyTriggerNow ?? screenerSync?.isBuyTriggerNow);
+  const triggerScore = plan?.buyTriggerScore ?? screenerSync?.buyTriggerScore ?? 85;
+
   return (
     <div
       id="sec-decision"
       className={`stock-decision-strip stock-decision-strip--${tone}`}
     >
       <div className="stock-decision-left">
-        <span className={`stock-signal-badge stock-signal-badge--${tone}`} aria-label={`Tín hiệu ${signal}`}>
-          <Icon className="size-3.5 shrink-0" aria-hidden />
-          <span className="stock-signal-badge-text">{signal}</span>
-          {ts?.confidence != null && (
-            <span className="stock-signal-badge-conf">{Math.round(ts.confidence)}%</span>
-          )}
-        </span>
+        {isTriggerNow ? (
+          <span
+            className="stock-signal-badge bg-gradient-to-r from-emerald-500 to-teal-500 text-black font-black px-2 py-0.5 rounded text-[11px] flex items-center gap-1 shadow-sm"
+            title={plan?.buyTriggerReasonVi ?? screenerSync?.buyTriggerReasonVi ?? "Tín hiệu MUA NGAY chuẩn xác từ Bộ lọc Screener"}
+          >
+            <Zap className="size-3.5 fill-black" />
+            <span>MUA NGAY</span>
+            <span className="opacity-90 text-[10px] font-extrabold">({triggerScore})</span>
+          </span>
+        ) : (
+          <span className={`stock-signal-badge stock-signal-badge--${tone}`} aria-label={`Tín hiệu ${signal}`}>
+            <Icon className="size-3.5 shrink-0" aria-hidden />
+            <span className="stock-signal-badge-text">{signal}</span>
+            {ts?.confidence != null && (
+              <span className="stock-signal-badge-conf">{Math.round(ts.confidence)}%</span>
+            )}
+          </span>
+        )}
         <span className="stock-decision-trend" title={trendLabel}>
           <ShieldCheck className="size-3 shrink-0 text-accent-primary" aria-hidden />
           {trendLabel}
@@ -359,16 +397,20 @@ const DecisionStrip = memo(function DecisionStrip({
         {plan && signal !== "QUAN SÁT" ? (
           <span className="stock-plan-group" role="group" aria-label="Kế hoạch giao dịch">
             <MetricChip
-              label={signal === "MUA" ? "Mua tối ưu" : "Bán tối ưu"}
-              value={fmt(plan.entry)}
+              label={signal === "MUA" ? "Điểm mua" : "Điểm bán"}
+              value={fmt(buyPt > 0 ? buyPt : plan.entry)}
               emphasis
             />
-            {plan.currentPriceDiffPct != null && plan.currentPriceDiffPct < -0.3 && (
-              <MetricChip
-                label="Chờ chỉnh"
-                value={`-${Math.abs(plan.currentPriceDiffPct).toFixed(1)}%`}
-                tone="up"
-              />
+            {signal === "MUA" && (
+              liveZoneStatus === "AT_BUY_POINT" ? (
+                <MetricChip label="Vị thế" value="Ngay điểm mua" tone="up" emphasis />
+              ) : liveZoneStatus === "NEAR_BUY_POINT" ? (
+                <MetricChip label="Vị thế" value={`Sát điểm mua (+${liveDiffPct}%)`} tone="up" />
+              ) : liveZoneStatus === "WAIT_PULLBACK" ? (
+                <MetricChip label="Chờ chỉnh" value={`+${liveDiffPct}%`} tone="down" />
+              ) : (
+                <MetricChip label="Vị thế" value={`Dưới hỗ trợ (${liveDiffPct}%)`} tone="down" />
+              )
             )}
             <MetricChip label="Lỗ tối đa (SL)" value={`-${plan.riskPct}%`} tone="down" />
             <MetricChip label="Lãi kỳ vọng (TP)" value={`+${plan.rewardPct}%`} tone="up" />
@@ -540,7 +582,12 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
       )}
 
       {/* Decision Strip */}
-      <DecisionStrip quote={detail.quote} technical={detail.technical} meta={meta ?? null} />
+      <DecisionStrip
+        quote={detail.quote}
+        technical={detail.technical}
+        screenerSync={detail.screenerSync}
+        meta={meta ?? null}
+      />
 
       {/* 2. Above-the-fold FireAnt Workstation (Split Pane: Chart 65% + Micro Station 35%) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
@@ -617,6 +664,7 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
                     symbol={detail.symbol}
                     quote={detail.quote}
                     technical={detail.technical}
+                    screenerSync={detail.screenerSync}
                   />
                 </ErrorBoundary>
               </div>

@@ -429,6 +429,7 @@ export function buildTechnicalSnapshot(barsIn: OhlcvBar[]): TechnicalSnapshot | 
       rsi14,
       bollinger: bb ? { upper: bb.upper, mid: bb.mid, lower: bb.lower } : null,
       trendScore: score,
+      topChartPattern: chartPatterns?.[0] ?? null,
     });
   }
   const tradeSignal = { ...tradeSignalBase, plan };

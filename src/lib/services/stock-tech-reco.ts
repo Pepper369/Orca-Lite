@@ -333,6 +333,7 @@ export function computeStockTechReco(
       rsi14: tech.rsi14,
       bollinger: tech.bollinger,
       trendScore: tech.trend?.score,
+      topChartPattern: tech.chartPatterns?.[0] ?? null,
     });
   }
 
@@ -351,6 +352,14 @@ export function computeStockTechReco(
         entryZone: ts.plan.entryZone,
         entryStrategyVi: ts.plan.entryStrategyVi,
         currentPriceDiffPct: ts.plan.currentPriceDiffPct,
+        buyPoint: ts.plan.buyPoint ?? ts.plan.entry,
+        buyRange: ts.plan.buyRange ?? ts.plan.entryZone,
+        buyZoneStatus: ts.plan.buyZoneStatus,
+        buyPointDiffPct: ts.plan.buyPointDiffPct ?? ts.plan.currentPriceDiffPct,
+        absBuyDiff: ts.plan.absBuyDiff,
+        isBuyTriggerNow: ts.plan.isBuyTriggerNow,
+        buyTriggerScore: ts.plan.buyTriggerScore,
+        buyTriggerReasonVi: ts.plan.buyTriggerReasonVi,
         stopLoss: ts.plan.stopLoss,
         takeProfit: ts.plan.takeProfit,
         takeProfit1: ts.plan.takeProfit1,

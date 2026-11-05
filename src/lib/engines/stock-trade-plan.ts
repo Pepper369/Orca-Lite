@@ -19,6 +19,15 @@ export interface StockTradePlan {
   entryStrategyVi: string;
   /** Chênh lệch % giữa Entry đề xuất vs Giá thị trường (âm: chờ chỉnh để mua rẻ hơn) */
   currentPriceDiffPct: number;
+  /** Đồng bộ trường điểm mua chuẩn với Bộ lọc Screener */
+  buyPoint?: number | null;
+  buyRange?: [number, number] | null;
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyPointDiffPct?: number | null;
+  absBuyDiff?: number | null;
+  isBuyTriggerNow?: boolean | null;
+  buyTriggerScore?: number | null;
+  buyTriggerReasonVi?: string | null;
   stopLoss: number;
   takeProfit: number;
   /** Secondary targets for scale-out */
@@ -55,6 +64,15 @@ export interface StockTradePlanInput {
   rsi14?: number | null;
   bollinger?: { upper?: number | null; mid?: number | null; lower?: number | null } | null;
   trendScore?: number | null;
+  topChartPattern?: {
+    nameVi?: string;
+    breakoutPrice?: number | null;
+    stopLossPrice?: number | null;
+    targetPrice?: number | null;
+  } | null;
+  isBuyTriggerNow?: boolean;
+  buyTriggerScore?: number | null;
+  buyTriggerReasonVi?: string | null;
 }
 
 /** VN-ish tick rounding */
@@ -111,7 +129,81 @@ export function buildStockTradePlan(
   let takeProfit: number;
 
   if (side === "buy") {
-    // Kích hoạt Engine Định Lượng Bất Đối Xứng Đa Yếu Tố
+    // 1. Kiểm tra điểm Pivot bứt phá từ mẫu hình biểu đồ kinh điển (VCP, Cốc tay cầm, Hai đáy, Cờ tăng)
+    const pivot = input.topChartPattern?.breakoutPrice ?? null;
+    const isPivotValid = pivot != null && pivot > 0 && Math.abs((last - pivot) / last) <= 0.045;
+
+    if (isPivotValid && input.topChartPattern) {
+      const buyPoint = tickRound(pivot);
+      const diffPct = Number((((last - buyPoint) / last) * 100).toFixed(1));
+      const absDiff = Math.abs(diffPct);
+      const buyRange: [number, number] = [
+        tickRound(buyPoint * 0.99),
+        tickRound(buyPoint * 1.015),
+      ];
+      let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+      if (absDiff <= 1.0 || (last >= buyRange[0] && last <= buyRange[1])) {
+        buyZoneStatus = "AT_BUY_POINT";
+      } else if (absDiff <= 2.5) {
+        buyZoneStatus = "NEAR_BUY_POINT";
+      } else if (diffPct > 2.5) {
+        buyZoneStatus = "WAIT_PULLBACK";
+      } else {
+        buyZoneStatus = "BELOW_SUPPORT";
+      }
+
+      const sl = input.topChartPattern.stopLossPrice
+        ? tickRound(input.topChartPattern.stopLossPrice)
+        : tickRound(buyPoint * 0.95);
+      const tp = input.topChartPattern.targetPrice
+        ? tickRound(input.topChartPattern.targetPrice)
+        : tickRound(buyPoint * 1.15);
+      const risk = buyPoint - sl;
+      const reward = tp - buyPoint;
+      const rr = risk > 0 ? Number((reward / risk).toFixed(1)) : 2.5;
+      const riskPct = buyPoint > 0 ? Number(((risk / buyPoint) * 100).toFixed(1)) : 5.0;
+      const rewardPct = buyPoint > 0 ? Number(((reward / buyPoint) * 100).toFixed(1)) : 15.0;
+
+      const patternBasis = [
+        `Pivot bứt phá mẫu hình ${input.topChartPattern.nameVi || "kinh điển"} tại ${buyPoint}`,
+        `Cắt lỗ vi phạm nền mẫu hình: -${riskPct}% tại ${sl}`,
+        `Mục tiêu lợi nhuận mô hình giá: +${rewardPct}% (R:R 1 ăn ${rr})`,
+      ];
+
+      return {
+        side,
+        sideVi: "MUA",
+        entry: buyPoint,
+        entryZone: buyRange,
+        entryStrategyVi: `Pivot bứt phá ${input.topChartPattern.nameVi || "Mẫu hình"}`,
+        currentPriceDiffPct: diffPct,
+        buyPoint,
+        buyRange,
+        buyZoneStatus,
+        buyPointDiffPct: diffPct,
+        absBuyDiff: absDiff,
+        stopLoss: sl,
+        takeProfit: tp,
+        takeProfit1: tickRound(buyPoint + risk * 1.5),
+        takeProfit2: tp,
+        takeProfit3: tickRound(buyPoint + risk * 3.5),
+        riskReward: rr,
+        riskPct,
+        rewardPct,
+        riskPerShare: risk,
+        invalidation: sl,
+        basis: patternBasis,
+        notes,
+        asymmetricScore: 88,
+        confluenceLayers: [`Pivot ${input.topChartPattern.nameVi || "Mẫu hình"}`],
+        actionVerdict: `Pivot bứt phá ${input.topChartPattern.nameVi || "mẫu hình"}. Vùng gom: ${buyRange[0]} – ${buyRange[1]}.`,
+        isBuyTriggerNow: input.isBuyTriggerNow,
+        buyTriggerScore: input.buyTriggerScore,
+        buyTriggerReasonVi: input.buyTriggerReasonVi,
+      };
+    }
+
+    // 2. Kích hoạt Engine Định Lượng Bất Đối Xứng Đa Yếu Tố
     const asym = computeAsymmetricPlan({
       last,
       atr14: input.atr14,
@@ -126,6 +218,22 @@ export function buildStockTradePlan(
       trendScore: input.trendScore,
     });
 
+    const buyPoint = asym.entry;
+    const diffPct = asym.currentPriceDiffPct;
+    const absDiff = Math.abs(diffPct);
+    const buyRange = asym.entryZone;
+
+    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+    if (absDiff <= 1.0 || (last >= buyRange[0] && last <= buyRange[1])) {
+      buyZoneStatus = "AT_BUY_POINT";
+    } else if (absDiff <= 2.5) {
+      buyZoneStatus = "NEAR_BUY_POINT";
+    } else if (diffPct > 2.5) {
+      buyZoneStatus = "WAIT_PULLBACK";
+    } else {
+      buyZoneStatus = "BELOW_SUPPORT";
+    }
+
     return {
       side,
       sideVi: "MUA",
@@ -133,6 +241,11 @@ export function buildStockTradePlan(
       entryZone: asym.entryZone,
       entryStrategyVi: asym.actionVerdict,
       currentPriceDiffPct: asym.currentPriceDiffPct,
+      buyPoint,
+      buyRange,
+      buyZoneStatus,
+      buyPointDiffPct: diffPct,
+      absBuyDiff: absDiff,
       stopLoss: asym.stopLoss,
       takeProfit: asym.takeProfit,
       takeProfit1: asym.takeProfit1,
@@ -148,6 +261,9 @@ export function buildStockTradePlan(
       asymmetricScore: asym.asymmetricScore,
       confluenceLayers: asym.confluenceCluster.layers,
       actionVerdict: asym.actionVerdict,
+      isBuyTriggerNow: input.isBuyTriggerNow,
+      buyTriggerScore: input.buyTriggerScore,
+      buyTriggerReasonVi: input.buyTriggerReasonVi,
     };
   }
 

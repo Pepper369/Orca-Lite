@@ -370,7 +370,7 @@ function getScreenerUniverse(): string[] {
   return Array.from(set);
 }
 
-interface ParsedBars {
+export interface ParsedBars {
   closes: number[];
   highs: number[];
   lows: number[];
@@ -378,7 +378,7 @@ interface ParsedBars {
   ohlcvBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
 }
 
-function parseBarArrays(bars?: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[]): ParsedBars {
+export function parseBarArrays(bars?: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[]): ParsedBars {
   const n = bars ? bars.length : 0;
   const closes: number[] = [];
   const highs: number[] = [];
@@ -734,7 +734,7 @@ function analyzeTechFeatures(
   };
 }
 
-function calculateBuyPointPlan(
+export function calculateBuyPointPlan(
   parsed: ParsedBars,
   price: number | null,
   ma20: number | null,
