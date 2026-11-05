@@ -72,6 +72,8 @@ export async function GET(req: Request) {
     minApexScore: num(url.searchParams.get("minApexScore"), 0, 99),
     maxExtensionBottom: num(url.searchParams.get("maxExtensionBottom")),
     sweetZoneOnly: url.searchParams.get("sweetZoneOnly") === "true" ? true : undefined,
+    buyTriggerOnly: url.searchParams.get("buyTriggerOnly") === "true" ? true : undefined,
+    minBuyTriggerScore: num(url.searchParams.get("minBuyTriggerScore"), 0, 100),
     maxBuyDiff: num(url.searchParams.get("maxBuyDiff")),
     buyZoneStatus: url.searchParams.get("buyZoneStatus") ?? undefined,
     mtfOnly: url.searchParams.get("mtfOnly") === "true" ? true : undefined,
@@ -138,6 +140,9 @@ export async function GET(req: Request) {
           limit: filters.limit,
           presetsCount: {
             all: 0,
+            apex_buy_now: 0,
+            orca_apex_quant: 0,
+            historical_edge: 0,
             orca_master_elite: 0,
             smart_money_inflow: 0,
             near_buy_point: 0,

@@ -4,6 +4,7 @@ import { trainHistoricalPriceAction } from "./historical-price-action-trainer";
 import { evaluateApexQuant } from "./orca-apex-quant-engine";
 
 export type StrategyType =
+  | "apex_buy_now"
   | "orca_apex_quant"
   | "price_action_trained"
   | "orca_master"
@@ -174,7 +175,11 @@ export interface ScreenerBacktestResult {
   generatedAt: string;
 }
 
-const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
+export const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
+  apex_buy_now: {
+    name: "⚡ Điểm Mua Kích Hoạt Tức Thời (Real-Time Buy Trigger)",
+    desc: "Kích hoạt điểm mua tức thời: Hợp lưu Wyckoff Spring / Vùng Vàng chân sóng + Bùng nổ khối lượng gom Pocket Pivot + Dư địa cản trên >= 5% + R:R >= 2.0x.",
+  },
   orca_apex_quant: {
     name: "👑 Chân Sóng Apex (Early Bottom Reversal)",
     desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone) + Tỷ lệ Risk/Reward >= 2.2x.",
@@ -534,7 +539,28 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         for (let v = i - 20; v < i; v++) sumVol += volumes[v];
         const avgVol20 = sumVol / 20;
 
-        if (strategy === "orca_apex_quant") {
+        if (strategy === "apex_buy_now") {
+          // Real-time Actionable Buy Trigger: Wyckoff Spring / Sweet Zone + Volume Ignition + Runway >= 5%
+          if (i >= 25) {
+            const subBars = bars.slice(Math.max(0, i - 45), i + 1);
+            if (subBars.length >= 20) {
+              const apex = evaluateApexQuant(subBars);
+              const changePct = ((currentClose - closes[i - 1]) / closes[i - 1]) * 100;
+              const isVolIgnited = volumes[i] >= avgVol20 * 1.15;
+              if (
+                apex.apexScore >= 66 &&
+                apex.reversalMetrics.isSweetLaunchZone &&
+                !apex.reversalMetrics.isExtended &&
+                apex.reversalMetrics.overheadRoomPct >= 5.0 &&
+                isVolIgnited &&
+                changePct >= -0.8 &&
+                changePct <= 5.5
+              ) {
+                signal = true;
+              }
+            }
+          }
+        } else if (strategy === "orca_apex_quant") {
           // Apex Quant Confluence: Wyckoff Spring / early bottom reversal in sweet zone (0.8% - 7.5% from bottom)
           if (i >= 25) {
             const subBars = bars.slice(Math.max(0, i - 45), i + 1);

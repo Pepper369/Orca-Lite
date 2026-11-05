@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { prefetchApi } from "@/lib/hooks";
 
 type Universe =
+  | "apex-buy-now"
   | "apex-quant"
   | "historical-edge"
   | "buy-point"
@@ -52,6 +53,7 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
+      { id: "apex-buy-now", label: "⚡ Điểm Mua Kích Hoạt" },
       { id: "apex-quant", label: "👑 Chân Sóng Apex" },
       { id: "historical-edge", label: "🎯 Lợi Thế Lịch Sử (Trained Edge)" },
       { id: "orca-master", label: "Orca Master (Top 90+)" },
@@ -244,6 +246,16 @@ function ScreenerInner() {
 
   let body: React.ReactNode;
   switch (universe) {
+    case "apex-buy-now":
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="apex_buy_now"
+          defaultView="orca_master"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
+      break;
     case "apex-quant":
       body = (
         <VnScreener

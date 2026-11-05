@@ -21,6 +21,7 @@ interface ScreenerBacktestModalProps {
 }
 
 const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
+  { id: "apex_buy_now", label: "⚡ Điểm Mua Kích Hoạt (Real-Time)", desc: "Kích hoạt điểm mua tức thời: Wyckoff Spring + Vùng Vàng chân sóng + Bùng nổ khối lượng gom + R:R >= 2.0x" },
   { id: "orca_apex_quant", label: "👑 Chân Sóng Apex (Early Bottom)", desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone)" },
   { id: "price_action_trained", label: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Edge)", desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50" },
   { id: "orca_master", label: "🏆 Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },

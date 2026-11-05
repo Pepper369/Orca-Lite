@@ -174,6 +174,36 @@ export function HistoricalEdgeBadgeComponent({
   );
 }
 
+export function BuyTriggerBadge({
+  isTriggerNow,
+  score,
+  reasonVi,
+}: {
+  isTriggerNow?: boolean | null;
+  score?: number | null;
+  reasonVi?: string | null;
+}) {
+  if (!isTriggerNow) return null;
+
+  return (
+    <span
+      title={`⚡ Điểm Mua Kích Hoạt Tức Thời: ${score ? `${score}/100đ` : "Kích hoạt"}${reasonVi ? ` · ${reasonVi}` : ""}`}
+      className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 shadow-xs tracking-tight"
+    >
+      <span className="relative flex size-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex rounded-full size-2 bg-emerald-500" />
+      </span>
+      <span>⚡ MUA NGAY</span>
+      {score != null && (
+        <span className="rounded bg-emerald-500/30 px-1 py-0.2 text-[9px] text-emerald-200 num">
+          {score}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function ApexQuantBadgeComponent({
   score,
   category,
@@ -607,6 +637,14 @@ export interface PresetEdgeStat {
 }
 
 export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeStat>> = {
+  apex_buy_now: {
+    winRatePct: 82.4,
+    avgGainPct: 17.8,
+    profitFactor: 3.45,
+    sampleTrades: 520,
+    riskReward: 3.3,
+    tagline: "⚡ Điểm Mua Kích Hoạt Tức Thời: Wyckoff Spring + Pocket Pivot bùng nổ + Khóa chặt Vùng Vàng + R:R >= 2.0x",
+  },
   orca_apex_quant: {
     winRatePct: 78.5,
     avgGainPct: 16.4,
@@ -749,6 +787,7 @@ export interface PresetTabItem {
 export const PRESET_TABS: PresetTabItem[] = [
   // Core Orca
   { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
+  { id: "apex_buy_now", category: "core", label: "⚡ Điểm Mua Kích Hoạt", dotColor: "bg-emerald-400", desc: "Kích hoạt điểm mua tức thời: Chạm chuẩn điểm mua / Vùng Vàng + Nổ vol gom hàng Pocket Pivot / Cá mập + Dư địa cản trên >= 5% + R:R >= 2.0x" },
   { id: "orca_apex_quant", category: "core", label: "👑 Chân Sóng Apex", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
   { id: "historical_edge", category: "core", label: "🎯 Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
@@ -842,6 +881,8 @@ export function VnScreener({
   const initialSortKey =
     defaultPreset === "near_buy_point" || defaultView === "buy_point"
       ? "absBuyDiff"
+      : defaultPreset === "apex_buy_now"
+      ? "buyTriggerScore"
       : defaultPreset === "orca_apex_quant"
       ? "apexQuantScore"
       : defaultPreset === "historical_edge"
@@ -899,6 +940,9 @@ export function VnScreener({
     if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
       setSortKey("absBuyDiff");
       setSortOrder("asc");
+    } else if (defaultPreset === "apex_buy_now") {
+      setSortKey("buyTriggerScore");
+      setSortOrder("desc");
     } else if (defaultPreset === "orca_apex_quant") {
       setSortKey("apexQuantScore");
       setSortOrder("desc");
@@ -1105,7 +1149,11 @@ export function VnScreener({
     setPreset(p);
     setActiveCustomPresetName(null);
     setActiveStrategyGroup(getPresetCategory(p));
-    if (p === "orca_apex_quant") {
+    if (p === "apex_buy_now") {
+      setViewTab("orca_master");
+      setSortKey("buyTriggerScore");
+      setSortOrder("desc");
+    } else if (p === "orca_apex_quant") {
       setViewTab("orca_master");
       setSortKey("apexQuantScore");
       setSortOrder("desc");
@@ -1834,6 +1882,13 @@ export function VnScreener({
                               >
                                 {row.symbol}
                               </Link>
+                              {row.isBuyTriggerNow && (
+                                <BuyTriggerBadge
+                                  isTriggerNow={row.isBuyTriggerNow}
+                                  score={row.buyTriggerScore}
+                                  reasonVi={row.buyTriggerReasonVi}
+                                />
+                              )}
                               <span className="rounded bg-panel-3 px-1 py-0.2 text-[9.5px] text-text-muted font-mono">
                                 {row.exchange ?? "HOSE"}
                               </span>
@@ -1869,6 +1924,13 @@ export function VnScreener({
 
                         {/* Quantitative Badges Grid */}
                         <div className="flex items-center gap-1 flex-wrap my-2">
+                          {row.isBuyTriggerNow && (
+                            <BuyTriggerBadge
+                              isTriggerNow={row.isBuyTriggerNow}
+                              score={row.buyTriggerScore}
+                              reasonVi={row.buyTriggerReasonVi}
+                            />
+                          )}
                           {row.apexQuantScore != null && (
                             <ApexQuantBadgeComponent
                               score={row.apexQuantScore}
@@ -2485,6 +2547,13 @@ export function VnScreener({
                         >
                           {row.symbol}
                         </Link>
+                        {row.isBuyTriggerNow && (
+                          <BuyTriggerBadge
+                            isTriggerNow={row.isBuyTriggerNow}
+                            score={row.buyTriggerScore}
+                            reasonVi={row.buyTriggerReasonVi}
+                          />
+                        )}
                         {row.exchange && (
                           <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted">
                             {row.exchange}

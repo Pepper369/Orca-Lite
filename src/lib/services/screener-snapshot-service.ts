@@ -70,6 +70,7 @@ import {
 
 export type ScreenerPreset =
   | "all"
+  | "apex_buy_now"
   | "orca_apex_quant"
   | "historical_edge"
   | "near_buy_point"
@@ -227,6 +228,10 @@ export type ScreenerStockItem = {
   isSweetLaunchZone?: boolean | null;
   isWyckoffSpring?: boolean | null;
   isMaReclaim?: boolean | null;
+  // Real-Time Actionable Buy Trigger Engine (Kích hoạt điểm mua tức thời)
+  isBuyTriggerNow?: boolean | null;
+  buyTriggerScore?: number | null; // 1 - 99
+  buyTriggerReasonVi?: string | null;
 };
 
 export type ScreenerFilterParams = {
@@ -271,6 +276,8 @@ export type ScreenerFilterParams = {
   minApexScore?: number;
   maxExtensionBottom?: number;
   sweetZoneOnly?: boolean;
+  buyTriggerOnly?: boolean; // Lọc các mã kích hoạt điểm mua ngay tức thời
+  minBuyTriggerScore?: number; // Điểm xung lực mua tối thiểu (0-100)
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
   buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
@@ -963,8 +970,68 @@ function detectPresets(item: {
   upDownVolRatio?: number | null;
   apexQuantScore?: number | null;
   isSweetLaunchZone?: boolean | null;
+  volRatio20?: number | null;
+  activeBuyRatioPct?: number | null;
+  foreignNetVal?: number | null;
+  overheadRoomPct?: number | null;
+  isWyckoffSpring?: boolean | null;
+  isMaReclaim?: boolean | null;
+  superTrendDir?: "up" | "down" | null;
+  mtfScore?: number | null;
+  riskReward?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
+
+  // 00. ⚡ Điểm Mua Kích Hoạt Tức Thời (Real-Time Actionable Buy Trigger)
+  const isTriggerPriceValid =
+    item.price != null &&
+    item.changePercent != null &&
+    item.changePercent >= -0.8 &&
+    item.changePercent <= 5.5;
+
+  const isInExecutionZone =
+    item.buyZoneStatus === "AT_BUY_POINT" ||
+    (item.absBuyDiff != null && item.absBuyDiff <= 1.8) ||
+    item.isSweetLaunchZone === true;
+
+  const hasApexConfluence =
+    (item.apexQuantScore != null && item.apexQuantScore >= 68) ||
+    item.confluenceScore >= 52 ||
+    (item.orcaMasterScore != null && item.orcaMasterScore >= 72);
+
+  const hasVolumeIgnition =
+    (item.volRatio20 != null && item.volRatio20 >= 1.15) ||
+    (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 54) ||
+    (item.foreignNetVal != null && item.foreignNetVal > 0.3) ||
+    (item.upDownVolRatio != null && item.upDownVolRatio >= 1.12) ||
+    item.smartMoneySignal === "POCKET_PIVOT" ||
+    item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+    item.vsaSignal === "NO_SUPPLY" ||
+    item.vsaSignal === "ABSORPTION";
+
+  const hasRunwayRiskReward =
+    (item.overheadRoomPct == null || item.overheadRoomPct >= 5.0) &&
+    ((item.riskReward != null && item.riskReward >= 2.0) ||
+      (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0));
+
+  const hasMtfConsensus =
+    item.isMtfAligned === true ||
+    item.mtfConsensus === "ALL_BULL" ||
+    item.mtfConsensus === "H1_D1_BULL" ||
+    item.superTrendDir === "up" ||
+    (item.mtfScore != null && item.mtfScore >= 60);
+
+  const isBuyTriggerNow =
+    isTriggerPriceValid &&
+    isInExecutionZone &&
+    hasApexConfluence &&
+    hasVolumeIgnition &&
+    hasRunwayRiskReward &&
+    hasMtfConsensus;
+
+  if (isBuyTriggerNow) {
+    passes.push("apex_buy_now");
+  }
 
   // 0. Siêu Lọc Apex Quant Confluence (Score >= 74 or Sweet Zone Reversal >= 65)
   if (
@@ -1766,7 +1833,58 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           upDownVolRatio: entry.trainedHistorical.upDownVolRatio,
           apexQuantScore: entry.apexQuant.apexScore,
           isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
+          volRatio20: entry.techFeatures.volRatio20,
+          activeBuyRatioPct: entry.smartMoney.activeBuyRatioPct,
+          foreignNetVal: entry.foreignNetVal,
+          overheadRoomPct: entry.apexQuant.reversalMetrics.overheadRoomPct,
+          isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
+          isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
+          superTrendDir: entry.techFeatures.superTrendDir,
+          mtfScore: entry.techFeatures.mtfScore,
+          riskReward: entry.buyPointPlan.riskReward,
         });
+
+        const isBuyTriggerNow = presetsPassed.includes("apex_buy_now");
+        let buyTriggerScore: number | null = null;
+        let buyTriggerReasonVi: string | null = null;
+
+        if (isBuyTriggerNow) {
+          const apex = entry.apexQuant.apexScore ?? 60;
+          const conf = entry.techFeatures.confluenceScore ?? 50;
+          const sm = entry.smartMoney.score ?? 50;
+          const mtf = entry.techFeatures.mtfScore ?? 50;
+          let rawTriggerScore = Math.round(apex * 0.35 + conf * 0.25 + sm * 0.2 + mtf * 0.2);
+          if (entry.buyPointPlan.buyZoneStatus === "AT_BUY_POINT") rawTriggerScore += 5;
+          if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) rawTriggerScore += 5;
+          if (entry.smartMoney.signal === "POCKET_PIVOT" || entry.mtfCandle.vsaSignal === "NO_SUPPLY") rawTriggerScore += 4;
+          buyTriggerScore = Math.max(1, Math.min(99, rawTriggerScore));
+
+          const reasons: string[] = [];
+          if (entry.buyPointPlan.buyZoneStatus === "AT_BUY_POINT") {
+            reasons.push("Chạm chuẩn điểm mua");
+          } else if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) {
+            reasons.push("Vùng Vàng chân sóng");
+          }
+          if (entry.smartMoney.signal === "POCKET_PIVOT") {
+            reasons.push("Pocket Pivot gom hàng");
+          } else if (entry.smartMoney.activeBuyRatioPct && entry.smartMoney.activeBuyRatioPct >= 60) {
+            reasons.push(`Chủ động mua ${Math.round(entry.smartMoney.activeBuyRatioPct)}%`);
+          } else if (entry.techFeatures.volRatio20 && entry.techFeatures.volRatio20 >= 1.5) {
+            reasons.push(`Vol nổ gấp ${entry.techFeatures.volRatio20.toFixed(1)}x`);
+          }
+          if (entry.apexQuant.reversalMetrics.isWyckoffSpring) {
+            reasons.push("Wyckoff Spring rũ cung");
+          } else if (entry.apexQuant.reversalMetrics.isMaReclaim) {
+            reasons.push("Lấy lại MA then chốt");
+          }
+          if (entry.techFeatures.isMtfAligned || entry.techFeatures.mtfConsensus === "ALL_BULL") {
+            reasons.push("Đa khung H1+D1+W1 đồng thuận");
+          }
+          if (reasons.length === 0) {
+            reasons.push("Hội tụ đa yếu tố định lượng Apex");
+          }
+          buyTriggerReasonVi = reasons.slice(0, 3).join(" • ");
+        }
 
         items.push({
           symbol: entry.sym,
@@ -1890,6 +2008,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
           isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
           isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
+          isBuyTriggerNow,
+          buyTriggerScore,
+          buyTriggerReasonVi,
           presetsPassed,
         });
       }
@@ -1901,6 +2022,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       // Precompute Presets Count & Sectors Available once during snapshot construction
       const presetsCount: Record<ScreenerPreset, number> = {
         all: items.length,
+        apex_buy_now: 0,
         orca_apex_quant: 0,
         historical_edge: 0,
         orca_master_elite: 0,
@@ -1961,6 +2083,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
 
   const defaultPresetsCount: Record<ScreenerPreset, number> = {
     all: snapshotData?.items?.length ?? 0,
+    apex_buy_now: 0,
     orca_apex_quant: 0,
     historical_edge: 0,
     orca_master_elite: 0,
@@ -2029,7 +2152,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -2143,6 +2266,10 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.minApexScore != null && (x.apexQuantScore == null || x.apexQuantScore < params.minApexScore)) continue;
     if (params.maxExtensionBottom != null && (x.extensionFromBottomPct == null || x.extensionFromBottomPct > params.maxExtensionBottom)) continue;
     if (params.sweetZoneOnly && !x.isSweetLaunchZone) continue;
+
+    // Real-Time Actionable Buy Trigger Filters
+    if (params.buyTriggerOnly && !x.isBuyTriggerNow) continue;
+    if (params.minBuyTriggerScore != null && (x.buyTriggerScore == null || x.buyTriggerScore < params.minBuyTriggerScore)) continue;
 
     filtered.push(x);
   }
