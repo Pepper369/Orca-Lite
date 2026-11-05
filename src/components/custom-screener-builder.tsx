@@ -324,9 +324,9 @@ export function CustomScreenerBuilder({
                   className="input w-full !py-1.5 text-[11px]"
                 >
                   <option value="ALL">Tất cả trạng thái</option>
-                  <option value="AT_BUY_POINT">🎯 Đang chạm điểm mua (At Buy Point)</option>
-                  <option value="NEAR_BUY_POINT">⚡ Sát điểm mua (Near Buy Zone &lt;= 2%)</option>
-                  <option value="WAIT_PULLBACK">⏳ Chờ điều chỉnh (Wait Pullback)</option>
+                  <option value="AT_BUY_POINT">Đang chạm điểm mua (At Buy Point)</option>
+                  <option value="NEAR_BUY_POINT">Sát điểm mua (Near Buy Zone &lt;= 2%)</option>
+                  <option value="WAIT_PULLBACK">Chờ điều chỉnh (Wait Pullback)</option>
                 </select>
               </div>
 
@@ -400,7 +400,7 @@ export function CustomScreenerBuilder({
                     className="size-4 rounded accent-emerald-500 cursor-pointer"
                   />
                   <span className="text-[11px] font-semibold text-text-primary">
-                    ⚡ Bắt buộc đồng thuận Đa khung xu hướng H1 + D1 + W1
+                    Bắt buộc đồng thuận Đa khung xu hướng H1 + D1 + W1
                   </span>
                 </label>
               </div>

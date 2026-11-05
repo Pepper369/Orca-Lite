@@ -18,17 +18,17 @@ type ScreenPayload = {
 
 const SCENARIOS = [
   { id: "all", label: "Tất cả kịch bản", shortLabel: "Tất cả" },
-  { id: "CHART_PATTERN_BREAKOUT", label: "💎 Bứt phá Mẫu hình Biểu đồ (VCP / Cốc / VĐV)", shortLabel: "💎 Mẫu Hình Giá" },
-  { id: "BOTTOM_BULLISH_DIVERGENCE", label: "🌟 Hợp lưu Đáy: MA + Nến + Phân kỳ dương", shortLabel: "🌟 Phân Kỳ Đáy" },
-  { id: "SMC_SWEEP_RECLAIM", label: "🧲 Quét rũ thanh khoản (SMC Spring)", shortLabel: "🧲 Quét SMC" },
-  { id: "VSA_NO_SUPPLY_TEST", label: "🧪 Test cung cạn kiệt (No Supply)", shortLabel: "🧪 Test VSA" },
-  { id: "EMA_RIBBON_ALIGN", label: "🎗️ Hợp lưu dải EMA Ribbon", shortLabel: "🎗️ EMA Ribbon" },
-  { id: "MA50_BOUNCE", label: "🛡️ Nảy hỗ trợ MA50 (Tổ chức)", shortLabel: "🛡️ Nảy MA50" },
-  { id: "MA20_BOUNCE", label: "🎯 Nảy hỗ trợ MA20 (Sóng tăng)", shortLabel: "🎯 Nảy MA20" },
-  { id: "MA200_RECLAIM", label: "👑 Lấy lại MA200 (Thoát đáy)", shortLabel: "👑 Lấy MA200" },
-  { id: "GOLDEN_CROSS_CONFIRM", label: "⚡ Xác nhận Golden Cross", shortLabel: "⚡ Golden Cross" },
-  { id: "MA_SQUEEZE_BREAKOUT", label: "🌀 Nén chặt MA bung nổ", shortLabel: "🌀 Nén MA" },
-  { id: "TREND_PULLBACK", label: "📈 Retest Kênh Tăng", shortLabel: "📈 Retest Kênh" },
+  { id: "CHART_PATTERN_BREAKOUT", label: "Bứt phá Mẫu hình Biểu đồ (VCP / Cốc / VĐV)", shortLabel: "Mẫu Hình Giá" },
+  { id: "BOTTOM_BULLISH_DIVERGENCE", label: "Hợp lưu Đáy: MA + Nến + Phân kỳ dương", shortLabel: "Phân Kỳ Đáy" },
+  { id: "SMC_SWEEP_RECLAIM", label: "Quét rũ thanh khoản (SMC Spring)", shortLabel: "Quét SMC" },
+  { id: "VSA_NO_SUPPLY_TEST", label: "Test cung cạn kiệt (No Supply)", shortLabel: "Test VSA" },
+  { id: "EMA_RIBBON_ALIGN", label: "Hợp lưu dải EMA Ribbon", shortLabel: "EMA Ribbon" },
+  { id: "MA50_BOUNCE", label: "Nảy hỗ trợ MA50 (Tổ chức)", shortLabel: "Nảy MA50" },
+  { id: "MA20_BOUNCE", label: "Nảy hỗ trợ MA20 (Sóng tăng)", shortLabel: "Nảy MA20" },
+  { id: "MA200_RECLAIM", label: "Lấy lại MA200 (Thoát đáy)", shortLabel: "Lấy MA200" },
+  { id: "GOLDEN_CROSS_CONFIRM", label: "Xác nhận Golden Cross", shortLabel: "Golden Cross" },
+  { id: "MA_SQUEEZE_BREAKOUT", label: "Nén chặt MA bung nổ", shortLabel: "Nén MA" },
+  { id: "TREND_PULLBACK", label: "Retest Kênh Tăng", shortLabel: "Retest Kênh" },
 ] as const;
 
 type ViewMode = "table" | "group_scenario" | "group_quality";
@@ -382,8 +382,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
               className="!w-28 !py-1 text-[11.5px]"
               options={[
                 { value: "all", label: "Tất cả hạng" },
-                { value: "A+", label: "⭐ Chỉ A+" },
-                { value: "A", label: "✨ Hạng A+ & A" },
+                { value: "A+", label: "Chỉ A+" },
+                { value: "A", label: "Hạng A+ & A" },
               ]}
             />
 
@@ -440,7 +440,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 onChange={(e) => setChartPatternOnly(e.target.checked)}
                 className="rounded"
               />
-              <span className="text-purple-400 font-semibold">💎 Mẫu hình giá (VCP/Cốc/VĐV)</span>
+              <span className="text-purple-400 font-semibold">Mẫu hình giá (VCP/Cốc/VĐV)</span>
             </label>
 
             <span className="text-text-muted">|</span>
@@ -464,7 +464,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 onChange={(e) => setDivergenceOnly(e.target.checked)}
                 className="rounded"
               />
-              <span className="text-cyan-400 font-medium">⚡ Phân kỳ dương</span>
+              <span className="text-cyan-400 font-medium">Phân kỳ dương</span>
             </label>
 
             <span className="text-text-muted">|</span>
@@ -524,7 +524,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 onChange={(e) => setNearEntryOnly(e.target.checked)}
                 className="rounded accent-emerald-500"
               />
-              <span>🎯 Sát điểm mua (≤ 1.5%)</span>
+              <span>Sát điểm mua (≤ 1.5%)</span>
             </label>
 
             <span className="text-text-muted">|</span>
@@ -536,7 +536,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 onChange={(e) => setMtfAlignedOnly(e.target.checked)}
                 className="rounded accent-amber-500"
               />
-              <span>⚡ Đồng thuận H1+D1+W1</span>
+              <span>Đồng thuận H1+D1+W1</span>
             </label>
           </div>
 
@@ -549,8 +549,8 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 onChange={(v) => setSortBy(v as SortField)}
                 className="!w-40 !py-0.5 text-[10.5px]"
                 options={[
-                  { value: "nearBuyPoint", label: "🎯 Gần điểm mua nhất" },
-                  { value: "mtfScore", label: "⚡ Đồng thuận H1·D1·W1" },
+                  { value: "nearBuyPoint", label: "Gần điểm mua nhất" },
+                  { value: "mtfScore", label: "Đồng thuận H1·D1·W1" },
                   { value: "score", label: "Điểm hợp lưu" },
                   { value: "riskReward", label: "Tỷ lệ R:R" },
                   { value: "change", label: "% Thay đổi" },
@@ -569,7 +569,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 }`}
                 title="Dạng bảng chi tiết"
               >
-                📋 Bảng
+                Bảng
               </button>
               <button
                 type="button"
@@ -579,7 +579,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 }`}
                 title="Phân nhóm theo kịch bản MA"
               >
-                🗂️ Nhóm MA
+                Nhóm MA
               </button>
               <button
                 type="button"
@@ -589,7 +589,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
                 }`}
                 title="Phân nhóm theo chất lượng setup"
               >
-                🏆 Nhóm Hạng
+                Nhóm Hạng
               </button>
             </div>
           </div>
@@ -728,7 +728,7 @@ export function MaCandleConfluenceScreener({ defaultSector }: { defaultSector?: 
         <div className="border-t border-line px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 bg-surface-elevated/10">
           <MetaLine meta={meta ?? data?.meta} />
           <div className="text-[10.5px] text-text-muted">
-            💡 Bấm vào bất kỳ dòng nào để mở rộng kế hoạch giao dịch chi tiết (Visual R:R Bar &amp; Vùng Stop Loss).
+            Bấm vào bất kỳ dòng nào để mở rộng kế hoạch giao dịch chi tiết (Visual R:R Bar &amp; Vùng Stop Loss).
           </div>
         </div>
       </Panel>
@@ -774,7 +774,7 @@ function ConfluenceRowItem({
             )}
             {row.divergenceSummary && (
               <span className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1 py-0.2 text-[9px] font-semibold" title={row.divergenceSummary}>
-                ⚡ {row.divergenceSummary}
+                {row.divergenceSummary}
               </span>
             )}
             {row.isMtfAligned ? (
@@ -782,7 +782,7 @@ function ConfluenceRowItem({
                 className="rounded bg-gradient-to-r from-emerald-500/25 to-amber-500/25 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.2 text-[9px] font-bold"
                 title={row.mtfSummary || "Đồng thuận Tăng Đa Khung: H1 🟢 · D1 🟢 · W1 🟢"}
               >
-                ⚡ H1·D1·W1 🟢
+                H1·D1·W1 🟢
               </span>
             ) : row.mtfConsensus === "D1_W1_BULL" ? (
               <span
@@ -802,7 +802,7 @@ function ConfluenceRowItem({
                 className="rounded bg-gradient-to-r from-cyan-500/30 to-amber-500/30 text-amber-200 border border-amber-400/60 px-1.5 py-0.2 text-[9px] font-bold shadow-xs animate-pulse"
                 title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương tươi mới"
               >
-                👑 Tam Hợp Lưu
+                Tam Hợp Lưu
               </span>
             )}
             {row.isDualDivergence && (
@@ -810,7 +810,7 @@ function ConfluenceRowItem({
                 className="rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/50 px-1 py-0.2 text-[9px] font-semibold"
                 title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng lúc tạo phân kỳ dương"
               >
-                ⚡ Phân Kỳ Kép
+                Phân Kỳ Kép
               </span>
             )}
             {row.foreignAccumulating && (
@@ -823,7 +823,7 @@ function ConfluenceRowItem({
                 className="rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1 py-0.2 text-[9px] font-semibold"
                 title={`Mẫu hình kỹ thuật: ${row.chartPatternNameVi}`}
               >
-                💎 {row.chartPatternNameVi}
+                {row.chartPatternNameVi}
               </span>
             )}
             {row.hasMultiLayerConfluence && (
@@ -831,7 +831,7 @@ function ConfluenceRowItem({
                 className="rounded bg-gradient-to-r from-amber-500/25 to-purple-500/25 text-amber-300 border border-amber-500/40 px-1 py-0.2 text-[9px] font-bold"
                 title="Siêu hợp lưu Đa tầng (Mẫu hình + Đường MA + Nến đảo chiều + Volume)"
               >
-                ⭐ Siêu Hợp Lưu
+                Siêu Hợp Lưu
               </span>
             )}
             {row.alertWorthy && <Badge tone="bull">Alert</Badge>}
@@ -975,7 +975,7 @@ function ConfluenceRowItem({
               {/* Left Column: Visual Risk-Reward Gauge */}
               <div className="rounded-lg border border-line/60 bg-surface-elevated/70 p-3 space-y-2">
                 <div className="flex items-center justify-between text-[11px] font-semibold text-text-primary">
-                  <span>📐 Thước đo Lợi nhuận / Rủi ro (R:R 1:{row.riskReward})</span>
+                  <span>Thước đo Lợi nhuận / Rủi ro (R:R 1:{row.riskReward})</span>
                   <span className="text-text-muted text-[10px]">Cơ chế: {row.stopLossType === "BELOW_MA" ? "Dưới dải MA" : "Dưới chân nến"}</span>
                 </div>
 
@@ -1002,7 +1002,7 @@ function ConfluenceRowItem({
 
               {/* Right Column: Technical MA Context & Tags */}
               <div className="rounded-lg border border-line/60 bg-surface-elevated/70 p-3 space-y-2 text-[11px]">
-                <div className="font-semibold text-text-primary">🔍 Bối cảnh Kỹ thuật Hợp lưu</div>
+                <div className="font-semibold text-text-primary">Bối cảnh Kỹ thuật Hợp lưu</div>
                 <div className="grid grid-cols-2 gap-2 text-[10.5px]">
                   <div>
                     <span className="text-text-muted">Độ dốc MA neo: </span>
@@ -1013,7 +1013,7 @@ function ConfluenceRowItem({
                   <div>
                     <span className="text-text-muted">Trạng thái Ribbon: </span>
                     <span className="font-medium text-text-secondary">
-                      {row.maAlignment === "BULLISH_RIBBON" ? "🚀 Ribbon Tăng Trưởng" : "Thường"}
+                      {row.maAlignment === "BULLISH_RIBBON" ? "Ribbon Tăng Trưởng" : "Thường"}
                     </span>
                   </div>
                   <div>
@@ -1031,7 +1031,7 @@ function ConfluenceRowItem({
                 {row.topChartPattern && (
                   <div className="mt-2 rounded border border-purple-500/30 bg-purple-500/10 p-2 text-[10.5px] space-y-1">
                     <div className="flex items-center justify-between font-semibold text-purple-300">
-                      <span>💎 {row.topChartPattern.nameVi}</span>
+                      <span>{row.topChartPattern.nameVi}</span>
                       <span className="text-[10px] text-purple-400">Độ tin cậy: {row.topChartPattern.score}/100</span>
                     </div>
                     <div className="text-text-muted">{row.topChartPattern.description}</div>
@@ -1059,7 +1059,7 @@ function ConfluenceRowItem({
                   >
                     <div className="flex items-center justify-between font-semibold">
                       <span className={row.isMtfAligned ? "text-emerald-300" : "text-text-primary"}>
-                        ⚡ Đồng thuận Đa Khung Thời Gian ({row.mtfScore}/100)
+                        Đồng thuận Đa Khung Thời Gian ({row.mtfScore}/100)
                       </span>
                       <span className="text-[10px] font-bold text-text-muted">{row.mtfBadgeVi}</span>
                     </div>
@@ -1159,10 +1159,10 @@ function ConfluenceRowItem({
             <div className="mt-3 rounded-lg border border-line/60 bg-surface-elevated/70 p-3 space-y-2 text-[11px]">
               <div className="font-semibold text-text-primary flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
-                  <span>⚡ Phân Tích 5 Trụ Cột Hợp Lưu Đa Nguồn</span>
+                  <span>Phân Tích 5 Trụ Cột Hợp Lưu Đa Nguồn</span>
                   {row.setupQuality === "A+" && (
                     <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.2 rounded font-bold">
-                      ⭐ SIÊU HỢP LƯU (Top Setup)
+                      SIÊU HỢP LƯU (Top Setup)
                     </span>
                   )}
                 </span>

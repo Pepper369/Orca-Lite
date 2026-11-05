@@ -174,7 +174,7 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                 : "bg-surface-elevated text-text-muted hover:text-text-primary border border-transparent"
             }`}
           >
-            🌟 Săn Đáy A+ (Hợp lưu cao)
+            Săn Đáy A+ (Hợp lưu cao)
           </button>
           <button
             type="button"
@@ -185,7 +185,7 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                 : "bg-surface-elevated text-text-muted hover:text-text-primary border border-transparent"
             }`}
           >
-            🛡️ Đáy xác nhận (3-Bar)
+            Đáy xác nhận (3-Bar)
           </button>
           <button
             type="button"
@@ -196,7 +196,7 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                 : "bg-surface-elevated text-text-muted hover:text-text-primary border border-transparent"
             }`}
           >
-            ⚡ Bắt rút chân (Búa/Nhíp)
+            Bắt rút chân (Búa/Nhíp)
           </button>
           <button
             type="button"
@@ -388,27 +388,27 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
                         <div className="flex flex-wrap gap-1 mt-1">
                           {conf?.rsiBullishDiv && (
                             <span className="rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1 py-0.2 text-[9px] font-medium">
-                              ✦ RSI Phân kỳ
+                              RSI Phân kỳ
                             </span>
                           )}
                           {conf?.atLowerBb && (
                             <span className="rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-1 py-0.2 text-[9px] font-medium">
-                              ✦ Chạm BB Dưới
+                              Chạm BB Dưới
                             </span>
                           )}
                           {conf?.volClimax && (
                             <span className="rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 px-1 py-0.2 text-[9px] font-medium">
-                              ✦ Vol Gom Hàng
+                              Vol Gom Hàng
                             </span>
                           )}
                           {conf?.volDryUp && (
                             <span className="rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 px-1 py-0.2 text-[9px] font-medium">
-                              ✦ Cạn Kiệt Cung
+                              Cạn Kiệt Cung
                             </span>
                           )}
                           {conf?.distTo20dLowPct != null && conf.distTo20dLowPct <= 3.5 && (
                             <span className="rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 px-1 py-0.2 text-[9px] font-medium">
-                              ✦ Đáy 20P (+{conf.distTo20dLowPct.toFixed(1)}%)
+                              Đáy 20P (+{conf.distTo20dLowPct.toFixed(1)}%)
                             </span>
                           )}
                         </div>
@@ -499,7 +499,7 @@ export function CandlestickScreener({ defaultSector }: { defaultSector?: string 
         <div className="border-t border-line px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2">
           <MetaLine meta={meta ?? data?.meta} />
           <p className="text-[10.5px] text-text-muted">
-            💡 Gợi ý: Click vào từng dòng để xem hướng dẫn nến xác nhận và điều kiện vào lệnh.
+            Gợi ý: Click vào từng dòng để xem hướng dẫn nến xác nhận và điều kiện vào lệnh.
           </p>
         </div>
       </Panel>

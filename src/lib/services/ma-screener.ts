@@ -421,18 +421,18 @@ function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreen
   };
 
   const signals: string[] = [];
-  if (retestMa200) signals.push("🛡️ Test MA200 dài hạn rút chân thành công (Hỗ trợ Kim cương)");
-  if (reclaimMa200) signals.push("🚀 Vừa vượt cản MA200 dài hạn (Tổ chức xác nhận)");
-  if (retestMa50) signals.push("🛡️ Test MA50 trung hạn giữ vững nhịp tăng");
-  if (reclaimMa50) signals.push("⚡ Lấy lại MA50 trung hạn sau nhịp rũ");
-  if (retestMa20) signals.push("🎯 Test MA20 ngắn hạn rút chân");
-  if (reclaimMa20) signals.push("📈 Vượt cản MA20 ngắn hạn");
+  if (retestMa200) signals.push("Test MA200 dài hạn rút chân thành công (Hỗ trợ Kim cương)");
+  if (reclaimMa200) signals.push("Vừa vượt cản MA200 dài hạn (Tổ chức xác nhận)");
+  if (retestMa50) signals.push("Test MA50 trung hạn giữ vững nhịp tăng");
+  if (reclaimMa50) signals.push("Lấy lại MA50 trung hạn sau nhịp rũ");
+  if (retestMa20) signals.push("Test MA20 ngắn hạn rút chân");
+  if (reclaimMa20) signals.push("Vượt cản MA20 ngắn hạn");
 
   if (recentGoldenCross && crossBarsAgo !== null && crossType) {
     if (crossBarsAgo === 0) {
-      signals.push(`🔥 Vừa Golden Cross HÔM NAY (${crossType})`);
+      signals.push(`Vừa Golden Cross HÔM NAY (${crossType})`);
     } else {
-      signals.push(`✨ Golden Cross T-${crossBarsAgo} (${crossType})`);
+      signals.push(`Golden Cross T-${crossBarsAgo} (${crossType})`);
     }
   } else if (ma50CrossUpMa200) {
     signals.push("Golden Cross Dài Hạn (MA50 cắt lên MA200)");

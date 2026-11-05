@@ -21,11 +21,11 @@ interface ScreenerBacktestModalProps {
 }
 
 const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
-  { id: "apex_buy_now", label: "⚡ Điểm Mua Kích Hoạt (Real-Time)", desc: "Kích hoạt điểm mua tức thời: Wyckoff Spring + Vùng Vàng chân sóng + Bùng nổ khối lượng gom + R:R >= 2.0x" },
-  { id: "orca_apex_quant", label: "👑 Chân Sóng Apex (Early Bottom)", desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone)" },
-  { id: "price_action_trained", label: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Edge)", desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50" },
-  { id: "orca_master", label: "🏆 Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
-  { id: "smart_money", label: "🦈 Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
+  { id: "apex_buy_now", label: "Điểm Mua Kích Hoạt (Real-Time)", desc: "Kích hoạt điểm mua tức thời: Wyckoff Spring + Vùng Vàng chân sóng + Bùng nổ khối lượng gom + R:R >= 2.0x" },
+  { id: "orca_apex_quant", label: "Chân Sóng Apex (Early Bottom)", desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone)" },
+  { id: "price_action_trained", label: "Hành Động Giá Tối Ưu Lịch Sử (Trained Edge)", desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50" },
+  { id: "orca_master", label: "Orca Master Composite Elite", desc: "Mô hình tổng hợp 5 trụ cột: RS Rating 80+, Kênh tăng EMA20 > EMA50, Vol > 1.2x và dòng tiền cá mập" },
+  { id: "smart_money", label: "Dấu Chân Cá Mập & Pocket Pivot", desc: "Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng bùng nổ vượt đỉnh volume các phiên giảm 10 phiên trước" },
   { id: "quant_edge", label: "Ưu Thế Quant OU (Mean Reversion)", desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ bán rã t½ tối ưu" },
   { id: "breakout", label: "Breakout Khối lượng", desc: "Vượt đỉnh 20 phiên + Khối lượng đột biến > 1.3x TB20" },
   { id: "canslim", label: "CANSLIM Momentum", desc: "Đà tăng trưởng: RSI > 52, EMA20 > EMA50, thanh khoản tích cực" },
@@ -33,12 +33,12 @@ const STRATEGIES: { id: StrategyType; label: string; desc: string }[] = [
   { id: "value", label: "Bắt đáy Giá trị", desc: "Mua gom khi RSI < 45 và nến đảo chiều cắt vượt EMA20" },
 ];
 
-const MARKET_REGIMES: { id: MarketRegimeType; label: string; icon: string }[] = [
-  { id: "all", label: "🌟 Toàn Chu Kỳ (2020 - Nay)", icon: "🌟" },
-  { id: "uptrend_2020_2021", label: "🚀 Siêu Sóng Uptrend (2020 - 2021)", icon: "🚀" },
-  { id: "downtrend_2022", label: "🔻 Khủng Hoảng Downtrend (2022)", icon: "🔻" },
-  { id: "sideway_2023_2024", label: "⚖️ Tích Lũy Phân Hóa (2023 - 2024)", icon: "⚖️" },
-  { id: "recent_2025_2026", label: "📈 Chu Kỳ Hiện Tại (2025 - 2026)", icon: "📈" },
+const MARKET_REGIMES: { id: MarketRegimeType; label: string }[] = [
+  { id: "all", label: "Toàn Chu Kỳ (2020 - Nay)" },
+  { id: "uptrend_2020_2021", label: "Siêu Sóng Uptrend (2020 - 2021)" },
+  { id: "downtrend_2022", label: "Khủng Hoảng Downtrend (2022)" },
+  { id: "sideway_2023_2024", label: "Tích Lũy Phân Hóa (2023 - 2024)" },
+  { id: "recent_2025_2026", label: "Chu Kỳ Hiện Tại (2025 - 2026)" },
 ];
 
 export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModalProps) {
@@ -425,11 +425,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                               marketRegime === rm.regime ? "bg-primary/10 font-medium" : ""
                             }`}
                           >
-                            <td className="py-2.5 px-3 text-foreground font-semibold flex items-center gap-1.5">
-                              {rm.regime === "uptrend_2020_2021" && "🚀"}
-                              {rm.regime === "downtrend_2022" && "🔻"}
-                              {rm.regime === "sideway_2023_2024" && "⚖️"}
-                              {rm.regime === "recent_2025_2026" && "📈"}
+                            <td className="py-2.5 px-3 text-foreground font-semibold">
                               <span>{rm.regimeName}</span>
                             </td>
                             <td className="py-2.5 px-3 text-center text-muted-foreground font-mono text-[11px]">{rm.period}</td>
@@ -491,7 +487,7 @@ export function ScreenerBacktestModal({ isOpen, onClose }: ScreenerBacktestModal
                   </div>
 
                   <p className="text-[11px] text-muted-foreground italic bg-surface/40 p-2.5 rounded-lg border border-border/30">
-                    💡 <strong>Lý do định lượng:</strong> {data.adaptiveWeightRecommendation.rationale}
+                    <strong>Lý do định lượng:</strong> {data.adaptiveWeightRecommendation.rationale}
                   </p>
                 </div>
               )}

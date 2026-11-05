@@ -998,7 +998,7 @@ function detectPresets(item: {
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
-  // 00. ⚡ Điểm Mua Kích Hoạt Tức Thời (Real-Time Actionable Buy Trigger)
+  // 00. Điểm Mua Kích Hoạt Tức Thời (Real-Time Actionable Buy Trigger)
   const isTriggerPriceValid =
     item.price != null &&
     item.changePercent != null &&

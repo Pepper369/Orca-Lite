@@ -396,7 +396,7 @@ export function analyzeMaCandleRow(
   if (hasMaLock && hasCandleLock && hasDivergenceLock) {
     confluenceTier = "DIAMOND_TRIPLE";
     isDiamondTriple = true;
-    confluenceTags.push("👑 Tam Hợp Lưu Kim Cương");
+    confluenceTags.push("Tam Hợp Lưu Kim Cương");
   } else if (
     (hasMaLock && hasCandleLock) ||
     (hasMaLock && hasDivergenceLock) ||
@@ -435,7 +435,7 @@ export function analyzeMaCandleRow(
   if (isBottomDivergence) {
     scenario = "BOTTOM_BULLISH_DIVERGENCE";
     scenarioLabel = isDiamondTriple
-      ? "👑 Tam Hợp Lưu Đáy"
+      ? "Tam Hợp Lưu Đáy"
       : isDualDivergence
       ? "Hợp Lưu Đáy (Phân Kỳ Kép)"
       : "Hợp Lưu Đáy (MA + Nến + Phân Kỳ)";

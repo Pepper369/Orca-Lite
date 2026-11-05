@@ -589,7 +589,7 @@ export function WyckoffScreener({ defaultSector }: { defaultSector: string | nul
                               onClick={() => setCalcRow(r)}
                               className="rounded bg-accent-primary/10 border border-accent-primary/30 text-accent-primary px-1.5 py-0.2 text-[9px] font-semibold hover:bg-accent-primary hover:text-white transition flex items-center gap-1 ml-auto"
                             >
-                              ⚡ Đi tiền
+                              Đi tiền
                             </button>
                           </div>
                         ) : null}

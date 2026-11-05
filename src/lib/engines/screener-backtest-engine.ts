@@ -177,23 +177,23 @@ export interface ScreenerBacktestResult {
 
 export const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: string }> = {
   apex_buy_now: {
-    name: "⚡ Điểm Mua Kích Hoạt Tức Thời (Real-Time Buy Trigger)",
+    name: "Điểm Mua Kích Hoạt Tức Thời (Real-Time Buy Trigger)",
     desc: "Kích hoạt điểm mua tức thời: Hợp lưu Wyckoff Spring / Vùng Vàng chân sóng + Bùng nổ khối lượng gom Pocket Pivot + Dư địa cản trên >= 5% + R:R >= 2.0x.",
   },
   orca_apex_quant: {
-    name: "👑 Chân Sóng Apex (Early Bottom Reversal)",
+    name: "Chân Sóng Apex (Early Bottom Reversal)",
     desc: "Mô hình siêu hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Ngăn chặn chạy xa đáy (Sweet Launch Zone) + Tỷ lệ Risk/Reward >= 2.2x.",
   },
   price_action_trained: {
-    name: "🎯 Hành Động Giá Tối Ưu Lịch Sử (Trained Price Action & Edge)",
+    name: "Hành Động Giá Tối Ưu Lịch Sử (Trained Price Action & Edge)",
     desc: "Mô hình định lượng học từ lịch sử giá: Kết hợp tỷ lệ thắng thực nghiệm quá khứ >= 55%, áp lực gom Up/Down Vol >= 1.05x và kiểm chứng nảy hỗ trợ MA20/MA50.",
   },
   orca_master: {
-    name: "🏆 Orca Master Composite Elite (Đa Trụ Cột Đỉnh Cao)",
+    name: "Orca Master Composite Elite (Đa Trụ Cột Đỉnh Cao)",
     desc: "Mô hình tổng hợp 5 trụ cột: RS Rating O'Neil >= 80, Trật tự kênh tăng EMA20 > EMA50, thanh khoản đột biến > 1.2x TB20 và dòng tiền cá mập tích lũy.",
   },
   smart_money: {
-    name: "🦈 Dấu Chân Cá Mập & Pocket Pivot (Smart Money Inflow)",
+    name: "Dấu Chân Cá Mập & Pocket Pivot (Smart Money Inflow)",
     desc: "Tín hiệu Pocket Pivot chuẩn Gil Morales & Wyckoff: Khối lượng phiên tăng vượt đỉnh volume mọi phiên giảm trong 10 phiên trước đó và giá giữ vững trên EMA20.",
   },
   breakout: {

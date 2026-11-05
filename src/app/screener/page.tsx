@@ -53,9 +53,9 @@ export const SCREENER_GROUPS: {
     title: "Định lượng & Dòng tiền",
     badge: "Quant Edge",
     items: [
-      { id: "apex-buy-now", label: "⚡ Điểm Mua Kích Hoạt" },
-      { id: "apex-quant", label: "👑 Chân Sóng Apex" },
-      { id: "historical-edge", label: "🎯 Lợi Thế Lịch Sử (Trained Edge)" },
+      { id: "apex-buy-now", label: "Điểm Mua Kích Hoạt" },
+      { id: "apex-quant", label: "Chân Sóng Apex" },
+      { id: "historical-edge", label: "Lợi Thế Lịch Sử (Trained Edge)" },
       { id: "orca-master", label: "Orca Master (Top 90+)" },
       { id: "smart-money", label: "Dòng Tiền Cá Mập" },
       { id: "buy-point", label: "Điểm Mua Tối Ưu (Buy Zone)" },

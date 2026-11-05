@@ -246,7 +246,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                     buyZoneFilter === "NEAR_BUY" ? "bg-emerald-500/20 text-emerald-400 font-bold" : "text-text-muted"
                   }`}
                 >
-                  🎯 Sát điểm mua (≤2%)
+                  Sát điểm mua (≤2%)
                 </button>
                 <button
                   type="button"
@@ -255,7 +255,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                     buyZoneFilter === "AT_BUY" ? "bg-cyan-500/20 text-cyan-400 font-bold" : "text-text-muted"
                   }`}
                 >
-                  ⚡ Đúng điểm mua (≤1%)
+                  Đúng điểm mua (≤1%)
                 </button>
               </div>
 
@@ -393,7 +393,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                     }}
                   >
                     <div className="flex items-center gap-1 text-accent-primary">
-                      <span>🎯 Điểm Mua & Vùng Gom</span>
+                      <span>Điểm Mua & Vùng Gom</span>
                       <ArrowUpDown className="size-3" />
                     </div>
                   </th>

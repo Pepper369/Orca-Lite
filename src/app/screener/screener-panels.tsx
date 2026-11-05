@@ -187,7 +187,7 @@ export function BuyTriggerBadge({
 
   return (
     <span
-      title={`⚡ Điểm Mua Kích Hoạt Tức Thời: ${score ? `${score}/100đ` : "Kích hoạt"}${reasonVi ? ` · ${reasonVi}` : ""}`}
+      title={`Điểm Mua Kích Hoạt Tức Thời: ${score ? `${score}/100đ` : "Kích hoạt"}${reasonVi ? ` · ${reasonVi}` : ""}`}
       className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 shadow-xs tracking-tight"
     >
       <span className="relative flex size-2">
@@ -232,7 +232,7 @@ export function ApexQuantBadgeComponent({
   if (isSuper) {
     colorClass = "bg-amber-500/20 text-amber-200 border-amber-400/50 font-bold shadow-xs";
     dotClass = "bg-amber-400 animate-pulse";
-    label = "👑 Chân Sóng";
+    label = "Chân Sóng";
   } else if (isLeader) {
     colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-400/40 font-semibold";
     dotClass = "bg-emerald-400";
@@ -643,7 +643,7 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     profitFactor: 3.45,
     sampleTrades: 520,
     riskReward: 3.3,
-    tagline: "⚡ Điểm Mua Kích Hoạt Tức Thời: Wyckoff Spring + Pocket Pivot bùng nổ + Khóa chặt Vùng Vàng + R:R >= 2.0x",
+    tagline: "Điểm Mua Kích Hoạt Tức Thời: Wyckoff Spring + Pocket Pivot bùng nổ + Khóa chặt Vùng Vàng + R:R >= 2.0x",
   },
   orca_apex_quant: {
     winRatePct: 78.5,
@@ -651,7 +651,7 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     profitFactor: 2.95,
     sampleTrades: 480,
     riskReward: 3.1,
-    tagline: "👑 Chân Sóng Apex: Đảo chiều chân sóng Wyckoff + Quant OU Z-score + Sweet Launch Zone (Chưa chạy xa đáy)",
+    tagline: "Chân Sóng Apex: Đảo chiều chân sóng Wyckoff + Quant OU Z-score + Sweet Launch Zone (Chưa chạy xa đáy)",
   },
   historical_edge: {
     winRatePct: 76.8,
@@ -659,7 +659,7 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     profitFactor: 2.82,
     sampleTrades: 460,
     riskReward: 2.9,
-    tagline: "🎯 Hành động giá tối ưu lịch sử: Tỷ lệ thắng thực nghiệm >= 60%, Up/Down Vol >= 1.25x",
+    tagline: "Hành động giá tối ưu lịch sử: Tỷ lệ thắng thực nghiệm >= 60%, Up/Down Vol >= 1.25x",
   },
   orca_master_elite: {
     winRatePct: 74.2,
@@ -731,7 +731,7 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     profitFactor: 2.85,
     sampleTrades: 420,
     riskReward: 2.9,
-    tagline: "👑 Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim + Nến đảo chiều chuẩn + Phân kỳ dương tươi mới (RSI/MACD)",
+    tagline: "Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim + Nến đảo chiều chuẩn + Phân kỳ dương tươi mới (RSI/MACD)",
   },
   quant_edge: {
     winRatePct: 68.0,
@@ -787,9 +787,9 @@ export interface PresetTabItem {
 export const PRESET_TABS: PresetTabItem[] = [
   // Core Orca
   { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
-  { id: "apex_buy_now", category: "core", label: "⚡ Điểm Mua Kích Hoạt", dotColor: "bg-emerald-400", desc: "Kích hoạt điểm mua tức thời: Chạm chuẩn điểm mua / Vùng Vàng + Nổ vol gom hàng Pocket Pivot / Cá mập + Dư địa cản trên >= 5% + R:R >= 2.0x" },
-  { id: "orca_apex_quant", category: "core", label: "👑 Chân Sóng Apex", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
-  { id: "historical_edge", category: "core", label: "🎯 Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
+  { id: "apex_buy_now", category: "core", label: "Điểm Mua Kích Hoạt", dotColor: "bg-emerald-400", desc: "Kích hoạt điểm mua tức thời: Chạm chuẩn điểm mua / Vùng Vàng + Nổ vol gom hàng Pocket Pivot / Cá mập + Dư địa cản trên >= 5% + R:R >= 2.0x" },
+  { id: "orca_apex_quant", category: "core", label: "Chân Sóng Apex", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
+  { id: "historical_edge", category: "core", label: "Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
   { id: "near_buy_point", category: "core", label: "Sát Điểm Mua (Buy Zone)", dotColor: "bg-emerald-400", desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
@@ -798,7 +798,7 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "mtf_candle_cluster", category: "price_action", label: "Cụm Nến Đa Khung", dotColor: "bg-rose-400", desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
   { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-emerald-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
   { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-amber-400", desc: "Bộ hợp lưu tối thượng: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng đồng thuận xu hướng TĂNG" },
-  { id: "bottom_confluence", category: "price_action", label: "👑 Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy Đỉnh Cao: Hỗ trợ MA/Reclaim MA + Cụm nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
+  { id: "bottom_confluence", category: "price_action", label: "Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy Đỉnh Cao: Hỗ trợ MA/Reclaim MA + Cụm nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
   { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
   { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
   { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM)", dotColor: "bg-purple-400", desc: "Bollinger nén trong Keltner chuẩn bị bùng nổ" },
@@ -1936,7 +1936,7 @@ export function VnScreener({
                               title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương"
                               className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-cyan-500/20 to-amber-500/20 border border-cyan-400/50 px-1.5 py-0.5 text-[9.5px] font-bold text-cyan-200"
                             >
-                              💎 Tam Hợp Lưu
+                              Tam Hợp Lưu
                             </span>
                           )}
                           {row.isDualDivergence && (
@@ -1944,7 +1944,7 @@ export function VnScreener({
                               title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng tạo phân kỳ dương"
                               className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-400/40 px-1.5 py-0.5 text-[9.5px] font-semibold text-cyan-300"
                             >
-                              ⚡ Phân Kỳ Kép
+                              Phân Kỳ Kép
                             </span>
                           )}
                           {row.apexQuantScore != null && (
@@ -2027,7 +2027,7 @@ export function VnScreener({
                         {row.buyPoint != null && (
                           <div className="flex items-center justify-between text-[10.5px] rounded-lg bg-accent-primary/10 border border-accent-primary/20 px-2 py-1 mb-2">
                             <span className="text-text-secondary flex items-center gap-1">
-                              🎯 Điểm mua: <b className="text-accent-primary">{fmtNum(row.buyPoint, 2)}</b>
+                              Điểm mua: <b className="text-accent-primary">{fmtNum(row.buyPoint, 2)}</b>
                             </span>
                             {buyDiff != null && (
                               <span
@@ -2123,7 +2123,7 @@ export function VnScreener({
                       onClick={() => handleSort("absBuyDiff")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                      Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 text-center font-medium">Tín hiệu MA</th>
                     <th
@@ -2159,13 +2159,13 @@ export function VnScreener({
                       onClick={() => handleSort("apexQuantScore")}
                       className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
                     >
-                      👑 Chân Sóng Apex {sortKey === "apexQuantScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                      Chân Sóng Apex {sortKey === "apexQuantScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
                       onClick={() => handleSort("historicalEdgeScore")}
                       className="py-2.5 text-center font-medium cursor-pointer hover:text-emerald-400 text-emerald-300"
                     >
-                      🎯 Lợi Thế Lịch Sử {sortKey === "historicalEdgeScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                      Lợi Thế Lịch Sử {sortKey === "historicalEdgeScore" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 text-left font-medium">Trụ Cột Dẫn Dắt</th>
                     <th
@@ -2190,7 +2190,7 @@ export function VnScreener({
                       onClick={() => handleSort("absBuyDiff")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                      Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 pr-3.5 text-center font-medium">Thao Tác</th>
                   </>
@@ -2239,7 +2239,7 @@ export function VnScreener({
                       onClick={() => handleSort("absBuyDiff")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
-                      🎯 Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
+                      Điểm Mua {sortKey === "absBuyDiff" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 pr-3.5 text-center font-medium">Thao Tác</th>
                   </>
@@ -2575,7 +2575,7 @@ export function VnScreener({
                             title="Tam Hợp Lưu Kim Cương: Hỗ trợ MA + Nến đảo chiều chuẩn + Phân kỳ dương"
                             className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-cyan-500/20 to-amber-500/20 border border-cyan-400/50 px-1 py-0.2 text-[9px] font-bold text-cyan-200"
                           >
-                            💎 Tam Hợp Lưu
+                            Tam Hợp Lưu
                           </span>
                         )}
                         {row.isDualDivergence && (
@@ -2583,7 +2583,7 @@ export function VnScreener({
                             title="Phân kỳ kép đồng pha: Cả RSI và MACD cùng tạo phân kỳ dương"
                             className="inline-flex items-center gap-1 rounded bg-cyan-500/15 border border-cyan-400/40 px-1 py-0.2 text-[9px] font-semibold text-cyan-300"
                           >
-                            ⚡ Phân Kỳ Kép
+                            Phân Kỳ Kép
                           </span>
                         )}
                         {row.exchange && (
@@ -2839,7 +2839,7 @@ export function VnScreener({
                           <div>{row.buyStrategy ?? "Bệ đỡ hội tụ"}</div>
                           {row.isMtfAligned && (
                             <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400">
-                              ⚡ Đồng thuận H1·D1·W1
+                              Đồng thuận H1·D1·W1
                             </span>
                           )}
                         </td>
@@ -2979,7 +2979,7 @@ export function VnScreener({
                             ) : null}
                             {row.candlePattern && row.candlePattern !== row.chartPattern ? (
                               <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">
-                                ✦ {row.candlePattern} {row.candleAgeBars === 0 ? <span className="text-[9px] text-emerald-400 font-bold">(T+0)</span> : row.candleAgeBars != null ? <span className="text-[9px] text-text-muted font-normal">(T-{row.candleAgeBars})</span> : null}
+                                {row.candlePattern} {row.candleAgeBars === 0 ? <span className="text-[9px] text-emerald-400 font-bold">(T+0)</span> : row.candleAgeBars != null ? <span className="text-[9px] text-text-muted font-normal">(T-{row.candleAgeBars})</span> : null}
                               </span>
                             ) : null}
                             {!row.chartPattern && !row.candlePattern && (
@@ -2991,7 +2991,7 @@ export function VnScreener({
                                   className="inline-flex items-center gap-0.5 rounded bg-gradient-to-r from-emerald-500/25 to-amber-500/25 border border-emerald-500/40 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300"
                                   title={row.mtfSummary || "Đồng thuận Tăng Đa Khung: H1 🟢 · D1 🟢 · W1 🟢"}
                                 >
-                                  ⚡ H1·D1·W1 🟢🟢🟢
+                                  H1·D1·W1 🟢🟢🟢
                                 </span>
                               ) : row.mtfConsensus === "D1_W1_BULL" ? (
                                 <span
@@ -3003,7 +3003,7 @@ export function VnScreener({
                               ) : null}
                               {row.hasBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
-                                  ⚡ {row.divergenceSummary || "Phân kỳ dương"}
+                                  {row.divergenceSummary || "Phân kỳ dương"}
                                 </span>
                               )}
                               {row.foreignAccumulating && (
@@ -3078,7 +3078,7 @@ export function VnScreener({
                             </span>
                           ) : row.candlePattern ? (
                             <span className="inline-block rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">
-                              ✦ {row.candlePattern}
+                              {row.candlePattern}
                             </span>
                           ) : (
                             <span className="text-text-muted text-[10px]">—</span>
