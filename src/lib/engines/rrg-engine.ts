@@ -72,6 +72,81 @@ export function determineQuadrant(rsRatio: number, rsMomentum: number): RrgQuadr
   return "IMPROVING";
 }
 
+export const SECTOR_NAME_TO_CODE: Record<string, string> = {
+  "Ngân hàng": "BANK",
+  "Bất động sản": "REAL",
+  "Chứng khoán": "SEC",
+  "Thép": "STEEL",
+  "Thép & Vật liệu": "STEEL",
+  "Bán lẻ": "RETAIL",
+  "Dầu khí": "OIL",
+  "Công nghệ": "TECH",
+  "Công nghệ thông tin": "TECH",
+  "Thực phẩm & Đồ uống": "FOOD",
+  "Hóa chất & Phân bón": "CHEM",
+  "Điện lực": "POWER",
+  "Điện & Năng lượng": "POWER",
+  "Cảng biển & Vận tải": "TRANS",
+  "Hàng không & Vận tải": "TRANS",
+  "Kho hậu cần": "TRANS",
+  "Khu công nghiệp": "IND_PARK",
+  "BĐS Khu công nghiệp": "IND_PARK",
+  "Xây dựng & Vật liệu": "BUILD",
+  "Xây dựng & Hạ tầng": "BUILD",
+  "Dược phẩm & Y tế": "PHARMA",
+  "Dệt may & Thủy sản": "TEXTILE",
+  "Bảo hiểm": "INSUR",
+  "Nông nghiệp": "AGRI",
+  "Nông nghiệp & Chăn nuôi": "AGRI",
+  "Ô tô & Phụ tùng": "AUTO",
+};
+
+export function matchSymbolToIcbSector(symbol: string, sectorName?: string | null): string {
+  const sym = symbol.toUpperCase().trim();
+  for (const s of VN_ICB_SECTORS) {
+    if (s.symbols.includes(sym)) return s.code;
+  }
+  if (sectorName) {
+    const trimmed = sectorName.trim();
+    if (SECTOR_NAME_TO_CODE[trimmed]) return SECTOR_NAME_TO_CODE[trimmed];
+    for (const [name, code] of Object.entries(SECTOR_NAME_TO_CODE)) {
+      if (trimmed.includes(name) || name.includes(trimmed)) return code;
+    }
+  }
+  return "OTHER";
+}
+
+export interface SectorRrgCoord {
+  sectorCode: string;
+  sectorName: string;
+  quadrant: RrgQuadrant;
+  rsRatio: number;
+  rsMomentum: number;
+  change5dPct: number;
+}
+
+export function evaluateSectorAlphaResonance(quadrant: RrgQuadrant | null | undefined): {
+  scoreBonus: number;
+  isLeading: boolean;
+  isImproving: boolean;
+  isLagging: boolean;
+  tagVi: string | null;
+} {
+  if (!quadrant) {
+    return { scoreBonus: 0, isLeading: false, isImproving: false, isLagging: false, tagVi: null };
+  }
+  if (quadrant === "LEADING") {
+    return { scoreBonus: 12, isLeading: true, isImproving: false, isLagging: false, tagVi: "Sóng Ngành Leading" };
+  }
+  if (quadrant === "IMPROVING") {
+    return { scoreBonus: 7, isLeading: false, isImproving: true, isLagging: false, tagVi: "Sóng Ngành Đang Lên" };
+  }
+  if (quadrant === "LAGGING") {
+    return { scoreBonus: -8, isLeading: false, isImproving: false, isLagging: true, tagVi: "Cảnh báo Ngành Tụt Hậu" };
+  }
+  return { scoreBonus: 0, isLeading: false, isImproving: false, isLagging: false, tagVi: null };
+}
+
 /**
  * Tính toán tọa độ RRG theo thuật toán chuẩn J-DeK (Julius de Kempenaer)
  * Normalized xung quanh điểm gốc 100, 100.

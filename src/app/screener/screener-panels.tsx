@@ -518,29 +518,106 @@ export function ConfluenceBadge({
   return <span className="text-[10px] text-text-muted">{score ? `${score}đ` : "—"}</span>;
 }
 
-export function SqueezeBadge({ state }: { state: string | null | undefined }) {
+export function SqueezeBadge({
+  state,
+  bars,
+  slope,
+}: {
+  state?: string | null | undefined;
+  bars?: number | null | undefined;
+  slope?: string | null | undefined;
+}) {
   if (state === "fired_bull") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400 whitespace-nowrap">
-        Bứt phá tăng (Tín hiệu Mua)
+      <span
+        title={`Bứt phá Volatility Squeeze Tăng${slope ? ` (${slope})` : ""}`}
+        className="inline-flex items-center gap-1 rounded bg-emerald-500/25 border border-emerald-400 px-1.5 py-0.5 text-[10px] font-bold text-emerald-200 whitespace-nowrap animate-pulse"
+      >
+        <span className="size-1.5 rounded-full bg-emerald-400" />
+        Nổ Squeeze
       </span>
     );
   }
   if (state === "fired_bear") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold text-rose-400 whitespace-nowrap">
-        Gãy giảm (Cảnh báo Bán)
+      <span
+        title="Gãy giảm Volatility Squeeze (Cảnh báo Bán)"
+        className="inline-flex items-center gap-1 rounded bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 text-[10px] font-bold text-rose-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-rose-400" />
+        Gãy Squeeze
       </span>
     );
   }
   if (state === "squeeze_on") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-purple-500/20 border border-purple-500/40 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 whitespace-nowrap animate-pulse">
-        Đang nén
+      <span
+        title={`Đang nén biến động (${bars ? `${bars} phiên` : "chặt"})${slope ? ` · Đà: ${slope}` : ""}`}
+        className="inline-flex items-center gap-1 rounded bg-purple-500/20 border border-purple-500/40 px-1.5 py-0.5 text-[10px] font-medium text-purple-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-purple-400" />
+        Nén {bars ? `${bars}P` : "Squeeze"}
       </span>
     );
   }
   return <span className="text-[10px] text-text-muted">—</span>;
+}
+
+export function SectorRrgBadge({
+  quadrant,
+  rsRatio,
+  rsMomentum,
+}: {
+  quadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | string | null | undefined;
+  rsRatio?: number | null | undefined;
+  rsMomentum?: number | null | undefined;
+}) {
+  if (!quadrant) return null;
+  if (quadrant === "LEADING") {
+    return (
+      <span
+        title={`Ngành Dẫn Dắt (Leading RRG) · RS-Ratio: ${rsRatio?.toFixed(1) ?? "—"}, RS-Mom: ${rsMomentum?.toFixed(1) ?? "—"}`}
+        className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-emerald-400" />
+        Dẫn dắt RRG
+      </span>
+    );
+  }
+  if (quadrant === "IMPROVING") {
+    return (
+      <span
+        title={`Ngành Cải Thiện (Improving RRG) · RS-Ratio: ${rsRatio?.toFixed(1) ?? "—"}, RS-Mom: ${rsMomentum?.toFixed(1) ?? "—"}`}
+        className="inline-flex items-center gap-1 rounded bg-blue-500/20 border border-blue-500/40 px-1.5 py-0.5 text-[9.5px] font-medium text-blue-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-blue-400" />
+        Cải thiện RRG
+      </span>
+    );
+  }
+  if (quadrant === "WEAKENING") {
+    return (
+      <span
+        title={`Ngành Suy Yếu (Weakening RRG) · RS-Ratio: ${rsRatio?.toFixed(1) ?? "—"}, RS-Mom: ${rsMomentum?.toFixed(1) ?? "—"}`}
+        className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9.5px] text-amber-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-amber-400" />
+        Suy yếu RRG
+      </span>
+    );
+  }
+  if (quadrant === "LAGGING") {
+    return (
+      <span
+        title={`Ngành Tụt Hậu (Lagging RRG) · RS-Ratio: ${rsRatio?.toFixed(1) ?? "—"}, RS-Mom: ${rsMomentum?.toFixed(1) ?? "—"}`}
+        className="inline-flex items-center gap-1 rounded bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.5 text-[9.5px] text-rose-300 whitespace-nowrap"
+      >
+        <span className="size-1.5 rounded-full bg-rose-400" />
+        Tụt hậu RRG
+      </span>
+    );
+  }
+  return null;
 }
 
 export function SuperTrendBadge({ dir }: { dir: "up" | "down" | null | undefined }) {
@@ -793,6 +870,7 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
   { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
   { id: "near_buy_point", category: "core", label: "Sát Điểm Mua (Buy Zone)", dotColor: "bg-emerald-400", desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
+  { id: "sector_leading", category: "core", label: "Ngành Dẫn Dắt RRG", dotColor: "bg-emerald-400", desc: "Cổ phiếu thuộc ngành Dẫn dắt (Leading Quadrant RRG) với RS-Ratio & RS-Momentum vượt trội VN-Index" },
 
   // Price Action & MTF
   { id: "mtf_candle_cluster", category: "price_action", label: "Cụm Nến Đa Khung", dotColor: "bg-rose-400", desc: "Cụm mô hình nến đảo chiều tăng đồng thuận H1, D1 và W1 mới nhất (T+0 / T+1)" },
@@ -876,6 +954,8 @@ export function VnScreener({
   const [minPiotroskiScore, setMinPiotroskiScore] = useState("");
   const [minTradingValue, setMinTradingValue] = useState("");
   const [mtfOnly, setMtfOnly] = useState(false);
+  const [rrgQuadrant, setRrgQuadrant] = useState("ALL");
+  const [squeezeFilter, setSqueezeFilter] = useState("ALL");
 
   // Sort state
   const initialSortKey =
@@ -925,6 +1005,8 @@ export function VnScreener({
     minPiotroskiScore: "",
     minTradingValue: "",
     mtfOnly: false,
+    rrgQuadrant: "ALL",
+    squeezeFilter: "ALL",
     mtfCandleOnly: false,
     minMtfCandleScore: "",
     vsaOnly: false,
@@ -998,6 +1080,12 @@ export function VnScreener({
     if (applied.minPiotroskiScore) p.set("minPiotroskiScore", applied.minPiotroskiScore);
     if (applied.minTradingValue) p.set("minTradingValue", applied.minTradingValue);
     if (applied.mtfOnly) p.set("mtfOnly", "true");
+    if (applied.rrgQuadrant && applied.rrgQuadrant !== "ALL") p.set("rrgQuadrant", applied.rrgQuadrant);
+    if (applied.squeezeFilter === "FIRED") {
+      p.set("squeezeFiredOnly", "true");
+    } else if (applied.squeezeFilter === "ON") {
+      p.set("squeezeOnly", "true");
+    }
     if (applied.mtfCandleOnly) p.set("mtfCandleOnly", "true");
     if (applied.minMtfCandleScore) p.set("minMtfCandleScore", applied.minMtfCandleScore);
     if (applied.vsaOnly) p.set("vsaOnly", "true");
@@ -1043,6 +1131,8 @@ export function VnScreener({
       minPiotroskiScore,
       minTradingValue,
       mtfOnly,
+      rrgQuadrant,
+      squeezeFilter,
       mtfCandleOnly: false,
       minMtfCandleScore: "",
       vsaOnly: false,
@@ -1074,6 +1164,8 @@ export function VnScreener({
     minPiotroskiScore,
     minTradingValue,
     mtfOnly,
+    rrgQuadrant,
+    squeezeFilter,
     mutate,
   ]);
 
@@ -1102,6 +1194,8 @@ export function VnScreener({
     setMinPiotroskiScore("");
     setMinTradingValue("");
     setMtfOnly(false);
+    setRrgQuadrant("ALL");
+    setSqueezeFilter("ALL");
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1128,6 +1222,8 @@ export function VnScreener({
       minPiotroskiScore: "",
       minTradingValue: "",
       mtfOnly: false,
+      rrgQuadrant: "ALL",
+      squeezeFilter: "ALL",
       mtfCandleOnly: false,
       minMtfCandleScore: "",
       vsaOnly: false,
@@ -1679,6 +1775,32 @@ export function VnScreener({
                 <option value="DEATH_CROSS">Cắt Tử thần (Death Cross)</option>
               </select>
             </label>
+            <label>
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Ngành RRG</span>
+              <select
+                value={rrgQuadrant}
+                onChange={(e) => setRrgQuadrant(e.target.value)}
+                className="input !w-full !py-1.5 text-[12px]"
+              >
+                <option value="ALL">Tất cả góc RRG</option>
+                <option value="LEADING">Dẫn dắt (Leading)</option>
+                <option value="IMPROVING">Cải thiện (Improving)</option>
+                <option value="WEAKENING">Suy yếu (Weakening)</option>
+                <option value="LAGGING">Tụt hậu (Lagging)</option>
+              </select>
+            </label>
+            <label>
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-text-muted">Squeeze (TTM)</span>
+              <select
+                value={squeezeFilter}
+                onChange={(e) => setSqueezeFilter(e.target.value)}
+                className="input !w-full !py-1.5 text-[12px]"
+              >
+                <option value="ALL">Tất cả Squeeze</option>
+                <option value="FIRED">Nổ Squeeze Tăng (Fired)</option>
+                <option value="ON">Đang nén (Squeeze On)</option>
+              </select>
+            </label>
             <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
             <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
             <Field label="ROE tối thiểu (%)" value={minRoe} onChange={setMinRoe} small placeholder="15" />
@@ -1897,6 +2019,13 @@ export function VnScreener({
                                   {row.sector}
                                 </span>
                               )}
+                              {row.sectorRrgQuadrant && (
+                                <SectorRrgBadge
+                                  quadrant={row.sectorRrgQuadrant}
+                                  rsRatio={row.sectorRsRatio}
+                                  rsMomentum={row.sectorRsMomentum}
+                                />
+                              )}
                             </div>
                             <div className="text-[10.5px] text-text-muted truncate max-w-[170px] mt-0.5">
                               {row.name}
@@ -1929,6 +2058,13 @@ export function VnScreener({
                               isTriggerNow={row.isBuyTriggerNow}
                               score={row.buyTriggerScore}
                               reasonVi={row.buyTriggerReasonVi}
+                            />
+                          )}
+                          {row.squeezeState && row.squeezeState !== "squeeze_off" && (
+                            <SqueezeBadge
+                              state={row.squeezeState}
+                              bars={row.squeezeBars}
+                              slope={row.squeezeMomentumSlope}
                             />
                           )}
                           {row.isDiamondConfluence && (
@@ -2599,7 +2735,18 @@ export function VnScreener({
                         {row.name}
                       </div>
                     </td>
-                    <td className="py-2.5 text-[11px] text-text-secondary">{row.sector}</td>
+                    <td className="py-2.5 text-[11px] text-text-secondary">
+                      <div>{row.sector}</div>
+                      {row.sectorRrgQuadrant && (
+                        <div className="mt-0.5">
+                          <SectorRrgBadge
+                            quadrant={row.sectorRrgQuadrant}
+                            rsRatio={row.sectorRsRatio}
+                            rsMomentum={row.sectorRsMomentum}
+                          />
+                        </div>
+                      )}
+                    </td>
 
                     {viewTab === "overview" && (
                       <>
@@ -2965,7 +3112,11 @@ export function VnScreener({
                           )}
                         </td>
                         <td className="py-2.5 text-center">
-                          <SqueezeBadge state={row.squeezeState} />
+                          <SqueezeBadge
+                            state={row.squeezeState}
+                            bars={row.squeezeBars}
+                            slope={row.squeezeMomentumSlope}
+                          />
                         </td>
                         <td className="py-2.5 text-center">
                           <SuperTrendBadge dir={row.superTrendDir} />

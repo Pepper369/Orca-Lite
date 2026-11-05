@@ -38,6 +38,11 @@ export interface AnalyzeMaCandleExtra {
   } | null;
   indexBars?: OhlcvBar[] | null;
   h1Bars?: OhlcvBar[] | null;
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  sectorRsRatio?: number | null;
+  sectorRsMomentum?: number | null;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  squeezeBars?: number | null;
 }
 
 export interface MaCandleConfluenceRow {
@@ -99,6 +104,17 @@ export interface MaCandleConfluenceRow {
   foreignAccumulating?: boolean;
   rsRating20?: number | null; // % relative performance vs VN-Index
   isMarketLeader?: boolean;
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  sectorRsRatio?: number | null;
+  sectorRsMomentum?: number | null;
+  isSectorLeading?: boolean;
+  isSectorLagging?: boolean;
+  rrgBonus?: number;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  squeezeBars?: number | null;
+  isSqueezeFiredBull?: boolean;
+  isSqueezeOn?: boolean;
+  squeezeBonus?: number;
   rsi14?: number | null;
   macdHist?: number | null;
   momentumStatus?: "BULLISH_EXPANSION" | "MOMENTUM_REVERSAL" | "NEUTRAL";
@@ -731,7 +747,41 @@ export function analyzeMaCandleRow(
   const mtfBonus = mtf.isAligned ? 6 : mtf.consensus === "D1_W1_BULL" ? 3 : 0;
   // Next-Gen Confluence Tier Bonuses: Diamond Triple +5, Dual Divergence +4, MA Reclaim +3, Steep Down -4
   const tierBonus = (isDiamondTriple ? 5 : 0) + (isDualDivergence ? 4 : 0) + (isMaReclaim ? 3 : 0) + (maSlopeStatus === "STEEP_DOWN" ? -4 : 0);
-  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus + tierBonus)));
+
+  // Sector RRG & Volatility Squeeze Bonuses (Biên độ 1 & 2)
+  const sectorRrgQuadrant = extra?.sectorRrgQuadrant ?? null;
+  const isSectorLeading = sectorRrgQuadrant === "LEADING";
+  const isSectorLagging = sectorRrgQuadrant === "LAGGING";
+  const squeezeState = extra?.squeezeState ?? null;
+  const squeezeBars = extra?.squeezeBars ?? null;
+  const isSqueezeFiredBull = squeezeState === "fired_bull";
+  const isSqueezeOn = squeezeState === "squeeze_on";
+
+  let rrgBonus = 0;
+  if (isSectorLeading) {
+    rrgBonus = 5;
+    confluenceTags.push("Sóng Ngành Leading");
+  } else if (sectorRrgQuadrant === "IMPROVING") {
+    rrgBonus = 3;
+    confluenceTags.push("Sóng Ngành Đang Lên");
+  } else if (isSectorLagging) {
+    rrgBonus = -4;
+    confluenceTags.push("Cảnh báo Ngành Tụt Hậu");
+  }
+
+  let squeezeBonus = 0;
+  if (isSqueezeFiredBull) {
+    squeezeBonus = 6;
+    confluenceTags.push("Nổ Volatility Squeeze");
+  } else if (isSqueezeOn && (squeezeBars == null || squeezeBars >= 4)) {
+    squeezeBonus = 3;
+    confluenceTags.push(`Squeeze Nén (${squeezeBars ?? 6}P)`);
+  } else if (squeezeState === "fired_bear") {
+    squeezeBonus = -6;
+    confluenceTags.push("Cảnh báo Squeeze Xả");
+  }
+
+  const confluenceScore = Math.max(10, Math.min(100, Math.round(rawSum + mtfBonus + tierBonus + rrgBonus + squeezeBonus)));
 
   // 10. Trade Setup Calculator
   const distToMaPct =
@@ -842,6 +892,17 @@ export function analyzeMaCandleRow(
     foreignAccumulating,
     rsRating20,
     isMarketLeader,
+    sectorRrgQuadrant,
+    sectorRsRatio: extra?.sectorRsRatio ?? null,
+    sectorRsMomentum: extra?.sectorRsMomentum ?? null,
+    isSectorLeading,
+    isSectorLagging,
+    rrgBonus,
+    squeezeState,
+    squeezeBars,
+    isSqueezeFiredBull,
+    isSqueezeOn,
+    squeezeBonus,
     rsi14: rsiVal,
     macdHist: macdHistVal,
     momentumStatus,

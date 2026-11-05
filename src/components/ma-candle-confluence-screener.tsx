@@ -835,9 +835,43 @@ function ConfluenceRowItem({
               </span>
             )}
             {row.alertWorthy && <Badge tone="bull">Alert</Badge>}
+            {row.isSqueezeFiredBull && (
+              <span
+                className="rounded bg-emerald-500/25 border border-emerald-400 px-1 py-0.2 text-[9px] font-bold text-emerald-200 animate-pulse"
+                title="Bứt phá Volatility Squeeze Tăng (Fired Bull)"
+              >
+                Nổ Squeeze
+              </span>
+            )}
+            {row.isSqueezeOn && (
+              <span
+                className="rounded bg-purple-500/20 border border-purple-500/35 px-1 py-0.2 text-[9px] font-medium text-purple-300"
+                title={`Đang nén biến động (${row.squeezeBars ? `${row.squeezeBars}P` : "chặt"})`}
+              >
+                Nén {row.squeezeBars ? `${row.squeezeBars}P` : "Squeeze"}
+              </span>
+            )}
           </div>
-          <div className="text-[10.5px] text-text-muted truncate max-w-[130px] mt-0.5">
-            {row.sector ?? row.name ?? "—"}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[10.5px] text-text-muted truncate max-w-[130px]">
+              {row.sector ?? row.name ?? "—"}
+            </span>
+            {row.sectorRrgQuadrant === "LEADING" && (
+              <span
+                className="rounded bg-emerald-500/20 border border-emerald-500/40 px-1 py-0.2 text-[8.5px] font-bold text-emerald-300 shrink-0"
+                title={`Ngành Dẫn Dắt (Leading RRG) · RS-Ratio: ${row.sectorRsRatio?.toFixed(1) ?? "—"}`}
+              >
+                Dẫn dắt RRG
+              </span>
+            )}
+            {row.sectorRrgQuadrant === "IMPROVING" && (
+              <span
+                className="rounded bg-blue-500/20 border border-blue-500/40 px-1 py-0.2 text-[8.5px] font-medium text-blue-300 shrink-0"
+                title={`Ngành Cải Thiện (Improving RRG) · RS-Ratio: ${row.sectorRsRatio?.toFixed(1) ?? "—"}`}
+              >
+                Cải thiện RRG
+              </span>
+            )}
           </div>
         </td>
 
@@ -1218,6 +1252,38 @@ function ConfluenceRowItem({
                   </div>
                 </div>
               </div>
+
+              {(row.sectorRrgQuadrant || row.squeezeState) && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line/40 text-[10px]">
+                  {row.sectorRrgQuadrant && (
+                    <div className="inline-flex items-center gap-1.5 rounded bg-surface-base px-2 py-0.5 border border-line/40">
+                      <span className="text-text-muted">Cộng Hưởng Ngành RRG:</span>
+                      <strong className={row.sectorRrgQuadrant === "LEADING" ? "text-emerald-400 font-bold" : row.sectorRrgQuadrant === "IMPROVING" ? "text-blue-400 font-semibold" : row.sectorRrgQuadrant === "LAGGING" ? "text-rose-400" : "text-amber-400"}>
+                        {row.sectorRrgQuadrant}
+                      </strong>
+                      {row.sectorRsRatio != null && <span className="text-text-muted font-mono text-[9px]">(RS-Ratio: {row.sectorRsRatio.toFixed(1)})</span>}
+                      {row.rrgBonus != null && row.rrgBonus !== 0 && (
+                        <span className={`font-mono font-bold ${row.rrgBonus > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {row.rrgBonus > 0 ? `+${row.rrgBonus}đ` : `${row.rrgBonus}đ`}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {row.squeezeState && row.squeezeState !== "squeeze_off" && (
+                    <div className="inline-flex items-center gap-1.5 rounded bg-surface-base px-2 py-0.5 border border-line/40">
+                      <span className="text-text-muted">Volatility Squeeze:</span>
+                      <strong className={row.isSqueezeFiredBull ? "text-emerald-400 font-bold" : row.isSqueezeOn ? "text-purple-300 font-medium" : "text-text-muted"}>
+                        {row.isSqueezeFiredBull ? "Nổ Squeeze Tăng" : row.isSqueezeOn ? `Đang Nén ${row.squeezeBars ?? 0} Phiên` : row.squeezeState}
+                      </strong>
+                      {row.squeezeBonus != null && row.squeezeBonus !== 0 && (
+                        <span className={`font-mono font-bold ${row.squeezeBonus > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {row.squeezeBonus > 0 ? `+${row.squeezeBonus}đ` : `${row.squeezeBonus}đ`}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </td>
         </tr>

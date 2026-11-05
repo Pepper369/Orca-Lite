@@ -11,6 +11,7 @@ import {
   type MaCandleConfluenceRow,
   type AnalyzeMaCandleExtra,
 } from "../engines/ma-candle-confluence";
+import { ttmSqueeze } from "../engines/oscillators";
 
 export type { MaCandleScenario, MaCandleConfluenceRow, AnalyzeMaCandleExtra };
 export { analyzeMaCandleRow };
@@ -81,10 +82,16 @@ export async function screenMaCandleConfluence(
     }
     const q = quoteBy.get(sym);
     const foreign = foreignMap.get(sym) ?? null;
+    const highs = pack.bars.map((b) => b.high);
+    const lows = pack.bars.map((b) => b.low);
+    const closes = pack.bars.map((b) => b.close);
+    const sq = ttmSqueeze(highs, lows, closes, 20, 2, 20, 1.5);
 
     const row = analyzeMaCandleRow(sym, pack.bars, q, {
       foreign,
       indexBars,
+      squeezeState: sq.state,
+      squeezeBars: sq.squeezeBars,
     });
     if (!row) continue;
 

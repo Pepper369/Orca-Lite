@@ -67,12 +67,22 @@ import {
   type ApexQuantCategory,
   type ApexQuantResult,
 } from "../engines/orca-apex-quant-engine";
+import {
+  VN_ICB_SECTORS,
+  matchSymbolToIcbSector,
+  computeRrgTrail,
+  determineQuadrant,
+  evaluateSectorAlphaResonance,
+  type SectorRrgCoord,
+  type RrgQuadrant,
+} from "../engines/rrg-engine";
 
 export type ScreenerPreset =
   | "all"
   | "apex_buy_now"
   | "orca_apex_quant"
   | "historical_edge"
+  | "sector_leading"
   | "near_buy_point"
   | "orca_master_elite"
   | "smart_money_inflow"
@@ -235,6 +245,18 @@ export type ScreenerStockItem = {
   isBuyTriggerNow?: boolean | null;
   buyTriggerScore?: number | null; // 1 - 99
   buyTriggerReasonVi?: string | null;
+  // Sector RRG Alpha Resonance (Biên độ 1)
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  sectorRsRatio?: number | null;
+  sectorRsMomentum?: number | null;
+  isSectorLeading?: boolean;
+  isSectorLagging?: boolean;
+  sectorResonanceBonus?: number | null;
+  // Volatility Squeeze Dynamics (Biên độ 2)
+  squeezeBars?: number | null;
+  isSqueezeFiredBull?: boolean;
+  isSqueezeOn?: boolean;
+  squeezeMomentumSlope?: "ACCELERATING_BULL" | "DECELERATING_BULL" | "ACCELERATING_BEAR" | "DECELERATING_BEAR" | "FLAT" | null;
 };
 
 export type ScreenerFilterParams = {
@@ -289,6 +311,11 @@ export type ScreenerFilterParams = {
   minMtfCandleScore?: number;
   vsaOnly?: boolean;
   minOverheadRoom?: number;
+  // Sector RRG & Volatility Squeeze Filters (Biên độ 1 & 2)
+  rrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | "all";
+  sectorLeadingOnly?: boolean;
+  squeezeOnly?: boolean;
+  squeezeFiredOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -450,6 +477,10 @@ function analyzeTechFeatures(
       ...maRes,
       adx14: null,
       squeezeState: null,
+      squeezeBars: null,
+      isSqueezeFiredBull: false,
+      isSqueezeOn: false,
+      squeezeMomentumSlope: null,
       superTrendDir: null,
       chartPattern: null,
       topChartPattern: null as DetectedChartPattern | null,
@@ -480,9 +511,13 @@ function analyzeTechFeatures(
   }
 
   let sqState: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" = "squeeze_off";
+  let sqBars = 0;
+  let sqSlope: "ACCELERATING_BULL" | "DECELERATING_BULL" | "ACCELERATING_BEAR" | "DECELERATING_BEAR" | "FLAT" = "FLAT";
   if (n >= 38) {
     const sqData = ttmSqueeze(highs, lows, closes, 20, 2, 20, 1.5);
     sqState = sqData.state;
+    sqBars = sqData.squeezeBars;
+    sqSlope = sqData.momentumSlope;
   }
 
   let stDir: "up" | "down" | null = null;
@@ -608,6 +643,10 @@ function analyzeTechFeatures(
     ...maRes,
     adx14: lastAdx != null ? Number(lastAdx.toFixed(1)) : null,
     squeezeState: sqState,
+    squeezeBars: sqBars,
+    isSqueezeFiredBull: sqState === "fired_bull",
+    isSqueezeOn: sqState === "squeeze_on",
+    squeezeMomentumSlope: sqSlope,
     superTrendDir: stDir,
     chartPattern: patternLabel,
     topChartPattern: topPattern,
@@ -995,6 +1034,12 @@ function detectPresets(item: {
   riskReward?: number | null;
   candlePatternScore?: number | null;
   isDualDivergence?: boolean | null;
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  isSectorLeading?: boolean | null;
+  isSectorLagging?: boolean | null;
+  isSqueezeFiredBull?: boolean | null;
+  isSqueezeOn?: boolean | null;
+  squeezeBars?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1020,6 +1065,7 @@ function detectPresets(item: {
     (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 54) ||
     (item.foreignNetVal != null && item.foreignNetVal > 0.3) ||
     (item.upDownVolRatio != null && item.upDownVolRatio >= 1.12) ||
+    item.isSqueezeFiredBull === true ||
     item.smartMoneySignal === "POCKET_PIVOT" ||
     item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
     item.vsaSignal === "NO_SUPPLY" ||
@@ -1037,13 +1083,17 @@ function detectPresets(item: {
     item.superTrendDir === "up" ||
     (item.mtfScore != null && item.mtfScore >= 60);
 
+  // Sector drag check: If sector is LAGGING, require stronger apex score (>= 72)
+  const isSectorOk = !item.isSectorLagging || (item.apexQuantScore != null && item.apexQuantScore >= 72);
+
   const isBuyTriggerNow =
     isTriggerPriceValid &&
     isInExecutionZone &&
     hasApexConfluence &&
     hasVolumeIgnition &&
     hasRunwayRiskReward &&
-    hasMtfConsensus;
+    hasMtfConsensus &&
+    isSectorOk;
 
   if (isBuyTriggerNow) {
     passes.push("apex_buy_now");
@@ -1227,9 +1277,23 @@ function detectPresets(item: {
     passes.push("vcp");
   }
 
-  // 10. TTM Squeeze
-  if (item.squeezeState === "squeeze_on" || item.squeezeState === "fired_bull") {
+  // 10. TTM Squeeze & Volatility Breakout (Biên độ 2)
+  if (
+    item.squeezeState === "squeeze_on" ||
+    item.squeezeState === "fired_bull" ||
+    item.isSqueezeFiredBull === true ||
+    (item.isSqueezeOn === true && (item.squeezeBars == null || item.squeezeBars >= 4))
+  ) {
     passes.push("ttm_squeeze");
+  }
+
+  // 10b. Sector Alpha Resonance: Ngành Dẫn Dắt (Biên độ 1)
+  if (
+    item.isSectorLeading === true ||
+    item.sectorRrgQuadrant === "LEADING" ||
+    (item.sectorRrgQuadrant === "IMPROVING" && ((item.orcaMasterScore != null && item.orcaMasterScore >= 60) || item.confluenceScore >= 60))
+  ) {
+    passes.push("sector_leading");
   }
 
   // 11. Sát Điểm Mua Nhất (Near Buy Point / Buy Zone)
@@ -1513,6 +1577,41 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
       }
       const rsMap = calculateUniverseRsRatings(stockHistories);
 
+      // Pre-calculate Sector RRG coordinates for 18 ICB sectors (Biên độ 1: Sector Alpha Resonance)
+      const sectorRrgMap = new Map<string, SectorRrgCoord>();
+      if (indexBars.length >= 20) {
+        const benchCloses = indexBars.map((b: any) => b.close);
+        const benchDates = indexBars.map((b: any) => new Date(b.time).toISOString().split("T")[0]);
+
+        for (const secDef of VN_ICB_SECTORS) {
+          let targetPrices: number[] = [];
+          for (const sym of secDef.symbols) {
+            const sBars = ohlcvMap.get(sym)?.bars;
+            if (sBars && sBars.length >= 15) {
+              targetPrices = sBars.map((b: any) => b.close);
+              break;
+            }
+          }
+          if (targetPrices.length >= 15) {
+            const trail = computeRrgTrail(targetPrices, benchCloses, benchDates, 5);
+            if (trail.length) {
+              const latest = trail[trail.length - 1];
+              const firstInTrail = trail[0];
+              const change5d = Math.round(((latest.rsRatio - firstInTrail.rsRatio) / firstInTrail.rsRatio) * 10000) / 100;
+              const quadrant = determineQuadrant(latest.rsRatio, latest.rsMomentum);
+              sectorRrgMap.set(secDef.code, {
+                sectorCode: secDef.code,
+                sectorName: secDef.name,
+                quadrant,
+                rsRatio: latest.rsRatio,
+                rsMomentum: latest.rsMomentum,
+                change5dPct: change5d,
+              });
+            }
+          }
+        }
+      }
+
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
       const orcaInputs: OrcaMasterInput[] = [];
@@ -1566,6 +1665,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         mtfCandle: MtfCandleClusterResult;
         trainedHistorical: HistoricalEdgeMetrics;
         apexQuant: ApexQuantResult;
+        sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+        sectorRsRatio?: number | null;
+        sectorRsMomentum?: number | null;
+        isSectorLeading: boolean;
+        isSectorLagging: boolean;
+        sectorResonanceBonus: number;
       }[] = [];
 
       for (const sym of symbols) {
@@ -1737,6 +1842,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           ma50: techFeatures.ma50,
         });
 
+        // Sector RRG Alpha Resonance (Biên độ 1)
+        const secCode = matchSymbolToIcbSector(sym, sec?.sector ?? sectorOf(sym));
+        const rrgCoord = sectorRrgMap.get(secCode);
+        const sectorRrgQuadrant = rrgCoord?.quadrant ?? null;
+        const isSectorLeading = sectorRrgQuadrant === "LEADING";
+        const isSectorLagging = sectorRrgQuadrant === "LAGGING";
+        const sectorResonance = evaluateSectorAlphaResonance(sectorRrgQuadrant);
+
         // 4. State-of-the-art Apex Quant Confluence & Early Bottom Reversal Engine
         const apexQuant = evaluateApexQuant({
           symbol: sym,
@@ -1749,6 +1862,9 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           piotroskiFScore,
           altmanZone,
           isMtfAligned: techFeatures.isMtfAligned,
+          sectorRrgQuadrant,
+          squeezeState: techFeatures.squeezeState,
+          squeezeBars: techFeatures.squeezeBars,
         });
 
         intermediateEntries.push({
@@ -1801,6 +1917,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           mtfCandle,
           trainedHistorical,
           apexQuant,
+          sectorRrgQuadrant,
+          sectorRsRatio: rrgCoord?.rsRatio ?? null,
+          sectorRsMomentum: rrgCoord?.rsMomentum ?? null,
+          isSectorLeading,
+          isSectorLagging,
+          sectorResonanceBonus: sectorResonance.scoreBonus,
         });
       }
 
@@ -1868,6 +1990,12 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           riskReward: entry.buyPointPlan.riskReward,
           candlePatternScore: entry.techFeatures.candlePatternScore,
           isDualDivergence: entry.techFeatures.isDualDivergence,
+          sectorRrgQuadrant: entry.sectorRrgQuadrant,
+          isSectorLeading: entry.isSectorLeading,
+          isSectorLagging: entry.isSectorLagging,
+          isSqueezeFiredBull: entry.techFeatures.isSqueezeFiredBull,
+          isSqueezeOn: entry.techFeatures.isSqueezeOn,
+          squeezeBars: entry.techFeatures.squeezeBars,
         });
 
         const hasCandleReversalSnap = Boolean(
@@ -1900,6 +2028,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           if (entry.buyPointPlan.buyZoneStatus === "AT_BUY_POINT") rawTriggerScore += 5;
           if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) rawTriggerScore += 5;
           if (entry.smartMoney.signal === "POCKET_PIVOT" || entry.mtfCandle.vsaSignal === "NO_SUPPLY") rawTriggerScore += 4;
+          // Volatility Squeeze & Sector Leading Alpha Boost
+          if (entry.techFeatures.isSqueezeFiredBull) rawTriggerScore += 5;
+          if (entry.isSectorLeading) rawTriggerScore += 4;
+          if (entry.isSectorLagging) rawTriggerScore -= 5;
           buyTriggerScore = Math.max(1, Math.min(99, rawTriggerScore));
 
           const reasons: string[] = [];
@@ -1907,6 +2039,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
             reasons.push("Chạm chuẩn điểm mua");
           } else if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) {
             reasons.push("Vùng Vàng chân sóng");
+          }
+          if (entry.techFeatures.isSqueezeFiredBull) {
+            reasons.push("Nổ Squeeze bứt phá");
+          } else if (entry.techFeatures.isSqueezeOn && (entry.techFeatures.squeezeBars == null || entry.techFeatures.squeezeBars >= 4)) {
+            reasons.push(`Nén Squeeze (${entry.techFeatures.squeezeBars ?? 6}P)`);
+          }
+          if (entry.isSectorLeading) {
+            reasons.push("Ngành dẫn dắt RRG");
           }
           if (entry.smartMoney.signal === "POCKET_PIVOT") {
             reasons.push("Pocket Pivot gom hàng");
@@ -1966,6 +2106,10 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           volRatio20: entry.techFeatures.volRatio20,
           adx14: entry.techFeatures.adx14,
           squeezeState: entry.techFeatures.squeezeState,
+          squeezeBars: entry.techFeatures.squeezeBars,
+          isSqueezeFiredBull: entry.techFeatures.isSqueezeFiredBull,
+          isSqueezeOn: entry.techFeatures.isSqueezeOn,
+          squeezeMomentumSlope: entry.techFeatures.squeezeMomentumSlope,
           superTrendDir: entry.techFeatures.superTrendDir,
           chartPattern: entry.techFeatures.chartPattern,
           candlePattern: entry.techFeatures.candlePattern,
@@ -2056,6 +2200,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isBuyTriggerNow,
           buyTriggerScore,
           buyTriggerReasonVi,
+          // Sector RRG & Volatility Squeeze Fields (Biên độ 1 & 2)
+          sectorRrgQuadrant: entry.sectorRrgQuadrant,
+          sectorRsRatio: entry.sectorRsRatio,
+          sectorRsMomentum: entry.sectorRsMomentum,
+          isSectorLeading: entry.isSectorLeading,
+          isSectorLagging: entry.isSectorLagging,
+          sectorResonanceBonus: entry.sectorResonanceBonus,
           presetsPassed,
         });
       }
@@ -2070,6 +2221,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         apex_buy_now: 0,
         orca_apex_quant: 0,
         historical_edge: 0,
+        sector_leading: 0,
         orca_master_elite: 0,
         smart_money_inflow: 0,
         near_buy_point: 0,
@@ -2131,6 +2283,7 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
     apex_buy_now: 0,
     orca_apex_quant: 0,
     historical_edge: 0,
+    sector_leading: 0,
     orca_master_elite: 0,
     smart_money_inflow: 0,
     near_buy_point: 0,
@@ -2315,6 +2468,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     // Real-Time Actionable Buy Trigger Filters
     if (params.buyTriggerOnly && !x.isBuyTriggerNow) continue;
     if (params.minBuyTriggerScore != null && (x.buyTriggerScore == null || x.buyTriggerScore < params.minBuyTriggerScore)) continue;
+
+    // Sector RRG & Volatility Squeeze Filters (Biên độ 1 & 2)
+    if (params.rrgQuadrant && params.rrgQuadrant !== "all" && x.sectorRrgQuadrant !== params.rrgQuadrant) continue;
+    if (params.sectorLeadingOnly && !x.isSectorLeading) continue;
+    if (params.squeezeOnly && !x.isSqueezeOn) continue;
+    if (params.squeezeFiredOnly && !x.isSqueezeFiredBull) continue;
 
     filtered.push(x);
   }

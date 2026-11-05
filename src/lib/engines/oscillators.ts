@@ -283,6 +283,8 @@ export function ttmSqueeze(
   squeezeOn: boolean[];
   momentum: (number | null)[];
   state: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear";
+  squeezeBars: number;
+  momentumSlope: "ACCELERATING_BULL" | "DECELERATING_BULL" | "ACCELERATING_BEAR" | "DECELERATING_BEAR" | "FLAT";
 } {
   const n = closes.length;
   const kc = keltner(highs, lows, closes, kcPeriod, kcMult);
@@ -376,7 +378,33 @@ export function ttmSqueeze(
     }
   }
 
-  return { squeezeOn, momentum, state };
+  let squeezeBars = 0;
+  if (n > 0) {
+    if (squeezeOn[n - 1]) {
+      for (let i = n - 1; i >= 0; i--) {
+        if (squeezeOn[i]) squeezeBars++;
+        else break;
+      }
+    } else if (state === "fired_bull" || state === "fired_bear") {
+      for (let i = n - 2; i >= 0; i--) {
+        if (squeezeOn[i]) squeezeBars++;
+        else break;
+      }
+    }
+  }
+
+  let momentumSlope: "ACCELERATING_BULL" | "DECELERATING_BULL" | "ACCELERATING_BEAR" | "DECELERATING_BEAR" | "FLAT" = "FLAT";
+  if (n >= 2) {
+    const curM = momentum[n - 1] ?? 0;
+    const prevM = momentum[n - 2] ?? 0;
+    if (curM >= 0) {
+      momentumSlope = curM >= prevM ? "ACCELERATING_BULL" : "DECELERATING_BULL";
+    } else {
+      momentumSlope = curM <= prevM ? "ACCELERATING_BEAR" : "DECELERATING_BEAR";
+    }
+  }
+
+  return { squeezeOn, momentum, state, squeezeBars, momentumSlope };
 }
 
 /**

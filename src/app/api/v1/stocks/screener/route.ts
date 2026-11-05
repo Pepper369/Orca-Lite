@@ -82,6 +82,10 @@ export async function GET(req: Request) {
     minMtfCandleScore: num(url.searchParams.get("minMtfCandleScore"), 0, 100),
     vsaOnly: url.searchParams.get("vsaOnly") === "true" ? true : undefined,
     minOverheadRoom: num(url.searchParams.get("minOverheadRoom")),
+    rrgQuadrant: (url.searchParams.get("rrgQuadrant") as any) ?? undefined,
+    sectorLeadingOnly: url.searchParams.get("sectorLeadingOnly") === "true" ? true : undefined,
+    squeezeOnly: url.searchParams.get("squeezeOnly") === "true" ? true : undefined,
+    squeezeFiredOnly: url.searchParams.get("squeezeFiredOnly") === "true" ? true : undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order")

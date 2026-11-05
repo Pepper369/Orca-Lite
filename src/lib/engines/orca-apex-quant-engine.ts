@@ -58,6 +58,9 @@ export interface ApexQuantInput {
   piotroskiFScore?: number | null;
   altmanZone?: string | null;
   isMtfAligned?: boolean | null;
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  squeezeBars?: number | null;
 }
 
 export interface ApexQuantResult {
@@ -77,6 +80,13 @@ export interface ApexQuantResult {
   tripleBarrierRiskReward: number;
   historicalWinRatePct: number;
   upDownVolRatio: number;
+  sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
+  isSectorLeading: boolean;
+  isSectorLagging: boolean;
+  squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
+  squeezeBars?: number | null;
+  isSqueezeFiredBull: boolean;
+  isSqueezeOn: boolean;
   verdictVi: string;
   highlights: string[];
 }
@@ -242,8 +252,24 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   const bars = normalized.bars;
   const symbol = normalized.symbol || "STOCK";
   const currentPrice = normalized.currentPrice ?? (bars[bars.length - 1]?.close || 0);
-  const { quote, activeBuyRatioPct, foreignNetValBillion, rsRating, piotroskiFScore, altmanZone, isMtfAligned } = normalized;
+  const {
+    quote,
+    activeBuyRatioPct,
+    foreignNetValBillion,
+    rsRating,
+    piotroskiFScore,
+    altmanZone,
+    isMtfAligned,
+    sectorRrgQuadrant,
+    squeezeState,
+    squeezeBars,
+  } = normalized;
   const highlights: string[] = [];
+
+  const isSqueezeFiredBull = squeezeState === "fired_bull";
+  const isSqueezeOn = squeezeState === "squeeze_on";
+  const isSectorLeading = sectorRrgQuadrant === "LEADING";
+  const isSectorLagging = sectorRrgQuadrant === "LAGGING";
 
   // 1. Analyze Bottom Reversal Dynamics
   const rev = analyzeBottomReversal(bars, currentPrice);
@@ -296,7 +322,7 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   }
 
   // =========================================================================
-  // PILLAR 1: Bottom Reversal & Wyckoff Spring Dynamics (Weight: 30%)
+  // PILLAR 1: Bottom Reversal, Wyckoff Spring & Volatility Squeeze (Weight: 30%)
   // =========================================================================
   let pillar1 = 45;
   if (rev.isWyckoffSpring) {
@@ -310,6 +336,17 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   if (topBullCandle) {
     pillar1 += Math.round((topBullCandle.score || 75) * 0.15);
     highlights.push(topBullCandle.nameVi);
+  }
+  // Volatility Squeeze Resonance (Biên độ 2)
+  if (isSqueezeFiredBull) {
+    pillar1 += 18;
+    highlights.push("Nổ Volatility Squeeze bứt phá");
+  } else if (isSqueezeOn && (squeezeBars == null || squeezeBars >= 4)) {
+    pillar1 += 10;
+    highlights.push(`Độ nén Squeeze chặt (${squeezeBars ? `${squeezeBars}P` : "chờ nổ"})`);
+  } else if (squeezeState === "fired_bear") {
+    pillar1 -= 18;
+    highlights.push("Cảnh báo Squeeze xả gãy nền");
   }
   pillar1 = Math.max(10, Math.min(99, pillar1));
 
@@ -367,6 +404,18 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   } else if (trained.historicalEdgeScore < 45) {
     pillar3 -= 15;
     highlights.push("Cảnh báo bẫy giá quá khứ");
+  }
+
+  // Sector RRG Alpha Resonance (Biên độ 1)
+  if (isSectorLeading) {
+    pillar3 += 14;
+    highlights.push("Ngành dẫn dắt RRG Leading");
+  } else if (sectorRrgQuadrant === "IMPROVING") {
+    pillar3 += 8;
+    highlights.push("Ngành cải thiện RRG Improving");
+  } else if (isSectorLagging) {
+    pillar3 -= 12;
+    highlights.push("Cảnh báo ngành tụt hậu RRG Lagging");
   }
   pillar3 = Math.max(10, Math.min(99, pillar3));
 
@@ -451,6 +500,13 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
     tripleBarrierRiskReward: tbRR,
     historicalWinRatePct: trained.historicalWinRatePct,
     upDownVolRatio: trained.upDownVolRatio,
+    sectorRrgQuadrant,
+    isSectorLeading,
+    isSectorLagging,
+    squeezeState,
+    squeezeBars,
+    isSqueezeFiredBull,
+    isSqueezeOn,
     verdictVi,
     highlights,
   };
