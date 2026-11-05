@@ -285,12 +285,12 @@ function buildContext(
       pb: num(detail.ratioMap?.pb) ?? (detail.detailedRatios as { pb?: number } | null)?.pb ?? null,
     }),
     tcbsHealth: {
-      overall: h?.scores.overall ?? 75,
-      profitability: h?.scores.profitability ?? 70,
-      liquidity: h?.scores.liquidity ?? 70,
-      leverage: h?.scores.leverage ?? 75,
-      cashflow: h?.scores.cashflow ?? 70,
-      efficiency: h?.scores.efficiency ?? 70,
+      overall: h?.scores.overall ?? null,
+      profitability: h?.scores.profitability ?? null,
+      liquidity: h?.scores.liquidity ?? null,
+      leverage: h?.scores.leverage ?? null,
+      cashflow: h?.scores.cashflow ?? null,
+      efficiency: h?.scores.efficiency ?? null,
       riskFlags: h?.riskFlags ?? [],
     },
   };
@@ -316,8 +316,8 @@ function deterministicFallback(ctx: ReturnType<typeof buildContext>): FinancialA
     actionVi = "Thận trọng (Theo dõi thêm rủi ro BCTC & đòn bẩy nợ)";
     mos = -8.5;
   }
-  const curP = ctx.quote?.price ?? 25;
-  const targetP = Math.round(curP * (1 + mos / 100) * 10) / 10;
+  const curP = ctx.quote?.price ?? null;
+  const targetP = curP != null ? Math.round(curP * (1 + mos / 100) * 10) / 10 : null;
 
   const lines: string[] = [];
   const chartInsights: string[] = [];

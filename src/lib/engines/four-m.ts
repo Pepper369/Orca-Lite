@@ -70,54 +70,81 @@ export function evaluateFourM(row: {
 
   // 2. Moat (Con hào kinh tế): ROE > 15%, Biên lợi nhuận gộp cao, Tăng trưởng dương
   let m2Score = 0;
-  const roe = row.roe ?? 0;
-  if (roe >= 20) m2Score += 12;
-  else if (roe >= 15) m2Score += 9;
-  else if (roe >= 10) m2Score += 5;
+  const roe = row.roe;
+  if (roe != null) {
+    if (roe >= 20) m2Score += 12;
+    else if (roe >= 15) m2Score += 9;
+    else if (roe >= 10) m2Score += 5;
+  }
 
-  const gm = row.grossMargin ?? 0;
-  if (gm >= 25) m2Score += 7;
-  else if (gm >= 15) m2Score += 4;
+  const gm = row.grossMargin;
+  if (gm != null) {
+    if (gm >= 25) m2Score += 7;
+    else if (gm >= 15) m2Score += 4;
+  }
 
-  const revGrowth = row.revenueYoyPct ?? 0;
-  if (revGrowth >= 12) m2Score += 6;
-  else if (revGrowth > 0) m2Score += 3;
+  const revGrowth = row.revenueYoyPct;
+  if (revGrowth != null) {
+    if (revGrowth >= 12) m2Score += 6;
+    else if (revGrowth > 0) m2Score += 3;
+  }
 
   const m2Pass = m2Score >= 16;
-  const m2Note = `ROE: ${roe.toFixed(1)}% · Biên gộp: ${gm.toFixed(1)}% · Tăng trưởng DT: ${revGrowth.toFixed(1)}%`;
+  const m2Parts: string[] = [];
+  m2Parts.push(roe != null ? `ROE: ${roe.toFixed(1)}%` : "ROE: Chưa có dữ liệu");
+  m2Parts.push(gm != null ? `Biên gộp: ${gm.toFixed(1)}%` : "Biên gộp: Chưa có dữ liệu");
+  if (revGrowth != null) m2Parts.push(`Tăng trưởng DT: ${revGrowth.toFixed(1)}%`);
+  const m2Note = m2Parts.join(" · ");
 
   // 3. Management (Ban lãnh đạo & Sức khỏe tài chính): Nợ/Vốn D/E thấp, ROIC tốt
   let m3Score = 0;
-  const de = row.debtEquity ?? 1.5;
-  if (de <= 0.8) m3Score += 12;
-  else if (de <= 1.2) m3Score += 8;
-  else if (de <= 2.0) m3Score += 4;
+  const de = row.debtEquity;
+  if (de != null) {
+    if (de <= 0.8) m3Score += 12;
+    else if (de <= 1.2) m3Score += 8;
+    else if (de <= 2.0) m3Score += 4;
+  }
 
-  const roic = row.roic ?? 0;
-  if (roic >= 15) m3Score += 7;
-  else if (roic >= 10) m3Score += 4;
+  const roic = row.roic;
+  if (roic != null) {
+    if (roic >= 15) m3Score += 7;
+    else if (roic >= 10) m3Score += 4;
+  }
 
-  const cr = row.currentRatio ?? 1.0;
-  if (cr >= 1.5) m3Score += 6;
-  else if (cr >= 1.1) m3Score += 3;
+  const cr = row.currentRatio;
+  if (cr != null) {
+    if (cr >= 1.5) m3Score += 6;
+    else if (cr >= 1.1) m3Score += 3;
+  }
 
   const m3Pass = m3Score >= 15;
-  const m3Note = `D/E: ${de.toFixed(2)} · ROIC: ${roic.toFixed(1)}% · Thanh toán hiện hành: ${cr.toFixed(2)}`;
+  const m3Parts: string[] = [];
+  m3Parts.push(de != null ? `D/E: ${de.toFixed(2)}` : "D/E: Chưa có dữ liệu");
+  m3Parts.push(roic != null ? `ROIC: ${roic.toFixed(1)}%` : "ROIC: Chưa có dữ liệu");
+  if (cr != null) m3Parts.push(`Thanh toán hiện hành: ${cr.toFixed(2)}`);
+  const m3Note = m3Parts.join(" · ");
 
   // 4. Margin of Safety (Biên an toàn định giá): P/E và P/B hợp lý
   let m4Score = 0;
-  const pe = row.pe ?? 18;
-  if (pe > 0 && pe <= 12) m4Score += 13;
-  else if (pe > 0 && pe <= 16) m4Score += 9;
-  else if (pe > 0 && pe <= 20) m4Score += 5;
+  const pe = row.pe;
+  if (pe != null && pe > 0) {
+    if (pe <= 12) m4Score += 13;
+    else if (pe <= 16) m4Score += 9;
+    else if (pe <= 20) m4Score += 5;
+  }
 
-  const pb = row.pb ?? 2.5;
-  if (pb > 0 && pb <= 1.5) m4Score += 12;
-  else if (pb > 0 && pb <= 2.2) m4Score += 8;
-  else if (pb > 0 && pb <= 3.0) m4Score += 4;
+  const pb = row.pb;
+  if (pb != null && pb > 0) {
+    if (pb <= 1.5) m4Score += 12;
+    else if (pb <= 2.2) m4Score += 8;
+    else if (pb <= 3.0) m4Score += 4;
+  }
 
   const m4Pass = m4Score >= 15;
-  const m4Note = `P/E: ${pe > 0 ? pe.toFixed(1) : "—"} · P/B: ${pb > 0 ? pb.toFixed(1) : "—"}`;
+  const m4Parts: string[] = [];
+  m4Parts.push(pe != null && pe > 0 ? `P/E: ${pe.toFixed(1)}x` : "P/E: Chưa có dữ liệu");
+  m4Parts.push(pb != null && pb > 0 ? `P/B: ${pb.toFixed(2)}x` : "P/B: Chưa có dữ liệu");
+  const m4Note = m4Parts.join(" · ");
 
   const totalScore = m1Score + m2Score + m3Score + m4Score;
   const passedPillarsCount = [m1Pass, m2Pass, m3Pass, m4Pass].filter(Boolean).length;

@@ -135,3 +135,33 @@ test("generateOrcaDynamicAiReport handles edge cases with zero crashes", () => {
   assert.ok(minimalReport.narrative.length > 50);
   assert.ok(minimalReport.structured.executiveVerdict.length > 0);
 });
+
+test("generateOrcaDynamicAiReport enforces zero hallucination: never fabricates missing financial numbers", () => {
+  // Stock with bars but NO financial statements (BCTC pending/IPO)
+  const report = generateOrcaDynamicAiReport({
+    symbol: "UNLISTED",
+    bars: [
+      { time: 1700000000, open: 20, high: 21, low: 19, close: 20.5, volume: 10000 },
+      { time: 1700086400, open: 20.5, high: 21.2, low: 20.1, close: 20.8, volume: 12000 },
+    ],
+    // Empty financials
+    financials: null,
+    financialHealth: null,
+    ratioMap: undefined,
+  });
+
+  // Verify that metrics are NOT default fabricated numbers (15, 12, 25, 0.6, 12.5, 1.8)
+  assert.equal(report.fourM.roe, null, "ROE must be null when missing, not fabricated");
+  assert.equal(report.fourM.roic, null, "ROIC must be null when missing, not fabricated");
+  assert.equal(report.fourM.grossMargin, null, "Gross margin must be null when missing, not fabricated");
+  assert.equal(report.fourM.debtEquity, null, "Debt/Equity must be null when missing, not fabricated");
+  assert.equal(report.fourM.pe, null, "P/E must be null when missing, not fabricated");
+  assert.equal(report.fourM.pb, null, "P/B must be null when missing, not fabricated");
+  assert.equal(report.tcbsHealth.overall, null, "Health score must be null when missing, not fabricated");
+
+  // Verify that narrative explicitly communicates missing data instead of claiming fake percentages
+  assert.ok(report.narrative.includes("Chưa có dữ liệu"), "Narrative must explicitly state missing data");
+  assert.ok(!report.narrative.includes("ROE: **15.0%**"), "Must not hallucinate ROE 15.0%");
+  assert.ok(!report.narrative.includes("Biên lãi gộp: **25.0%**"), "Must not hallucinate Gross Margin 25.0%");
+  assert.ok(!report.narrative.includes("P/E hiện tại: **12.5x**"), "Must not hallucinate P/E 12.5x");
+});

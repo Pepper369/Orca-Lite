@@ -95,12 +95,12 @@ export interface DynamicAiReport {
   };
   fourM: FourMScore;
   tcbsHealth: {
-    overall: number;
-    profitability: number;
-    liquidity: number;
-    leverage: number;
-    cashflow: number;
-    efficiency: number;
+    overall: number | null;
+    profitability: number | null;
+    liquidity: number | null;
+    leverage: number | null;
+    cashflow: number | null;
+    efficiency: number | null;
     riskFlags: string[];
   };
   apexQuant?: ApexQuantResult;
@@ -176,28 +176,30 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
   const tripleBarrier = calculateTripleBarrierLevels(curPrice, atrPct, 3.0, 1.3, 12);
   const tp2Price = Math.round(curPrice * (1 + (tripleBarrier.targetReturnPct * 1.5) / 100));
 
-  // 4. Financial Statements extraction
+  // 4. Financial Statements extraction (Strictly grounded in real data)
   const inc = input.financials?.income?.[0] ?? {};
   const bal = input.financials?.balance?.[0] ?? {};
   const cf = input.financials?.cashflow?.[0] ?? {};
   const ratios = input.financials?.ratios?.[0] ?? {};
 
-  const revenue = num(inc.netRevenue) ?? num(inc.revenue) ?? 0;
-  const netIncome = num(inc.netIncome) ?? num(inc.profitAfterTax) ?? 0;
-  const totalAssets = num(bal.totalAssets) ?? 0;
-  const equity = num(bal.equity) ?? num(bal.ownerEquity) ?? 0;
-  const ocf = num(cf.operatingCashFlow) ?? num(cf.netCashFromOperating) ?? 0;
-  const debt = num(bal.shortTermBorrowings ?? 0)! + num(bal.longTermBorrowings ?? 0)!;
+  const revenue = num(inc.netRevenue) ?? num(inc.revenue);
+  const netIncome = num(inc.netIncome) ?? num(inc.profitAfterTax);
+  const totalAssets = num(bal.totalAssets);
+  const equity = num(bal.equity) ?? num(bal.ownerEquity);
+  const ocf = num(cf.operatingCashFlow) ?? num(cf.netCashFromOperating);
+  const shortDebt = num(bal.shortTermBorrowings);
+  const longDebt = num(bal.longTermBorrowings);
+  const debt = shortDebt != null || longDebt != null ? (shortDebt ?? 0) + (longDebt ?? 0) : null;
+  const debtEquity = debt != null && equity != null && equity > 0 ? debt / equity : null;
 
   const roeRaw = num(ratios.roe) ?? num(input.ratioMap?.roe);
-  const roe = roeRaw != null ? (Math.abs(roeRaw) < 1 ? roeRaw * 100 : roeRaw) : 15;
+  const roe = roeRaw != null ? (Math.abs(roeRaw) < 1 ? roeRaw * 100 : roeRaw) : null;
   const roicRaw = num(ratios.roic) ?? num(input.ratioMap?.roic);
-  const roic = roicRaw != null ? (Math.abs(roicRaw) < 1 ? roicRaw * 100 : roicRaw) : 12;
+  const roic = roicRaw != null ? (Math.abs(roicRaw) < 1 ? roicRaw * 100 : roicRaw) : null;
   const grossMarginRaw = num(ratios.grossMargin) ?? num(input.ratioMap?.grossMargin);
-  const grossMargin = grossMarginRaw != null ? (Math.abs(grossMarginRaw) < 1 ? grossMarginRaw * 100 : grossMarginRaw) : 25;
-  const debtEquity = equity > 0 ? debt / equity : 0.6;
-  const pe = num(input.ratioMap?.pe) ?? 12.5;
-  const pb = num(input.ratioMap?.pb) ?? 1.8;
+  const grossMargin = grossMarginRaw != null ? (Math.abs(grossMarginRaw) < 1 ? grossMarginRaw * 100 : grossMarginRaw) : null;
+  const pe = num(input.ratioMap?.pe);
+  const pb = num(input.ratioMap?.pb);
 
   const yoyRev = input.financialGrowth?.yoy?.find((x) => x.metric === "netRevenue" || x.metric === "revenue")?.changePct;
   const yoyNi = input.financialGrowth?.yoy?.find((x) => x.metric === "netIncome")?.changePct;
@@ -210,48 +212,51 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
     price: curPrice,
     changePercent: changePct,
     volume: input.quote?.volume,
-    roe,
-    roic,
-    grossMargin,
-    debtEquity,
+    roe: roe ?? null,
+    roic: roic ?? null,
+    grossMargin: grossMargin ?? null,
+    debtEquity: debtEquity ?? null,
     revenueYoyPct: yoyRev != null ? yoyRev * 100 : null,
     niYoyPct: yoyNi != null ? yoyNi * 100 : null,
-    pe,
-    pb,
+    pe: pe ?? null,
+    pb: pb ?? null,
   });
 
-  // 6. TCBS Health 5 Pillars
+  // 6. TCBS Health 5 Pillars (Grounded in real datafeed)
   const hScores = input.financialHealth?.scores;
   const tcbsHealth = {
-    overall: Math.round(hScores?.overall ?? (fourM.totalScore * 0.4 + 45)),
-    profitability: Math.round(hScores?.profitability ?? (roe > 15 ? 80 : 60)),
-    liquidity: Math.round(hScores?.liquidity ?? 70),
-    leverage: Math.round(hScores?.leverage ?? (debtEquity < 1.0 ? 80 : 50)),
-    cashflow: Math.round(hScores?.cashflow ?? (ocf > 0 ? 75 : 45)),
-    efficiency: Math.round(hScores?.efficiency ?? 70),
+    overall: hScores?.overall != null ? Math.round(hScores.overall) : null,
+    profitability: hScores?.profitability != null ? Math.round(hScores.profitability) : null,
+    liquidity: hScores?.liquidity != null ? Math.round(hScores.liquidity) : null,
+    leverage: hScores?.leverage != null ? Math.round(hScores.leverage) : null,
+    cashflow: hScores?.cashflow != null ? Math.round(hScores.cashflow) : null,
+    efficiency: hScores?.efficiency != null ? Math.round(hScores.efficiency) : null,
     riskFlags: input.financialHealth?.riskFlags ?? [],
   };
 
   // 7. Calculate Valuation Signal & Margin of Safety
-  let marginOfSafetyPct = 12.5;
+  let marginOfSafetyPct: number | null = null;
   let valVerdict: "UNDERVALUED" | "FAIR" | "OVERVALUED" | "CAUTION" = "FAIR";
-  let actionVi = "Tích lũy từng phần khi thị trường điều chỉnh";
+  let actionVi = "Theo dõi biến động và tích lũy từng phần khi thị trường điều chỉnh";
 
   if (fourM.totalScore >= 75 && (apex?.apexScore ?? 0) >= 65) {
     valVerdict = "UNDERVALUED";
     marginOfSafetyPct = 24.5;
     actionVi = "VÙNG MUA VÀNG: Hội tụ Chân Sóng Apex & Biên an toàn 4M vững chắc";
-  } else if (fourM.totalScore >= 68) {
+  } else if (fourM.totalScore >= 65) {
     valVerdict = "UNDERVALUED";
     marginOfSafetyPct = 16.0;
     actionVi = "Định giá hấp dẫn: Tích lũy theo sóng hồi phục nội tại";
-  } else if (fourM.totalScore < 45 || debtEquity > 2.0 || ocf < 0) {
+  } else if ((fourM.totalScore < 45 && fourM.passedPillarsCount <= 1) || (debtEquity != null && debtEquity > 2.0) || (ocf != null && ocf < 0)) {
     valVerdict = "CAUTION";
     marginOfSafetyPct = -10.0;
     actionVi = "Cảnh giác rủi ro đòn bẩy hoặc chất lượng dòng tiền suy giảm";
+  } else {
+    marginOfSafetyPct = 8.0;
+    actionVi = "Định giá hợp lý: Vị thế cân bằng, giải ngân theo các nhịp võng hỗ trợ";
   }
 
-  const targetPrice = curPrice > 0 ? Math.round(curPrice * (1 + marginOfSafetyPct / 100) * 10) / 10 : null;
+  const targetPrice = curPrice > 0 && marginOfSafetyPct != null ? Math.round(curPrice * (1 + marginOfSafetyPct / 100) * 10) / 10 : null;
 
   // 8. Build Strengths, Risks, Watchpoints & Chart Insights
   const strengths: string[] = [];
@@ -260,30 +265,32 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
   const chartInsights: string[] = [];
 
   // Strengths
-  if (fourM.m2MoatPass) {
+  if (fourM.m2MoatPass && roe != null && grossMargin != null) {
     strengths.push(`Con hào kinh tế vững chắc: ROE ${roe.toFixed(1)}% & Biên lãi gộp ${grossMargin.toFixed(1)}% chứng minh lợi thế cạnh tranh đầu ngành.`);
+  } else if (roe != null && roe >= 15) {
+    strengths.push(`Hiệu quả sinh lời tốt: ROE đạt ${roe.toFixed(1)}%, vượt trội so với trung bình ngành.`);
   }
-  if (ocf > netIncome && netIncome > 0) {
+  if (ocf != null && netIncome != null && ocf > netIncome && netIncome > 0) {
     strengths.push(`Chất lượng lợi nhuận cao: Dòng tiền OCF thực thu (${fmtMoney(ocf)}) vượt trội so với LNST (${fmtMoney(netIncome)}), không xào nấu doanh thu.`);
   }
   if (apex?.reversalMetrics.isSweetLaunchZone) {
     strengths.push(`Vị thế Vùng Vàng Chân Sóng: Giá chỉ mở rộng ${apex.reversalMetrics.extensionFromBottomPct.toFixed(1)}% từ đáy (ngưỡng tối ưu 0.8% - 7.5%), tỷ lệ R:R đạt ${tripleBarrier.riskRewardRatio}x.`);
   }
-  if (trainer && trainer.upDownVolRatio >= 1.1) {
-    strengths.push(`Dòng tiền cá mập gom hàng: Tỷ lệ Up/Down Volume 50 phiên đạt ${trainer.upDownVolRatio}x, lực mua phiên tăng chiếm ưu thế rõ nét.`);
+  if (trainer && trainer.upDownVolRatio >= 1.05) {
+    strengths.push(`Dòng tiền gom hàng: Tỷ lệ Up/Down Volume 50 phiên đạt ${trainer.upDownVolRatio}x, lực mua phiên tăng chiếm ưu thế rõ nét.`);
   }
-  if (debtEquity < 0.8) {
+  if (debtEquity != null && debtEquity < 0.8) {
     strengths.push(`Cơ cấu vốn an toàn: Tỷ lệ Nợ/VCSH chỉ ${debtEquity.toFixed(2)}x, hạn chế tối đa rủi ro chi phí lãi vay.`);
   }
   if (!strengths.length) {
-    strengths.push(`Mô hình kinh doanh quen thuộc trong nhóm ngành ${input.sectorTrend?.sector ?? "sàn chứng khoán Việt Nam"}.`);
+    strengths.push(`Mô hình kinh doanh hoạt động trong nhóm ngành ${input.sectorTrend?.sector ?? "sàn chứng khoán Việt Nam"}.`);
   }
 
   // Risks
-  if (debtEquity > 1.4) {
+  if (debtEquity != null && debtEquity > 1.4) {
     risks.push(`Đòn bẩy nợ cao: Tỷ lệ Nợ/VCSH ở mức ${debtEquity.toFixed(2)}x, cần theo dõi nghĩa vụ trả nợ ngắn hạn.`);
   }
-  if (ocf < 0) {
+  if (ocf != null && ocf < 0) {
     risks.push(`Dòng tiền kinh doanh âm: OCF đạt ${fmtMoney(ocf)}, doanh nghiệp đang phải bù đắp vốn lưu động hoặc đọng vốn trong khoản phải thu.`);
   }
   if (apex?.reversalMetrics.isExtended) {
@@ -294,6 +301,9 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
   }
   if (input.foreignFlow && input.foreignFlow.netValue != null && input.foreignFlow.netValue < -5_000_000_000) {
     risks.push(`Khối ngoại bán ròng: Dòng tiền tổ chức ngoại rút ròng ${fmtMoney(Math.abs(input.foreignFlow.netValue))}, tạo áp lực cung ngắn hạn.`);
+  }
+  if (revenue == null && netIncome == null) {
+    risks.push(`Dữ liệu BCTC kỳ mới nhất chưa được cập nhật đầy đủ, cần kiểm tra thêm khi doanh nghiệp công bố báo cáo kiểm toán.`);
   }
   if (!risks.length) {
     risks.push(`Rủi ro điều chỉnh chung của thị trường VN-Index và biến động thanh khoản phiên giao dịch.`);
@@ -370,10 +380,31 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
   lines.push(`### 3. NỀN TẢNG NỘI TẠI & CON HÀO KINH TẾ 4M PHIL TOWN`);
   lines.push(`- **Đánh giá 4M Toàn diện:** **${fourM.totalScore}/100đ (Hạng ${fourM.gradeVi})** · Vượt qua **${fourM.passedPillarsCount}/4 trụ cột**.`);
   lines.push(`  + **M1 · Ý nghĩa (Meaning):** ${fourM.m1MeaningScore}/25đ (${fourM.m1Note}).`);
-  lines.push(`  + **M2 · Con hào kinh tế (Moat):** ${fourM.m2MoatScore}/25đ (${fourM.m2Note}) — ROE đạt **${roe.toFixed(1)}%**, Biên lợi nhuận gộp đạt **${grossMargin.toFixed(1)}%**.`);
-  lines.push(`  + **M3 · Năng lực quản trị (Management):** ${fourM.m3ManagementScore}/25đ (${fourM.m3Note}) — Nợ/VCSH: **${debtEquity.toFixed(2)}x**, Dòng tiền kinh doanh OCF: **${fmtMoney(ocf)}** ${ocf > netIncome && netIncome > 0 ? "(Chất lượng lợi nhuận vàng, OCF vượt trội LNST)" : ""}.`);
-  lines.push(`  + **M4 · Biên an toàn (Margin of Safety):** ${fourM.m4MarginOfSafetyScore}/25đ (${fourM.m4Note}) — P/E hiện tại **${pe.toFixed(1)}x**, P/B **${pb.toFixed(1)}x**.`);
-  lines.push(`- **Sức khỏe Tài chính Orca Health 5 Trụ cột:** Tổng thể: **${tcbsHealth.overall}/100đ** (Sinh lời: ${tcbsHealth.profitability} | Thanh khoản: ${tcbsHealth.liquidity} | Đòn bẩy: ${tcbsHealth.leverage} | Dòng tiền: ${tcbsHealth.cashflow} | Hiệu quả: ${tcbsHealth.efficiency}).`);
+  
+  const m2Text = [
+    roe != null ? `ROE: **${roe.toFixed(1)}%**` : "ROE: Chưa có dữ liệu",
+    grossMargin != null ? `Biên lãi gộp: **${grossMargin.toFixed(1)}%**` : "Biên lãi gộp: Chưa có dữ liệu",
+  ].join(", ");
+  lines.push(`  + **M2 · Con hào kinh tế (Moat):** ${fourM.m2MoatScore}/25đ (${fourM.m2Note}) — ${m2Text}.`);
+
+  const m3Text = [
+    debtEquity != null ? `Nợ/VCSH: **${debtEquity.toFixed(2)}x**` : "Nợ/VCSH: Chưa có dữ liệu",
+    ocf != null ? `Dòng tiền OCF: **${fmtMoney(ocf)}**` : "Dòng tiền OCF: Chưa có dữ liệu",
+    (ocf != null && netIncome != null && ocf > netIncome && netIncome > 0) ? "(Chất lượng lợi nhuận vàng, OCF vượt trội LNST)" : "",
+  ].filter(Boolean).join(" · ");
+  lines.push(`  + **M3 · Năng lực quản trị (Management):** ${fourM.m3ManagementScore}/25đ (${fourM.m3Note}) — ${m3Text}.`);
+
+  const m4Text = [
+    pe != null && pe > 0 ? `P/E hiện tại: **${pe.toFixed(1)}x**` : "P/E: Chưa có dữ liệu",
+    pb != null && pb > 0 ? `P/B: **${pb.toFixed(2)}x**` : "P/B: Chưa có dữ liệu",
+  ].join(" · ");
+  lines.push(`  + **M4 · Biên an toàn (Margin of Safety):** ${fourM.m4MarginOfSafetyScore}/25đ (${fourM.m4Note}) — ${m4Text}.`);
+
+  if (tcbsHealth.overall != null) {
+    lines.push(`- **Sức khỏe Tài chính Orca Health 5 Trụ cột:** Tổng thể: **${tcbsHealth.overall}/100đ** (Sinh lời: ${tcbsHealth.profitability ?? "—"} | Thanh khoản: ${tcbsHealth.liquidity ?? "—"} | Đòn bẩy: ${tcbsHealth.leverage ?? "—"} | Dòng tiền: ${tcbsHealth.cashflow ?? "—"} | Hiệu quả: ${tcbsHealth.efficiency ?? "—"}).`);
+  } else {
+    lines.push(`- **Sức khỏe Tài chính Orca Health:** Chưa có đủ bộ chỉ số chuẩn hóa kỳ này từ dữ liệu BCTC.`);
+  }
   lines.push("");
 
   // Section 4
@@ -415,7 +446,7 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
     narrative: lines.join("\n"),
     structured: {
       executiveVerdict,
-      healthSummary: `Orca Health ${tcbsHealth.overall}/100 · 4M Phil Town: ${fourM.totalScore}/100 (${fourM.gradeVi}) · ROE: ${roe.toFixed(1)}% · OCF: ${fmtMoney(ocf)}.`,
+      healthSummary: `${tcbsHealth.overall != null ? `Orca Health: ${tcbsHealth.overall}/100 · ` : ""}4M Phil Town: ${fourM.totalScore}/100 (${fourM.gradeVi})${roe != null ? ` · ROE: ${roe.toFixed(1)}%` : ""}${ocf != null ? ` · OCF: ${fmtMoney(ocf)}` : ""}.`,
       trendSummary: apex
         ? `Apex Quant: ${apex.apexScore}đ · Wyckoff Spring: ${apex.reversalMetrics.reversalStageVi} · Sweet Zone: ${apex.reversalMetrics.extensionFromBottomPct.toFixed(1)}% từ đáy · Z-Score: ${apex.ouZScore.toFixed(2)}σ.`
         : `Xu hướng kỹ thuật đang tích lũy · Up/Down Vol: ${trainer?.upDownVolRatio ?? 1.0}x.`,

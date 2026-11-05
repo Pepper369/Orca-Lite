@@ -1,6 +1,9 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
+import { getVnStockDetail } from "@/lib/services/stocks";
+import { getVnIndices } from "@/lib/services/stocks-board";
+import { generateOrcaDynamicAiReport } from "@/lib/engines/orca-dynamic-ai-intelligence";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,6 +56,29 @@ function extractAmountFromText(text: string): number | null {
   if (matchK) {
     const val = parseFloat(matchK[1].replace(",", "."));
     if (!isNaN(val) && val > 0) return Math.round(val * 1_000);
+  }
+  return null;
+}
+
+function extractTickerFromQuery(q: string): string | null {
+  const upper = q.toUpperCase();
+  const explicitMatch = q.match(/(?:mã|cổ\s*phiếu|cp|ticker|symbol)\s+([A-Za-z]{3})\b/i);
+  if (explicitMatch) {
+    return explicitMatch[1].toUpperCase();
+  }
+
+  const words = upper.match(/\b[A-Z]{3}\b/g) ?? [];
+  const skipWords = new Set([
+    "VND", "USD", "EUR", "ALL", "THE", "FOR", "AND", "NOT", "BUY", "BAN",
+    "MUA", "GIA", "DON", "TIEN", "TIET", "LUONG", "CHI", "APP", "API", "NOW",
+    "TOP", "DAT", "VAY", "NOI", "CAN", "XEM", "CHO", "TOI", "COI", "HOI",
+    "LAM", "SAO", "NEN", "QUA", "CAC", "MOT", "HAI", "BAA", "BON", "NAM",
+    "DAY", "HAY", "LAI", "THI", "KHI", "VOI", "DOC", "NHA"
+  ]);
+  for (const w of words) {
+    if (!skipWords.has(w)) {
+      return w;
+    }
   }
   return null;
 }
@@ -451,6 +477,77 @@ export async function POST(req: Request) {
     const gross = facts.grossIncome ?? facts.totalGrossSalary ?? 0;
     const fixed = facts.fixedExpenses ?? 0;
     const totalExp = facts.totalExpenses ?? 0;
+
+    // 1. Phân tích Cổ phiếu thời gian thực từ Live Datafeed (Orca Dynamic Quant AI - Zero Hallucination)
+    const ticker = extractTickerFromQuery(question);
+    if (ticker) {
+      try {
+        const detailRes = await getVnStockDetail(ticker);
+        if (detailRes?.detail && (detailRes.detail.quote || (detailRes.detail.bars && detailRes.detail.bars.length > 0))) {
+          const detail = detailRes.detail;
+          const report = generateOrcaDynamicAiReport({
+            symbol: ticker,
+            name: detail.name,
+            quote: detail.quote,
+            bars: detail.bars,
+            technical: detail.technical,
+            financials: detail.financials,
+            financialHealth: detail.financialHealth,
+            financialGrowth: detail.financialGrowth,
+            ratioMap: detail.ratioMap,
+            foreignFlow: detail.foreignFlow as any,
+            orderBook: detail.orderBook as any,
+          });
+
+          return ok({
+            answer: report.narrative,
+            structured: report.structured,
+            fourM: report.fourM,
+            tcbsHealth: report.tcbsHealth,
+            apexQuant: report.apexQuant,
+            tripleBarrier: report.tripleBarrier,
+            model: report.model,
+            latencyMs: report.latencyMs,
+            sourceNote: report.sourceNote,
+          });
+        }
+      } catch (stockErr) {
+        console.warn(`[Ask Orca] Không thể nạp live datafeed cho mã ${ticker}:`, stockErr);
+      }
+    }
+
+    // 2. Diễn biến Thị trường & Chỉ số VN-Index thời gian thực từ Live Datafeed
+    const isMarketQuery = /thị\s*trường|vn-?index|vn30|hose|hnx|upcom/i.test(question);
+    if (isMarketQuery) {
+      try {
+        const indicesRes = await getVnIndices();
+        if (indicesRes?.items && indicesRes.items.length > 0) {
+          const lines = indicesRes.items.slice(0, 6).map((item) => {
+            const chg = item.changePercent != null ? `${item.changePercent >= 0 ? "+" : ""}${item.changePercent.toFixed(2)}%` : "—";
+            const pt = item.change != null ? `${item.change >= 0 ? "+" : ""}${item.change.toFixed(2)}đ` : "";
+            return `• **${item.code}**: **${item.value.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} điểm** (${pt} | ${chg})`;
+          });
+
+          const answer = `Chào bạn! Dưới đây là diễn biến thị trường chứng khoán Việt Nam cập nhật trực tiếp từ Datafeed thời gian thực:
+
+**DIỄN BIẾN CÁC CHỈ SỐ THỊ TRƯỜNG CHÍNH:**
+${lines.join("\n")}
+
+**ĐÁNH GIÁ ĐỊNH LƯỢNG DÒNG TIỀN (ORCA IN-HOUSE QUANT):**
+1. **Trạng thái thị trường:** Các chỉ số phản ánh thanh khoản và độ rộng dòng tiền thực tế trên sàn HOSE, HNX và UPCoM từ nguồn cấp dữ liệu trực tiếp.
+2. **Chiến lược hành động:** Ưu tiên chọn lọc các cổ phiếu bước vào **👑 Vùng Vàng Chân Sóng Apex** (độ mở rộng từ đáy $0.8\\% - 7.5\\%$) và có con hào kinh tế 4M vững chắc. Kỷ luật tuân thủ ngưỡng cắt lỗ ATR và tỷ số Risk/Reward $\\ge 2.2\\text{x}$.
+3. Bạn có thể gõ trực tiếp tên bất kỳ mã cổ phiếu nào (ví dụ: *HPG, FPT, SSI, MBB, VCB...*) để hệ thống phân tích chi tiết dữ liệu tài chính BCTC và tín hiệu kỹ thuật thời gian thực!`;
+
+          return ok({
+            answer,
+            model: "Orca Market Datafeed Hub (Live)",
+            sourceNote: "100% In-House Live Datafeed (Zero external LLM latency)",
+          });
+        }
+      } catch (idxErr) {
+        console.warn("[Ask Orca] Lỗi lấy dữ liệu chỉ số thị trường:", idxErr);
+      }
+    }
 
     // Nếu có LLM cấu hình, gọi LLM gateway với Prompt đa kịch bản, tự nhiên, linh hoạt
     if (llmConfigured()) {
