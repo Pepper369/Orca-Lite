@@ -490,32 +490,81 @@ export function AltmanBadge({
 export function ConfluenceBadge({
   badge,
   score,
+  grade,
+  pillarsPassed,
 }: {
   badge: "SUPER_SETUP" | "POTENTIAL_BREAKOUT" | "WATCH" | "NONE" | string | null | undefined;
   score?: number | null;
+  grade?: "A+" | "A" | "B" | "C" | string | null;
+  pillarsPassed?: number | null;
 }) {
-  if (badge === "SUPER_SETUP") {
+  if (grade === "A+" || badge === "SUPER_SETUP") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-400 whitespace-nowrap shadow-sm">
-        SIÊU SETUP {score ? `(${score}đ)` : ""}
+      <span
+        title={`Hợp lưu Hạng A+ (Hoàn hảo ${pillarsPassed ?? 5}/5 Trục độc lập)`}
+        className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-amber-500/25 to-purple-500/25 border border-amber-400/60 px-2 py-0.5 text-[10px] font-bold text-amber-300 whitespace-nowrap shadow-sm"
+      >
+        HẠNG A+ {pillarsPassed ? `(${pillarsPassed}/5)` : ""} {score ? `· ${score}đ` : ""}
       </span>
     );
   }
-  if (badge === "POTENTIAL_BREAKOUT") {
+  if (grade === "A" || badge === "POTENTIAL_BREAKOUT") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-accent-primary/20 border border-accent-primary/40 px-2 py-0.5 text-[10px] font-bold text-accent-primary whitespace-nowrap">
-        CHỜ NỔ {score ? `(${score}đ)` : ""}
+      <span
+        title={`Hợp lưu Hạng A (Tối ưu ${pillarsPassed ?? 4}/5 Trục độc lập)`}
+        className="inline-flex items-center gap-1 rounded bg-accent-primary/20 border border-accent-primary/50 px-2 py-0.5 text-[10px] font-bold text-accent-primary whitespace-nowrap"
+      >
+        HẠNG A {pillarsPassed ? `(${pillarsPassed}/5)` : ""} {score ? `· ${score}đ` : ""}
       </span>
     );
   }
-  if (badge === "WATCH") {
+  if (grade === "B" || badge === "WATCH") {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[10px] font-medium text-blue-400 whitespace-nowrap">
-        Theo dõi {score ? `(${score}đ)` : ""}
+      <span
+        title={`Hợp lưu Hạng B (Đạt chuẩn ${pillarsPassed ?? 3}/5 Trục độc lập)`}
+        className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-500/40 px-1.5 py-0.5 text-[10px] font-semibold text-blue-400 whitespace-nowrap"
+      >
+        Hạng B {pillarsPassed ? `(${pillarsPassed}/5)` : ""} {score ? `· ${score}đ` : ""}
       </span>
     );
   }
   return <span className="text-[10px] text-text-muted">{score ? `${score}đ` : "—"}</span>;
+}
+
+export function FiboGoldenPocketBadge({
+  isGoldenPocket,
+  summary,
+}: {
+  isGoldenPocket?: boolean | null;
+  summary?: string | null;
+}) {
+  if (!isGoldenPocket) return null;
+  return (
+    <span
+      title={summary || "Chạm bật Golden Pocket Fibo 0.618 - 0.65"}
+      className="inline-flex items-center gap-0.5 rounded bg-purple-500/25 border border-purple-400/50 px-1.5 py-0.2 text-[9px] font-bold text-purple-200"
+    >
+      Fibo GP 0.618
+    </span>
+  );
+}
+
+export function FlipZoneBadge({
+  isFlipZone,
+  summary,
+}: {
+  isFlipZone?: boolean | null;
+  summary?: string | null;
+}) {
+  if (!isFlipZone) return null;
+  return (
+    <span
+      title={summary || "Retest Flip Zone Hỗ trợ mới (Role Reversal)"}
+      className="inline-flex items-center gap-0.5 rounded bg-blue-500/25 border border-blue-400/50 px-1.5 py-0.2 text-[9px] font-bold text-blue-200"
+    >
+      Flip Zone
+    </span>
+  );
 }
 
 export function SqueezeBadge({
@@ -1124,6 +1173,8 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "sector_leading", category: "core", label: "Ngành Dẫn Dắt RRG", dotColor: "bg-emerald-400", desc: "Cổ phiếu thuộc ngành Dẫn dắt (Leading Quadrant RRG) với RS-Ratio & RS-Momentum vượt trội VN-Index" },
 
   // Price Action & MTF
+  { id: "smc_golden_pocket", category: "price_action", label: "SMC & Golden Pocket (A+)", dotColor: "bg-purple-400", desc: "Hợp lưu đỉnh cao Hạng A+: Quét rũ thanh khoản (Liquidity Sweep/OB) + Rút chân tại Golden Pocket Fibo (0.618-0.65) + Mua chủ động" },
+  { id: "flip_zone_retest", category: "price_action", label: "Retest Flip Zone Cản Cũ", dotColor: "bg-blue-400", desc: "Hợp lưu cấu trúc: Kháng cự cũ bị phá vỡ dứt khoát nay trở thành Hỗ trợ mới (Role Reversal) kèm cạn cung" },
   { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-emerald-400", desc: "Đồng thuận đa khung tuyệt đối: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng tăng kèm cụm nến đảo chiều" },
   { id: "bottom_confluence", category: "price_action", label: "Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
   { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
@@ -1679,7 +1730,7 @@ export function VnScreener({
       setViewTab("buy_point");
       setSortKey("absBuyDiff");
       setSortOrder("asc");
-    } else if (p === "mtf_confluence") {
+    } else if (p === "mtf_confluence" || p === "smc_golden_pocket" || p === "flip_zone_retest") {
       setViewTab("confluence");
       setSortKey("confluenceScore");
       setSortOrder("desc");
@@ -3736,6 +3787,19 @@ export function VnScreener({
                                 isWyckoffLps={row.isWyckoffLps}
                                 isRsNewHigh20={row.isRsNewHigh20}
                               />
+                              <FiboGoldenPocketBadge
+                                isGoldenPocket={row.isGoldenPocket}
+                                summary={row.fiboSummary}
+                              />
+                              <FlipZoneBadge
+                                isFlipZone={row.isFlipZoneSupport}
+                                summary={row.structureSummary}
+                              />
+                              {row.isSmcOrderBlock && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 text-[9px] font-bold text-amber-300">
+                                  SMC OB
+                                </span>
+                              )}
                               {row.hasBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
                                   {row.divergenceSummary || "Phân kỳ dương"}
@@ -3758,7 +3822,12 @@ export function VnScreener({
                           {row.confluenceScore}
                         </td>
                         <td className="py-2.5 pr-3.5 text-right">
-                          <ConfluenceBadge badge={row.confluenceBadge} />
+                          <ConfluenceBadge
+                            badge={row.confluenceBadge}
+                            score={row.confluenceScore}
+                            grade={row.setupGrade}
+                            pillarsPassed={row.orthogonalPillarsPassed}
+                          />
                         </td>
                       </>
                     )}

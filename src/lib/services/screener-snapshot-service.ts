@@ -97,6 +97,8 @@ export type ScreenerPreset =
   | "piotroski_diamonds"
   | "mtf_confluence"
   | "bottom_confluence"
+  | "smc_golden_pocket"
+  | "flip_zone_retest"
   | "quant_edge"
   | "quant_mean_revert"
   | "quant_low_beta"
@@ -251,6 +253,13 @@ export type ScreenerStockItem = {
   // Next-Gen Confluence Engine (Hợp lưu MA + Nến đảo chiều + Phân kỳ)
   isDiamondConfluence?: boolean | null;
   isDualDivergence?: boolean | null;
+  setupGrade?: "A+" | "A" | "B" | "C" | null;
+  orthogonalPillarsPassed?: number | null;
+  isGoldenPocket?: boolean | null;
+  fiboSummary?: string | null;
+  isFlipZoneSupport?: boolean | null;
+  structureSummary?: string | null;
+  isSmcOrderBlock?: boolean | null;
   // Real-Time Actionable Buy Trigger Engine (Kích hoạt điểm mua tức thời)
   isBuyTriggerNow?: boolean | null;
   buyTriggerScore?: number | null; // 1 - 99
@@ -1213,6 +1222,13 @@ function detectPresets(item: {
   peg?: number | null;
   consensusUpsidePct?: number | null;
   magicFormulaScore?: number | null;
+  setupGrade?: "A+" | "A" | "B" | "C" | null;
+  orthogonalPillarsPassed?: number | null;
+  isGoldenPocket?: boolean | null;
+  fiboSummary?: string | null;
+  isFlipZoneSupport?: boolean | null;
+  structureSummary?: string | null;
+  isSmcOrderBlock?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1445,6 +1461,16 @@ function detectPresets(item: {
       (hasMaSupport && item.confluenceScore >= 52))
   ) {
     passes.push("bottom_confluence");
+  }
+
+  // 8b. SMC & Golden Pocket (A+ Orthogonal Confluence)
+  if (item.isGoldenPocket || item.setupGrade === "A+" || (item.confluenceScore >= 74 && item.isSmcOrderBlock)) {
+    passes.push("smc_golden_pocket");
+  }
+
+  // 8c. Flip Zone Role Reversal Retest
+  if (item.isFlipZoneSupport) {
+    passes.push("flip_zone_retest");
   }
 
   // 9. VCP & Classic Patterns
@@ -2499,6 +2525,13 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
           isDiamondConfluence,
           isDualDivergence,
+          setupGrade: (entry.techFeatures as Record<string, unknown>)?.setupGrade as "A+" | "A" | "B" | "C" | undefined ?? (entry.techFeatures.confluenceScore >= 75 ? "A+" : entry.techFeatures.confluenceScore >= 68 ? "A" : "B"),
+          orthogonalPillarsPassed: (entry.techFeatures as Record<string, unknown>)?.orthogonalPillarsPassed as number | undefined ?? 3,
+          isGoldenPocket: Boolean((entry.techFeatures as Record<string, unknown>)?.isGoldenPocket),
+          fiboSummary: (entry.techFeatures as Record<string, unknown>)?.fiboSummary as string | null ?? null,
+          isFlipZoneSupport: Boolean((entry.techFeatures as Record<string, unknown>)?.isFlipZoneSupport),
+          structureSummary: (entry.techFeatures as Record<string, unknown>)?.structureSummary as string | null ?? null,
+          isSmcOrderBlock: Boolean((entry.techFeatures as Record<string, unknown>)?.isSmcOrderBlock),
           isBuyTriggerNow,
           buyTriggerScore,
           buyTriggerReasonVi,
@@ -2564,6 +2597,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
         piotroski_diamonds: 0,
         mtf_confluence: 0,
         bottom_confluence: 0,
+        smc_golden_pocket: 0,
+        flip_zone_retest: 0,
         quant_edge: 0,
         quant_mean_revert: 0,
         quant_low_beta: 0,
@@ -2631,6 +2666,8 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
     piotroski_diamonds: 0,
     mtf_confluence: 0,
     bottom_confluence: 0,
+    smc_golden_pocket: 0,
+    flip_zone_retest: 0,
     quant_edge: 0,
     quant_mean_revert: 0,
     quant_low_beta: 0,

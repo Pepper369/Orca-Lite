@@ -71,6 +71,18 @@ const PatternAnalysisHub = dynamic(
   },
 );
 
+const ConfluenceRadarCard = dynamic(
+  () => import("@/components/stocks/confluence-radar-card").then((m) => m.ConfluenceRadarCard),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Hợp Lưu Đa Yếu Tố (Confluence 2.0)">
+        <Loading rows={3} />
+      </Panel>
+    ),
+  },
+);
+
 const AiFinancialPanel = dynamic(
   () => import("@/components/stocks/ai-financial-panel").then((m) => m.AiFinancialPanel),
   {
@@ -721,14 +733,22 @@ export default function StockDetailPage({ params }: { params: Promise<{ symbol: 
                 <ErrorBoundary name="tech-reco" resetKey={detail.symbol}>
                   <TechRecoPanel symbol={detail.symbol} />
                 </ErrorBoundary>
-                <ErrorBoundary name="patterns" resetKey={detail.symbol}>
-                  <PatternAnalysisHub symbol={detail.symbol} technical={detail.technical} patterns={detail.patterns} />
+                <ErrorBoundary name="confluence-radar" resetKey={detail.symbol}>
+                  <ConfluenceRadarCard
+                    symbol={detail.symbol}
+                    confluenceData={detail.confluence}
+                  />
                 </ErrorBoundary>
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
+                <ErrorBoundary name="patterns" resetKey={detail.symbol}>
+                  <PatternAnalysisHub symbol={detail.symbol} technical={detail.technical} patterns={detail.patterns} />
+                </ErrorBoundary>
                 <ErrorBoundary name="consensus-upside" resetKey={detail.symbol}>
                   <ConsensusUpsideCard symbol={detail.symbol} />
                 </ErrorBoundary>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
                 <ErrorBoundary name="business-goals" resetKey={detail.symbol}>
                   <BusinessGoalsPanel symbol={detail.symbol} />
                 </ErrorBoundary>

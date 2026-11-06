@@ -14,6 +14,8 @@ export async function GET(req: Request) {
   const scenario = (url.searchParams.get("scenario") ?? "all").toUpperCase();
   const allowedScenarios = new Set([
     "ALL",
+    "SMC_GOLDEN_POCKET",
+    "FLIP_ZONE_RETEST",
     "BOTTOM_BULLISH_DIVERGENCE",
     "CHART_PATTERN_BREAKOUT",
     "SMC_SWEEP_RECLAIM",
@@ -45,6 +47,13 @@ export async function GET(req: Request) {
   const foreignOnly = url.searchParams.get("foreignOnly") === "1";
   const leaderOnly = url.searchParams.get("leaderOnly") === "1" || url.searchParams.get("rsOnly") === "1";
   const patternOnly = url.searchParams.get("patternOnly") === "1";
+  const goldenPocketOnly = url.searchParams.get("goldenPocketOnly") === "1";
+  const flipZoneOnly = url.searchParams.get("flipZoneOnly") === "1";
+
+  const rawGrade = url.searchParams.get("gradeOnly")?.toUpperCase();
+  const gradeOnly: "A+" | "A" | "B" | "all" =
+    rawGrade === "A+" || rawGrade === "A" || rawGrade === "B" ? rawGrade : "all";
+
   const rawQuality = url.searchParams.get("qualityOnly");
   const qualityOnly: "A+" | "A" | "all" =
     rawQuality === "A+" || rawQuality === "A" ? rawQuality : "all";
@@ -72,6 +81,9 @@ export async function GET(req: Request) {
         limit,
         sector,
         qualityOnly,
+        gradeOnly,
+        goldenPocketOnly,
+        flipZoneOnly,
         volumeOnly,
         foreignOnly,
         leaderOnly,

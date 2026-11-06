@@ -27,6 +27,7 @@ import { WORKERS_BUDGET } from "../data-engine/workers-budget";
 import { analyzeExposure, type ExposureAnalysis } from "./exposure-chain";
 import { attributeDrivers, type DriverAttribution } from "./driver-attribution";
 import { computeStarRatings, type StarRatings } from "./star-ratings";
+import { analyzeMaCandleRow, type MaCandleConfluenceRow } from "../engines/ma-candle-confluence";
 
 export interface ScreenerSyncInfo {
   buyPoint: number | null;
@@ -97,6 +98,7 @@ export interface VnStockDetail {
   exposure?: ExposureAnalysis | null;
   attribution?: DriverAttribution | null;
   starRatings?: StarRatings | null;
+  confluence?: MaCandleConfluenceRow | null;
   metricsSources: string[];
   notes: string[];
 }
@@ -487,6 +489,15 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
     /* ignore fallback */
   }
 
+  let confluence: MaCandleConfluenceRow | null = null;
+  if (bars.length >= 25) {
+    try {
+      confluence = analyzeMaCandleRow(sym, bars, quote ?? undefined);
+    } catch {
+      /* resilient */
+    }
+  }
+
   const detail: VnStockDetail = {
     symbol: sym,
     name,
@@ -540,6 +551,7 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
       ma50: technical?.sma?.sma50,
       ma200: technical?.sma?.sma200,
     }),
+    confluence,
     metricsSources: sources,
     notes,
   };
@@ -581,6 +593,7 @@ function emptyShell(sym: string, note: string): { detail: VnStockDetail; meta: M
       exposure: analyzeExposure(sym),
       attribution: null,
       starRatings: null,
+      confluence: null,
       metricsSources: [],
       notes: [note],
     },
