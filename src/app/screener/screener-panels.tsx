@@ -178,16 +178,43 @@ export function BuyTriggerBadge({
   isTriggerNow,
   score,
   reasonVi,
+  subtype,
+  labelVi,
+  entryMin,
+  entryMax,
+  stopLoss,
+  target1,
+  target2,
+  riskReward,
 }: {
   isTriggerNow?: boolean | null;
   score?: number | null;
   reasonVi?: string | null;
+  subtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | string | null;
+  labelVi?: string | null;
+  entryMin?: number | null;
+  entryMax?: number | null;
+  stopLoss?: number | null;
+  target1?: number | null;
+  target2?: number | null;
+  riskReward?: number | null;
 }) {
   if (!isTriggerNow) return null;
 
+  const tooltipParts = [
+    `Điểm Mua Kích Hoạt Tức Thời: ${score ? `${score}/100đ` : "Kích hoạt"}`,
+    labelVi ? `Chiến lược: ${labelVi}` : subtype ? `Kịch bản: ${subtype}` : null,
+    entryMin != null && entryMax != null ? `Vùng mua: [${fmtNum(entryMin, 2)} - ${fmtNum(entryMax, 2)}]` : null,
+    stopLoss != null ? `Cắt lỗ (SL): ${fmtNum(stopLoss, 2)}` : null,
+    target1 != null ? `Mục tiêu (TP1): ${fmtNum(target1, 2)}` : null,
+    target2 != null ? `Mục tiêu (TP2): ${fmtNum(target2, 2)}` : null,
+    riskReward != null ? `Tỷ lệ R:R: ${riskReward.toFixed(1)}x` : null,
+    reasonVi ? `Luận điểm: ${reasonVi}` : null,
+  ].filter(Boolean).join(" · ");
+
   return (
     <span
-      title={`Điểm Mua Kích Hoạt Tức Thời: ${score ? `${score}/100đ` : "Kích hoạt"}${reasonVi ? ` · ${reasonVi}` : ""}`}
+      title={tooltipParts}
       className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 shadow-xs tracking-tight"
     >
       <span className="relative flex size-2">
@@ -195,12 +222,93 @@ export function BuyTriggerBadge({
         <span className="relative inline-flex rounded-full size-2 bg-emerald-500" />
       </span>
       <span>⚡ MUA NGAY</span>
+      {labelVi && (
+        <span className="hidden sm:inline font-semibold text-emerald-200">
+          {labelVi}
+        </span>
+      )}
+      {riskReward != null && (
+        <span className="rounded bg-emerald-500/40 px-1 py-0.2 text-[9px] text-amber-200 font-mono font-bold">
+          {riskReward.toFixed(1)}R
+        </span>
+      )}
       {score != null && (
         <span className="rounded bg-emerald-500/30 px-1 py-0.2 text-[9px] text-emerald-200 num">
           {score}
         </span>
       )}
     </span>
+  );
+}
+
+export function SniperTradePlanBadge({
+  subtype,
+  labelVi,
+  entryMin,
+  entryMax,
+  stopLoss,
+  target1,
+  target2,
+  riskReward,
+  reasonVi,
+}: {
+  subtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | string | null;
+  labelVi?: string | null;
+  entryMin?: number | null;
+  entryMax?: number | null;
+  stopLoss?: number | null;
+  target1?: number | null;
+  target2?: number | null;
+  riskReward?: number | null;
+  reasonVi?: string | null;
+}) {
+  if (!subtype) return null;
+
+  let colorClasses = "bg-emerald-500/15 border-emerald-400/50 text-emerald-300";
+  let iconText = "🎯";
+  if (subtype === "SQUEEZE_BREAKOUT") {
+    colorClasses = "bg-cyan-500/15 border-cyan-400/50 text-cyan-300";
+    iconText = "⚡";
+  } else if (subtype === "SWEEP_RECLAIM") {
+    colorClasses = "bg-amber-500/15 border-amber-400/50 text-amber-300";
+    iconText = "🔄";
+  }
+
+  const tooltipParts = [
+    `Kế hoạch Sniper: ${labelVi || subtype}`,
+    entryMin != null && entryMax != null ? `Vùng mua: [${fmtNum(entryMin, 2)} - ${fmtNum(entryMax, 2)}]` : null,
+    stopLoss != null ? `Cắt lỗ (SL): ${fmtNum(stopLoss, 2)}` : null,
+    target1 != null ? `TP1: ${fmtNum(target1, 2)}` : null,
+    target2 != null ? `TP2: ${fmtNum(target2, 2)}` : null,
+    riskReward != null ? `Tỷ lệ R:R: ${riskReward.toFixed(1)}x` : null,
+    reasonVi ? `Luận điểm: ${reasonVi}` : null,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <div
+      title={tooltipParts}
+      className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-1 text-[10px] ${colorClasses} shadow-xs select-none`}
+    >
+      <div className="flex items-center gap-1 font-bold">
+        <span>{iconText}</span>
+        <span className="truncate max-w-[130px]">{labelVi || subtype}</span>
+        {riskReward != null && (
+          <span className="ml-auto rounded bg-black/30 px-1 py-0.2 text-[9px] font-mono font-black text-amber-300 border border-amber-400/30">
+            {riskReward.toFixed(1)}R
+          </span>
+        )}
+      </div>
+      {(entryMin != null || stopLoss != null) && (
+        <div className="flex items-center gap-1.5 text-[9px] font-mono opacity-90">
+          {entryMin != null && entryMax != null && (
+            <span title="Vùng gom tối ưu">Mua: {fmtNum(entryMin, 1)}-{fmtNum(entryMax, 1)}</span>
+          )}
+          {stopLoss != null && (
+            <span className="text-rose-400 font-semibold" title="Điểm cắt lỗ Invalidation">SL: {fmtNum(stopLoss, 1)}</span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -563,6 +671,24 @@ export function FlipZoneBadge({
       className="inline-flex items-center gap-0.5 rounded bg-blue-500/25 border border-blue-400/50 px-1.5 py-0.2 text-[9px] font-bold text-blue-200"
     >
       Flip Zone
+    </span>
+  );
+}
+
+export function SmcOrderBlockBadge({
+  isOrderBlock,
+  summary,
+}: {
+  isOrderBlock?: boolean | null;
+  summary?: string | null;
+}) {
+  if (!isOrderBlock) return null;
+  return (
+    <span
+      title={summary || "Tín hiệu Order Block (OB) / Dòng tiền tạo lập gom hàng"}
+      className="inline-flex items-center gap-0.5 rounded bg-indigo-500/25 border border-indigo-400/50 px-1.5 py-0.2 text-[9px] font-bold text-indigo-200"
+    >
+      SMC OB
     </span>
   );
 }
@@ -1045,6 +1171,15 @@ export function VnScreener({
   const [vsaNoSupplyOnly, setVsaNoSupplyOnly] = useState(false);
   const [precisionMtfOnly, setPrecisionMtfOnly] = useState(false);
 
+  // Sniper Execution Quick Modifier States (Phase 3)
+  const [sniperTriggerOnly, setSniperTriggerOnly] = useState(false);
+  const [setupGradeFilter, setSetupGradeFilter] = useState<"all" | "A+" | "A" | "B">("all");
+  const [goldenPocketFilter, setGoldenPocketFilter] = useState(false);
+  const [flipZoneFilter, setFlipZoneFilter] = useState(false);
+  const [smcOrderBlockFilter, setSmcOrderBlockFilter] = useState(false);
+  const [sniperSubtypeFilter, setSniperSubtypeFilter] = useState<"all" | "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM">("all");
+  const [minSniperRRFilter, setMinSniperRRFilter] = useState("");
+
   // Consolidated compound filter helper states
   const [buyPositionCombo, setBuyPositionCombo] = useState("ALL");
   const [volatilityCombo, setVolatilityCombo] = useState("ALL");
@@ -1182,6 +1317,13 @@ export function VnScreener({
     netCashOnly: false,
     tightClosesOnly: false,
     vduOnly: false,
+    sniperTriggerOnly: false,
+    setupGradeFilter: "all" as "all" | "A+" | "A" | "B",
+    goldenPocketFilter: false,
+    flipZoneFilter: false,
+    smcOrderBlockFilter: false,
+    sniperSubtypeFilter: "all" as "all" | "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM",
+    minSniperRRFilter: "",
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -1274,6 +1416,13 @@ export function VnScreener({
     if (applied.minMtfCandleScore) p.set("minMtfCandleScore", applied.minMtfCandleScore);
     if (applied.vsaOnly) p.set("vsaOnly", "true");
     if (applied.minOverheadRoom) p.set("minOverheadRoom", applied.minOverheadRoom);
+    if (applied.sniperTriggerOnly) p.set("buyTriggerOnly", "true");
+    if (applied.setupGradeFilter && applied.setupGradeFilter !== "all") p.set("setupGradeOnly", applied.setupGradeFilter);
+    if (applied.goldenPocketFilter) p.set("goldenPocketOnly", "true");
+    if (applied.flipZoneFilter) p.set("flipZoneOnly", "true");
+    if (applied.smcOrderBlockFilter) p.set("smcOrderBlockOnly", "true");
+    if (applied.sniperSubtypeFilter && applied.sniperSubtypeFilter !== "all") p.set("sniperTriggerSubtype", applied.sniperSubtypeFilter);
+    if (applied.minSniperRRFilter) p.set("minSniperRR", applied.minSniperRRFilter);
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -1334,6 +1483,13 @@ export function VnScreener({
       netCashOnly,
       tightClosesOnly,
       vduOnly,
+      sniperTriggerOnly,
+      setupGradeFilter,
+      goldenPocketFilter,
+      flipZoneFilter,
+      smcOrderBlockFilter,
+      sniperSubtypeFilter,
+      minSniperRRFilter,
     });
     void mutate();
   }, [
@@ -1376,8 +1532,19 @@ export function VnScreener({
     netCashOnly,
     tightClosesOnly,
     vduOnly,
+    sniperTriggerOnly,
+    setupGradeFilter,
+    goldenPocketFilter,
+    flipZoneFilter,
+    smcOrderBlockFilter,
+    sniperSubtypeFilter,
+    minSniperRRFilter,
     mutate,
   ]);
+
+  const toggleQuickModifier = useCallback((key: string, val: unknown) => {
+    setApplied((prev) => ({ ...prev, [key]: val }));
+  }, []);
 
   const handleReset = useCallback(() => {
     setPreset("all");
@@ -1422,6 +1589,13 @@ export function VnScreener({
     setNetCashOnly(false);
     setTightClosesOnly(false);
     setVduOnly(false);
+    setSniperTriggerOnly(false);
+    setSetupGradeFilter("all");
+    setGoldenPocketFilter(false);
+    setFlipZoneFilter(false);
+    setSmcOrderBlockFilter(false);
+    setSniperSubtypeFilter("all");
+    setMinSniperRRFilter("");
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1467,6 +1641,13 @@ export function VnScreener({
       netCashOnly: false,
       tightClosesOnly: false,
       vduOnly: false,
+      sniperTriggerOnly: false,
+      setupGradeFilter: "all",
+      goldenPocketFilter: false,
+      flipZoneFilter: false,
+      smcOrderBlockFilter: false,
+      sniperSubtypeFilter: "all",
+      minSniperRRFilter: "",
     });
     void mutate();
   }, [mutate]);
@@ -1782,6 +1963,174 @@ export function VnScreener({
                 })
               )}
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* 1.5 Sniper Execution Quick Modifiers Bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-panel/90 p-2.5 shadow-xs backdrop-blur-xs">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary mr-1 shrink-0">
+          <span className="flex size-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="hidden sm:inline">Sniper Execution:</span>
+        </div>
+
+        {/* 1. Điểm Mua Tức Thời Quick Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = !applied.sniperTriggerOnly;
+            setSniperTriggerOnly(next);
+            toggleQuickModifier("sniperTriggerOnly", next);
+          }}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all border shrink-0 ${
+            applied.sniperTriggerOnly
+              ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/60 shadow-xs"
+              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+          }`}
+        >
+          <span>🎯</span>
+          <span>Điểm Mua Tức Thời</span>
+        </button>
+
+        {/* 2. Setup Grade A+/A Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = applied.setupGradeFilter === "A" ? "all" : applied.setupGradeFilter === "A+" ? "A" : "A+";
+            setSetupGradeFilter(next);
+            toggleQuickModifier("setupGradeFilter", next);
+          }}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
+            applied.setupGradeFilter !== "all"
+              ? "bg-amber-500/20 text-amber-200 border-amber-400/60 shadow-xs font-bold"
+              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+          }`}
+        >
+          <span>🏆</span>
+          <span>{applied.setupGradeFilter === "all" ? "Hợp lưu A+/A" : `Hạng ${applied.setupGradeFilter}`}</span>
+        </button>
+
+        {/* 3. Golden Pocket 0.618 Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = !applied.goldenPocketFilter;
+            setGoldenPocketFilter(next);
+            toggleQuickModifier("goldenPocketFilter", next);
+          }}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
+            applied.goldenPocketFilter
+              ? "bg-purple-500/25 text-purple-200 border-purple-400/60 shadow-xs font-bold"
+              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+          }`}
+        >
+          <span>📐</span>
+          <span>Fibo GP 0.618</span>
+        </button>
+
+        {/* 4. Flip Zone Retest Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = !applied.flipZoneFilter;
+            setFlipZoneFilter(next);
+            toggleQuickModifier("flipZoneFilter", next);
+          }}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
+            applied.flipZoneFilter
+              ? "bg-blue-500/25 text-blue-200 border-blue-400/60 shadow-xs font-bold"
+              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+          }`}
+        >
+          <span>🔄</span>
+          <span>Flip Zone Retest</span>
+        </button>
+
+        {/* 5. SMC Order Block Toggle */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = !applied.smcOrderBlockFilter;
+            setSmcOrderBlockFilter(next);
+            toggleQuickModifier("smcOrderBlockFilter", next);
+          }}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
+            applied.smcOrderBlockFilter
+              ? "bg-indigo-500/25 text-indigo-200 border-indigo-400/60 shadow-xs font-bold"
+              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
+          }`}
+        >
+          <span>🏦</span>
+          <span>Order Block (SMC)</span>
+        </button>
+
+        {/* 6. Sniper Subtype Selector & Min R:R Selector */}
+        <div className="flex flex-wrap items-center gap-1.5 ml-auto">
+          <select
+            value={applied.sniperSubtypeFilter}
+            onChange={(e) => {
+              const val = e.target.value as any;
+              setSniperSubtypeFilter(val);
+              toggleQuickModifier("sniperSubtypeFilter", val);
+            }}
+            className="rounded-lg border border-border-subtle bg-panel-2 px-2 py-1 text-xs text-text-primary focus:border-accent-primary focus:outline-none"
+          >
+            <option value="all">Mọi Kịch Bản Sniper</option>
+            <option value="SNIPER_PULLBACK">🎯 Pullback Vùng Vàng</option>
+            <option value="SQUEEZE_BREAKOUT">⚡ Bứt Phá Squeeze</option>
+            <option value="SWEEP_RECLAIM">🔄 Quét Thanh Khoản Spring</option>
+          </select>
+
+          <select
+            value={applied.minSniperRRFilter}
+            onChange={(e) => {
+              const val = e.target.value;
+              setMinSniperRRFilter(val);
+              toggleQuickModifier("minSniperRRFilter", val);
+            }}
+            className="rounded-lg border border-border-subtle bg-panel-2 px-2 py-1 text-xs text-text-primary focus:border-accent-primary focus:outline-none"
+          >
+            <option value="">Mọi R:R</option>
+            <option value="1.5">R:R ≥ 1.5x</option>
+            <option value="2.0">R:R ≥ 2.0x</option>
+            <option value="2.5">R:R ≥ 2.5x</option>
+            <option value="3.0">R:R ≥ 3.0x</option>
+          </select>
+
+          {/* Reset Quick Modifiers */}
+          {(applied.sniperTriggerOnly ||
+            applied.setupGradeFilter !== "all" ||
+            applied.goldenPocketFilter ||
+            applied.flipZoneFilter ||
+            applied.smcOrderBlockFilter ||
+            applied.sniperSubtypeFilter !== "all" ||
+            Boolean(applied.minSniperRRFilter)) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSniperTriggerOnly(false);
+                setSetupGradeFilter("all");
+                setGoldenPocketFilter(false);
+                setFlipZoneFilter(false);
+                setSmcOrderBlockFilter(false);
+                setSniperSubtypeFilter("all");
+                setMinSniperRRFilter("");
+                setApplied((prev) => ({
+                  ...prev,
+                  sniperTriggerOnly: false,
+                  setupGradeFilter: "all",
+                  goldenPocketFilter: false,
+                  flipZoneFilter: false,
+                  smcOrderBlockFilter: false,
+                  sniperSubtypeFilter: "all",
+                  minSniperRRFilter: "",
+                }));
+              }}
+              className="rounded px-1.5 py-1 text-[11px] font-medium text-text-muted hover:text-rose-400 transition-colors"
+              title="Đặt lại các bộ lọc nhanh Sniper"
+            >
+              ✕ Đặt lại
+            </button>
           )}
         </div>
       </div>
@@ -2361,6 +2710,14 @@ export function VnScreener({
                                   isTriggerNow={row.isBuyTriggerNow}
                                   score={row.buyTriggerScore}
                                   reasonVi={row.buyTriggerReasonVi}
+                                  subtype={row.sniperTriggerSubtype}
+                                  labelVi={row.sniperTriggerLabelVi}
+                                  entryMin={row.sniperEntryMin}
+                                  entryMax={row.sniperEntryMax}
+                                  stopLoss={row.sniperStopLoss}
+                                  target1={row.sniperTarget1}
+                                  target2={row.sniperTarget2}
+                                  riskReward={row.sniperRiskReward}
                                 />
                               )}
                               <span className="rounded bg-panel-3 px-1 py-0.2 text-[9.5px] text-text-muted font-mono">
@@ -2391,6 +2748,23 @@ export function VnScreener({
                           </div>
                         </div>
 
+                        {/* Sniper Actionable Trade Plan in Grid */}
+                        {row.sniperTriggerSubtype && (
+                          <div className="my-1.5">
+                            <SniperTradePlanBadge
+                              subtype={row.sniperTriggerSubtype}
+                              labelVi={row.sniperTriggerLabelVi}
+                              entryMin={row.sniperEntryMin}
+                              entryMax={row.sniperEntryMax}
+                              stopLoss={row.sniperStopLoss}
+                              target1={row.sniperTarget1}
+                              target2={row.sniperTarget2}
+                              riskReward={row.sniperRiskReward}
+                              reasonVi={row.buyTriggerReasonVi}
+                            />
+                          </div>
+                        )}
+
                         {/* Mini Candlestick / Sparkline Chart */}
                         <div className="my-1.5">
                           <ScreenerMiniChart
@@ -2405,11 +2779,22 @@ export function VnScreener({
 
                         {/* Quantitative Badges Grid */}
                         <div className="flex items-center gap-1 flex-wrap my-2">
-                          {row.isBuyTriggerNow && (
-                            <BuyTriggerBadge
-                              isTriggerNow={row.isBuyTriggerNow}
-                              score={row.buyTriggerScore}
-                              reasonVi={row.buyTriggerReasonVi}
+                          {row.isGoldenPocket && (
+                            <FiboGoldenPocketBadge
+                              isGoldenPocket={row.isGoldenPocket}
+                              summary={row.fiboSummary}
+                            />
+                          )}
+                          {row.isFlipZoneSupport && (
+                            <FlipZoneBadge
+                              isFlipZone={row.isFlipZoneSupport}
+                              summary={row.structureSummary}
+                            />
+                          )}
+                          {row.isSmcOrderBlock && (
+                            <SmcOrderBlockBadge
+                              isOrderBlock={row.isSmcOrderBlock}
+                              summary={row.structureSummary}
                             />
                           )}
                           {row.squeezeState && row.squeezeState !== "squeeze_off" && (
@@ -3096,6 +3481,14 @@ export function VnScreener({
                             isTriggerNow={row.isBuyTriggerNow}
                             score={row.buyTriggerScore}
                             reasonVi={row.buyTriggerReasonVi}
+                            subtype={row.sniperTriggerSubtype}
+                            labelVi={row.sniperTriggerLabelVi}
+                            entryMin={row.sniperEntryMin}
+                            entryMax={row.sniperEntryMax}
+                            stopLoss={row.sniperStopLoss}
+                            target1={row.sniperTarget1}
+                            target2={row.sniperTarget2}
+                            riskReward={row.sniperRiskReward}
                           />
                         )}
                         {row.isDiamondConfluence && (
@@ -3374,22 +3767,49 @@ export function VnScreener({
                         <td className="py-2.5 text-center font-mono text-[11px] text-text-secondary">
                           {row.buyRange ? `${fmtNum(row.buyRange[0], 2)} – ${fmtNum(row.buyRange[1], 2)}` : "—"}
                         </td>
-                        <td className="py-2.5 text-left text-[11px] font-medium text-text-primary truncate max-w-[190px]">
-                          <div>{row.buyStrategy ?? "Bệ đỡ hội tụ"}</div>
-                          {row.isMtfAligned && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400">
-                              Đồng thuận H1·D1·W1
-                            </span>
-                          )}
+                        <td className="py-2.5 text-left text-[11px] font-medium text-text-primary">
+                          <div className="flex flex-col gap-1 max-w-[210px]">
+                            <div className="truncate">{row.buyStrategy ?? "Bệ đỡ hội tụ"}</div>
+                            {row.sniperTriggerSubtype && (
+                              <SniperTradePlanBadge
+                                subtype={row.sniperTriggerSubtype}
+                                labelVi={row.sniperTriggerLabelVi}
+                                entryMin={row.sniperEntryMin}
+                                entryMax={row.sniperEntryMax}
+                                stopLoss={row.sniperStopLoss}
+                                target1={row.sniperTarget1}
+                                target2={row.sniperTarget2}
+                                riskReward={row.sniperRiskReward}
+                                reasonVi={row.buyTriggerReasonVi}
+                              />
+                            )}
+                            {row.isMtfAligned && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-400">
+                                Đồng thuận H1·D1·W1
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="num py-2.5 text-right font-medium text-rose-400 font-mono">
-                          {row.stopLoss != null ? fmtNum(row.stopLoss, 2) : "—"}
+                          {row.stopLoss != null
+                            ? fmtNum(row.stopLoss, 2)
+                            : row.sniperStopLoss != null
+                            ? fmtNum(row.sniperStopLoss, 2)
+                            : "—"}
                         </td>
                         <td className="num py-2.5 text-right font-medium text-emerald-400 font-mono">
-                          {row.targetPrice != null ? fmtNum(row.targetPrice, 2) : "—"}
+                          {row.targetPrice != null
+                            ? fmtNum(row.targetPrice, 2)
+                            : row.sniperTarget1 != null
+                            ? fmtNum(row.sniperTarget1, 2)
+                            : "—"}
                         </td>
                         <td className="num py-2.5 text-right font-bold text-amber-400 font-mono">
-                          {row.riskReward != null ? `${row.riskReward}R` : "—"}
+                          {row.riskReward != null
+                            ? `${row.riskReward}R`
+                            : row.sniperRiskReward != null
+                            ? `${row.sniperRiskReward.toFixed(1)}R`
+                            : "—"}
                         </td>
                         <td className="py-2.5 pr-3.5 text-center">
                           <Link
@@ -3573,9 +3993,13 @@ export function VnScreener({
                                 isFlipZone={row.isFlipZoneSupport}
                                 summary={row.structureSummary}
                               />
-                              {row.isSmcOrderBlock && (
-                                <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 text-[9px] font-bold text-amber-300">
-                                  SMC OB
+                              <SmcOrderBlockBadge
+                                isOrderBlock={row.isSmcOrderBlock}
+                                summary={row.structureSummary}
+                              />
+                              {row.sniperTriggerSubtype && (
+                                <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300">
+                                  ⚡ {row.sniperTriggerLabelVi || row.sniperTriggerSubtype} {row.sniperRiskReward ? `(${row.sniperRiskReward.toFixed(1)}R)` : ""}
                                 </span>
                               )}
                               {row.hasBullishDivergence && (
