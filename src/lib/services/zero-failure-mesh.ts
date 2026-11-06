@@ -164,7 +164,9 @@ interface EntradeStockData {
 export async function fetchEntradeQuotes(symbols: string[]): Promise<Quote[]> {
   const t0 = Date.now();
   try {
-    const symList = symbols.map((s) => s.toUpperCase().trim()).filter(Boolean);
+    const symList = symbols
+      .map((s) => s.toUpperCase().trim())
+      .filter((s) => /^[A-Z0-9]{1,10}$/.test(s));
     if (!symList.length) return [];
 
     // Gọi API Entrade public snapshot

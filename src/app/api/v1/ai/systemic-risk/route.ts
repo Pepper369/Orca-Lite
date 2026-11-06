@@ -1,4 +1,4 @@
-import { ok } from "@/lib/envelope";
+import { ok, badRequest } from "@/lib/envelope";
 import {
   VN_SYSTEMIC_EXPOSURE_MAP,
   getContagionExposureForTicker,
@@ -34,10 +34,14 @@ const MOCK_HISTORICAL_SIGNALS: Array<{ title: string; content: string; ticker: s
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const symbol = searchParams.get("symbol")?.toUpperCase().trim();
+  const rawSymbol = searchParams.get("symbol");
+  const symbol = rawSymbol?.toUpperCase().trim();
 
-  // 1. Nếu có symbol, trả về chuỗi lan tỏa liên đới của riêng mã đó
+  // 1. Nếu có symbol, kiểm tra định dạng và trả về chuỗi lan tỏa liên đới của riêng mã đó
   if (symbol) {
+    if (!/^[A-Z0-9]{1,10}$/.test(symbol)) {
+      return badRequest("Mã cổ phiếu không hợp lệ");
+    }
     const links = getContagionExposureForTicker(symbol);
     return ok({
       ticker: symbol,

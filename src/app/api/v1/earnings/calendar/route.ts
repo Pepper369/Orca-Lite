@@ -269,7 +269,8 @@ const SAMPLE_EARNINGS_DATABASE: CompanyEarningsItem[] = [
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const currentYear = new Date().getFullYear();
-  const yearParam = Number(searchParams.get("year")) || currentYear;
+  const rawYear = Number(searchParams.get("year"));
+  const yearParam = Number.isFinite(rawYear) && rawYear >= 2000 && rawYear <= 2099 ? rawYear : currentYear;
 
   const deadlines: BctcDeadline[] = getBCTCDeadlines(yearParam);
 

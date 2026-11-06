@@ -100,7 +100,12 @@ const VI_TICKER_EXCLUSIONS = new Set([
 
 export function tokenizeViTitle(title: string): Set<string> {
   if (!title) return new Set();
-  const lower = title.toLowerCase().trim();
+  // Strip HTML script/style tags and contents for clean clustering and injection defense
+  const noHtml = title
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ");
+  const lower = noHtml.toLowerCase().trim();
   const cleaned = lower.replace(/[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ\s]/gi, " ");
   const tokens = cleaned.split(/\s+/).filter((t) => t.length > 2 && !VI_STOPWORDS.has(t));
   return new Set(tokens);
