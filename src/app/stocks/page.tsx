@@ -225,6 +225,7 @@ export default function VnMarketCenterPage() {
                 quotes.map((qu) => {
                   const atCeil = hitsBand(qu.price, qu.ceilingPrice);
                   const atFloor = !atCeil && hitsBand(qu.price, qu.floorPrice);
+                  const isVolumeSurge = (qu.changePercent ?? 0) >= 1.5 && (qu.volume ?? 0) >= 1_500_000;
                   return (
                   <Link
                     key={qu.symbol}
@@ -238,7 +239,7 @@ export default function VnMarketCenterPage() {
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-accent-primary">{qu.symbol}</span>
                         {atCeil ? (
                           <span className="rounded border border-violet-500/40 bg-violet-500/20 px-1 text-[9px] font-bold uppercase text-violet-300">
@@ -248,6 +249,11 @@ export default function VnMarketCenterPage() {
                         {atFloor ? (
                           <span className="rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300">
                             Sàn
+                          </span>
+                        ) : null}
+                        {isVolumeSurge ? (
+                          <span className="rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300">
+                            ⚡ Tiền vào
                           </span>
                         ) : null}
                         <AddToWatchlist assetType="stock" symbol={qu.symbol} />
@@ -283,15 +289,16 @@ export default function VnMarketCenterPage() {
             <div className="table-scroll hidden max-h-[min(70vh,720px)] w-full md:block">
               <table className="stock-table w-full table-fixed text-left">
                 <colgroup>
-                  <col className="w-[16%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[11%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[16%]" />
+                  <col className="w-[11%]" />
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-background-secondary text-[10px] uppercase tracking-wider text-text-muted">
                   <tr>
@@ -303,6 +310,7 @@ export default function VnMarketCenterPage() {
                     <th className="text-right text-sky-300">Sàn</th>
                     <th className="text-right">KL</th>
                     <th className="text-right">GT</th>
+                    <th className="text-right text-accent-primary">Áp Lực Mua</th>
                     <th className="pr-2 text-right sm:pr-3">Theo dõi</th>
                   </tr>
                 </thead>
@@ -310,6 +318,8 @@ export default function VnMarketCenterPage() {
                   {quotes.map((qu) => {
                     const atCeil = hitsBand(qu.price, qu.ceilingPrice);
                     const atFloor = !atCeil && hitsBand(qu.price, qu.floorPrice);
+                    const buyPressure = Math.max(15, Math.min(90, Math.round(50 + (qu.changePercent ?? 0) * 4)));
+                    const isVolumeSurge = (qu.changePercent ?? 0) >= 1.5 && (qu.volume ?? 0) >= 1_500_000;
                     return (
                     <tr
                       key={qu.symbol}
@@ -318,10 +328,10 @@ export default function VnMarketCenterPage() {
                       }`}
                     >
                       <td className="py-2 pl-2 sm:pl-3">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <Link
                             href={`/stocks/${qu.symbol}`}
-                            className="font-semibold text-accent-primary hover:underline"
+                            className="font-semibold text-accent-primary hover:underline font-mono"
                           >
                             {qu.symbol}
                           </Link>
@@ -333,6 +343,11 @@ export default function VnMarketCenterPage() {
                           {atFloor ? (
                             <span className="shrink-0 rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300" title="Giá chạm sàn">
                               Sàn
+                            </span>
+                          ) : null}
+                          {isVolumeSurge ? (
+                            <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300 animate-pulse" title="Đột biến thanh khoản: Tiền đổ vào mạnh">
+                              ⚡ Tiền vào
                             </span>
                           ) : null}
                         </div>
@@ -359,6 +374,11 @@ export default function VnMarketCenterPage() {
                       </td>
                       <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.volume)}</td>
                       <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.quoteVolume)}</td>
+                      <td className="py-2 text-right font-mono text-[11px]">
+                        <span className={`font-semibold ${buyPressure >= 55 ? "text-up" : buyPressure <= 45 ? "text-down" : "text-text-muted"}`}>
+                          {buyPressure}%
+                        </span>
+                      </td>
                       <td className="py-2 pr-2 text-right sm:pr-3">
                         <AddToWatchlist assetType="stock" symbol={qu.symbol} />
                       </td>
