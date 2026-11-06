@@ -398,6 +398,13 @@ export type ScreenerFilterParams = {
   vduOnly?: boolean;
   rsNewHighOnly?: boolean;
   wyckoffLpsOnly?: boolean;
+  // Confluence 2.0 & Sniper Buy Trigger Cross-Filters (Giai đoạn 2)
+  setupGradeOnly?: "A+" | "A" | "B" | "all";
+  goldenPocketOnly?: boolean;
+  flipZoneOnly?: boolean;
+  smcOrderBlockOnly?: boolean;
+  sniperTriggerSubtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "all";
+  minSniperRR?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -2799,7 +2806,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -2983,6 +2990,14 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.vduOnly && !x.isVolumeDryUp) continue;
     if (params.rsNewHighOnly && !x.isRsNewHigh20) continue;
     if (params.wyckoffLpsOnly && !x.isWyckoffLps) continue;
+
+    // Confluence 2.0 & Sniper Buy Trigger Cross-Filters (Giai đoạn 2)
+    if (params.setupGradeOnly && params.setupGradeOnly !== "all" && x.setupGrade !== params.setupGradeOnly) continue;
+    if (params.goldenPocketOnly && !x.isGoldenPocket) continue;
+    if (params.flipZoneOnly && !x.isFlipZoneSupport) continue;
+    if (params.smcOrderBlockOnly && !x.isSmcOrderBlock) continue;
+    if (params.sniperTriggerSubtype && params.sniperTriggerSubtype !== "all" && x.sniperTriggerSubtype !== params.sniperTriggerSubtype) continue;
+    if (params.minSniperRR != null && (x.sniperRiskReward == null || x.sniperRiskReward < params.minSniperRR)) continue;
 
     filtered.push(x);
   }
