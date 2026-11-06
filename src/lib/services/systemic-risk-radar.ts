@@ -182,10 +182,8 @@ export function evaluateSystemicLegalRisk(
     }
   }
 
-  // Tìm các ngân hàng / đối tác bị lây lan rủi ro
-  const affectedLinks = VN_SYSTEMIC_EXPOSURE_MAP.filter(
-    (l) => l.sourceTicker === primaryTicker,
-  );
+  // Tìm các ngân hàng / đối tác bị lây lan rủi ro qua O(1) index
+  const affectedLinks = CONTAGION_BY_SOURCE.get(primaryTicker) || [];
   const affectedTickers = affectedLinks.map((l) => l.targetTicker);
 
   let systemicContagionRisk: LegalRiskSignal["systemicContagionRisk"] = "LOCALIZED";
@@ -228,8 +226,30 @@ export function evaluateSystemicLegalRisk(
   };
 }
 
-/** Lấy danh sách các ngân hàng và tổ chức chịu rủi ro lan tỏa từ một mã cụ thể */
+// Pre-indexed lookup maps for O(1) systemic contagion checks
+const CONTAGION_BY_SOURCE = new Map<string, SystemicExposureLink[]>();
+const CONTAGION_BY_PARTICIPANT = new Map<string, SystemicExposureLink[]>();
+
+for (const link of VN_SYSTEMIC_EXPOSURE_MAP) {
+  let sArr = CONTAGION_BY_SOURCE.get(link.sourceTicker);
+  if (!sArr) {
+    sArr = [];
+    CONTAGION_BY_SOURCE.set(link.sourceTicker, sArr);
+  }
+  sArr.push(link);
+
+  for (const sym of [link.sourceTicker, link.targetTicker]) {
+    let pArr = CONTAGION_BY_PARTICIPANT.get(sym);
+    if (!pArr) {
+      pArr = [];
+      CONTAGION_BY_PARTICIPANT.set(sym, pArr);
+    }
+    pArr.push(link);
+  }
+}
+
+/** Lấy danh sách các ngân hàng và tổ chức chịu rủi ro lan tỏa từ một mã cụ thể (O(1) lookup) */
 export function getContagionExposureForTicker(ticker: string): SystemicExposureLink[] {
   const sym = ticker.toUpperCase().trim();
-  return VN_SYSTEMIC_EXPOSURE_MAP.filter((l) => l.sourceTicker === sym || l.targetTicker === sym);
+  return CONTAGION_BY_PARTICIPANT.get(sym) || [];
 }

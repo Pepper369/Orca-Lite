@@ -112,12 +112,21 @@ export function tokenizeViTitle(title: string): Set<string> {
 }
 
 export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
-  if (!a.size || !b.size) return 0.0;
+  const aSize = a.size;
+  const bSize = b.size;
+  if (!aSize || !bSize) return 0.0;
+
+  // shortcut: early bound check — if max possible overlap < 0.2, skip looping
+  const maxPossible = aSize < bSize ? aSize / bSize : bSize / aSize;
+  if (maxPossible < 0.2) return 0.0;
+
+  // Always iterate through the smaller set
+  const [smaller, larger] = aSize <= bSize ? [a, b] : [b, a];
   let inter = 0;
-  for (const item of a) {
-    if (b.has(item)) inter++;
+  for (const item of smaller) {
+    if (larger.has(item)) inter++;
   }
-  const union = a.size + b.size - inter;
+  const union = aSize + bSize - inter;
   return union > 0 ? inter / union : 0.0;
 }
 
@@ -129,34 +138,26 @@ export function clusterNewsTitles(titles: string[], threshold = 0.3): number[][]
   if (!titles || titles.length === 0) return [];
 
   const tokenSets = titles.map((t) => tokenizeViTitle(t));
-  const clusterOf = new Array(titles.length).fill(-1);
-  let clusterCount = 0;
+  const clusterOf = new Int32Array(titles.length).fill(-1);
+  const clusters: number[][] = [];
 
   for (let i = 0; i < titles.length; i++) {
     if (clusterOf[i] !== -1) continue;
-    clusterOf[i] = clusterCount;
-    clusterCount++;
+    const cIdx = clusters.length;
+    clusterOf[i] = cIdx;
+    clusters.push([i]);
 
+    const setI = tokenSets[i]!;
     for (let j = i + 1; j < titles.length; j++) {
       if (clusterOf[j] !== -1) continue;
-      if (jaccardSimilarity(tokenSets[i], tokenSets[j]) >= threshold) {
-        clusterOf[j] = clusterOf[i];
+      if (jaccardSimilarity(setI, tokenSets[j]!) >= threshold) {
+        clusterOf[j] = cIdx;
+        clusters[cIdx]!.push(j);
       }
     }
   }
 
-  const buckets: Record<number, number[]> = {};
-  for (let idx = 0; idx < clusterOf.length; idx++) {
-    const c = clusterOf[idx];
-    if (!buckets[c]) buckets[c] = [];
-    buckets[c].push(idx);
-  }
-
-  const result: number[][] = [];
-  for (let c = 0; c < clusterCount; c++) {
-    if (buckets[c]) result.push(buckets[c]);
-  }
-  return result;
+  return clusters;
 }
 
 export interface ExtractedQueryIntent {

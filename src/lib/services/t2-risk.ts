@@ -65,8 +65,9 @@ export function computeT2OverextensionRisk(
     };
   }
 
-  // Sắp xếp nến theo thứ tự thời gian tăng dần
-  const sorted = [...bars].sort((a, b) => a.time - b.time);
+  // Sắp xếp nến nếu chưa theo thứ tự thời gian tăng dần
+  const isSorted = bars.length <= 1 || bars[0]!.time <= bars[bars.length - 1]!.time;
+  const sorted = isSorted ? bars : [...bars].sort((a, b) => a.time - b.time);
   const n = sorted.length;
   const lastBar = sorted[n - 1]!;
   const price = currentPrice && currentPrice > 0 ? currentPrice : lastBar.close;
@@ -90,11 +91,11 @@ export function computeT2OverextensionRisk(
   const cumulativeRunGainPct =
     runStartPrice > 0 ? ((price - runStartPrice) / runStartPrice) * 100 : 0;
 
-  // 2. Tính MA10 và MA20
+  // 2. Tính MA10 và MA20 (Zero-allocation loop)
   const calcMa = (period: number) => {
     if (n < period) return price;
-    const slice = sorted.slice(n - period);
-    const sum = slice.reduce((acc, b) => acc + b.close, 0);
+    let sum = 0;
+    for (let i = n - period; i < n; i++) sum += sorted[i]!.close;
     return sum / period;
   };
 
@@ -103,16 +104,15 @@ export function computeT2OverextensionRisk(
   const distanceFromMa10Pct = ma10 > 0 ? ((price - ma10) / ma10) * 100 : 0;
   const distanceFromMa20Pct = ma20 > 0 ? ((price - ma20) / ma20) * 100 : 0;
 
-  // 3. Ước lượng RSI(14) nhanh
+  // 3. Ước lượng RSI(14) nhanh (Zero-allocation loop)
   let rsi14: number | null = null;
   if (n >= 15) {
     let gains = 0;
     let losses = 0;
-    const rsiSlice = sorted.slice(n - 15);
-    for (let i = 1; i < rsiSlice.length; i++) {
-      const diff = rsiSlice[i]!.close - rsiSlice[i - 1]!.close;
+    for (let i = n - 14; i < n; i++) {
+      const diff = sorted[i]!.close - sorted[i - 1]!.close;
       if (diff >= 0) gains += diff;
-      else losses += Math.abs(diff);
+      else losses -= diff;
     }
     const avgGain = gains / 14;
     const avgLoss = losses / 14;
@@ -123,9 +123,12 @@ export function computeT2OverextensionRisk(
     }
   }
 
-  // 4. Tỷ lệ đột biến Volume so với MA20 volume
-  const volSlice = sorted.slice(Math.max(0, n - 20));
-  const avgVol = volSlice.reduce((s, b) => s + b.volume, 0) / (volSlice.length || 1);
+  // 4. Tỷ lệ đột biến Volume so với MA20 volume (Zero-allocation loop)
+  const volStart = Math.max(0, n - 20);
+  const volCount = n - volStart;
+  let sumVol = 0;
+  for (let i = volStart; i < n; i++) sumVol += sorted[i]!.volume;
+  const avgVol = volCount > 0 ? sumVol / volCount : 1;
   const volumeSurgeRatio = avgVol > 0 ? Math.round((lastBar.volume / avgVol) * 10) / 10 : 1;
 
   // 5. Tính Điểm Rủi Ro (0 - 100)

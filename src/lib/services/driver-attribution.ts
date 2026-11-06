@@ -85,29 +85,29 @@ export function attributeDrivers(f: DriverFeatures): DriverAttribution {
   const maSignal = f.maSignal ?? "";
   const volRatio = f.volumeRatio ?? 1.0;
 
-  const signs: Record<string, number> = {
-    FOREIGN: clamp(f.foreignNetVnd / 10_000_000_000, 5), // 10 tỷ VND = 1.0
-    MARKET: f.marketDeltaPct,
-    SECTOR: f.sectorDeltaPct - f.marketDeltaPct, // Alpha ngành
-    NEWS: newsSentiment * Math.log1p(newsCount) * 3,
-    TECHNICAL: techImpact(rsi, maSignal),
-    VOLUME: volumeImpact(volRatio, move),
+  const moveSign = move > 0 ? 1 : -1;
+  const adjust = (val: number) => {
+    const w = Math.abs(val);
+    if (w === 0) return 0;
+    const vs = val > 0 ? 1 : val < 0 ? -1 : 0;
+    return vs === moveSign ? w : w * 0.3;
   };
 
-  const moveSign = move > 0 ? 1 : -1;
-  const weights: Record<string, number> = {};
-  let total = 0.0;
+  const vForeign = clamp(f.foreignNetVnd / 10_000_000_000, 5);
+  const vMarket = f.marketDeltaPct;
+  const vSector = f.sectorDeltaPct - f.marketDeltaPct;
+  const vNews = newsSentiment * Math.log1p(newsCount) * 3;
+  const vTechnical = techImpact(rsi, maSignal);
+  const vVolume = volumeImpact(volRatio, move);
 
-  for (const [k, v] of Object.entries(signs)) {
-    let w = Math.abs(v);
-    if (w === 0) continue;
-    const vs = v > 0 ? 1 : v < 0 ? -1 : 0;
-    if (vs !== moveSign) {
-      w *= 0.3; // Tín hiệu ngược hướng nhận 30% trọng số
-    }
-    weights[k] = w;
-    total += w;
-  }
+  const wForeign = adjust(vForeign);
+  const wMarket = adjust(vMarket);
+  const wSector = adjust(vSector);
+  const wNews = adjust(vNews);
+  const wTechnical = adjust(vTechnical);
+  const wVolume = adjust(vVolume);
+
+  const total = wForeign + wMarket + wSector + wNews + wTechnical + wVolume;
 
   if (total < 0.01) {
     return {
@@ -125,12 +125,12 @@ export function attributeDrivers(f: DriverFeatures): DriverAttribution {
 
   const r1 = (v: number) => Math.round(v * 10) / 10;
 
-  const foreignPct = r1(((weights.FOREIGN ?? 0) / total) * 100);
-  const marketPct = r1(((weights.MARKET ?? 0) / total) * 100);
-  const sectorPct = r1(((weights.SECTOR ?? 0) / total) * 100);
-  const newsPct = r1(((weights.NEWS ?? 0) / total) * 100);
-  const technicalPct = r1(((weights.TECHNICAL ?? 0) / total) * 100);
-  const volumePct = r1(((weights.VOLUME ?? 0) / total) * 100);
+  const foreignPct = r1((wForeign / total) * 100);
+  const marketPct = r1((wMarket / total) * 100);
+  const sectorPct = r1((wSector / total) * 100);
+  const newsPct = r1((wNews / total) * 100);
+  const technicalPct = r1((wTechnical / total) * 100);
+  const volumePct = r1((wVolume / total) * 100);
 
   const accounted = foreignPct + marketPct + sectorPct + newsPct + technicalPct + volumePct;
   const residualPct = r1(Math.max(0, 100 - accounted));
@@ -138,15 +138,12 @@ export function attributeDrivers(f: DriverFeatures): DriverAttribution {
   let dominant: DominantDriver = "UNKNOWN";
   let bestWeight = 0;
 
-  for (const [k, w] of Object.entries(weights)) {
-    const v = signs[k];
-    const vs = v > 0 ? 1 : v < 0 ? -1 : 0;
-    if (vs !== moveSign) continue;
-    if (w > bestWeight) {
-      bestWeight = w;
-      dominant = k as DominantDriver;
-    }
-  }
+  if (vForeign * moveSign > 0 && wForeign > bestWeight) { dominant = "FOREIGN"; bestWeight = wForeign; }
+  if (vMarket * moveSign > 0 && wMarket > bestWeight) { dominant = "MARKET"; bestWeight = wMarket; }
+  if (vSector * moveSign > 0 && wSector > bestWeight) { dominant = "SECTOR"; bestWeight = wSector; }
+  if (vNews * moveSign > 0 && wNews > bestWeight) { dominant = "NEWS"; bestWeight = wNews; }
+  if (vTechnical * moveSign > 0 && wTechnical > bestWeight) { dominant = "TECHNICAL"; bestWeight = wTechnical; }
+  if (vVolume * moveSign > 0 && wVolume > bestWeight) { dominant = "VOLUME"; bestWeight = wVolume; }
 
   const dominantName = DOMINANT_LABELS_VI[dominant] || "yếu tố kỹ thuật";
   const directionStr = move > 0 ? "tăng giá" : "giảm giá";
