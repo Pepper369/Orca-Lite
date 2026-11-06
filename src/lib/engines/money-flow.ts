@@ -227,7 +227,7 @@ function atrSeries(bars: OhlcvBar[], period = 14): number {
   return avg;
 }
 
-function findSwings(bars: OhlcvBar[], halfWindow: number, kind: SwingKind): SwingPoint[] {
+export function findSwings(bars: OhlcvBar[], halfWindow: number, kind: SwingKind): SwingPoint[] {
   const out: SwingPoint[] = [];
   if (bars.length < halfWindow * 2 + 1) return out;
   for (let i = halfWindow; i < bars.length - halfWindow; i++) {
