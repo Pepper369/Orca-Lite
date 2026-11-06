@@ -264,6 +264,14 @@ export type ScreenerStockItem = {
   isBuyTriggerNow?: boolean | null;
   buyTriggerScore?: number | null; // 1 - 99
   buyTriggerReasonVi?: string | null;
+  sniperTriggerSubtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "NONE" | null;
+  sniperTriggerLabelVi?: string | null;
+  sniperEntryMin?: number | null;
+  sniperEntryMax?: number | null;
+  sniperStopLoss?: number | null;
+  sniperTarget1?: number | null;
+  sniperTarget2?: number | null;
+  sniperRiskReward?: number | null;
   // Sector RRG Alpha Resonance (Biên độ 1)
   sectorRrgQuadrant?: "LEADING" | "IMPROVING" | "WEAKENING" | "LAGGING" | null;
   sectorRsRatio?: number | null;
@@ -1245,6 +1253,11 @@ function detectPresets(item: {
     item.isSweetLaunchZone === true;
 
   const hasApexConfluence =
+    item.setupGrade === "A+" ||
+    item.setupGrade === "A" ||
+    item.isGoldenPocket === true ||
+    item.isFlipZoneSupport === true ||
+    item.isSmcOrderBlock === true ||
     (item.apexQuantScore != null && item.apexQuantScore >= 68) ||
     item.confluenceScore >= 52 ||
     (item.orcaMasterScore != null && item.orcaMasterScore >= 72) ||
@@ -2397,6 +2410,54 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           buyTriggerReasonVi = reasons.slice(0, 3).join(" • ");
         }
 
+        let sniperTriggerSubtype: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "NONE" | null = null;
+        let sniperTriggerLabelVi: string | null = null;
+        let sniperEntryMin: number | null = null;
+        let sniperEntryMax: number | null = null;
+        let sniperStopLoss: number | null = null;
+        let sniperTarget1: number | null = null;
+        let sniperTarget2: number | null = null;
+        let sniperRiskReward: number | null = null;
+
+        if (isBuyTriggerNow && entry.price) {
+          const p = entry.price;
+          const isGolden = Boolean((entry.techFeatures as Record<string, unknown>)?.isGoldenPocket);
+          const isFlip = Boolean((entry.techFeatures as Record<string, unknown>)?.isFlipZoneSupport);
+          const isSmcOb = Boolean((entry.techFeatures as Record<string, unknown>)?.isSmcOrderBlock);
+
+          if (entry.techFeatures.isMaReclaimSpring || isSmcOb || entry.apexQuant.reversalMetrics.isWyckoffSpring) {
+            sniperTriggerSubtype = "SWEEP_RECLAIM";
+            sniperTriggerLabelVi = "Quét Rũ Thanh Khoản Rút Chân";
+            sniperEntryMin = +(p * 0.995).toFixed(2);
+            sniperEntryMax = +(p * 1.012).toFixed(2);
+            sniperStopLoss = entry.buyPointPlan.stopLoss ? +entry.buyPointPlan.stopLoss.toFixed(2) : +(p * 0.975).toFixed(2);
+          } else if (isGolden || isFlip || entry.apexQuant.reversalMetrics.isSweetLaunchZone) {
+            sniperTriggerSubtype = "SNIPER_PULLBACK";
+            sniperTriggerLabelVi = "Kéo Ngược Vùng Vàng / Flip Zone";
+            sniperEntryMin = +(p * 0.992).toFixed(2);
+            sniperEntryMax = +(p * 1.008).toFixed(2);
+            sniperStopLoss = entry.buyPointPlan.stopLoss ? +entry.buyPointPlan.stopLoss.toFixed(2) : +(p * 0.972).toFixed(2);
+          } else if (entry.techFeatures.isMaRibbonSqueeze || entry.techFeatures.isSqueezeOn || entry.techFeatures.isSqueezeFiredBull) {
+            sniperTriggerSubtype = "SQUEEZE_BREAKOUT";
+            sniperTriggerLabelVi = "Bùng Nổ Từ Vùng Nén Kép";
+            sniperEntryMin = +(p * 0.998).toFixed(2);
+            sniperEntryMax = +(p * 1.018).toFixed(2);
+            sniperStopLoss = entry.buyPointPlan.stopLoss ? +entry.buyPointPlan.stopLoss.toFixed(2) : +(p * 0.968).toFixed(2);
+          } else {
+            sniperTriggerSubtype = "SNIPER_PULLBACK";
+            sniperTriggerLabelVi = "Điểm Mua Tức Thời";
+            sniperEntryMin = +(p * 0.995).toFixed(2);
+            sniperEntryMax = +(p * 1.01).toFixed(2);
+            sniperStopLoss = entry.buyPointPlan.stopLoss ? +entry.buyPointPlan.stopLoss.toFixed(2) : +(p * 0.97).toFixed(2);
+          }
+
+          const risk = Math.max(0.01, p - sniperStopLoss);
+          sniperTarget1 = entry.buyPointPlan.targetPrice ? +entry.buyPointPlan.targetPrice.toFixed(2) : +(p * 1.085).toFixed(2);
+          sniperTarget2 = +(p + risk * 3.5).toFixed(2);
+          const reward = Math.max(0.01, sniperTarget1 - p);
+          sniperRiskReward = +(reward / risk).toFixed(2);
+        }
+
         items.push({
           symbol: entry.sym,
           name: entry.q?.name ?? entry.vc?.name ?? entry.sec?.name ?? null,
@@ -2535,6 +2596,14 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           isBuyTriggerNow,
           buyTriggerScore,
           buyTriggerReasonVi,
+          sniperTriggerSubtype,
+          sniperTriggerLabelVi,
+          sniperEntryMin,
+          sniperEntryMax,
+          sniperStopLoss,
+          sniperTarget1,
+          sniperTarget2,
+          sniperRiskReward,
           // Sector RRG & Volatility Squeeze Fields (Biên độ 1 & 2)
           sectorRrgQuadrant: entry.sectorRrgQuadrant,
           sectorRsRatio: entry.sectorRsRatio,

@@ -19,6 +19,25 @@ export type ConfluenceTier = "DIAMOND_TRIPLE" | "GOLD_DOUBLE" | "SILVER_SINGLE";
 
 export type SetupGrade = "A+" | "A" | "B" | "C";
 
+export type SniperTriggerSubtype = "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "NONE";
+
+export interface SniperBuyTrigger {
+  isTriggerNow: boolean;
+  subtype: SniperTriggerSubtype;
+  subtypeLabelVi: string;
+  triggerScore: number;
+  entryZone: {
+    min: number;
+    max: number;
+  };
+  invalidationStopLoss: number;
+  stopLossDistancePct: number;
+  target1: number;
+  target2: number;
+  riskReward: number;
+  reasonsVi: string[];
+}
+
 export type MaCandleScenario =
   | "ALL"
   | "SMC_GOLDEN_POCKET"        // Hợp lưu Đỉnh Cao: SMC Sweep/OB + Golden Pocket Fibo (0.618 - 0.65)
@@ -191,6 +210,9 @@ export interface MaCandleConfluenceRow {
   riskPercent: number;
   rewardPercent: number;
   alertWorthy: boolean;
+
+  // Sniper Buy Trigger Plan
+  sniperTrigger: SniperBuyTrigger;
 }
 
 function roundPrice(val: number, refPrice: number): number {
@@ -1060,6 +1082,110 @@ export function analyzeMaCandleRow(
 
   const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : confluenceScore >= 68 || setupGrade === "A" ? "A" : "B";
 
+  // =========================================================================
+  // SNIPER BUY TRIGGER CALCULATION (3 Orthogonal Real-time Execution Subtypes)
+  // =========================================================================
+  let isTriggerNow = false;
+  let sniperSubtype: SniperTriggerSubtype = "NONE";
+  let subtypeLabelVi = "Chờ kích hoạt";
+  let sniperTriggerScore = 0;
+  const sniperReasons: string[] = [];
+
+  const changePct = quote?.changePercent ?? null;
+  const isPriceSane = changePct == null || (changePct >= -1.5 && changePct <= 4.5);
+  const isHighGrade = setupGrade === "A+" || setupGrade === "A";
+
+  // Subtype 1: SNIPER_PULLBACK (Golden Pocket Fibo 0.618-0.65 / Retest Flip Zone / Cạn cung VSA)
+  const isPullbackCandidate =
+    (isGoldenPocketHit || isFlipSupportHit || (distToMaPct != null && Math.abs(distToMaPct) <= 1.8)) &&
+    (isVsaNoSupplyTest || volumeNature === "NO_SUPPLY_TEST" || lowerWickPct >= 28 || topPattern.type === "bullish");
+
+  // Subtype 2: SQUEEZE_BREAKOUT (Bùng nổ từ vùng nén kép TTM / MA Ribbon)
+  const isSqueezeCandidate =
+    (isMaRibbonSqueeze || isSqueezeOn || isSqueezeFiredBull) &&
+    ((volRatio ?? 0) >= 1.2 || (activeBuyRatioPct != null && activeBuyRatioPct >= 58) || foreignAccumulating) &&
+    (changePct == null || changePct >= -0.5);
+
+  // Subtype 3: SWEEP_RECLAIM (Săn thanh khoản Smart Money / Wyckoff Spring quét rũ rồi lấy lại)
+  const isSweepCandidate =
+    (isMaSpringPinbar || isSmcObHit || topPattern.name.toLowerCase().includes("spring")) &&
+    (lowerWickPct >= 35 || isAbsorptionSpike || volumeNature === "ABSORPTION_SPIKE");
+
+  if (isPriceSane && (isHighGrade || confluenceScore >= 65)) {
+    if (isSweepCandidate) {
+      isTriggerNow = true;
+      sniperSubtype = "SWEEP_RECLAIM";
+      subtypeLabelVi = "Quét Rũ Thanh Khoản Rút Chân";
+      sniperTriggerScore = Math.min(99, Math.round(confluenceScore * 0.45 + (isAbsorptionSpike ? 25 : 18) + (isHighGrade ? 25 : 15)));
+      sniperReasons.push("Quét thủng đáy/OB rút chân mạnh");
+      if (isAbsorptionSpike) sniperReasons.push("Dòng tiền lớn hấp thụ vol đột biến");
+      if (isSmcObHit) sniperReasons.push("Bảo vệ Order Block tổ chức");
+    } else if (isPullbackCandidate) {
+      isTriggerNow = true;
+      sniperSubtype = "SNIPER_PULLBACK";
+      subtypeLabelVi = "Kéo Ngược Vùng Vàng / Flip Zone";
+      sniperTriggerScore = Math.min(99, Math.round(confluenceScore * 0.45 + (isGoldenPocketHit ? 25 : isFlipSupportHit ? 22 : 18) + (isHighGrade ? 25 : 15)));
+      if (isGoldenPocketHit) sniperReasons.push("Test chuẩn Fibo Golden Pocket 0.618 - 0.65");
+      else if (isFlipSupportHit) sniperReasons.push("Retest thành công Flip Zone cản cũ");
+      if (isVsaNoSupplyTest) sniperReasons.push("Cạn kiệt áp lực bán VSA No Supply");
+      if (lowerWickPct >= 28) sniperReasons.push("Râu nến dưới dài hỗ trợ lực cầu");
+    } else if (isSqueezeCandidate) {
+      isTriggerNow = true;
+      sniperSubtype = "SQUEEZE_BREAKOUT";
+      subtypeLabelVi = "Bùng Nổ Từ Vùng Nén Kép";
+      sniperTriggerScore = Math.min(99, Math.round(confluenceScore * 0.45 + (isSqueezeFiredBull ? 25 : 20) + (isHighGrade ? 25 : 15)));
+      if (isMaRibbonSqueeze) sniperReasons.push("Nén dải MA Ribbon co cụm cực đại");
+      if (isSqueezeOn || isSqueezeFiredBull) sniperReasons.push("Năng lượng nén TTM Squeeze bung nổ");
+      if ((volRatio ?? 0) >= 1.2) sniperReasons.push(`Vol nổ sớm ${(volRatio ?? 0).toFixed(1)}x`);
+      if (activeBuyRatioPct != null && activeBuyRatioPct >= 58) sniperReasons.push(`Phe mua chủ động ${Math.round(activeBuyRatioPct)}%`);
+    }
+  }
+
+  // Refine Invalidation Stop-loss, Entry Zone & Targets
+  let sniperMinEntry = roundPrice(close * 0.995, close);
+  let sniperMaxEntry = roundPrice(close * 1.01, close);
+  let sniperStopLoss = stopLoss;
+
+  if (sniperSubtype === "SWEEP_RECLAIM") {
+    sniperStopLoss = roundPrice(lastBar.low * 0.988, close);
+    sniperMinEntry = roundPrice(close * 0.995, close);
+    sniperMaxEntry = roundPrice(close * 1.012, close);
+  } else if (sniperSubtype === "SNIPER_PULLBACK") {
+    const refSupport = Math.min(lastBar.low, anchorMaPrice ?? lastBar.low);
+    sniperStopLoss = roundPrice(refSupport * 0.985, close);
+    sniperMinEntry = roundPrice(close * 0.992, close);
+    sniperMaxEntry = roundPrice(close * 1.008, close);
+  } else if (sniperSubtype === "SQUEEZE_BREAKOUT") {
+    const baseBandLow = Math.min(lastBar.low, anchorMaPrice ?? lastBar.low);
+    sniperStopLoss = roundPrice(baseBandLow * 0.978, close);
+    sniperMinEntry = roundPrice(close * 0.998, close);
+    sniperMaxEntry = roundPrice(close * 1.018, close);
+  }
+
+  const sniperRisk = Math.max(0.001, close - sniperStopLoss);
+  const sniperStopLossDistPct = Number(((sniperRisk / close) * 100).toFixed(2));
+  const sniperTarget1 = roundPrice(Math.max(target1, close * (1 + (sniperStopLossDistPct * 2.0) / 100)), close);
+  const sniperTarget2 = roundPrice(Math.max(target2, close * (1 + (sniperStopLossDistPct * 3.5) / 100)), close);
+  const sniperReward = Math.max(0.001, sniperTarget1 - close);
+  const sniperRR = Number((sniperReward / sniperRisk).toFixed(2));
+
+  const sniperTrigger: SniperBuyTrigger = {
+    isTriggerNow,
+    subtype: sniperSubtype,
+    subtypeLabelVi,
+    triggerScore: isTriggerNow ? sniperTriggerScore : 0,
+    entryZone: {
+      min: sniperMinEntry,
+      max: sniperMaxEntry,
+    },
+    invalidationStopLoss: sniperStopLoss,
+    stopLossDistancePct: sniperStopLossDistPct,
+    target1: sniperTarget1,
+    target2: sniperTarget2,
+    riskReward: sniperRR,
+    reasonsVi: sniperReasons,
+  };
+
   const sec = getSecurity(symbol);
 
   return {
@@ -1176,5 +1302,8 @@ export function analyzeMaCandleRow(
     riskPercent,
     rewardPercent,
     alertWorthy: confluenceScore >= 74 && setupQuality !== "B",
+
+    // Sniper Buy Trigger Plan
+    sniperTrigger,
   };
 }

@@ -33,6 +33,9 @@ export interface MaCandleScreenOpts {
   gradeOnly?: "A+" | "A" | "B" | "all";
   goldenPocketOnly?: boolean;
   flipZoneOnly?: boolean;
+  triggerOnly?: boolean;
+  triggerSubtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "all";
+  minRR?: number;
   volumeOnly?: boolean;
   foreignOnly?: boolean;
   leaderOnly?: boolean;
@@ -107,6 +110,9 @@ export async function screenMaCandleConfluence(
     if (opts.gradeOnly && opts.gradeOnly !== "all" && row.setupGrade !== opts.gradeOnly) continue;
     if (opts.goldenPocketOnly && !row.isGoldenPocket) continue;
     if (opts.flipZoneOnly && !row.isFlipZoneSupport) continue;
+    if (opts.triggerOnly && !row.sniperTrigger?.isTriggerNow) continue;
+    if (opts.triggerSubtype && opts.triggerSubtype !== "all" && row.sniperTrigger?.subtype !== opts.triggerSubtype) continue;
+    if (opts.minRR && (row.sniperTrigger?.riskReward ?? 0) < opts.minRR) continue;
     if (opts.volumeOnly && !(row.volRatio && row.volRatio >= 1.15)) continue;
     if (opts.foreignOnly && !row.foreignAccumulating) continue;
     if (opts.leaderOnly && !row.isMarketLeader) continue;

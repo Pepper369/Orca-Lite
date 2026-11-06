@@ -49,6 +49,14 @@ export async function GET(req: Request) {
   const patternOnly = url.searchParams.get("patternOnly") === "1";
   const goldenPocketOnly = url.searchParams.get("goldenPocketOnly") === "1";
   const flipZoneOnly = url.searchParams.get("flipZoneOnly") === "1";
+  const triggerOnly = url.searchParams.get("triggerOnly") === "1" || url.searchParams.get("triggerOnly") === "true";
+  const rawSubtype = url.searchParams.get("triggerSubtype")?.toUpperCase();
+  const triggerSubtype: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "all" =
+    rawSubtype === "SNIPER_PULLBACK" || rawSubtype === "SQUEEZE_BREAKOUT" || rawSubtype === "SWEEP_RECLAIM"
+      ? rawSubtype
+      : "all";
+  const rawMinRR = Number(url.searchParams.get("minRR"));
+  const minRR = Number.isFinite(rawMinRR) && rawMinRR > 0 ? rawMinRR : undefined;
 
   const rawGrade = url.searchParams.get("gradeOnly")?.toUpperCase();
   const gradeOnly: "A+" | "A" | "B" | "all" =
@@ -84,6 +92,9 @@ export async function GET(req: Request) {
         gradeOnly,
         goldenPocketOnly,
         flipZoneOnly,
+        triggerOnly,
+        triggerSubtype,
+        minRR,
         volumeOnly,
         foreignOnly,
         leaderOnly,
