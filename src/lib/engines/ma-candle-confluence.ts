@@ -11,11 +11,18 @@ import {
   type MtfConsensusResult,
   type MtfTimeframeDetail,
 } from "./mtf-consensus";
+import { analyzeFibonacciConfluence, type FiboConfluenceResult } from "./fibonacci-confluence";
+import { analyzeStructureLevelsConfluence, type StructureConfluenceResult } from "./structure-levels";
+import { analyzeMoneyFlow, type MoneyFlowAnalysis } from "./money-flow";
 
 export type ConfluenceTier = "DIAMOND_TRIPLE" | "GOLD_DOUBLE" | "SILVER_SINGLE";
 
+export type SetupGrade = "A+" | "A" | "B" | "C";
+
 export type MaCandleScenario =
   | "ALL"
+  | "SMC_GOLDEN_POCKET"        // Hợp lưu Đỉnh Cao: SMC Sweep/OB + Golden Pocket Fibo (0.618 - 0.65)
+  | "FLIP_ZONE_RETEST"         // Retest thành công Flip Zone (Kháng cự cũ hoá hỗ trợ mới)
   | "BOTTOM_BULLISH_DIVERGENCE" // Hợp lưu Đáy: MA + Nến đảo chiều + Phân kỳ dương
   | "CHART_PATTERN_BREAKOUT"    // Hợp lưu Bứt phá Mẫu hình Biểu đồ (VCP, Cup & Handle, Vai Đầu Vai Ngược, Tam giác tăng)
   | "SMC_SWEEP_RECLAIM"    // Quét thanh khoản & rút chân hỗ trợ (SMC Shakeout)
@@ -45,6 +52,9 @@ export interface AnalyzeMaCandleExtra {
   squeezeBars?: number | null;
   activeBuyRatioPct?: number | null;
   isPrecisionMtfAligned?: boolean | null;
+  fiboResult?: FiboConfluenceResult | null;
+  structureResult?: StructureConfluenceResult | null;
+  moneyFlow?: MoneyFlowAnalysis | null;
 }
 
 export interface MaCandleConfluenceRow {
@@ -90,15 +100,34 @@ export interface MaCandleConfluenceRow {
   isDualDivergence?: boolean;
   divergenceOscillators?: string[];
 
-  // Confluence Score, Quality & Tier
+  // Confluence Score, Quality, Tier & Setup Grade
   confluenceScore: number;
   setupQuality: "A+" | "A" | "B";
+  setupGrade: SetupGrade;
+  orthogonalPillarsPassed: number; // 1 to 5
+  orthogonalPillarDetails: {
+    structureTrend: boolean; // Trục 1: Cấu trúc & Xu hướng
+    valueZone: boolean;      // Trục 2: Vùng Giá trị & Cản (MA/Fibo/Flip Zone)
+    liquidityFlow: boolean;  // Trục 3: Thanh khoản & Dòng tiền (SMC/VSA/Khối ngoại)
+    momentumTrigger: boolean;// Trục 4: Động lượng & Kích hoạt (Nến/Phân kỳ/Squeeze)
+    mtfMacro: boolean;       // Trục 5: Đa khung & Liên thị trường (MTF/RRG/RS)
+  };
   confluenceTier?: ConfluenceTier;
   isDiamondTriple?: boolean;
   isMaReclaim?: boolean;
   maSlopeStatus?: "UP" | "FLAT" | "STEEP_DOWN";
   volumeNature?: "ABSORPTION_SPIKE" | "NO_SUPPLY_TEST" | "NORMAL";
   confluenceTags: string[];
+
+  // Phase 1 & 2 Extensions: Fibonacci, Flip Zone, Round Numbers & SMC
+  isGoldenPocket?: boolean;
+  isFiboCluster?: boolean;
+  fiboSummary?: string | null;
+  isFlipZoneSupport?: boolean;
+  isRoundNumberConfluence?: boolean;
+  structureSummary?: string | null;
+  isSmcOrderBlock?: boolean;
+  isSmcFvgInDiscount?: boolean;
 
   // Advanced Confluence Pillars & Momentum (New State-of-the-Art)
   foreignNetVal?: number | null; // in Billion VND
@@ -273,13 +302,53 @@ export function analyzeMaCandleRow(
   const lowerWickPct = (lowerWick / barRange) * 100;
   const closeNearHighPct = ((lastBar.close - lastBar.low) / barRange) * 100;
 
+  const confluenceTags: string[] = [];
+
+  // Phase 1 & 2 Extensions: Fibonacci Confluence, Structure Levels & Money Flow Hydration
+  const fibo = extra?.fiboResult ?? analyzeFibonacciConfluence(bars);
+  const structure = extra?.structureResult ?? analyzeStructureLevelsConfluence(bars, "stock");
+  const moneyFlow = extra?.moneyFlow ?? (bars.length >= 25 ? analyzeMoneyFlow(bars) : null);
+
+  const isGoldenPocketHit = Boolean(fibo.isGoldenPocketBounce || fibo.goldenPocket?.inPocket);
+  const isFiboClusterHit = fibo.hasFiboClusterConfluence;
+  const isFlipSupportHit = structure.isAtFlipZoneSupport;
+  const isRoundNumHit = structure.roundNumber.isAtRoundNumber;
+
+  const isSmcObHit = Boolean(
+    moneyFlow?.smc.orderBlocks.some(
+      (ob) => ob.direction === "bullish" && ob.status === "OPEN" && close >= ob.low && close <= ob.high * 1.02,
+    ),
+  );
+  const isFvgDiscount = Boolean(
+    moneyFlow?.ict.premiumDiscount === "DISCOUNT" &&
+      moneyFlow?.smc.fvgs.some((f) => f.direction === "bullish" && f.status === "OPEN"),
+  );
+
+  if (isGoldenPocketHit) {
+    confluenceTags.push("Golden Pocket Fibo 0.618 - 0.65");
+  }
+  if (isFiboClusterHit) {
+    confluenceTags.push("Hội tụ Fibo Cluster đa chu kỳ");
+  }
+  if (isFlipSupportHit && structure.nearestFlipZone) {
+    confluenceTags.push(`Flip Zone hỗ trợ ${structure.nearestFlipZone.level}`);
+  }
+  if (isRoundNumHit) {
+    confluenceTags.push(`Số tròn tâm lý ${structure.roundNumber.level}`);
+  }
+  if (isSmcObHit) {
+    confluenceTags.push("Order Block (OB) hỗ trợ");
+  }
+  if (isFvgDiscount) {
+    confluenceTags.push("Fair Value Gap (FVG) vùng Discount");
+  }
+
   // 3. Advanced Scenario Classification
   let scenario: MaCandleScenario = "TREND_PULLBACK";
   let scenarioLabel = "Điều Chỉnh Retest Kênh Tăng";
   let scenarioBadgeTone: "emerald" | "blue" | "purple" | "amber" | "cyan" = "emerald";
   let anchorMa: "MA20" | "MA50" | "MA200" | "MA10" | "CROSS" = "MA20";
   let anchorMaPrice: number | null = sma20;
-  const confluenceTags: string[] = [];
 
   // Check MA200 Reclaim
   const testedBelow200 = sma200 != null && bars.slice(-5).some((b) => b.low <= sma200 * 1.005 || b.close < sma200);
@@ -484,7 +553,25 @@ export function analyzeMaCandleRow(
       (sma20 != null && close >= sma20 * 0.94) ||
       close >= patternLow);
 
-  if (isBottomDivergence) {
+  // Priority 1: SMC Liquidity Sweep / Order Block Confluence with Golden Pocket Fibo
+  const isSmcGoldenPocket = (isSmcSweep || isSmcObHit) && isGoldenPocketHit;
+  const isFlipZoneSetup = isFlipSupportHit && (hasCandleLock || isAbsorptionSpike || isVsaNoSupplyTest);
+
+  if (isSmcGoldenPocket) {
+    scenario = "SMC_GOLDEN_POCKET";
+    scenarioLabel = "SMC Sweep & Golden Pocket Fibo";
+    scenarioBadgeTone = "purple";
+    anchorMaPrice = fibo.goldenPocket ? (fibo.goldenPocket.lower + fibo.goldenPocket.upper) / 2 : sma20;
+    anchorMa = sweptBelow50 ? "MA50" : "MA20";
+    confluenceTags.push("SMC Sweep + Golden Pocket Fibo");
+  } else if (isFlipZoneSetup) {
+    scenario = "FLIP_ZONE_RETEST";
+    scenarioLabel = "Retest Flip Zone Hỗ Trợ Mới";
+    scenarioBadgeTone = "blue";
+    anchorMaPrice = structure.nearestFlipZone?.level ?? sma20;
+    anchorMa = near50 ? "MA50" : "MA20";
+    confluenceTags.push("Retest Flip Zone hỗ trợ");
+  } else if (isBottomDivergence) {
     scenario = "BOTTOM_BULLISH_DIVERGENCE";
     scenarioLabel = isDiamondTriple
       ? "Tam Hợp Lưu Đáy"
@@ -867,25 +954,107 @@ export function analyzeMaCandleRow(
   const rewardPercent = Number((((target1 - close) / close) * 100).toFixed(1));
   const riskReward = Number((rewardPercent / Math.max(0.1, riskPercent)).toFixed(1));
 
-  // Setup Quality Classification
-  const isAplus =
-    confluenceScore >= 74 &&
-    ((volRatio ?? 0) >= 1.15 ||
-      foreignAccumulating ||
-      isMarketLeader ||
-      bestBullDiv != null ||
-      hasMultiLayerConfluence ||
-      mtf.isAligned) &&
-    (scenario === "BOTTOM_BULLISH_DIVERGENCE" ||
-      scenario === "CHART_PATTERN_BREAKOUT" ||
-      scenario === "SMC_SWEEP_RECLAIM" ||
-      scenario === "MA50_BOUNCE" ||
-      scenario === "MA200_RECLAIM" ||
-      scenario === "GOLDEN_CROSS_CONFIRM" ||
-      scenario === "VSA_NO_SUPPLY_TEST" ||
-      scenario === "EMA_RIBBON_ALIGN");
+  // 5 Orthogonal Pillars Evaluation (Zero-Redundancy Confluence Matrix)
+  // Trục 1: Cấu trúc & Xu hướng (Structure & Trend)
+  const hasStructureTrend = Boolean(
+    slope20 > 0.04 ||
+      isRibbon ||
+      moneyFlow?.structure.trend === "bullish" ||
+      moneyFlow?.structure.bos === "bullish" ||
+      moneyFlow?.structure.choch === "bullish" ||
+      (topChart != null && topChart.score >= 70),
+  );
 
-  const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : confluenceScore >= 68 ? "A" : "B";
+  // Trục 2: Vùng Giá trị & Cản (Value Zone & Key Levels: MA / Golden Pocket / Fibo Cluster / Flip Zone / Round Number)
+  const hasValueZone = Boolean(
+    near20 ||
+      near50 ||
+      testedBelow200 ||
+      reclaimed200 ||
+      isEmaPullback ||
+      isGoldenPocketHit ||
+      isFiboClusterHit ||
+      isFlipSupportHit ||
+      isRoundNumHit,
+  );
+
+  // Trục 3: Thanh khoản & Dòng tiền (Liquidity & Orderflow: SMC Sweep, Order Block, FVG, VSA, Foreign, Active Buy)
+  const hasLiquidityFlow = Boolean(
+    isSmcSweep ||
+      isSmcObHit ||
+      isFvgDiscount ||
+      isAbsorptionSpike ||
+      isVsaNoSupplyTest ||
+      foreignAccumulating ||
+      (activeBuyRatioPct != null && activeBuyRatioPct >= 55),
+  );
+
+  // Trục 4: Động lượng & Kích hoạt (Momentum & Trigger: Reversal Candle, RSI/MACD Divergence, Squeeze Explosion)
+  const hasMomentumTrigger = Boolean(
+    hasCandleLock ||
+      bestBullDiv != null ||
+      isSqueezeFiredBull ||
+      (rsiVal != null && rsiVal >= 48 && rsiVal <= 68),
+  );
+
+  // Trục 5: Đa khung thời gian & Liên thị trường (MTF & Macro: MTF Consensus, Sector Leading/Improving, RS vs VN-Index)
+  const hasMtfMacro = Boolean(
+    mtf.isAligned ||
+      mtf.consensus === "D1_W1_BULL" ||
+      isSectorLeading ||
+      sectorRrgQuadrant === "IMPROVING" ||
+      isMarketLeader,
+  );
+
+  const orthogonalPillarsPassed =
+    (hasStructureTrend ? 1 : 0) +
+    (hasValueZone ? 1 : 0) +
+    (hasLiquidityFlow ? 1 : 0) +
+    (hasMomentumTrigger ? 1 : 0) +
+    (hasMtfMacro ? 1 : 0);
+
+  const orthogonalPillarDetails = {
+    structureTrend: hasStructureTrend,
+    valueZone: hasValueZone,
+    liquidityFlow: hasLiquidityFlow,
+    momentumTrigger: hasMomentumTrigger,
+    mtfMacro: hasMtfMacro,
+  };
+
+  let setupGrade: SetupGrade = "C";
+  if (orthogonalPillarsPassed === 5) {
+    setupGrade = "A+";
+  } else if (orthogonalPillarsPassed === 4) {
+    setupGrade = "A";
+  } else if (orthogonalPillarsPassed === 3) {
+    setupGrade = "B";
+  } else {
+    setupGrade = "C";
+  }
+
+  // Setup Quality Classification (Backward compatible + Orthogonal enhancement)
+  const isAplus =
+    setupGrade === "A+" ||
+    (confluenceScore >= 74 &&
+      ((volRatio ?? 0) >= 1.15 ||
+        foreignAccumulating ||
+        isMarketLeader ||
+        bestBullDiv != null ||
+        hasMultiLayerConfluence ||
+        mtf.isAligned ||
+        isSmcGoldenPocket) &&
+      (scenario === "SMC_GOLDEN_POCKET" ||
+        scenario === "FLIP_ZONE_RETEST" ||
+        scenario === "BOTTOM_BULLISH_DIVERGENCE" ||
+        scenario === "CHART_PATTERN_BREAKOUT" ||
+        scenario === "SMC_SWEEP_RECLAIM" ||
+        scenario === "MA50_BOUNCE" ||
+        scenario === "MA200_RECLAIM" ||
+        scenario === "GOLDEN_CROSS_CONFIRM" ||
+        scenario === "VSA_NO_SUPPLY_TEST" ||
+        scenario === "EMA_RIBBON_ALIGN"));
+
+  const setupQuality: "A+" | "A" | "B" = isAplus ? "A+" : confluenceScore >= 68 || setupGrade === "A" ? "A" : "B";
 
   const sec = getSecurity(symbol);
 
@@ -933,12 +1102,25 @@ export function analyzeMaCandleRow(
 
     confluenceScore,
     setupQuality,
+    setupGrade,
+    orthogonalPillarsPassed,
+    orthogonalPillarDetails,
     confluenceTier,
     isDiamondTriple,
     isMaReclaim,
     maSlopeStatus,
     volumeNature,
     confluenceTags,
+
+    // Phase 1 & 2 Confluence Details
+    isGoldenPocket: isGoldenPocketHit,
+    isFiboCluster: isFiboClusterHit,
+    fiboSummary: fibo.summaryVi,
+    isFlipZoneSupport: isFlipSupportHit,
+    isRoundNumberConfluence: isRoundNumHit,
+    structureSummary: structure.summaryVi,
+    isSmcOrderBlock: isSmcObHit,
+    isSmcFvgInDiscount: isFvgDiscount,
 
     // Multi-Timeframe (MTF) Confluence (H1 + D1 + W1)
     mtfConsensus: mtf.consensus,
