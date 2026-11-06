@@ -29,7 +29,7 @@ test("getVndCompanyNews: gọi /v4/news đúng truy vấn mã và lọc dòng l�
   try {
     const items = await getVndCompanyNews("gas", 10);
     assert.equal(items.length, 1);
-    assert.match(urls[0], /\/v4\/news\?q=newsType:company_news~locale:VN~code:GAS/);
+    assert.match(urls[0], /\/v4\/news\?q=tagCodes:GAS/);
     assert.match(urls[0], /size=10/);
   } finally {
     globalThis.fetch = realFetch;

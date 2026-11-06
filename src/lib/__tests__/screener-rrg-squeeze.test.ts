@@ -8,7 +8,7 @@ import {
 import { ttmSqueeze } from "../engines/oscillators";
 import { evaluateApexQuant } from "../engines/orca-apex-quant-engine";
 import { analyzeMaCandleRow } from "../engines/ma-candle-confluence";
-import { PRESET_TABS } from "@/app/screener/screener-panels";
+import { PRESET_TABS } from "@/app/screener/screener-constants";
 import type { OhlcvBar } from "../types";
 
 function makeBar(date: string, open: number, high: number, low: number, close: number, volume: number): OhlcvBar {

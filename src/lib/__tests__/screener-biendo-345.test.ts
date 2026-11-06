@@ -185,7 +185,7 @@ test("Orca Apex Quant Engine incorporates Ribbon Squeeze, Absorption, and Precis
 });
 
 test("Consolidated Screener Presets - Preserves taxonomy and removes duplicate noise", () => {
-  const { PRESET_TABS } = require("../../app/screener/screener-panels");
+  const { PRESET_TABS } = require("../../app/screener/screener-constants");
   // Check that core streamlined presets exist
   const ids = PRESET_TABS.map((t: any) => t.id);
   assert.ok(ids.includes("apex_buy_now"));

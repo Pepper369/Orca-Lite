@@ -13,7 +13,7 @@ import {
 } from "./mtf-consensus";
 import { analyzeFibonacciConfluence, type FiboConfluenceResult } from "./fibonacci-confluence";
 import { analyzeStructureLevelsConfluence, type StructureConfluenceResult } from "./structure-levels";
-import { analyzeMoneyFlow, type MoneyFlowAnalysis } from "./money-flow";
+import { analyzeMoneyFlow, findSwings, type MoneyFlowAnalysis } from "./money-flow";
 
 export type ConfluenceTier = "DIAMOND_TRIPLE" | "GOLD_DOUBLE" | "SILVER_SINGLE";
 
@@ -305,8 +305,12 @@ export function analyzeMaCandleRow(
   const confluenceTags: string[] = [];
 
   // Phase 1 & 2 Extensions: Fibonacci Confluence, Structure Levels & Money Flow Hydration
-  const fibo = extra?.fiboResult ?? analyzeFibonacciConfluence(bars);
-  const structure = extra?.structureResult ?? analyzeStructureLevelsConfluence(bars, "stock");
+  const sharedSwings =
+    (!extra?.fiboResult || !extra?.structureResult) && bars.length >= 15
+      ? findSwings(bars, 3, "external")
+      : undefined;
+  const fibo = extra?.fiboResult ?? analyzeFibonacciConfluence(bars, sharedSwings);
+  const structure = extra?.structureResult ?? analyzeStructureLevelsConfluence(bars, "stock", sharedSwings);
   const moneyFlow = extra?.moneyFlow ?? (bars.length >= 25 ? analyzeMoneyFlow(bars) : null);
 
   const isGoldenPocketHit = Boolean(fibo.isGoldenPocketBounce || fibo.goldenPocket?.inPocket);

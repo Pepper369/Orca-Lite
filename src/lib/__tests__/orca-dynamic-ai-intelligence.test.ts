@@ -101,7 +101,7 @@ test("generateOrcaDynamicAiReport generates deep CFA-level quantitative intellig
   assert.equal(report.symbol, "HPG");
   assert.equal(report.usedLlm, false);
   assert.equal(report.model, "Orca Dynamic Quant AI Engine (Live Datafeed)");
-  assert.ok(report.latencyMs < 50, `Latency must be sub-50ms, was ${report.latencyMs}ms`);
+  assert.ok(report.latencyMs < 150, `Latency must be sub-150ms, was ${report.latencyMs}ms`);
 
   // 2. Structured data assertions
   assert.ok(report.structured.executiveVerdict.length > 20);

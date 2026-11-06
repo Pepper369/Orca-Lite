@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { STRATEGY_METADATA } from "../engines/screener-backtest-engine";
-import { PRESET_EDGE_BENCHMARKS, PRESET_TABS } from "@/app/screener/screener-panels";
+import { PRESET_EDGE_BENCHMARKS, PRESET_TABS } from "@/app/screener/screener-constants";
 
 test("STRATEGY_METADATA defines apex_buy_now real-time trigger with accurate description", () => {
   const meta = STRATEGY_METADATA.apex_buy_now;

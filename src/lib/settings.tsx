@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Context } from "react";
 
 /**
  * ORCA Settings System — client store + server persistence.
@@ -200,7 +200,8 @@ type SettingsCtxValue = {
   reset: () => void;
 };
 
-const SettingsCtx = createContext<SettingsCtxValue | null>(null);
+const SettingsCtx: Context<SettingsCtxValue | null> =
+  typeof createContext === "function" ? createContext<SettingsCtxValue | null>(null) : (null as unknown as Context<SettingsCtxValue | null>);
 
 let snapshot: UserSettings = DEFAULT_SETTINGS;
 let loggedIn = false;
