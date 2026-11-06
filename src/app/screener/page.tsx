@@ -38,6 +38,7 @@ type Universe =
   | "ma-confluence"
   | "divergence"
   | "macro-radar"
+  | "systemic-radar"
   | "alpha-beta";
 
 export type ScreenerGroupId = "growth_trend" | "quant_alpha" | "macro_sector" | "fundamental_val";
@@ -88,6 +89,7 @@ export const SCREENER_GROUPS: {
     title: "Vĩ mô & Luân chuyển Ngành",
     badge: "Macro & Flow",
     items: [
+      { id: "systemic-radar", label: "Radar Rủi ro Pháp lý & Lan tỏa" },
       { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ" },
       { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
       { id: "sector-flow", label: "Dòng tiền theo ngành" },
@@ -124,6 +126,10 @@ const MultiSourceScreener = dynamic(
 );
 const RrgChart = dynamic(
   () => import("@/components/rrg-chart").then((m) => m.RrgChart),
+  { ssr: false, loading: PanelFallback },
+);
+const SystemicRiskRadarPanel = dynamic(
+  () => import("@/components/systemic-risk-radar-panel").then((m) => m.SystemicRiskRadarPanel),
   { ssr: false, loading: PanelFallback },
 );
 const OQuantStudio = dynamic(
@@ -328,6 +334,9 @@ function ScreenerInner() {
           onOpenBacktest={() => setShowBacktest(true)}
         />
       );
+      break;
+    case "systemic-radar":
+      body = <SystemicRiskRadarPanel />;
       break;
     case "macro-radar":
       body = <MacroRadarCard />;

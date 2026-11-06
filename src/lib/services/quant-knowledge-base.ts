@@ -48,6 +48,20 @@ export const LOTUSMARKET_EMPIRICAL_FINDINGS: EmpiricalFinding[] = [
     statEvidence: "Trong các năm giảm mạnh (2018: -15%, 2022: -28%), các mã VN30 có lợi suất cổ tức tiền mặt >= 5% (như VNM, FPT, MBB) có mức sụt giảm tối đa (Max Drawdown) thấp hơn 35% so với nhóm cổ phiếu chỉ chia giấy (cổ tức cổ phiếu) và phục hồi về đỉnh cũ nhanh gấp đôi.",
     practicalAdviceVi: "Với danh mục phòng thủ dài hạn, ưu tiên các doanh nghiệp có dòng tiền tự do (FCF) dồi dào và chính sách chi trả cổ tức bằng tiền mặt thực tế.",
   },
+  {
+    id: "systemic_legal_risk",
+    topic: "Rủi ro pháp lý & Lan tỏa hệ thống Ngân hàng - Bất động sản",
+    axiomVi: "Biến cố pháp lý/thanh tra tại các tập đoàn BĐS lớn luôn kích hoạt hiệu ứng rút vốn và trích lập dự phòng lan tỏa sang ngân hàng tài trợ chính.",
+    statEvidence: "Tại TTCK VN, các ngân hàng tài trợ tín dụng hoặc bảo lãnh phát hành trái phiếu cho doanh nghiệp BĐS gặp rủi ro pháp lý thường chịu mức sụt giảm giá cổ phiếu -15% đến -30% theo dây chuyền trước khi thông tin được giải trình minh bạch.",
+    practicalAdviceVi: "Khi xuất hiện tin đồn thanh tra hoặc sai phạm pháp lý, ngay lập tức dùng Radar Lan Tỏa Hệ Thống bóc tách mối liên hệ giữa doanh nghiệp tâm điểm và ngân hàng tài trợ để kịp thời cơ cấu danh mục, tuyệt đối không bắt đáy sớm.",
+  },
+  {
+    id: "bctc_quality_analysis",
+    topic: "Bóc tách chất lượng BCTC: Cốt lõi vs Thoát lỗ trên giấy",
+    axiomVi: "Lợi nhuận tăng trưởng chỉ bền vững khi đến từ hoạt động kinh doanh cốt lõi (Core EBIT >= 70% LNST), không phải từ bán công ty con hay định giá lại tài sản.",
+    statEvidence: "Thống kê cho thấy 82% doanh nghiệp 'báo lãi đột biến' nhờ doanh thu tài chính hoặc thu nhập khác một lần có giá cổ phiếu sụt giảm mạnh trong 2 quý tiếp theo do cạn kiệt nguồn thu bất thường và hoạt động kinh doanh chính vẫn suy thoái.",
+    practicalAdviceVi: "Luôn kiểm tra tỷ trọng Lợi nhuận cốt lõi so với tổng LNST và đối chiếu dòng tiền thuần từ HĐKD (CFO). Tránh xa các cổ phiếu 'thoát lỗ trên giấy' nhờ bán tài sản hoặc ghi nhận lãi tài chính ảo.",
+  },
 ];
 
 export function getQuantInsightForQuery(query: string): string | null {
@@ -71,6 +85,16 @@ export function getQuantInsightForQuery(query: string): string | null {
   if (lower.includes("cổ tức") || lower.includes("dividend") || lower.includes("chia thưởng")) {
     const f = LOTUSMARKET_EMPIRICAL_FINDINGS.find((i) => i.id === "cash_vs_stock_dividend");
     return f ? `💡 **THỐNG KÊ CỔ TỨC TRÊN TTCK VIỆT NAM:**\n• ${f.axiomVi}\n• *Bằng chứng số liệu:* ${f.statEvidence}\n• *Lời khuyên:* ${f.practicalAdviceVi}` : null;
+  }
+
+  if (lower.includes("pháp lý") || lower.includes("thanh tra") || lower.includes("bắt bớ") || lower.includes("trái phiếu") || lower.includes("lan tỏa")) {
+    const f = LOTUSMARKET_EMPIRICAL_FINDINGS.find((i) => i.id === "systemic_legal_risk");
+    return f ? `💡 **RADAR RỦI RO PHÁP LÝ & LAN TỎA HỆ THỐNG:**\n• ${f.axiomVi}\n• *Bằng chứng số liệu:* ${f.statEvidence}\n• *Lời khuyên:* ${f.practicalAdviceVi}` : null;
+  }
+
+  if (lower.includes("bctc") || lower.includes("chất lượng lợi nhuận") || lower.includes("lợi nhuận cốt lõi") || lower.includes("thoát lỗ") || lower.includes("bán tài sản")) {
+    const f = LOTUSMARKET_EMPIRICAL_FINDINGS.find((i) => i.id === "bctc_quality_analysis");
+    return f ? `💡 **BÓC TÁCH CHẤT LƯỢNG BCTC:**\n• ${f.axiomVi}\n• *Bằng chứng số liệu:* ${f.statEvidence}\n• *Lời khuyên:* ${f.practicalAdviceVi}` : null;
   }
 
   return null;
