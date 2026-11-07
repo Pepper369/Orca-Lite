@@ -34,7 +34,9 @@ export interface ScreenerSyncInfo {
   buyPointDiffPct: number | null;
   absBuyDiff: number | null;
   buyRange: [number, number] | null;
-  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "NO_SETUP";
+  isExtended?: boolean;
+  chaseRisk?: "LOW" | "MODERATE" | "HIGH";
   stopLoss: number | null;
   targetPrice: number | null;
   riskReward: number | null;
@@ -413,12 +415,14 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         liveDiffPct = Number((((curPrice - screenerItem.buyPoint) / curPrice) * 100).toFixed(1));
         liveAbsDiff = Math.abs(liveDiffPct);
         if (screenerItem.buyRange) {
-          if (liveAbsDiff <= 1.0 || (curPrice >= screenerItem.buyRange[0] && curPrice <= screenerItem.buyRange[1])) {
-            liveZoneStatus = "AT_BUY_POINT";
-          } else if (liveAbsDiff <= 2.5) {
-            liveZoneStatus = "NEAR_BUY_POINT";
-          } else if (liveDiffPct > 2.5) {
+          if (liveDiffPct != null && liveDiffPct > 4.5) {
+            liveZoneStatus = "EXTENDED";
+          } else if (liveDiffPct != null && liveDiffPct > 2.8) {
             liveZoneStatus = "WAIT_PULLBACK";
+          } else if (liveAbsDiff <= 1.2 || (curPrice >= screenerItem.buyRange[0] && curPrice <= screenerItem.buyRange[1])) {
+            liveZoneStatus = "AT_BUY_POINT";
+          } else if (liveAbsDiff <= 2.8) {
+            liveZoneStatus = "NEAR_BUY_POINT";
           } else {
             liveZoneStatus = "BELOW_SUPPORT";
           }
@@ -431,6 +435,8 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         absBuyDiff: liveAbsDiff,
         buyRange: screenerItem.buyRange,
         buyZoneStatus: liveZoneStatus,
+        isExtended: screenerItem.isExtended || liveZoneStatus === "EXTENDED",
+        chaseRisk: liveZoneStatus === "EXTENDED" ? "HIGH" : screenerItem.chaseRisk,
         stopLoss: screenerItem.stopLoss,
         targetPrice: screenerItem.targetPrice,
         riskReward: screenerItem.riskReward,

@@ -225,7 +225,9 @@ export type ScreenerStockItem = {
   buyPointDiffPct: number | null; // % difference: ((price - buyPoint) / price) * 100
   absBuyDiff: number | null; // Absolute difference %: Math.abs(buyPointDiffPct)
   buyRange: [number, number] | null; // Entry accumulation zone [min, max]
-  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "NO_SETUP";
+  isExtended?: boolean;
+  chaseRisk?: "LOW" | "MODERATE" | "HIGH";
   stopLoss: number | null;
   targetPrice: number | null;
   riskReward: number | null;
@@ -388,7 +390,7 @@ export type ScreenerFilterParams = {
   buyTriggerOnly?: boolean; // Lọc các mã kích hoạt điểm mua ngay tức thời
   minBuyTriggerScore?: number; // Điểm xung lực mua tối thiểu (0-100)
   maxBuyDiff?: number; // % khoảng cách tối đa tới điểm mua (ví dụ: 1.5 = trong vòng 1.5%)
-  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "ALL" | string;
   mtfOnly?: boolean; // Lọc các cổ phiếu có đồng thuận đa khung H1 + D1 + W1
   mtfConsensus?: "ALL_BULL" | "D1_W1_BULL" | "H1_D1_BULL" | "MIXED" | "BEAR_PRESSURE" | "ALL" | string;
   mtfCandleOnly?: boolean;
@@ -407,7 +409,7 @@ export type ScreenerFilterParams = {
   vsaNoSupplyOnly?: boolean;
   precisionMtfOnly?: boolean;
   // Consolidated Compound Filters (Gộp các bộ lọc cùng chức năng)
-  buyPosition?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "SAFE_ACCUMULATION" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "ALL" | string;
+  buyPosition?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "SAFE_ACCUMULATION" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "ALL" | string;
   volatilityCoil?: "ALL" | "FIRED" | "SQUEEZE_ON" | "RIBBON_SQUEEZE" | "COIL_SUPER" | string;
   vsaPattern?: "ALL" | "ABSORPTION" | "NO_SUPPLY" | "ACTIVE_BUY" | string;
   faProfile?: "ALL" | "FORTRESS" | "CASH_MACHINE" | "MOAT_QUALITY" | "UNDERVALUED_GROWTH" | "CONSENSUS_UPSIDE" | "VALUE_DIVIDEND" | "HIGH_RISK" | string;
@@ -527,6 +529,56 @@ function generateResilientBars(
     const volume = 250_000 + (seed % 350_000);
     bars.push({ time: t, open, high, low, close, volume });
   }
+  return bars;
+}
+
+/**
+ * Synchronize the historical daily bars with real-time intraday quote session.
+ * Prevents analyzing on yesterday's stale EOD close and prevents chasing late breakouts.
+ */
+function syncLatestRealtimeBar(
+  rawBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[] | undefined,
+  quote: { price?: number; open?: number; high?: number; low?: number; volume?: number } | null | undefined,
+  currentPrice: number | null,
+  currentVolume: number | null
+): { time: number; open: number; high: number; low: number; close: number; volume: number }[] {
+  if (!rawBars || rawBars.length === 0) {
+    return generateResilientBars("RESILIENT", currentPrice ?? 25.0);
+  }
+
+  const p = currentPrice && currentPrice > 0 ? currentPrice : (rawBars[rawBars.length - 1]?.close ?? 25.0);
+  const bars = [...rawBars];
+  const last = bars[bars.length - 1];
+  const now = Date.now();
+  const isToday = last && (now - last.time) < 20 * 3600 * 1000;
+
+  const barOpen = quote?.open && quote.open > 0 ? quote.open : (isToday ? last.open : p);
+  const barHigh = Math.max(isToday ? last.high : p, quote?.high ?? p, p);
+  const barLow = Math.min(isToday ? last.low : p, quote?.low ?? p, p);
+  const barClose = p;
+  const barVol = currentVolume && currentVolume > 0
+    ? (isToday ? Math.max(last.volume, currentVolume) : currentVolume)
+    : (isToday ? last.volume : 150_000);
+
+  if (isToday) {
+    bars[bars.length - 1] = {
+      ...last,
+      high: barHigh,
+      low: barLow,
+      close: barClose,
+      volume: barVol,
+    };
+  } else {
+    bars.push({
+      time: now,
+      open: barOpen,
+      high: barHigh,
+      low: barLow,
+      close: barClose,
+      volume: barVol,
+    });
+  }
+
   return bars;
 }
 
@@ -916,6 +968,8 @@ export function calculateBuyPointPlan(
       absBuyDiff: null,
       buyRange: null as [number, number] | null,
       buyZoneStatus: "NO_SETUP" as const,
+      isExtended: false,
+      chaseRisk: "LOW" as const,
       stopLoss: null,
       targetPrice: null,
       riskReward: null,
@@ -935,15 +989,30 @@ export function calculateBuyPointPlan(
       tickRound(buyPoint * 0.99),
       tickRound(buyPoint * 1.015),
     ];
-    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-    if (absDiff <= 1.0 || (price >= buyRange[0] && price <= buyRange[1])) {
-      buyZoneStatus = "AT_BUY_POINT";
-    } else if (absDiff <= 2.5) {
-      buyZoneStatus = "NEAR_BUY_POINT";
-    } else if (diffPct > 2.5) {
+    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+    let isExtended = false;
+    let chaseRisk: "LOW" | "MODERATE" | "HIGH" = "LOW";
+
+    if (diffPct > 4.5) {
+      buyZoneStatus = "EXTENDED";
+      isExtended = true;
+      chaseRisk = "HIGH";
+    } else if (diffPct > 2.8) {
       buyZoneStatus = "WAIT_PULLBACK";
+      isExtended = false;
+      chaseRisk = "MODERATE";
+    } else if (absDiff <= 1.2 || (price >= buyRange[0] && price <= buyRange[1])) {
+      buyZoneStatus = "AT_BUY_POINT";
+      isExtended = false;
+      chaseRisk = "LOW";
+    } else if (absDiff <= 2.8) {
+      buyZoneStatus = "NEAR_BUY_POINT";
+      isExtended = false;
+      chaseRisk = "LOW";
     } else {
       buyZoneStatus = "BELOW_SUPPORT";
+      isExtended = false;
+      chaseRisk = "LOW";
     }
 
     const sl = topChartPattern.stopLossPrice ? tickRound(topChartPattern.stopLossPrice) : tickRound(buyPoint * 0.95);
@@ -958,6 +1027,8 @@ export function calculateBuyPointPlan(
       absBuyDiff: absDiff,
       buyRange,
       buyZoneStatus,
+      isExtended,
+      chaseRisk,
       stopLoss: sl,
       targetPrice: tp,
       riskReward: rr,
@@ -996,15 +1067,30 @@ export function calculateBuyPointPlan(
   const absDiff = Math.abs(diffPct);
   const buyRange: [number, number] = asym.entryZone;
 
-  let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-  if (absDiff <= 1.0 || (price >= buyRange[0] && price <= buyRange[1])) {
-    buyZoneStatus = "AT_BUY_POINT";
-  } else if (absDiff <= 2.5) {
-    buyZoneStatus = "NEAR_BUY_POINT";
-  } else if (diffPct > 2.5) {
+  let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+  let isExtended = false;
+  let chaseRisk: "LOW" | "MODERATE" | "HIGH" = "LOW";
+
+  if (diffPct > 4.5) {
+    buyZoneStatus = "EXTENDED";
+    isExtended = true;
+    chaseRisk = "HIGH";
+  } else if (diffPct > 2.8) {
     buyZoneStatus = "WAIT_PULLBACK";
+    isExtended = false;
+    chaseRisk = "MODERATE";
+  } else if (absDiff <= 1.2 || (price >= buyRange[0] && price <= buyRange[1])) {
+    buyZoneStatus = "AT_BUY_POINT";
+    isExtended = false;
+    chaseRisk = "LOW";
+  } else if (absDiff <= 2.8) {
+    buyZoneStatus = "NEAR_BUY_POINT";
+    isExtended = false;
+    chaseRisk = "LOW";
   } else {
     buyZoneStatus = "BELOW_SUPPORT";
+    isExtended = false;
+    chaseRisk = "LOW";
   }
 
   const primaryLayer = asym.confluenceCluster.layers[0] || "Bệ đỡ hội tụ";
@@ -1015,6 +1101,8 @@ export function calculateBuyPointPlan(
     absBuyDiff: absDiff,
     buyRange,
     buyZoneStatus,
+    isExtended,
+    chaseRisk,
     stopLoss: asym.stopLoss,
     targetPrice: asym.takeProfit,
     riskReward: asym.riskReward,
@@ -1236,8 +1324,12 @@ function detectPresets(item: {
   beta?: number | null;
   qualityScore?: number | null;
   tripleBarrierRiskReward?: number | null;
-  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyPointDiffPct?: number | null;
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "NO_SETUP";
   absBuyDiff?: number | null;
+  isExtended?: boolean;
+  chaseRisk?: "LOW" | "MODERATE" | "HIGH";
+  extensionFromBottomPct?: number | null;
   isMtfAligned?: boolean;
   mtfConsensus?: string;
   rsRating?: number | null;
@@ -1309,10 +1401,17 @@ function detectPresets(item: {
     item.changePercent >= -0.8 &&
     item.changePercent <= 5.5;
 
+  // Anti-chasing extension guard: Exclude stocks that have already surged too far from pivot or bottom
+  const isExtendedFromPivot = (item.buyPointDiffPct != null && item.buyPointDiffPct > 3.5) || item.buyZoneStatus === "EXTENDED";
+  const isExtendedFromBottom = item.extensionFromBottomPct != null && item.extensionFromBottomPct > 8.0;
+  const isIntradayOverExtended = item.changePercent != null && item.changePercent > 5.5;
+  const isChasingRisk = item.isExtended === true || isExtendedFromPivot || isExtendedFromBottom || isIntradayOverExtended;
+
   const isInExecutionZone =
-    item.buyZoneStatus === "AT_BUY_POINT" ||
-    (item.absBuyDiff != null && item.absBuyDiff <= 1.8) ||
-    item.isSweetLaunchZone === true;
+    !isChasingRisk &&
+    (item.buyZoneStatus === "AT_BUY_POINT" ||
+      (item.absBuyDiff != null && item.absBuyDiff <= 1.8) ||
+      item.isSweetLaunchZone === true);
 
   const hasApexConfluence =
     item.setupGrade === "A+" ||
@@ -1374,8 +1473,9 @@ function detectPresets(item: {
 
   // 0. Siêu Lọc Apex Quant Confluence (Score >= 74 or Sweet Zone Reversal >= 65)
   if (
-    (item.apexQuantScore != null && item.apexQuantScore >= 74) ||
-    (item.apexQuantScore != null && item.apexQuantScore >= 65 && item.isSweetLaunchZone)
+    !isExtendedFromBottom &&
+    ((item.apexQuantScore != null && item.apexQuantScore >= 74) ||
+      (item.apexQuantScore != null && item.apexQuantScore >= 65 && item.isSweetLaunchZone))
   ) {
     passes.push("orca_apex_quant");
   }
@@ -1581,9 +1681,10 @@ function detectPresets(item: {
 
   // 11. Sát Điểm Mua Nhất (Near Buy Point / Buy Zone)
   const isNearBuy =
-    item.buyZoneStatus === "AT_BUY_POINT" ||
-    item.buyZoneStatus === "NEAR_BUY_POINT" ||
-    (item.absBuyDiff != null && item.absBuyDiff <= 2.2);
+    !isChasingRisk &&
+    (item.buyZoneStatus === "AT_BUY_POINT" ||
+      item.buyZoneStatus === "NEAR_BUY_POINT" ||
+      (item.absBuyDiff != null && item.absBuyDiff <= 2.2));
 
   const hasSetupConfluence =
     item.confluenceScore >= 42 ||
@@ -2150,7 +2251,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const foreignAccumulating = foreignNetVal != null && foreignNetVal > 0.5;
 
         const rawBars = ohlcvMap.get(sym)?.bars;
-        const effectiveBars = (rawBars && rawBars.length >= 15) ? rawBars : (price ? generateResilientBars(sym, price) : rawBars);
+        const baseBars = (rawBars && rawBars.length >= 15) ? rawBars : (price ? generateResilientBars(sym, price) : rawBars);
+        // Real-time multi-timeframe bar stitching with intraday quote to prevent stale signals
+        const effectiveBars = syncLatestRealtimeBar(baseBars, q, price, volume);
         const parsed = parseBarArrays(effectiveBars);
 
         let rsRating20: number | null = null;
@@ -2395,8 +2498,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           beta: entry.quantFeatures.beta,
           qualityScore: entry.qualityScore,
           tripleBarrierRiskReward: entry.quantFeatures.tripleBarrierRiskReward,
+          buyPointDiffPct: entry.buyPointPlan.buyPointDiffPct,
           buyZoneStatus: entry.buyPointPlan.buyZoneStatus,
           absBuyDiff: entry.buyPointPlan.absBuyDiff,
+          isExtended: entry.buyPointPlan.isExtended,
+          chaseRisk: entry.buyPointPlan.chaseRisk,
+          extensionFromBottomPct: entry.apexQuant.reversalMetrics.extensionFromBottomPct,
           rsRating: entry.rsRating,
           piotroskiFScore: entry.piotroskiFScore,
           altmanZone: entry.altmanZone,
@@ -2691,6 +2798,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           absBuyDiff: entry.buyPointPlan.absBuyDiff,
           buyRange: entry.buyPointPlan.buyRange,
           buyZoneStatus: entry.buyPointPlan.buyZoneStatus,
+          isExtended: entry.buyPointPlan.isExtended,
+          chaseRisk: entry.buyPointPlan.chaseRisk,
           stopLoss: entry.buyPointPlan.stopLoss,
           targetPrice: entry.buyPointPlan.targetPrice,
           riskReward: entry.buyPointPlan.riskReward,
@@ -3152,9 +3261,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
       } else if (params.buyPosition === "NEAR_BUY_POINT") {
         if (x.buyZoneStatus !== "NEAR_BUY_POINT" && x.buyZoneStatus !== "AT_BUY_POINT" && (x.absBuyDiff == null || x.absBuyDiff > 2.5)) continue;
       } else if (params.buyPosition === "SAFE_ACCUMULATION") {
-        if (x.absBuyDiff == null || x.absBuyDiff > 3.5) continue;
+        if (x.absBuyDiff == null || x.absBuyDiff > 3.5 || x.isExtended) continue;
       } else if (params.buyPosition === "WAIT_PULLBACK") {
         if (x.buyZoneStatus !== "WAIT_PULLBACK") continue;
+      } else if (params.buyPosition === "EXTENDED") {
+        if (x.buyZoneStatus !== "EXTENDED" && !x.isExtended) continue;
       } else if (params.buyPosition === "BELOW_SUPPORT") {
         if (x.buyZoneStatus !== "BELOW_SUPPORT") continue;
       }

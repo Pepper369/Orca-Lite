@@ -22,9 +22,11 @@ export interface StockTradePlan {
   /** Đồng bộ trường điểm mua chuẩn với Bộ lọc Screener */
   buyPoint?: number | null;
   buyRange?: [number, number] | null;
-  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "NO_SETUP";
   buyPointDiffPct?: number | null;
   absBuyDiff?: number | null;
+  isExtended?: boolean;
+  chaseRisk?: "LOW" | "MODERATE" | "HIGH";
   isBuyTriggerNow?: boolean | null;
   buyTriggerScore?: number | null;
   buyTriggerReasonVi?: string | null;
@@ -141,15 +143,30 @@ export function buildStockTradePlan(
         tickRound(buyPoint * 0.99),
         tickRound(buyPoint * 1.015),
       ];
-      let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-      if (absDiff <= 1.0 || (last >= buyRange[0] && last <= buyRange[1])) {
-        buyZoneStatus = "AT_BUY_POINT";
-      } else if (absDiff <= 2.5) {
-        buyZoneStatus = "NEAR_BUY_POINT";
-      } else if (diffPct > 2.5) {
+      let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+      let isExtended = false;
+      let chaseRisk: "LOW" | "MODERATE" | "HIGH" = "LOW";
+
+      if (diffPct > 4.5) {
+        buyZoneStatus = "EXTENDED";
+        isExtended = true;
+        chaseRisk = "HIGH";
+      } else if (diffPct > 2.8) {
         buyZoneStatus = "WAIT_PULLBACK";
+        isExtended = false;
+        chaseRisk = "MODERATE";
+      } else if (absDiff <= 1.2 || (last >= buyRange[0] && last <= buyRange[1])) {
+        buyZoneStatus = "AT_BUY_POINT";
+        isExtended = false;
+        chaseRisk = "LOW";
+      } else if (absDiff <= 2.8) {
+        buyZoneStatus = "NEAR_BUY_POINT";
+        isExtended = false;
+        chaseRisk = "LOW";
       } else {
         buyZoneStatus = "BELOW_SUPPORT";
+        isExtended = false;
+        chaseRisk = "LOW";
       }
 
       const sl = input.topChartPattern.stopLossPrice
@@ -182,6 +199,8 @@ export function buildStockTradePlan(
         buyZoneStatus,
         buyPointDiffPct: diffPct,
         absBuyDiff: absDiff,
+        isExtended,
+        chaseRisk,
         stopLoss: sl,
         takeProfit: tp,
         takeProfit1: tickRound(buyPoint + risk * 1.5),
@@ -223,15 +242,30 @@ export function buildStockTradePlan(
     const absDiff = Math.abs(diffPct);
     const buyRange = asym.entryZone;
 
-    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-    if (absDiff <= 1.0 || (last >= buyRange[0] && last <= buyRange[1])) {
-      buyZoneStatus = "AT_BUY_POINT";
-    } else if (absDiff <= 2.5) {
-      buyZoneStatus = "NEAR_BUY_POINT";
-    } else if (diffPct > 2.5) {
+    let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
+    let isExtended = false;
+    let chaseRisk: "LOW" | "MODERATE" | "HIGH" = "LOW";
+
+    if (diffPct > 4.5) {
+      buyZoneStatus = "EXTENDED";
+      isExtended = true;
+      chaseRisk = "HIGH";
+    } else if (diffPct > 2.8) {
       buyZoneStatus = "WAIT_PULLBACK";
+      isExtended = false;
+      chaseRisk = "MODERATE";
+    } else if (absDiff <= 1.2 || (last >= buyRange[0] && last <= buyRange[1])) {
+      buyZoneStatus = "AT_BUY_POINT";
+      isExtended = false;
+      chaseRisk = "LOW";
+    } else if (absDiff <= 2.8) {
+      buyZoneStatus = "NEAR_BUY_POINT";
+      isExtended = false;
+      chaseRisk = "LOW";
     } else {
       buyZoneStatus = "BELOW_SUPPORT";
+      isExtended = false;
+      chaseRisk = "LOW";
     }
 
     return {
@@ -246,6 +280,8 @@ export function buildStockTradePlan(
       buyZoneStatus,
       buyPointDiffPct: diffPct,
       absBuyDiff: absDiff,
+      isExtended,
+      chaseRisk,
       stopLoss: asym.stopLoss,
       takeProfit: asym.takeProfit,
       takeProfit1: asym.takeProfit1,

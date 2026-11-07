@@ -48,7 +48,9 @@ export interface MultiSourceStockItem {
   buyPoint?: number | null;
   buyPointDiffPct?: number | null;
   absBuyDiff?: number | null;
-  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" | "NO_SETUP";
+  buyZoneStatus?: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" | "NO_SETUP";
+  isExtended?: boolean;
+  chaseRisk?: "LOW" | "MODERATE" | "HIGH";
   buyRange?: [number, number] | null;
   stopLoss?: number | null;
   targetPricePlan?: number | null;
