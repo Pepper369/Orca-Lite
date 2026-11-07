@@ -62,8 +62,7 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
       {isTriggerNow && (
         <div className="flex items-center justify-between p-2 rounded-lg bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-emerald-500/10 border border-emerald-500/50 text-emerald-300">
           <div className="flex items-center gap-1.5 font-bold text-[11px]">
-            <Zap className="size-3.5 text-accent-primary animate-pulse" />
-            <span>⚡ TÍN HIỆU MUA NGAY (Trigger {triggerScore}/99)</span>
+            <span>TÍN HIỆU MUA NGAY (Trigger {triggerScore}/99)</span>
           </div>
           <span className="text-[10px] font-semibold text-emerald-400">
             {triggerReason}
@@ -100,14 +99,14 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
                 }`}
               >
                 {buyZoneStatus === "AT_BUY_POINT"
-                  ? "🎯 Ngay điểm mua"
+                  ? "Ngay điểm mua"
                   : buyZoneStatus === "NEAR_BUY_POINT"
-                    ? `⚡ Sát điểm mua (+${diffPct}%)`
+                    ? `Sát điểm mua (+${diffPct}%)`
                     : buyZoneStatus === "WAIT_PULLBACK"
-                      ? `⏳ Chờ chỉnh (+${diffPct}%)`
+                      ? `Chờ chỉnh (+${diffPct}%)`
                       : buyZoneStatus === "EXTENDED"
-                        ? `🚫 Đã tăng rướn (+${diffPct}%)`
-                        : `⚠️ Dưới hỗ trợ (${diffPct}%)`}
+                        ? `Đã tăng rướn (+${diffPct}%)`
+                        : `Dưới hỗ trợ (${diffPct}%)`}
               </span>
             )}
           </div>
@@ -121,19 +120,19 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
           <div className="mt-2 pt-2 border-t border-border-subtle/50 text-[11px] font-medium leading-relaxed">
             {buyZoneStatus === "WAIT_PULLBACK" ? (
               <div className="text-amber-300">
-                ⚠️ Giá sàn ({fmt(lastPrice)}) đã chạy cao hơn điểm mua <b>+{diffPct}%</b> (vượt biên an toàn 2.5%). Kiên nhẫn đặt lệnh chờ pullback tại <b>{fmt(buyPoint)}</b> để khống chế lỗ tối đa chỉ <b>-{plan.riskPct}%</b>.
+                Giá sàn ({fmt(lastPrice)}) đã chạy cao hơn điểm mua <b>+{diffPct}%</b> (vượt biên an toàn 2.5%). Kiên nhẫn đặt lệnh chờ pullback tại <b>{fmt(buyPoint)}</b> để khống chế lỗ tối đa chỉ <b>-{plan.riskPct}%</b>.
               </div>
             ) : buyZoneStatus === "NEAR_BUY_POINT" ? (
               <div className="text-teal-300">
-                ⚡ Giá sàn ({fmt(lastPrice)}) đang sát điểm mua (+<b>{diffPct}%</b> ≤ 2.5% — trong vùng gom an toàn). Vẫn hoàn toàn đạt tiêu chuẩn giải ngân trước khi bứt xa khỏi nền.
+                Giá sàn ({fmt(lastPrice)}) đang sát điểm mua (+<b>{diffPct}%</b> ≤ 2.5% — trong vùng gom an toàn). Vẫn hoàn toàn đạt tiêu chuẩn giải ngân trước khi bứt xa khỏi nền.
               </div>
             ) : buyZoneStatus === "AT_BUY_POINT" ? (
               <div className="text-emerald-400">
-                ✅ Giá sàn ({fmt(lastPrice)}) đang ở đúng bệ đỡ hội tụ / điểm mua chuẩn. Giải ngân ngay để đạt tỷ suất <b>1 ăn {plan.riskReward.toFixed(1)}</b>.
+                Giá sàn ({fmt(lastPrice)}) đang ở đúng bệ đỡ hội tụ / điểm mua chuẩn. Giải ngân ngay để đạt tỷ suất <b>1 ăn {plan.riskReward.toFixed(1)}</b>.
               </div>
             ) : (
               <div className="text-sky-300">
-                ⚡ Giá sàn ({fmt(lastPrice)}) đã chiết khấu dưới bệ đỡ (<b>{diffPct}%</b>). Theo dõi phản ứng nến rút chân quanh <b>{fmt(buyPoint)}</b> trước khi mở vị thế mới.
+                Giá sàn ({fmt(lastPrice)}) đã chiết khấu dưới bệ đỡ (<b>{diffPct}%</b>). Theo dõi phản ứng nến rút chân quanh <b>{fmt(buyPoint)}</b> trước khi mở vị thế mới.
               </div>
             )}
           </div>

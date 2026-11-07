@@ -222,7 +222,7 @@ export function BuyTriggerBadge({
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
         <span className="relative inline-flex rounded-full size-2 bg-emerald-500" />
       </span>
-      <span>⚡ MUA NGAY</span>
+      <span>MUA NGAY</span>
       {labelVi && (
         <span className="hidden sm:inline font-semibold text-emerald-200">
           {labelVi}
@@ -266,13 +266,10 @@ export function SniperTradePlanBadge({
   if (!subtype) return null;
 
   let colorClasses = "bg-emerald-500/15 border-emerald-400/50 text-emerald-300";
-  let iconText = "🎯";
   if (subtype === "SQUEEZE_BREAKOUT") {
     colorClasses = "bg-cyan-500/15 border-cyan-400/50 text-cyan-300";
-    iconText = "⚡";
   } else if (subtype === "SWEEP_RECLAIM") {
     colorClasses = "bg-amber-500/15 border-amber-400/50 text-amber-300";
-    iconText = "🔄";
   }
 
   const tooltipParts = [
@@ -291,7 +288,6 @@ export function SniperTradePlanBadge({
       className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-1 text-[10px] ${colorClasses} shadow-xs select-none`}
     >
       <div className="flex items-center gap-1 font-bold">
-        <span>{iconText}</span>
         <span className="truncate max-w-[130px]">{labelVi || subtype}</span>
         {riskReward != null && (
           <span className="ml-auto rounded bg-black/30 px-1 py-0.2 text-[9px] font-mono font-black text-amber-300 border border-amber-400/30">
@@ -465,7 +461,7 @@ export function QuantBadge({
   if (badge === "SUPER_QUANT") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold text-cyan-300 whitespace-nowrap shadow-sm">
-        <Zap className="size-3 text-cyan-300" /> SIÊU QUANT {score ? `(${score}đ)` : ""}
+        SIÊU QUANT {score ? `(${score}đ)` : ""}
       </span>
     );
   }
@@ -3639,7 +3635,7 @@ export function VnScreener({
                         <td className="py-2.5 text-center">
                           {row.buyZoneStatus === "AT_BUY_POINT" ? (
                             <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-500/40 px-2 py-0.5 text-[10px] font-bold text-emerald-300 whitespace-nowrap shadow-sm">
-                              <Zap className="size-3 text-emerald-300" /> NGAY ĐIỂM MUA
+                              NGAY ĐIỂM MUA
                             </span>
                           ) : row.buyZoneStatus === "NEAR_BUY_POINT" ? (
                             <span className="inline-flex items-center gap-1 rounded bg-cyan-500/20 border border-cyan-400/40 px-2 py-0.5 text-[10px] font-bold text-cyan-300 whitespace-nowrap">
@@ -3892,7 +3888,7 @@ export function VnScreener({
                               />
                               {row.sniperTriggerSubtype && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300">
-                                  ⚡ {row.sniperTriggerLabelVi || row.sniperTriggerSubtype} {row.sniperRiskReward ? `(${row.sniperRiskReward.toFixed(1)}R)` : ""}
+                                  {row.sniperTriggerLabelVi || row.sniperTriggerSubtype} {row.sniperRiskReward ? `(${row.sniperRiskReward.toFixed(1)}R)` : ""}
                                 </span>
                               )}
                               {row.hasBullishDivergence && (
