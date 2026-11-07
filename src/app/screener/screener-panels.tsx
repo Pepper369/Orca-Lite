@@ -36,6 +36,7 @@ import {
   Layers,
 } from "lucide-react";
 import { ScreenerMiniChart } from "@/components/screener-mini-chart";
+import { ScreenerMatrixToolbar } from "@/components/screener-matrix-toolbar";
 import {
   CustomScreenerBuilder,
   loadCustomPresets,
@@ -1543,7 +1544,84 @@ export function VnScreener({
   ]);
 
   const toggleQuickModifier = useCallback((key: string, val: unknown) => {
+    if (key === "sniperTriggerOnly") setSniperTriggerOnly(Boolean(val));
+    if (key === "setupGradeFilter") setSetupGradeFilter(val as any);
+    if (key === "goldenPocketFilter") setGoldenPocketFilter(Boolean(val));
+    if (key === "squeezeFilter") setSqueezeFilter(val as string);
+    if (key === "flipZoneFilter") setFlipZoneFilter(Boolean(val));
+    if (key === "smcOrderBlockFilter") setSmcOrderBlockFilter(Boolean(val));
+    if (key === "sniperSubtypeFilter") setSniperSubtypeFilter(val as any);
+    if (key === "minSniperRRFilter") setMinSniperRRFilter(val as string);
+    if (key === "tightClosesOnly") setTightClosesOnly(Boolean(val));
+    if (key === "vduOnly") setVduOnly(Boolean(val));
+    if (key === "vsaNoSupplyOnly") setVsaNoSupplyOnly(Boolean(val));
+    if (key === "maRibbonSqueezeOnly") setMaRibbonSqueezeOnly(Boolean(val));
+    if (key === "maReclaimOnly") setMaReclaimOnly(Boolean(val));
+    if (key === "minSmartMoneyScore") setMinSmartMoneyScore(val as string);
+    if (key === "rrgQuadrant") setRrgQuadrant(val as string);
+    if (key === "minRsRating") setMinRsRating(val as string);
+    if (key === "mtfOnly") setMtfOnly(Boolean(val));
+    if (key === "minOrcaMasterScore") setMinOrcaMasterScore(val as string);
+    if (key === "faProfileCombo") setFaProfileCombo(val as string);
+    if (key === "netCashOnly") setNetCashOnly(Boolean(val));
+    if (key === "minPiotroskiScore") setMinPiotroskiScore(val as string);
+    if (key === "minRoic") setMinRoic(val as string);
+    if (key === "maxPeg") setMaxPeg(val as string);
+
     setApplied((prev) => ({ ...prev, [key]: val }));
+  }, []);
+
+  const handleResetMatrix = useCallback(() => {
+    setSniperTriggerOnly(false);
+    setSetupGradeFilter("all");
+    setGoldenPocketFilter(false);
+    setSqueezeFilter("ALL");
+    setFlipZoneFilter(false);
+    setSmcOrderBlockFilter(false);
+    setSniperSubtypeFilter("all");
+    setMinSniperRRFilter("");
+    setTightClosesOnly(false);
+    setVduOnly(false);
+    setVsaNoSupplyOnly(false);
+    setMaRibbonSqueezeOnly(false);
+    setMaReclaimOnly(false);
+    setMinSmartMoneyScore("");
+    setRrgQuadrant("ALL");
+    setMinRsRating("");
+    setMtfOnly(false);
+    setMinOrcaMasterScore("");
+    setFaProfileCombo("ALL");
+    setNetCashOnly(false);
+    setMinPiotroskiScore("");
+    setMinRoic("");
+    setMaxPeg("");
+
+    setApplied((prev) => ({
+      ...prev,
+      sniperTriggerOnly: false,
+      setupGradeFilter: "all",
+      goldenPocketFilter: false,
+      squeezeFilter: "ALL",
+      flipZoneFilter: false,
+      smcOrderBlockFilter: false,
+      sniperSubtypeFilter: "all",
+      minSniperRRFilter: "",
+      tightClosesOnly: false,
+      vduOnly: false,
+      vsaNoSupplyOnly: false,
+      maRibbonSqueezeOnly: false,
+      maReclaimOnly: false,
+      minSmartMoneyScore: "",
+      rrgQuadrant: "ALL",
+      minRsRating: "",
+      mtfOnly: false,
+      minOrcaMasterScore: "",
+      faProfileCombo: "ALL",
+      netCashOnly: false,
+      minPiotroskiScore: "",
+      minRoic: "",
+      maxPeg: "",
+    }));
   }, []);
 
   const handleReset = useCallback(() => {
@@ -1967,173 +2045,13 @@ export function VnScreener({
         </div>
       </div>
 
-      {/* 1.5 Sniper Execution Quick Modifiers Bar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-panel/90 p-2.5 shadow-xs backdrop-blur-xs">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary mr-1 shrink-0">
-          <span className="flex size-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="hidden sm:inline">Sniper Execution:</span>
-        </div>
-
-        {/* 1. Điểm Mua Tức Thời Quick Toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            const next = !applied.sniperTriggerOnly;
-            setSniperTriggerOnly(next);
-            toggleQuickModifier("sniperTriggerOnly", next);
-          }}
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all border shrink-0 ${
-            applied.sniperTriggerOnly
-              ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/60 shadow-xs"
-              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-          }`}
-        >
-          <span>🎯</span>
-          <span>Điểm Mua Tức Thời</span>
-        </button>
-
-        {/* 2. Setup Grade A+/A Toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            const next = applied.setupGradeFilter === "A" ? "all" : applied.setupGradeFilter === "A+" ? "A" : "A+";
-            setSetupGradeFilter(next);
-            toggleQuickModifier("setupGradeFilter", next);
-          }}
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
-            applied.setupGradeFilter !== "all"
-              ? "bg-amber-500/20 text-amber-200 border-amber-400/60 shadow-xs font-bold"
-              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-          }`}
-        >
-          <span>🏆</span>
-          <span>{applied.setupGradeFilter === "all" ? "Hợp lưu A+/A" : `Hạng ${applied.setupGradeFilter}`}</span>
-        </button>
-
-        {/* 3. Golden Pocket 0.618 Toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            const next = !applied.goldenPocketFilter;
-            setGoldenPocketFilter(next);
-            toggleQuickModifier("goldenPocketFilter", next);
-          }}
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
-            applied.goldenPocketFilter
-              ? "bg-purple-500/25 text-purple-200 border-purple-400/60 shadow-xs font-bold"
-              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-          }`}
-        >
-          <span>📐</span>
-          <span>Fibo GP 0.618</span>
-        </button>
-
-        {/* 4. Flip Zone Retest Toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            const next = !applied.flipZoneFilter;
-            setFlipZoneFilter(next);
-            toggleQuickModifier("flipZoneFilter", next);
-          }}
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
-            applied.flipZoneFilter
-              ? "bg-blue-500/25 text-blue-200 border-blue-400/60 shadow-xs font-bold"
-              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-          }`}
-        >
-          <span>🔄</span>
-          <span>Flip Zone Retest</span>
-        </button>
-
-        {/* 5. SMC Order Block Toggle */}
-        <button
-          type="button"
-          onClick={() => {
-            const next = !applied.smcOrderBlockFilter;
-            setSmcOrderBlockFilter(next);
-            toggleQuickModifier("smcOrderBlockFilter", next);
-          }}
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all border shrink-0 ${
-            applied.smcOrderBlockFilter
-              ? "bg-indigo-500/25 text-indigo-200 border-indigo-400/60 shadow-xs font-bold"
-              : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-          }`}
-        >
-          <span>🏦</span>
-          <span>Order Block (SMC)</span>
-        </button>
-
-        {/* 6. Sniper Subtype Selector & Min R:R Selector */}
-        <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-          <select
-            value={applied.sniperSubtypeFilter}
-            onChange={(e) => {
-              const val = e.target.value as any;
-              setSniperSubtypeFilter(val);
-              toggleQuickModifier("sniperSubtypeFilter", val);
-            }}
-            className="rounded-lg border border-border-subtle bg-panel-2 px-2 py-1 text-xs text-text-primary focus:border-accent-primary focus:outline-none"
-          >
-            <option value="all">Mọi Kịch Bản Sniper</option>
-            <option value="SNIPER_PULLBACK">🎯 Pullback Vùng Vàng</option>
-            <option value="SQUEEZE_BREAKOUT">⚡ Bứt Phá Squeeze</option>
-            <option value="SWEEP_RECLAIM">🔄 Quét Thanh Khoản Spring</option>
-          </select>
-
-          <select
-            value={applied.minSniperRRFilter}
-            onChange={(e) => {
-              const val = e.target.value;
-              setMinSniperRRFilter(val);
-              toggleQuickModifier("minSniperRRFilter", val);
-            }}
-            className="rounded-lg border border-border-subtle bg-panel-2 px-2 py-1 text-xs text-text-primary focus:border-accent-primary focus:outline-none"
-          >
-            <option value="">Mọi R:R</option>
-            <option value="1.5">R:R ≥ 1.5x</option>
-            <option value="2.0">R:R ≥ 2.0x</option>
-            <option value="2.5">R:R ≥ 2.5x</option>
-            <option value="3.0">R:R ≥ 3.0x</option>
-          </select>
-
-          {/* Reset Quick Modifiers */}
-          {(applied.sniperTriggerOnly ||
-            applied.setupGradeFilter !== "all" ||
-            applied.goldenPocketFilter ||
-            applied.flipZoneFilter ||
-            applied.smcOrderBlockFilter ||
-            applied.sniperSubtypeFilter !== "all" ||
-            Boolean(applied.minSniperRRFilter)) && (
-            <button
-              type="button"
-              onClick={() => {
-                setSniperTriggerOnly(false);
-                setSetupGradeFilter("all");
-                setGoldenPocketFilter(false);
-                setFlipZoneFilter(false);
-                setSmcOrderBlockFilter(false);
-                setSniperSubtypeFilter("all");
-                setMinSniperRRFilter("");
-                setApplied((prev) => ({
-                  ...prev,
-                  sniperTriggerOnly: false,
-                  setupGradeFilter: "all",
-                  goldenPocketFilter: false,
-                  flipZoneFilter: false,
-                  smcOrderBlockFilter: false,
-                  sniperSubtypeFilter: "all",
-                  minSniperRRFilter: "",
-                }));
-              }}
-              className="rounded px-1.5 py-1 text-[11px] font-medium text-text-muted hover:text-rose-400 transition-colors"
-              title="Đặt lại các bộ lọc nhanh Sniper"
-            >
-              ✕ Đặt lại
-            </button>
-          )}
-        </div>
-      </div>
+      {/* 1.5 4-Tier Confluence Matrix Toolbar */}
+      <ScreenerMatrixToolbar
+        filters={applied}
+        onToggle={toggleQuickModifier}
+        onReset={handleResetMatrix}
+        totalFilteredCount={data?.total}
+      />
 
       {/* 2. Main Screener Panel */}
       <Panel
