@@ -1908,89 +1908,44 @@ export function VnScreener({
     URL.revokeObjectURL(url);
   };
 
+  const CORE_GOALS: { id: ScreenerPreset; label: string }[] = [
+    { id: "all", label: "Tất cả" },
+    { id: "apex_buy_now", label: "Điểm mua bứt phá" },
+    { id: "near_buy_point", label: "Sát điểm mua an toàn" },
+    { id: "canslim", label: "Tăng trưởng & Vượt đỉnh" },
+    { id: "smart_money_inflow", label: "Dòng tiền cá mập" },
+    { id: "value", label: "Định giá rẻ & Giá trị" },
+    { id: "dividend", label: "Cổ tức cao" },
+  ];
+
   return (
-    <div className="space-y-3">
-      {/* 1. Categorized Strategy Navigation */}
-      <div className="rounded-lg border border-line bg-panel p-2.5 space-y-2.5">
-        {/* Tier 1: Category Selector + Builder action */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line/60">
+    <div className="space-y-2.5">
+      {/* 1. Thanh Chọn Phong Cách Đầu Tư Cốt Lõi (Tối giản, trực quan, không icon rườm rà) */}
+      <div className="rounded-lg border border-line bg-panel p-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Nhóm mục tiêu cốt lõi */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted px-1.5">
-              Nhóm chiến lược:
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mr-1">
+              Mục tiêu:
             </span>
-            {STRATEGY_GROUPS.map((group) => {
-              const isActive = activeStrategyGroup === group.id;
-              const customCount = group.id === "custom" ? customPresets.length : null;
+            {CORE_GOALS.map((goal) => {
+              const active = preset === goal.id && !activeCustomPresetName;
+              const count = presetsCount ? presetsCount[goal.id] : null;
               return (
                 <button
-                  key={group.id}
+                  key={goal.id}
                   type="button"
-                  onClick={() => {
-                    setActiveStrategyGroup(group.id);
-                    if (group.id !== "custom") {
-                      // If current preset not in this category, pick the first one
-                      const firstInGroup = PRESET_TABS.find((t) => t.category === group.id);
-                      if (firstInGroup && getPresetCategory(preset) !== group.id) {
-                        handleSelectPreset(firstInGroup.id);
-                      }
-                    }
-                  }}
-                  title={group.desc}
-                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] transition-all ${
-                    isActive
-                      ? "bg-surface-elevated text-text-primary border border-border-subtle shadow-xs font-semibold"
-                      : "text-text-secondary hover:text-text-primary hover:bg-panel-2"
-                  }`}
-                >
-                  <span className={`size-1.5 rounded-full ${group.dotColor}`} />
-                  <span>{group.label}</span>
-                  {customCount != null && customCount > 0 && (
-                    <span className="rounded-full bg-purple-500/20 text-purple-300 px-1.5 text-[10px] font-mono">
-                      {customCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowCustomBuilder(true)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium bg-panel-2 text-text-secondary border border-border-subtle hover:text-text-primary hover:bg-panel-hover transition-all shrink-0"
-          >
-            <SlidersHorizontal className="size-3 text-accent-primary" />
-            <span>Tự tạo bộ lọc</span>
-          </button>
-        </div>
-
-        {/* Tier 2: Presets under the active Category */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {activeStrategyGroup !== "custom" ? (
-            PRESET_TABS.filter((tab) => tab.category === activeStrategyGroup).map((tab) => {
-              const active = preset === tab.id && !activeCustomPresetName;
-              const count = presetsCount ? presetsCount[tab.id] : null;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => handleSelectPreset(tab.id)}
-                  title={tab.desc}
-                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] transition-all ${
+                  onClick={() => handleSelectPreset(goal.id)}
+                  className={`px-3 py-1.5 rounded text-xs transition-all ${
                     active
-                      ? "bg-accent-primary text-white shadow-xs font-semibold"
-                      : "bg-panel-2 text-text-secondary hover:bg-panel-hover hover:text-text-primary"
+                      ? "bg-accent-primary text-white font-semibold shadow-xs"
+                      : "bg-panel-2 text-text-secondary hover:text-text-primary hover:bg-panel-hover"
                   }`}
                 >
-                  <span
-                    className={`size-1.5 rounded-full ${
-                      active ? "bg-white" : tab.dotColor
-                    }`}
-                  />
-                  <span>{tab.label}</span>
+                  <span>{goal.label}</span>
                   {count != null && (
                     <span
-                      className={`rounded px-1.5 py-0.2 text-[10px] font-mono ${
+                      className={`ml-1.5 rounded px-1.5 py-0.2 text-[10px] font-mono ${
                         active ? "bg-white/20 text-white" : "bg-panel-3 text-text-muted"
                       }`}
                     >
@@ -1999,53 +1954,73 @@ export function VnScreener({
                   )}
                 </button>
               );
-            })
-          ) : (
-            <div className="flex flex-wrap items-center gap-1.5 w-full">
-              {customPresets.length === 0 ? (
-                <div className="flex items-center justify-between w-full py-1 text-[11.5px] text-text-muted">
-                  <span>Chưa có bộ lọc tùy biến nào được lưu. Bạn có thể tự phối hợp các chỉ số theo phong cách riêng.</span>
+            })}
+
+            {/* Dropdown Chiến lược chuyên sâu khác */}
+            <select
+              value={CORE_GOALS.some((g) => g.id === preset) ? "" : preset}
+              onChange={(e) => {
+                if (e.target.value) handleSelectPreset(e.target.value as ScreenerPreset);
+              }}
+              className="rounded border border-border-subtle bg-panel-2 px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary focus:border-accent-primary"
+            >
+              <option value="">Chiến lược chuyên sâu khác...</option>
+              {PRESET_TABS.filter((t) => !CORE_GOALS.some((g) => g.id === t.id)).map((tab) => (
+                <option key={tab.id} value={tab.id}>
+                  {tab.label} {presetsCount?.[tab.id] != null ? `(${presetsCount[tab.id]})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Nút Tự tạo bộ lọc */}
+          <button
+            type="button"
+            onClick={() => setShowCustomBuilder(true)}
+            className="flex items-center gap-1.5 rounded border border-border-subtle bg-panel-2 px-2.5 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-all shrink-0"
+          >
+            <span>Tự tạo bộ lọc</span>
+            {customPresets.length > 0 && (
+              <span className="rounded bg-accent-primary/20 px-1 text-[10px] text-accent-primary font-mono">
+                {customPresets.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Danh sách bộ lọc tùy biến nếu có */}
+        {customPresets.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-line/60">
+            <span className="text-[11px] text-text-muted mr-1">Bộ lọc đã lưu:</span>
+            {customPresets.map((cp) => {
+              const active = activeCustomPresetName === cp.name;
+              return (
+                <div
+                  key={cp.id}
+                  onClick={() => handleApplyCustomPreset(cp.filters, cp.name)}
+                  className={`group flex items-center gap-1.5 rounded px-2.5 py-1 text-xs cursor-pointer border transition-all ${
+                    active
+                      ? "bg-accent-primary/20 text-accent-primary border-accent-primary/50 font-semibold"
+                      : "bg-panel-2 text-text-secondary border-border-subtle hover:text-text-primary"
+                  }`}
+                >
+                  <span>{cp.name}</span>
                   <button
                     type="button"
-                    onClick={() => setShowCustomBuilder(true)}
-                    className="text-accent-primary hover:underline font-medium ml-2"
+                    onClick={(e) => handleDeleteCustomPreset(cp.id, e)}
+                    className="opacity-40 group-hover:opacity-100 hover:text-rose-400 p-0.5 rounded transition-all ml-0.5"
+                    title="Xóa bộ lọc này"
                   >
-                    Mở trình tạo bộ lọc →
+                    <Trash2 className="size-2.5" />
                   </button>
                 </div>
-              ) : (
-                customPresets.map((cp) => {
-                  const active = activeCustomPresetName === cp.name;
-                  return (
-                    <div
-                      key={cp.id}
-                      onClick={() => handleApplyCustomPreset(cp.filters, cp.name)}
-                      className={`group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-all cursor-pointer border ${
-                        active
-                          ? "bg-purple-500/20 text-purple-200 border-purple-400/50 shadow-xs font-semibold"
-                          : "bg-panel-2 text-text-secondary border-border-subtle hover:bg-panel-hover hover:text-text-primary"
-                      }`}
-                    >
-                      <span className="size-1.5 rounded-full bg-purple-400" />
-                      <span>{cp.name}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteCustomPreset(cp.id, e)}
-                        className="opacity-40 group-hover:opacity-100 hover:text-rose-400 p-0.5 rounded transition-all ml-1"
-                        title="Xóa bộ lọc này"
-                      >
-                        <Trash2 className="size-2.5" />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* 1.5 4-Tier Confluence Matrix Toolbar */}
+      {/* 1.5 Bộ Lọc Chuyên Sâu (Thu gọn mặc định, không icon emoji) */}
       <ScreenerMatrixToolbar
         filters={applied}
         onToggle={toggleQuickModifier}
@@ -2252,11 +2227,11 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi vị thế điểm mua</option>
-                  <option value="AT_BUY_POINT">⚡ Ngay điểm mua (Zone ≤ 1.0%)</option>
-                  <option value="NEAR_BUY_POINT">🎯 Sát điểm mua (≤ 2.5%)</option>
-                  <option value="SAFE_ACCUMULATION">🛡️ Vùng gom an toàn (≤ 3.5%)</option>
-                  <option value="WAIT_PULLBACK">⏳ Chờ điều chỉnh (&gt; 2.5%)</option>
-                  <option value="BELOW_SUPPORT">⚠️ Dưới hỗ trợ</option>
+                  <option value="AT_BUY_POINT">Ngay điểm mua (Zone ≤ 1.0%)</option>
+                  <option value="NEAR_BUY_POINT">Sát điểm mua (≤ 2.5%)</option>
+                  <option value="SAFE_ACCUMULATION">Vùng gom an toàn (≤ 3.5%)</option>
+                  <option value="WAIT_PULLBACK">Chờ điều chỉnh (&gt; 2.5%)</option>
+                  <option value="BELOW_SUPPORT">Dưới hỗ trợ</option>
                 </select>
               </label>
 
@@ -2270,10 +2245,10 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi trạng thái nén</option>
-                  <option value="FIRED">🚀 Nổ Squeeze Tăng (Fired Bull)</option>
-                  <option value="SQUEEZE_ON">🌀 Đang nén TTM Squeeze</option>
-                  <option value="RIBBON_SQUEEZE">📐 Nén Dải Ribbon MA (≤ 2.8%)</option>
-                  <option value="COIL_SUPER">⚡ Siêu nén kép (TTM + Ribbon)</option>
+                  <option value="FIRED">Nổ Squeeze Tăng (Fired Bull)</option>
+                  <option value="SQUEEZE_ON">Đang nén TTM Squeeze</option>
+                  <option value="RIBBON_SQUEEZE">Nén Dải Ribbon MA (≤ 2.8%)</option>
+                  <option value="COIL_SUPER">Siêu nén kép (TTM + Ribbon)</option>
                 </select>
               </label>
 
@@ -2287,8 +2262,8 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi khối lượng VSA</option>
-                  <option value="ABSORPTION">🌊 Hấp thụ cung đột biến (≥ 1.3x)</option>
-                  <option value="NO_SUPPLY">🔬 Cạn cung kiểm định (≤ 0.65x)</option>
+                  <option value="ABSORPTION">Hấp thụ cung đột biến (≥ 1.3x)</option>
+                  <option value="NO_SUPPLY">Cạn cung kiểm định (≤ 0.65x)</option>
                 </select>
               </label>
 
@@ -2302,12 +2277,12 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi hồ sơ cơ bản</option>
-                  <option value="FORTRESS">🏰 Pháo Đài Tiền Mặt (Net Cash)</option>
-                  <option value="CASH_MACHINE">💰 Cỗ Máy Tiền Mặt (CFO/LNST ≥ 1.0)</option>
-                  <option value="MOAT_QUALITY">💎 Con Hào Kinh Tế (ROIC ≥ 15%)</option>
-                  <option value="UNDERVALUED_GROWTH">🚀 Định Giá Rẻ PEG ≤ 1.0</option>
-                  <option value="CONSENSUS_UPSIDE">🎯 Định Giá Hời CTCK (≥ 20%)</option>
-                  <option value="VALUE_DIVIDEND">💵 Giá Trị & Cổ Tức Cao</option>
+                  <option value="FORTRESS">Pháo Đài Tiền Mặt (Net Cash)</option>
+                  <option value="CASH_MACHINE">Cỗ Máy Tiền Mặt (CFO/LNST ≥ 1.0)</option>
+                  <option value="MOAT_QUALITY">Con Hào Kinh Tế (ROIC ≥ 15%)</option>
+                  <option value="UNDERVALUED_GROWTH">Định Giá Rẻ PEG ≤ 1.0</option>
+                  <option value="CONSENSUS_UPSIDE">Định Giá Hời CTCK (≥ 20%)</option>
+                  <option value="VALUE_DIVIDEND">Giá Trị & Cổ Tức Cao</option>
                 </select>
               </label>
 
@@ -2321,10 +2296,10 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi mẫu hình kỹ thuật</option>
-                  <option value="TIGHT_CLOSES">📐 Nén Phẳng Minervini (≤ 1.25%)</option>
-                  <option value="VDU">💧 Cạn Von Nền VDU (≤ 0.60x)</option>
-                  <option value="WYCKOFF_LPS">🔬 Wyckoff LPS Test Cung</option>
-                  <option value="RS_NEW_HIGH">🏆 RS Dẫn Dắt Vượt Đỉnh</option>
+                  <option value="TIGHT_CLOSES">Nén Phẳng Minervini (≤ 1.25%)</option>
+                  <option value="VDU">Cạn Von Nền VDU (≤ 0.60x)</option>
+                  <option value="WYCKOFF_LPS">Wyckoff LPS Test Cung</option>
+                  <option value="RS_NEW_HIGH">RS Dẫn Dắt Vượt Đỉnh</option>
                 </select>
               </label>
 
@@ -2355,9 +2330,9 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Tất cả tín hiệu MA</option>
-                  <option value="GOLDEN_CROSS">⭐ Giao cắt Vàng (Golden Cross)</option>
-                  <option value="BULLISH_ALIGN">📈 Kênh tăng (Trật tự MA)</option>
-                  <option value="DEATH_CROSS">⚠️ Cắt Tử thần (Death Cross)</option>
+                  <option value="GOLDEN_CROSS">Giao cắt Vàng (Golden Cross)</option>
+                  <option value="BULLISH_ALIGN">Kênh tăng (Trật tự MA)</option>
+                  <option value="DEATH_CROSS">Cắt Tử thần (Death Cross)</option>
                 </select>
               </label>
             </div>
