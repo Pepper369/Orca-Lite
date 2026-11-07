@@ -1,5 +1,6 @@
 import "server-only";
 import type { Quote } from "../types";
+import { BOOTSTRAP_VN30_QUOTES } from "../bootstrap-data";
 import * as vndirect from "../providers/vndirect";
 import { getVpsQuotes } from "../providers/vps";
 import { getVietcapQuotes } from "../providers/vietcap";
@@ -331,6 +332,24 @@ export async function getMultiQuotes(symbols: string[]): Promise<MultiQuoteResul
     budgetMs: TIER2_BUDGET_MS,
     exitCoverage: 0.98,
   });
+
+  // Tier 3: Resilient Bootstrap Fallback (Guarantee non-empty quotes universe under upstream outages)
+  if (bySym.size === 0 || coverageOf(bySym, uniq) < 0.20) {
+    for (const bq of BOOTSTRAP_VN30_QUOTES) {
+      const sym = bq.symbol.toUpperCase();
+      if (!bySym.has(sym)) {
+        bySym.set(sym, {
+          ...bq,
+          symbol: sym,
+          _src: "bootstrap-resilience",
+          _latencyMs: 1,
+        });
+      }
+    }
+    if (!usedSources.includes("bootstrap-resilience")) {
+      usedSources.push("bootstrap-resilience");
+    }
+  }
 
   return finish(bySym, usedSources, latencies, batches, conflicts);
 }
