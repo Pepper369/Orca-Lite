@@ -36,15 +36,20 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
   const absDiff = Math.abs(diffPct);
 
   // Đánh giá trạng thái vùng mua theo chuẩn Screener Engine
-  let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-  if (buyRange && (absDiff <= 1.0 || (lastPrice >= buyRange[0] && lastPrice <= buyRange[1]))) {
-    buyZoneStatus = "AT_BUY_POINT";
-  } else if (absDiff <= 2.5) {
-    buyZoneStatus = "NEAR_BUY_POINT";
-  } else if (diffPct > 2.5) {
-    buyZoneStatus = "WAIT_PULLBACK";
-  } else {
-    buyZoneStatus = "BELOW_SUPPORT";
+  let buyZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" =
+    screenerSync?.buyZoneStatus ?? plan?.buyZoneStatus ?? "NEAR_BUY_POINT";
+  if (buyRange && lastPrice > 0 && buyPoint > 0) {
+    if (diffPct > 4.5) {
+      buyZoneStatus = "EXTENDED";
+    } else if (diffPct > 2.8) {
+      buyZoneStatus = "WAIT_PULLBACK";
+    } else if (absDiff <= 1.2 || (lastPrice >= buyRange[0] && lastPrice <= buyRange[1])) {
+      buyZoneStatus = "AT_BUY_POINT";
+    } else if (absDiff <= 2.8) {
+      buyZoneStatus = "NEAR_BUY_POINT";
+    } else {
+      buyZoneStatus = "BELOW_SUPPORT";
+    }
   }
 
   const isTriggerNow = Boolean(plan?.isBuyTriggerNow ?? screenerSync?.isBuyTriggerNow);
@@ -89,7 +94,9 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
                       ? "bg-teal-500/20 text-teal-300 border-teal-500/40"
                       : buyZoneStatus === "WAIT_PULLBACK"
                         ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                        : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                        : buyZoneStatus === "EXTENDED"
+                          ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                          : "bg-rose-500/20 text-rose-300 border-rose-500/40"
                 }`}
               >
                 {buyZoneStatus === "AT_BUY_POINT"
@@ -98,7 +105,9 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
                     ? `⚡ Sát điểm mua (+${diffPct}%)`
                     : buyZoneStatus === "WAIT_PULLBACK"
                       ? `⏳ Chờ chỉnh (+${diffPct}%)`
-                      : `⚠️ Dưới hỗ trợ (${diffPct}%)`}
+                      : buyZoneStatus === "EXTENDED"
+                        ? `🚫 Đã tăng rướn (+${diffPct}%)`
+                        : `⚠️ Dưới hỗ trợ (${diffPct}%)`}
               </span>
             )}
           </div>

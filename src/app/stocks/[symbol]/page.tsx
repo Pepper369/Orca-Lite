@@ -347,15 +347,20 @@ const DecisionStrip = memo(function DecisionStrip({
       : (screenerSync?.buyPointDiffPct ?? plan?.buyPointDiffPct ?? plan?.currentPriceDiffPct ?? 0);
   const absDiff = Math.abs(liveDiffPct);
 
-  let liveZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "BELOW_SUPPORT" = "NEAR_BUY_POINT";
-  if (buyRange && (absDiff <= 1.0 || (curPrice >= buyRange[0] && curPrice <= buyRange[1]))) {
-    liveZoneStatus = "AT_BUY_POINT";
-  } else if (absDiff <= 2.5) {
-    liveZoneStatus = "NEAR_BUY_POINT";
-  } else if (liveDiffPct > 2.5) {
-    liveZoneStatus = "WAIT_PULLBACK";
-  } else {
-    liveZoneStatus = "BELOW_SUPPORT";
+  let liveZoneStatus: "AT_BUY_POINT" | "NEAR_BUY_POINT" | "WAIT_PULLBACK" | "EXTENDED" | "BELOW_SUPPORT" =
+    screenerSync?.buyZoneStatus ?? plan?.buyZoneStatus ?? "NEAR_BUY_POINT";
+  if (buyRange && curPrice > 0 && buyPt > 0) {
+    if (liveDiffPct > 4.5) {
+      liveZoneStatus = "EXTENDED";
+    } else if (liveDiffPct > 2.8) {
+      liveZoneStatus = "WAIT_PULLBACK";
+    } else if (absDiff <= 1.2 || (curPrice >= buyRange[0] && curPrice <= buyRange[1])) {
+      liveZoneStatus = "AT_BUY_POINT";
+    } else if (absDiff <= 2.8) {
+      liveZoneStatus = "NEAR_BUY_POINT";
+    } else {
+      liveZoneStatus = "BELOW_SUPPORT";
+    }
   }
 
   const isTriggerNow = Boolean(plan?.isBuyTriggerNow ?? screenerSync?.isBuyTriggerNow);
@@ -424,6 +429,8 @@ const DecisionStrip = memo(function DecisionStrip({
                 <MetricChip label="Vị thế" value={`Sát điểm mua (+${liveDiffPct}%)`} tone="up" />
               ) : liveZoneStatus === "WAIT_PULLBACK" ? (
                 <MetricChip label="Chờ chỉnh" value={`+${liveDiffPct}%`} tone="down" />
+              ) : liveZoneStatus === "EXTENDED" ? (
+                <MetricChip label="Đã tăng rướn" value={`+${liveDiffPct}%`} tone="down" emphasis />
               ) : (
                 <MetricChip label="Vị thế" value={`Dưới hỗ trợ (${liveDiffPct}%)`} tone="down" />
               )
