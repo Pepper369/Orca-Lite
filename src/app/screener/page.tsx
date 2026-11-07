@@ -144,56 +144,8 @@ const CryptoScreener = dynamic(
   () => import("./screener-panels").then((m) => m.CryptoScreener),
   { ssr: false, loading: PanelFallback },
 );
-const AlphaBetaScreener = dynamic(
-  () => import("@/components/alpha-beta-screener").then((m) => m.AlphaBetaScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const DivergenceScreener = dynamic(
-  () => import("@/components/divergence-screener").then((m) => m.DivergenceScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const CandlestickScreener = dynamic(
-  () => import("@/components/candlestick-screener").then((m) => m.CandlestickScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const MaCandleConfluenceScreener = dynamic(
-  () => import("@/components/ma-candle-confluence-screener").then((m) => m.MaCandleConfluenceScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const WyckoffScreener = dynamic(
-  () => import("@/components/wyckoff-screener").then((m) => m.WyckoffScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const CanslimScreener = dynamic(
-  () => import("@/components/canslim-screener").then((m) => m.CanslimScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const MinerviniScreener = dynamic(
-  () => import("@/components/minervini-screener").then((m) => m.MinerviniScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const ElliottScreener = dynamic(
-  () => import("@/components/elliott-screener").then((m) => m.ElliottScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const ValuationScreener = dynamic(
-  () => import("@/components/valuation-screener").then((m) => m.ValuationScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const FundamentalScreener = dynamic(
-  () => import("@/components/fundamental-screener").then((m) => m.FundamentalScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const FourMScreener = dynamic(
-  () => import("@/components/four-m-screener").then((m) => m.FourMScreener),
-  { ssr: false, loading: PanelFallback },
-);
 const SectorFlowScreener = dynamic(
   () => import("@/components/sector-flow-screener").then((m) => m.SectorFlowScreener),
-  { ssr: false, loading: PanelFallback },
-);
-const MaScreener = dynamic(
-  () => import("@/components/ma-screener").then((m) => m.MaScreener),
   { ssr: false, loading: PanelFallback },
 );
 const ScreenerBacktestModal = dynamic(
@@ -346,7 +298,14 @@ function ScreenerInner() {
       body = <OQuantStudio />;
       break;
     case "ma-cross":
-      body = <MaScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="ma_cross"
+          defaultView="technical"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "sector-flow":
       body = <SectorFlowScreener />;
@@ -355,28 +314,77 @@ function ScreenerInner() {
       body = <RrgChart />;
       break;
     case "four-m":
-      body = <FourMScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="fa_fortress"
+          defaultView="valuation"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "crypto":
       body = <CryptoScreener />;
       break;
     case "alpha-beta":
-      body = <AlphaBetaScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="quant_low_beta"
+          defaultView="quant"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "divergence":
-      body = <DivergenceScreener />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="bottom_confluence"
+          defaultView="confluence"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "candlestick":
-      body = <CandlestickScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="mtf_candle_cluster"
+          defaultView="confluence"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "ma-confluence":
-      body = <MaCandleConfluenceScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="bottom_confluence"
+          defaultView="confluence"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "wyckoff":
-      body = <WyckoffScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="vsa_no_supply"
+          defaultView="technical"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "canslim":
-      body = <CanslimScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="canslim"
+          defaultView="profitability"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "rs-leaders":
       body = (
@@ -399,16 +407,44 @@ function ScreenerInner() {
       );
       break;
     case "minervini":
-      body = <MinerviniScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="tight_closes_vdu"
+          defaultView="technical"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "elliott":
-      body = <ElliottScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="bottom_confluence"
+          defaultView="technical"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "valuation":
-      body = <ValuationScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="value"
+          defaultView="valuation"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     case "fundamental":
-      body = <FundamentalScreener defaultSector={sector} />;
+      body = (
+        <VnScreener
+          defaultSector={sector}
+          defaultPreset="fa_fortress"
+          defaultView="health"
+          onOpenBacktest={() => setShowBacktest(true)}
+        />
+      );
       break;
     default:
       body = <VnScreener defaultSector={sector} onOpenBacktest={() => setShowBacktest(true)} />;
