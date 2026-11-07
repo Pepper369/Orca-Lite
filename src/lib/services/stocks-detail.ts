@@ -464,6 +464,8 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         technical.tradeSignal.plan.buyPointDiffPct = liveDiffPct;
         technical.tradeSignal.plan.currentPriceDiffPct = liveDiffPct;
         technical.tradeSignal.plan.absBuyDiff = liveAbsDiff;
+        technical.tradeSignal.plan.isExtended = screenerItem.isExtended || liveZoneStatus === "EXTENDED";
+        technical.tradeSignal.plan.chaseRisk = liveZoneStatus === "EXTENDED" ? "HIGH" : screenerItem.chaseRisk;
         if (screenerItem.stopLoss) technical.tradeSignal.plan.stopLoss = screenerItem.stopLoss;
         if (screenerItem.targetPrice) technical.tradeSignal.plan.takeProfit = screenerItem.targetPrice;
         if (screenerItem.riskReward) technical.tradeSignal.plan.riskReward = screenerItem.riskReward;
@@ -471,6 +473,34 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         technical.tradeSignal.plan.isBuyTriggerNow = screenerItem.isBuyTriggerNow;
         technical.tradeSignal.plan.buyTriggerScore = screenerItem.buyTriggerScore;
         technical.tradeSignal.plan.buyTriggerReasonVi = screenerItem.buyTriggerReasonVi;
+      }
+
+      // Đảm bảo tính nhất quán: Nếu cổ phiếu được lọc vào nhóm Mua Kích Hoạt Tức Thời hoặc Sát Điểm Mua
+      // thì Tín hiệu Kỹ thuật bắt buộc phải đồng bộ sang "MUA", tuyệt đối không để xảy ra tình trạng "báo BÁN"
+      if (technical?.tradeSignal) {
+        const isActionableBuyZone =
+          liveZoneStatus === "AT_BUY_POINT" ||
+          liveZoneStatus === "NEAR_BUY_POINT" ||
+          (screenerItem.absBuyDiff != null && screenerItem.absBuyDiff <= 2.2);
+
+        const isActionableBuyPreset =
+          screenerItem.presetsPassed?.includes("apex_buy_now") ||
+          screenerItem.presetsPassed?.includes("near_buy_point") ||
+          screenerItem.isBuyTriggerNow === true;
+
+        if ((isActionableBuyPreset || isActionableBuyZone) && !screenerItem.isExtended && liveZoneStatus !== "EXTENDED") {
+          technical.tradeSignal.action = "buy";
+          technical.tradeSignal.actionVi = "MUA";
+          const curConf = typeof technical.tradeSignal.confidence === "number" ? technical.tradeSignal.confidence : 60;
+          const trigScore = typeof screenerItem.buyTriggerScore === "number" ? screenerItem.buyTriggerScore : 75;
+          technical.tradeSignal.confidence = Math.max(curConf, trigScore);
+          const curBias = typeof technical.tradeSignal.bias === "number" ? technical.tradeSignal.bias : 30;
+          technical.tradeSignal.bias = Math.max(curBias, 45);
+          if (technical.tradeSignal.reasons) {
+            technical.tradeSignal.reasons = technical.tradeSignal.reasons.filter((r) => !r.toLowerCase().includes("giảm") && !r.toLowerCase().includes("bán"));
+            technical.tradeSignal.reasons.unshift(screenerItem.buyTriggerReasonVi || "Đồng thuận điểm mua định lượng Screener");
+          }
+        }
       }
     } else if (technical?.tradeSignal?.plan) {
       const p = technical.tradeSignal.plan;

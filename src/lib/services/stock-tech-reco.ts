@@ -340,7 +340,7 @@ export function computeStockTechReco(
   // Align with composite engine tradeSignal when present
   if (tech.tradeSignal) {
     const ts = tech.tradeSignal;
-    if ((ts.action === "buy" || ts.action === "sell") && ts.plan && (ts.confidence ?? 0) >= 50) {
+    if ((ts.action === "buy" || ts.action === "sell") && ts.plan && (ts.confidence ?? 0) >= 45) {
       signal = ts.action === "buy" ? "MUA" : "BÁN";
       stance = ts.action === "buy" ? "watch-long" : "watch-short";
       tone = ts.action === "buy" ? "up" : "down";

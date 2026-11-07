@@ -1458,7 +1458,11 @@ function detectPresets(item: {
   // Sector drag check: If sector is LAGGING, require stronger apex score (>= 72)
   const isSectorOk = !item.isSectorLagging || (item.apexQuantScore != null && item.apexQuantScore >= 72);
 
+  // Consistency Guard: Tuyệt đối không kích hoạt MUA nếu các chỉ báo kỹ thuật cốt lõi báo BÁN tháo (Death Cross)
+  const isNotSellSignal = item.maSignal !== "DEATH_CROSS" && item.superTrendDir !== "down";
+
   const isBuyTriggerNow =
+    isNotSellSignal &&
     isTriggerPriceValid &&
     isInExecutionZone &&
     hasApexConfluence &&
@@ -1682,6 +1686,7 @@ function detectPresets(item: {
   // 11. Sát Điểm Mua Nhất (Near Buy Point / Buy Zone)
   const isNearBuy =
     !isChasingRisk &&
+    item.maSignal !== "DEATH_CROSS" &&
     (item.buyZoneStatus === "AT_BUY_POINT" ||
       item.buyZoneStatus === "NEAR_BUY_POINT" ||
       (item.absBuyDiff != null && item.absBuyDiff <= 2.2));
