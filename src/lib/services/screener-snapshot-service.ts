@@ -118,6 +118,28 @@ export type ScreenerPreset =
   | "consensus_upside"
   | "tight_closes_vdu";
 
+export const SCREENER_BIT = {
+  SWEET_ZONE: 1 << 0,
+  BUY_TRIGGER: 1 << 1,
+  SECTOR_LEADING: 1 << 2,
+  SQUEEZE_ON: 1 << 3,
+  SQUEEZE_FIRED: 1 << 4,
+  MA_RIBBON_SQUEEZE: 1 << 5,
+  MA_RECLAIM_SPRING: 1 << 6,
+  ABSORPTION_SPIKE: 1 << 7,
+  VSA_NO_SUPPLY: 1 << 8,
+  PRECISION_MTF: 1 << 9,
+  TIGHT_CLOSES: 1 << 10,
+  VOLUME_DRY_UP: 1 << 11,
+  RS_NEW_HIGH: 1 << 12,
+  WYCKOFF_LPS: 1 << 13,
+  NET_CASH: 1 << 14,
+  GOLDEN_POCKET: 1 << 15,
+  FLIP_ZONE: 1 << 16,
+  SMC_ORDER_BLOCK: 1 << 17,
+  MTF_ALIGNED: 1 << 18,
+} as const;
+
 export type ScreenerStockItem = {
   symbol: string;
   name: string | null;
@@ -317,6 +339,7 @@ export type ScreenerStockItem = {
   faCategory?: FaCategory;
   faBadgeVi?: string | null;
   faSummaryVi?: string | null;
+  bitFlags?: number;
 };
 
 export type ScreenerFilterParams = {
@@ -2649,6 +2672,29 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
           faCategory: entry.faMatrix.faCategory,
           faBadgeVi: entry.faMatrix.faBadgeVi,
           faSummaryVi: entry.faMatrix.faSummaryVi,
+          bitFlags: (() => {
+            let b = 0;
+            if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) b |= SCREENER_BIT.SWEET_ZONE;
+            if (isBuyTriggerNow) b |= SCREENER_BIT.BUY_TRIGGER;
+            if (entry.isSectorLeading) b |= SCREENER_BIT.SECTOR_LEADING;
+            if (entry.techFeatures.isSqueezeOn) b |= SCREENER_BIT.SQUEEZE_ON;
+            if (entry.techFeatures.isSqueezeFiredBull) b |= SCREENER_BIT.SQUEEZE_FIRED;
+            if (entry.techFeatures.isMaRibbonSqueeze) b |= SCREENER_BIT.MA_RIBBON_SQUEEZE;
+            if (entry.techFeatures.isMaReclaimSpring) b |= SCREENER_BIT.MA_RECLAIM_SPRING;
+            if (entry.techFeatures.isAbsorptionSpike) b |= SCREENER_BIT.ABSORPTION_SPIKE;
+            if (entry.techFeatures.isVsaNoSupplyTest) b |= SCREENER_BIT.VSA_NO_SUPPLY;
+            if (entry.techFeatures.isPrecisionMtfAligned) b |= SCREENER_BIT.PRECISION_MTF;
+            if (entry.techFeatures.isTightCloses) b |= SCREENER_BIT.TIGHT_CLOSES;
+            if (entry.techFeatures.isVolumeDryUp) b |= SCREENER_BIT.VOLUME_DRY_UP;
+            if (entry.techFeatures.isRsNewHigh20) b |= SCREENER_BIT.RS_NEW_HIGH;
+            if (entry.techFeatures.isWyckoffLps) b |= SCREENER_BIT.WYCKOFF_LPS;
+            if (entry.faMatrix.isNetCash) b |= SCREENER_BIT.NET_CASH;
+            if (Boolean((entry.techFeatures as Record<string, unknown>)?.isGoldenPocket)) b |= SCREENER_BIT.GOLDEN_POCKET;
+            if (Boolean((entry.techFeatures as Record<string, unknown>)?.isFlipZoneSupport)) b |= SCREENER_BIT.FLIP_ZONE;
+            if (Boolean((entry.techFeatures as Record<string, unknown>)?.isSmcOrderBlock)) b |= SCREENER_BIT.SMC_ORDER_BLOCK;
+            if (entry.techFeatures.isMtfAligned) b |= SCREENER_BIT.MTF_ALIGNED;
+            return b;
+          })(),
           presetsPassed,
         });
       }
@@ -2832,6 +2878,27 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     minQuantScore, maxOuZScore, minRiskReward,
   } = params;
 
+  let requiredBitMask = 0;
+  if (params.sweetZoneOnly) requiredBitMask |= SCREENER_BIT.SWEET_ZONE;
+  if (params.buyTriggerOnly) requiredBitMask |= SCREENER_BIT.BUY_TRIGGER;
+  if (params.sectorLeadingOnly) requiredBitMask |= SCREENER_BIT.SECTOR_LEADING;
+  if (params.squeezeOnly) requiredBitMask |= SCREENER_BIT.SQUEEZE_ON;
+  if (params.squeezeFiredOnly) requiredBitMask |= SCREENER_BIT.SQUEEZE_FIRED;
+  if (params.maRibbonSqueezeOnly) requiredBitMask |= SCREENER_BIT.MA_RIBBON_SQUEEZE;
+  if (params.maReclaimOnly) requiredBitMask |= SCREENER_BIT.MA_RECLAIM_SPRING;
+  if (params.absorptionSpikeOnly) requiredBitMask |= SCREENER_BIT.ABSORPTION_SPIKE;
+  if (params.vsaNoSupplyOnly) requiredBitMask |= SCREENER_BIT.VSA_NO_SUPPLY;
+  if (params.precisionMtfOnly) requiredBitMask |= SCREENER_BIT.PRECISION_MTF;
+  if (params.tightClosesOnly) requiredBitMask |= SCREENER_BIT.TIGHT_CLOSES;
+  if (params.vduOnly) requiredBitMask |= SCREENER_BIT.VOLUME_DRY_UP;
+  if (params.rsNewHighOnly) requiredBitMask |= SCREENER_BIT.RS_NEW_HIGH;
+  if (params.wyckoffLpsOnly) requiredBitMask |= SCREENER_BIT.WYCKOFF_LPS;
+  if (params.netCashOnly) requiredBitMask |= SCREENER_BIT.NET_CASH;
+  if (params.goldenPocketOnly) requiredBitMask |= SCREENER_BIT.GOLDEN_POCKET;
+  if (params.flipZoneOnly) requiredBitMask |= SCREENER_BIT.FLIP_ZONE;
+  if (params.smcOrderBlockOnly) requiredBitMask |= SCREENER_BIT.SMC_ORDER_BLOCK;
+  if (params.mtfOnly) requiredBitMask |= SCREENER_BIT.MTF_ALIGNED;
+
   const filtered: ScreenerStockItem[] = [];
   const n = allItems.length;
 
@@ -2843,6 +2910,33 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (hasExchange && x.exchange !== exchangeTarget) continue;
     if (hasSector && x.sector !== sectorTarget) continue;
     if (hasMaSignal && x.maSignal !== maSignalTarget) continue;
+
+    // Bitmask fast-rejection: 1 CPU instruction tests up to 19 boolean filters simultaneously
+    if (requiredBitMask !== 0) {
+      if (x.bitFlags != null) {
+        if ((x.bitFlags & requiredBitMask) !== requiredBitMask) continue;
+      } else {
+        if (params.sweetZoneOnly && !x.isSweetLaunchZone) continue;
+        if (params.buyTriggerOnly && !x.isBuyTriggerNow) continue;
+        if (params.sectorLeadingOnly && !x.isSectorLeading) continue;
+        if (params.squeezeOnly && !x.isSqueezeOn) continue;
+        if (params.squeezeFiredOnly && !x.isSqueezeFiredBull) continue;
+        if (params.maRibbonSqueezeOnly && !x.isMaRibbonSqueeze) continue;
+        if (params.maReclaimOnly && !x.isMaReclaimSpring) continue;
+        if (params.absorptionSpikeOnly && !x.isAbsorptionSpike) continue;
+        if (params.vsaNoSupplyOnly && !x.isVsaNoSupplyTest) continue;
+        if (params.precisionMtfOnly && !x.isPrecisionMtfAligned) continue;
+        if (params.tightClosesOnly && !x.isTightCloses) continue;
+        if (params.vduOnly && !x.isVolumeDryUp) continue;
+        if (params.rsNewHighOnly && !x.isRsNewHigh20) continue;
+        if (params.wyckoffLpsOnly && !x.isWyckoffLps) continue;
+        if (params.netCashOnly && !x.isNetCash) continue;
+        if (params.goldenPocketOnly && !x.isGoldenPocket) continue;
+        if (params.flipZoneOnly && !x.isFlipZoneSupport) continue;
+        if (params.smcOrderBlockOnly && !x.isSmcOrderBlock) continue;
+        if (params.mtfOnly && !x.isMtfAligned) continue;
+      }
+    }
 
     // Text query check
     if (qUpper && !x.symbol.includes(qUpper) && (!x.name || !x.name.toUpperCase().includes(qUpper))) {

@@ -7,19 +7,7 @@
  *   is enabled only when both VNSTOCK_BASE_URL and VNSTOCK_API_KEY are configured. SSI is
  *   market-only and never used for financial statements.
  */
-import { env } from "../env";
-import { ssiFcConfigured } from "../providers/ssi-fcdata";
-
-export function vnProviderLayout() {
-  const ssiLive = ssiFcConfigured();
-  return {
-    market: { primary: "vndirect", fallback: ssiLive ? "ssi-fcdata" : "vndirect" },
-    financial: {
-      primary: "vndirect",
-      fallback: env.vnstockApiKey && env.vnstockBaseUrl ? "vnstock-financial" : "vndirect",
-    },
-  } as const;
-}
+export { vnProviderLayout } from "./layout";
 
 export { getFinancialPackage, getFinancialsForSymbol } from "./service";
 export { listFinancialProviders } from "./providers-registry";

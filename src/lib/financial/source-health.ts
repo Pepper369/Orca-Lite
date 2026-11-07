@@ -1,7 +1,7 @@
 import "server-only";
 import { listFinancialProviders } from "./providers-registry";
 import { getFinancialMonitorSnapshot } from "./monitor";
-import { vnProviderLayout } from "./index";
+import { vnProviderLayout } from "./layout";
 import { ssiFcConfigured } from "../providers/ssi-fcdata";
 import { getMarketSourceStats, getMarketSourceStatus, type MarketSourceId } from "../realtime/market-source-monitor";
 

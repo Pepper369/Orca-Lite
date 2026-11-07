@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryScreenerStocks, type ScreenerStockItem } from "../services/screener-snapshot-service";
+import { queryScreenerStocks, SCREENER_BIT, type ScreenerStockItem } from "../services/screener-snapshot-service";
 
 test("Giai đoạn 2 Cross-Filter - queryScreenerStocks supports setupGradeOnly and goldenPocketOnly", async () => {
   // Test query with setupGradeOnly filter
@@ -78,3 +78,33 @@ test("Giai đoạn 2 Cross-Filter - queryScreenerStocks filters by sniperTrigger
     );
   }
 });
+
+test("Sprint 1 Bitmask Optimization - ScreenerStockItem includes bitFlags and aligns with SCREENER_BIT", async () => {
+  const res = await queryScreenerStocks({
+    preset: "all",
+    limit: 30,
+  });
+
+  assert.ok(res, "Response must exist");
+  assert.ok(res.items.length > 0, "Items must be returned");
+
+  for (const item of res.items) {
+    if (item.bitFlags != null) {
+      assert.equal(typeof item.bitFlags, "number");
+      // Check consistency between boolean flags and bitmask bits
+      if (item.isGoldenPocket) {
+        assert.ok((item.bitFlags & SCREENER_BIT.GOLDEN_POCKET) !== 0, `${item.symbol} GOLDEN_POCKET bit must match boolean`);
+      }
+      if (item.isFlipZoneSupport) {
+        assert.ok((item.bitFlags & SCREENER_BIT.FLIP_ZONE) !== 0, `${item.symbol} FLIP_ZONE bit must match boolean`);
+      }
+      if (item.isBuyTriggerNow) {
+        assert.ok((item.bitFlags & SCREENER_BIT.BUY_TRIGGER) !== 0, `${item.symbol} BUY_TRIGGER bit must match boolean`);
+      }
+      if (item.isSectorLeading) {
+        assert.ok((item.bitFlags & SCREENER_BIT.SECTOR_LEADING) !== 0, `${item.symbol} SECTOR_LEADING bit must match boolean`);
+      }
+    }
+  }
+});
+

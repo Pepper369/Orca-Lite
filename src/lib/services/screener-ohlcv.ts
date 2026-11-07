@@ -1,5 +1,5 @@
 import "server-only";
-import { getVnOhlcv } from "./stocks";
+import { getVnOhlcv } from "./stocks-board";
 import { getVndOhlcv, getVndIndexOhlcv, isVnIndexSymbol } from "../providers/vndirect";
 import { fetchVndDchartHistory } from "../providers/vndirect-dchart";
 import { getPublicOhlcv } from "../providers/public-vn-feed";
