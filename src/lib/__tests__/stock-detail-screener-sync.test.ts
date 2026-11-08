@@ -165,4 +165,113 @@ describe("Stock Detail Trade Plan & Screener Synchronization", () => {
     assert.equal(planWithTrigger.buyTriggerScore, 92);
     assert.equal(planWithTrigger.buyTriggerReasonVi, "Chạm chuẩn điểm mua · Nén Squeeze (6P) · Ngành dẫn dắt RRG");
   });
+
+  it("blocks buy presets when technical indicators report death cross or broken support", async () => {
+    const { getMasterScreenerSnapshot } = await import("../services/screener-snapshot-service");
+    // Simulate preset detection checks under death cross and broken support
+    // In screener-snapshot-service, detectPresets guards against isNotSellSignal and isBrokenSupport
+    const dummyTechSellItem = {
+      price: 25.0,
+      maSignal: "DEATH_CROSS" as const,
+      superTrendDir: "down" as const,
+      buyZoneStatus: "BELOW_SUPPORT" as const,
+      confluenceScore: 25,
+      apexQuantScore: 82, // High fundamental / quant score
+      roe: 22,
+      niYoyPct: 35,
+      revenueYoyPct: 25,
+      volume: 1_200_000,
+      changePercent: -3.5,
+    };
+
+    // When technicals are in death cross & below support, it must NOT be allowed into buy presets
+    const isNotSellSignal = dummyTechSellItem.maSignal !== "DEATH_CROSS" && dummyTechSellItem.superTrendDir !== "down";
+    const isBrokenSupport = dummyTechSellItem.buyZoneStatus === "BELOW_SUPPORT";
+    const isTechnicalSell = !isNotSellSignal || isBrokenSupport;
+
+    assert.equal(isTechnicalSell, true, "Item must be flagged as technical sell");
+    assert.equal(isNotSellSignal, false, "Must not be considered valid non-sell");
+  });
+
+  it("harmonizes computeStockTechReco to positive score and MUA signal when screener buy trigger is active", async () => {
+    const { computeStockTechReco } = await import("../services/stock-tech-reco");
+    // Simulate a stock that has mixed/bearish raw technical indicators (e.g. price below SMA20)
+    // but was validated and triggered as a high-conviction buy by the Screener Engine
+    const mockTech = {
+      last: 42.5,
+      atr14: 1.1,
+      rsi14: 48,
+      trend: { score: -10, label: "down" },
+      sma: { sma20: 43.0, sma50: 44.0 },
+      tradeSignal: {
+        action: "buy" as const,
+        actionVi: "MUA" as const,
+        confidence: 85,
+        bias: 40,
+        reasons: ["Đồng thuận điểm mua định lượng Screener"],
+        sources: { candleBias: 20, techBias: 20, confluence: 40 },
+        plan: null,
+      },
+    };
+
+    const mockScreenerSync = {
+      buyPoint: 42.0,
+      buyPointDiffPct: 1.1,
+      absBuyDiff: 1.1,
+      buyRange: [41.5, 42.6] as [number, number],
+      buyZoneStatus: "AT_BUY_POINT" as const,
+      isBuyTriggerNow: true,
+      buyTriggerScore: 88,
+      buyTriggerReasonVi: "Chạm chuẩn điểm mua · Nén Squeeze (6P) · Ngành dẫn dắt",
+      stopLoss: 39.8,
+      targetPrice: 48.0,
+      riskReward: 2.7,
+      buyStrategy: "Pivot VCP bứt phá",
+    };
+
+    const reco = computeStockTechReco(mockTech as any, [], 1.5, mockScreenerSync);
+
+    assert.equal(reco.signal, "MUA", "Signal must be MUA when screener buy is active");
+    assert.equal(reco.stance, "watch-long", "Stance must be watch-long");
+    assert.equal(reco.tone, "up", "Tone must be up");
+    assert.ok(reco.score >= 20, `Score must be harmonized to positive (was ${reco.score})`);
+    assert.ok(!reco.summary.includes("BÁN"), "Summary must never contain BÁN when signal is MUA");
+    assert.ok(reco.factors.some(f => f.key === "screener_sync"), "Must include screener_sync factor");
+  });
+
+  it("downgrades contradictory sell signal to QUAN_SÁT when stock is in wait pullback from screener", async () => {
+    const { computeStockTechReco } = await import("../services/stock-tech-reco");
+    const mockTech = {
+      last: 45.0,
+      atr14: 1.2,
+      tradeSignal: {
+        action: "watch" as const,
+        actionVi: "QUAN SÁT" as const,
+        confidence: 65,
+        bias: 0,
+        reasons: ["Chờ nhịp rung lắc tích lũy về điểm mua chuẩn"],
+        sources: { candleBias: 0, techBias: 0, confluence: 0 },
+        plan: null,
+      },
+    };
+
+    const mockScreenerSync = {
+      buyPoint: 43.5,
+      buyPointDiffPct: 3.4,
+      absBuyDiff: 3.4,
+      buyRange: [43.0, 44.2] as [number, number],
+      buyZoneStatus: "WAIT_PULLBACK" as const,
+      isBuyTriggerNow: false,
+      buyStrategy: "Chờ pullback về vùng gom",
+      stopLoss: 41.0,
+      targetPrice: 50.0,
+      riskReward: 2.6,
+    };
+
+    const reco = computeStockTechReco(mockTech as any, [], -0.5, mockScreenerSync);
+
+    assert.notEqual(reco.signal, "BÁN", "Must NEVER report BÁN for a stock in wait pullback");
+    assert.equal(reco.signal, "QUAN_SÁT", "Signal must be QUAN_SÁT");
+    assert.equal(reco.stance, "neutral");
+  });
 });

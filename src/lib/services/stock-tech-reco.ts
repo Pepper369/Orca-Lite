@@ -3,6 +3,7 @@ import { buildMeta } from "../freshness";
 import { llmChat, llmConfigured } from "../ai/gateway";
 import { collectFactNumbers, validateOutput } from "../ai/validate";
 import { getVnStockDetail } from "./stocks";
+import type { ScreenerSyncInfo } from "./stocks-detail";
 import type { CandlePattern, Meta, TechnicalSnapshot, DivergenceSignal } from "../types";
 import { buildStockTradePlan, type StockTradePlan } from "../engines/stock-trade-plan";
 
@@ -129,6 +130,7 @@ export function computeStockTechReco(
   tech: TechnicalSnapshot | null | undefined,
   patterns: CandlePattern[],
   changePercent: number | null,
+  screenerSync?: ScreenerSyncInfo | null,
 ): QuantTechReco {
   const factors: TechFactor[] = [];
   let score = 0;
@@ -300,7 +302,63 @@ export function computeStockTechReco(
   }
 
   score = clamp(score);
-  let { stance, signal, label, tone } = stanceFromScore(score);
+
+  // 1. Đồng bộ hóa chặt chẽ giữa Bộ lọc Screener Engine và Tín hiệu Kỹ thuật
+  const isScreenerBuyActive =
+    screenerSync?.isBuyTriggerNow === true ||
+    screenerSync?.buyZoneStatus === "AT_BUY_POINT" ||
+    screenerSync?.buyZoneStatus === "NEAR_BUY_POINT";
+
+  const isTradeSignalBuy = tech.tradeSignal?.action === "buy";
+  const isOverallBuy = isScreenerBuyActive || isTradeSignalBuy;
+
+  let stance: RecoStance;
+  let signal: TradeSignal;
+  let label: string;
+  let tone: RecoTone;
+
+  if (isOverallBuy) {
+    signal = "MUA";
+    stance = "watch-long";
+    tone = "up";
+    label = "Tín hiệu MUA (kỹ thuật & bộ lọc)";
+    // Score Harmonization: Điểm kỹ thuật cho khuyến nghị MUA bắt buộc phải đồng bộ dương (tối thiểu +25 đến +48)
+    const baseTriggerScore = screenerSync?.buyTriggerScore ? Math.round(screenerSync.buyTriggerScore * 0.45) : 28;
+    score = Math.max(score, baseTriggerScore);
+
+    // Bổ sung nhân tố tích cực đại diện cho Bộ lọc & Điểm mua chuẩn
+    factors.unshift({
+      key: "screener_sync",
+      label: "Hội tụ Bộ lọc & Điểm mua",
+      value: screenerSync?.buyStrategy || "Đạt chuẩn vùng gom",
+      bias: "up",
+      weight: 22,
+      note: screenerSync?.buyTriggerReasonVi || "Đồng thuận điểm mua định lượng Screener",
+    });
+  } else if (tech.tradeSignal?.action === "watch" || screenerSync?.buyZoneStatus === "WAIT_PULLBACK" || screenerSync?.buyZoneStatus === "EXTENDED") {
+    // Nếu đang chờ tích lũy hoặc pullback/rướn, tuyệt đối không phát tín hiệu BÁN
+    signal = "QUAN_SÁT";
+    stance = "neutral";
+    tone = "neutral";
+    label = screenerSync?.buyZoneStatus === "WAIT_PULLBACK" ? "QUAN SÁT — chờ pullback về vùng mua" : "QUAN SÁT — chờ rung lắc tích lũy";
+    if (score < 0) score = Math.max(0, score + 20);
+  } else if (tech.tradeSignal?.action === "sell" && !isScreenerBuyActive) {
+    signal = "BÁN";
+    stance = "watch-short";
+    tone = "down";
+    label = "Tín hiệu BÁN (kỹ thuật)";
+    score = Math.min(-18, score);
+  } else {
+    // Dùng stance từ score thuần
+    score = clamp(score);
+    const fromScore = stanceFromScore(score);
+    signal = fromScore.signal;
+    stance = fromScore.stance;
+    label = fromScore.label;
+    tone = fromScore.tone;
+  }
+
+  score = clamp(score);
   const confidence = confFromCoverage(factors.length, Math.abs(score));
   const confidencePct = confidencePctFrom(factors.length, Math.abs(score), patternBoost);
   const patternHits: PatternHit[] = patterns.slice(0, 6).map((p) => ({
@@ -320,68 +378,105 @@ export function computeStockTechReco(
       : `${signal === "QUAN_SÁT" ? "QUAN SÁT" : signal} (${confidencePct}%): điểm ${score >= 0 ? "+" : ""}${score} · ${top.map((f) => f.label).join(" · ")}.`;
 
   let plan: StockTradePlan | null = null;
-  if ((signal === "MUA" || signal === "BÁN") && tech.last > 0) {
-    plan = buildStockTradePlan(signal === "MUA" ? "buy" : "sell", {
-      last: tech.last,
-      atr14: tech.atr14,
-      support: tech.support,
-      resistance: tech.resistance,
-      volatility30d: tech.volatility30d,
-      sma20: tech.sma?.sma20,
-      sma50: tech.sma?.sma50,
-      sma200: tech.sma?.sma200,
-      rsi14: tech.rsi14,
-      bollinger: tech.bollinger,
-      trendScore: tech.trend?.score,
-      topChartPattern: tech.chartPatterns?.[0] ?? null,
-    });
-  }
-
-  // Align with composite engine tradeSignal when present
-  if (tech.tradeSignal) {
-    const ts = tech.tradeSignal;
-    if ((ts.action === "buy" || ts.action === "sell") && ts.plan && (ts.confidence ?? 0) >= 45) {
-      signal = ts.action === "buy" ? "MUA" : "BÁN";
-      stance = ts.action === "buy" ? "watch-long" : "watch-short";
-      tone = ts.action === "buy" ? "up" : "down";
-      label = signal === "MUA" ? "Tín hiệu MUA (kỹ thuật)" : "Tín hiệu BÁN (kỹ thuật)";
+  if (signal === "MUA" && tech.last > 0) {
+    if (tech.tradeSignal?.plan) {
+      const tsPlan = tech.tradeSignal.plan;
       plan = {
-        side: ts.action,
-        sideVi: ts.action === "buy" ? "MUA" : "BÁN",
-        entry: ts.plan.entry,
-        entryZone: ts.plan.entryZone,
-        entryStrategyVi: ts.plan.entryStrategyVi,
-        currentPriceDiffPct: ts.plan.currentPriceDiffPct,
-        buyPoint: ts.plan.buyPoint ?? ts.plan.entry,
-        buyRange: ts.plan.buyRange ?? ts.plan.entryZone,
-        buyZoneStatus: ts.plan.buyZoneStatus,
-        buyPointDiffPct: ts.plan.buyPointDiffPct ?? ts.plan.currentPriceDiffPct,
-        absBuyDiff: ts.plan.absBuyDiff,
-        isBuyTriggerNow: ts.plan.isBuyTriggerNow,
-        buyTriggerScore: ts.plan.buyTriggerScore,
-        buyTriggerReasonVi: ts.plan.buyTriggerReasonVi,
-        stopLoss: ts.plan.stopLoss,
-        takeProfit: ts.plan.takeProfit,
-        takeProfit1: ts.plan.takeProfit1,
-        takeProfit2: ts.plan.takeProfit2,
-        takeProfit3: ts.plan.takeProfit3,
-        riskReward: ts.plan.riskReward,
-        riskPct: ts.plan.riskPct,
-        rewardPct: ts.plan.rewardPct,
-        riskPerShare: Math.abs(ts.plan.entry - ts.plan.stopLoss),
-        invalidation: ts.plan.invalidation,
-        basis: ts.plan.basis,
-        notes: ts.plan.notes,
-        asymmetricScore: ts.plan.asymmetricScore,
-        confluenceLayers: ts.plan.confluenceLayers,
-        actionVerdict: ts.plan.actionVerdict,
+        side: "buy",
+        sideVi: "MUA",
+        entry: tsPlan.entry,
+        entryZone: tsPlan.entryZone,
+        entryStrategyVi: tsPlan.entryStrategyVi,
+        currentPriceDiffPct: tsPlan.currentPriceDiffPct,
+        buyPoint: tsPlan.buyPoint ?? tsPlan.entry,
+        buyRange: tsPlan.buyRange ?? tsPlan.entryZone,
+        buyZoneStatus: tsPlan.buyZoneStatus,
+        buyPointDiffPct: tsPlan.buyPointDiffPct ?? tsPlan.currentPriceDiffPct,
+        absBuyDiff: tsPlan.absBuyDiff,
+        isBuyTriggerNow: tsPlan.isBuyTriggerNow,
+        buyTriggerScore: tsPlan.buyTriggerScore,
+        buyTriggerReasonVi: tsPlan.buyTriggerReasonVi,
+        stopLoss: tsPlan.stopLoss,
+        takeProfit: tsPlan.takeProfit,
+        takeProfit1: tsPlan.takeProfit1,
+        takeProfit2: tsPlan.takeProfit2,
+        takeProfit3: tsPlan.takeProfit3,
+        riskReward: tsPlan.riskReward,
+        riskPct: tsPlan.riskPct,
+        rewardPct: tsPlan.rewardPct,
+        riskPerShare: Math.abs(tsPlan.entry - tsPlan.stopLoss),
+        invalidation: tsPlan.invalidation,
+        basis: tsPlan.basis,
+        notes: tsPlan.notes,
+        asymmetricScore: tsPlan.asymmetricScore,
+        confluenceLayers: tsPlan.confluenceLayers,
+        actionVerdict: tsPlan.actionVerdict,
       };
-    } else if (ts.action === "watch" && (ts.confidence ?? 0) >= 45) {
-      signal = "QUAN_SÁT";
-      stance = "neutral";
-      tone = "neutral";
-      label = "QUAN SÁT — chờ xác nhận";
-      plan = null;
+    } else {
+      plan = buildStockTradePlan("buy", {
+        last: tech.last,
+        atr14: tech.atr14,
+        support: tech.support,
+        resistance: tech.resistance,
+        volatility30d: tech.volatility30d,
+        sma20: tech.sma?.sma20,
+        sma50: tech.sma?.sma50,
+        sma200: tech.sma?.sma200,
+        rsi14: tech.rsi14,
+        bollinger: tech.bollinger,
+        trendScore: tech.trend?.score,
+        topChartPattern: tech.chartPatterns?.[0] ?? null,
+      });
+    }
+  } else if (signal === "BÁN" && tech.last > 0) {
+    if (tech.tradeSignal?.plan && tech.tradeSignal.action === "sell") {
+      const tsPlan = tech.tradeSignal.plan;
+      plan = {
+        side: "sell",
+        sideVi: "BÁN",
+        entry: tsPlan.entry,
+        entryZone: tsPlan.entryZone,
+        entryStrategyVi: tsPlan.entryStrategyVi,
+        currentPriceDiffPct: tsPlan.currentPriceDiffPct,
+        buyPoint: tsPlan.buyPoint ?? tsPlan.entry,
+        buyRange: tsPlan.buyRange ?? tsPlan.entryZone,
+        buyZoneStatus: tsPlan.buyZoneStatus,
+        buyPointDiffPct: tsPlan.buyPointDiffPct ?? tsPlan.currentPriceDiffPct,
+        absBuyDiff: tsPlan.absBuyDiff,
+        isBuyTriggerNow: false,
+        buyTriggerScore: null,
+        buyTriggerReasonVi: null,
+        stopLoss: tsPlan.stopLoss,
+        takeProfit: tsPlan.takeProfit,
+        takeProfit1: tsPlan.takeProfit1,
+        takeProfit2: tsPlan.takeProfit2,
+        takeProfit3: tsPlan.takeProfit3,
+        riskReward: tsPlan.riskReward,
+        riskPct: tsPlan.riskPct,
+        rewardPct: tsPlan.rewardPct,
+        riskPerShare: Math.abs(tsPlan.entry - tsPlan.stopLoss),
+        invalidation: tsPlan.invalidation,
+        basis: tsPlan.basis,
+        notes: tsPlan.notes,
+        asymmetricScore: tsPlan.asymmetricScore,
+        confluenceLayers: tsPlan.confluenceLayers,
+        actionVerdict: tsPlan.actionVerdict,
+      };
+    } else {
+      plan = buildStockTradePlan("sell", {
+        last: tech.last,
+        atr14: tech.atr14,
+        support: tech.support,
+        resistance: tech.resistance,
+        volatility30d: tech.volatility30d,
+        sma20: tech.sma?.sma20,
+        sma50: tech.sma?.sma50,
+        sma200: tech.sma?.sma200,
+        rsi14: tech.rsi14,
+        bollinger: tech.bollinger,
+        trendScore: tech.trend?.score,
+        topChartPattern: tech.chartPatterns?.[0] ?? null,
+      });
     }
   }
 
@@ -404,7 +499,7 @@ export function computeStockTechReco(
 
 const SYS = `Bạn là chuyên gia phân tích kỹ thuật chứng khoán Việt Nam của Orca Financial.
 Nhiệm vụ: tổng hợp CÁC YẾU TỐ KỸ THUẬT đã cho thành khuyến nghị nghiên cứu ngắn bằng tiếng Việt.
-Quy tắc: Chỉ dùng số liệu trong context — không invent. Trả JSON: {"narrative":"...","stance":"watch-long|watch-short|neutral","keyDrivers":[],"risks":[],"invalidation":null}`;
+Quy tắc: Chỉ dùng số liệu trong context — không invent. Đồng thuận nghiêm ngặt với kết quả định lượng: nếu quant.signal là "MUA" thì stance bắt buộc phải là "watch-long"; nếu quant.signal là "BÁN" thì stance là "watch-short"; nếu là "QUAN_SÁT" thì stance là "neutral". Trả JSON: {"narrative":"...","stance":"watch-long|watch-short|neutral","keyDrivers":[],"risks":[],"invalidation":null}`;
 
 async function enrichLlm(
   quant: QuantTechReco,
@@ -420,7 +515,7 @@ async function enrichLlm(
       maxTokens: 800,
     });
     const text = res.text ?? "";
-    const parsed = parseLlmJson(text);
+    const parsed = parseLlmJson(text, quant.signal);
     if (!parsed) return { llm: null, status: "failed" };
     const facts = collectFactNumbers(JSON.stringify(contract));
     const check = validateOutput(parsed.narrative, facts);
@@ -434,7 +529,7 @@ async function enrichLlm(
   }
 }
 
-function parseLlmJson(text: string): Omit<LlmTechReco, "model" | "latencyMs"> | null {
+function parseLlmJson(text: string, quantSignal?: TradeSignal): Omit<LlmTechReco, "model" | "latencyMs"> | null {
   try {
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
@@ -443,7 +538,11 @@ function parseLlmJson(text: string): Omit<LlmTechReco, "model" | "latencyMs"> | 
     const narrative = typeof j.narrative === "string" ? j.narrative.trim() : "";
     if (!narrative || narrative.length < 20) return null;
     const s = String(j.stance ?? "neutral").toLowerCase();
-    const stance: RecoStance = s === "watch-long" || s === "watch-short" ? s : "neutral";
+    let stance: RecoStance = s === "watch-long" || s === "watch-short" ? s : "neutral";
+    // Đảm bảo không xảy ra xung đột: nếu quant báo MUA thì stance bắt buộc watch-long
+    if (quantSignal === "MUA") stance = "watch-long";
+    else if (quantSignal === "BÁN") stance = "watch-short";
+
     const keyDrivers = Array.isArray(j.keyDrivers)
       ? j.keyDrivers.filter((x): x is string => typeof x === "string" && x.trim().length > 0).slice(0, 4)
       : [];
@@ -469,13 +568,16 @@ export async function getStockTechReco(
   if (!detail) return null;
   const tech = detail.detail.technical;
   const patterns = detail.detail.patterns ?? [];
-  const quant = computeStockTechReco(tech, patterns, detail.detail.quote?.changePercent ?? null);
+  const screenerSync = detail.detail.screenerSync ?? null;
+  const quant = computeStockTechReco(tech, patterns, detail.detail.quote?.changePercent ?? null, screenerSync);
   const contract = {
     symbol,
     last: tech?.last ?? detail.detail.quote?.price ?? null,
     changePercent: detail.detail.quote?.changePercent ?? null,
     rsi14: tech?.rsi14 ?? null,
     score: quant.score,
+    signal: quant.signal,
+    strategy: screenerSync?.buyStrategy ?? null,
   };
   const { llm, status } = await enrichLlm(quant, contract);
   return {

@@ -19,12 +19,6 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
   const plan = ts?.plan;
   const lastPrice = quote?.price ?? technical?.last ?? 0;
 
-  const signal = ts?.action === "buy" ? "MUA" : ts?.action === "sell" ? "BÁN" : "QUAN SÁT";
-  const isBuy = signal === "MUA";
-  const isSell = signal === "BÁN";
-  const tone = isBuy ? "text-emerald-400" : isSell ? "text-rose-400" : "text-amber-400";
-  const bgTone = isBuy ? "bg-emerald-500/10 border-emerald-500/30" : isSell ? "bg-rose-500/10 border-rose-500/30" : "bg-surface-elevated border-border-subtle";
-
   const fmt = (n?: number | null) => (n != null ? n.toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "—");
 
   // Đồng bộ điểm mua chuẩn & vùng gom với Screener
@@ -55,6 +49,23 @@ export const StockEntryStrategyCard = memo(function StockEntryStrategyCard({
   const isTriggerNow = Boolean(plan?.isBuyTriggerNow ?? screenerSync?.isBuyTriggerNow);
   const triggerScore = plan?.buyTriggerScore ?? screenerSync?.buyTriggerScore ?? 85;
   const triggerReason = plan?.buyTriggerReasonVi ?? screenerSync?.buyTriggerReasonVi ?? "Đạt chuẩn tín hiệu bứt phá";
+
+  const isActionableBuyZone =
+    buyZoneStatus === "AT_BUY_POINT" ||
+    buyZoneStatus === "NEAR_BUY_POINT" ||
+    absDiff <= 2.8;
+
+  // Consistency Guard: Tuyệt đối không để card hiển thị LỆNH: BÁN khi cổ phiếu có điểm mua / bộ lọc kích hoạt
+  let effectiveAction = ts?.action;
+  if ((isTriggerNow || isActionableBuyZone || buyPoint > 0) && effectiveAction === "sell") {
+    effectiveAction = isTriggerNow ? "buy" : "watch";
+  }
+
+  const signal = effectiveAction === "buy" ? "MUA" : effectiveAction === "sell" ? "BÁN" : "QUAN SÁT";
+  const isBuy = signal === "MUA";
+  const isSell = signal === "BÁN";
+  const tone = isBuy ? "text-emerald-400" : isSell ? "text-rose-400" : "text-amber-400";
+  const bgTone = isBuy ? "bg-emerald-500/10 border-emerald-500/30" : isSell ? "bg-rose-500/10 border-rose-500/30" : "bg-surface-elevated border-border-subtle";
 
   return (
     <div className="space-y-2.5 text-xs">

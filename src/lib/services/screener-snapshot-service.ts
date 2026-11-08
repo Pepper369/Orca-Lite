@@ -1090,10 +1090,13 @@ export function calculateBuyPointPlan(
   } else {
     buyZoneStatus = "BELOW_SUPPORT";
     isExtended = false;
-    chaseRisk = "LOW";
+    chaseRisk = "HIGH";
   }
 
-  const primaryLayer = asym.confluenceCluster.layers[0] || "Bệ đỡ hội tụ";
+  const primaryLayer =
+    buyZoneStatus === "BELOW_SUPPORT"
+      ? "Gãy hỗ trợ — Chờ tạo nền đáy mới"
+      : asym.confluenceCluster.layers[0] || "Bệ đỡ hội tụ";
 
   return {
     buyPoint,
@@ -1458,11 +1461,14 @@ function detectPresets(item: {
   // Sector drag check: If sector is LAGGING, require stronger apex score (>= 72)
   const isSectorOk = !item.isSectorLagging || (item.apexQuantScore != null && item.apexQuantScore >= 72);
 
-  // Consistency Guard: Tuyệt đối không kích hoạt MUA nếu các chỉ báo kỹ thuật cốt lõi báo BÁN tháo (Death Cross)
+  // Consistency Guard: Tuyệt đối không kích hoạt MUA nếu các chỉ báo kỹ thuật cốt lõi báo BÁN tháo (Death Cross, SuperTrend Down, Gãy hỗ trợ)
   const isNotSellSignal = item.maSignal !== "DEATH_CROSS" && item.superTrendDir !== "down";
+  const isBrokenSupport = item.buyZoneStatus === "BELOW_SUPPORT";
+  const isTechnicalSell = !isNotSellSignal || isBrokenSupport;
 
   const isBuyTriggerNow =
     isNotSellSignal &&
+    !isBrokenSupport &&
     isTriggerPriceValid &&
     isInExecutionZone &&
     hasApexConfluence &&
@@ -1478,6 +1484,7 @@ function detectPresets(item: {
   // 0. Siêu Lọc Apex Quant Confluence (Score >= 74 or Sweet Zone Reversal >= 65)
   if (
     !isExtendedFromBottom &&
+    !isTechnicalSell &&
     ((item.apexQuantScore != null && item.apexQuantScore >= 74) ||
       (item.apexQuantScore != null && item.apexQuantScore >= 65 && item.isSweetLaunchZone))
   ) {
@@ -1486,47 +1493,52 @@ function detectPresets(item: {
 
   // 0a. Lợi Thế Thực Nghiệm Lịch Sử (Historical Price Action Edge & Trained High Conviction)
   if (
-    (item.historicalEdgeScore != null && item.historicalEdgeScore >= 70) ||
-    (item.historicalWinRate != null && item.historicalWinRate >= 60 && (item.upDownVolRatio ?? 1) >= 1.15)
+    !isTechnicalSell &&
+    ((item.historicalEdgeScore != null && item.historicalEdgeScore >= 70) ||
+      (item.historicalWinRate != null && item.historicalWinRate >= 60 && (item.upDownVolRatio ?? 1) >= 1.15))
   ) {
     passes.push("historical_edge");
   }
 
   // 0a. Orca Master Elite (Top 80+ Institutional Multi-Factor Rating)
-  if (item.orcaMasterScore != null && item.orcaMasterScore >= 80) {
+  if (isNotSellSignal && item.orcaMasterScore != null && item.orcaMasterScore >= 80) {
     passes.push("orca_master_elite");
   }
 
   // 0b. Dấu Chân Cá Mập (Smart Money Inflow & Institutional Footprint)
   if (
-    (item.smartMoneyScore != null && item.smartMoneyScore >= 70) ||
-    item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
-    item.smartMoneySignal === "POCKET_PIVOT" ||
-    item.smartMoneySignal === "SPRING_ABSORPTION"
+    !isBrokenSupport &&
+    item.maSignal !== "DEATH_CROSS" &&
+    ((item.smartMoneyScore != null && item.smartMoneyScore >= 70) ||
+      item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+      item.smartMoneySignal === "POCKET_PIVOT" ||
+      item.smartMoneySignal === "SPRING_ABSORPTION")
   ) {
     passes.push("smart_money_inflow");
   }
 
   // 0c. Cụm Mô Hình Nến Đa Khung (MTF Candlestick Clusters: TRIPLE_BULL or DUAL_BULL)
   if (
-    item.mtfCandleClusterStatus === "TRIPLE_BULL" ||
-    item.mtfCandleClusterStatus === "DUAL_BULL" ||
-    (item.mtfCandleScore != null && item.mtfCandleScore >= 78)
+    isNotSellSignal &&
+    (item.mtfCandleClusterStatus === "TRIPLE_BULL" ||
+      item.mtfCandleClusterStatus === "DUAL_BULL" ||
+      (item.mtfCandleScore != null && item.mtfCandleScore >= 78))
   ) {
     passes.push("mtf_candle_cluster");
   }
 
   // 0d. VSA Cạn Cung & Hấp Thụ (No Supply Test & Stopping Volume)
   if (
-    item.vsaSignal === "NO_SUPPLY" ||
-    item.vsaSignal === "STOPPING_VOLUME" ||
-    item.vsaSignal === "ABSORPTION"
+    !isBrokenSupport &&
+    (item.vsaSignal === "NO_SUPPLY" ||
+      item.vsaSignal === "STOPPING_VOLUME" ||
+      item.vsaSignal === "ABSORPTION")
   ) {
     passes.push("vsa_no_supply");
   }
 
   // 0e. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
-  if (item.rsRating != null && item.rsRating >= 80) {
+  if (isNotSellSignal && item.rsRating != null && item.rsRating >= 80) {
     passes.push("rs_leaders");
   }
 
@@ -1540,7 +1552,7 @@ function detectPresets(item: {
   }
 
   // 1. Quant Edge Presets (Institutional Statistical Models)
-  if (item.quantEdgeScore != null && item.quantEdgeScore >= 62) {
+  if (!isTechnicalSell && item.quantEdgeScore != null && item.quantEdgeScore >= 62) {
     passes.push("quant_edge");
   }
   if (item.ouZScore != null && item.ouZScore <= -1.4 && item.ouHalfLife != null && item.ouHalfLife <= 35) {
@@ -1549,7 +1561,7 @@ function detectPresets(item: {
   if (item.beta != null && item.beta <= 0.88 && item.qualityScore != null && item.qualityScore >= 68) {
     passes.push("quant_low_beta");
   }
-  if (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0) {
+  if (!isBrokenSupport && item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0) {
     passes.push("quant_asymmetric");
   }
 
@@ -1557,7 +1569,7 @@ function detectPresets(item: {
   const roeGood = item.roe != null && item.roe >= 14;
   const growthGood = (item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15);
   const priceHealthy = item.price != null && item.price >= 8;
-  if (roeGood && (growthGood || (item.changePercent != null && item.changePercent > 0)) && priceHealthy) {
+  if (!isTechnicalSell && roeGood && (growthGood || (item.changePercent != null && item.changePercent > 0)) && priceHealthy) {
     passes.push("canslim");
   }
 
@@ -1587,7 +1599,7 @@ function detectPresets(item: {
   // 6. Momentum Breakout
   const chgStrong = item.changePercent != null && item.changePercent >= 2.0;
   const volActive = item.volume != null && item.volume >= 100_000;
-  if (chgStrong && volActive) {
+  if (!isTechnicalSell && chgStrong && volActive) {
     passes.push("breakout");
   }
 
@@ -1595,21 +1607,22 @@ function detectPresets(item: {
   const isMaBullish = item.maSignal === "GOLDEN_CROSS" || item.maSignal === "BULLISH_ALIGN";
   const volValid = item.volume != null && item.volume >= 80_000;
   const priceValid = item.price != null && item.price >= 8;
-  if (isMaBullish && volValid && priceValid) {
+  if (!isBrokenSupport && isMaBullish && volValid && priceValid) {
     passes.push("ma_cross");
   }
 
   // 8. Confluence (Siêu hội tụ >= 50 hoặc >= 40 kèm tín hiệu xác nhận)
   if (
-    item.confluenceScore >= 50 ||
-    (item.confluenceScore >= 40 && (
-      item.squeezeState === "fired_bull" ||
-      item.squeezeState === "squeeze_on" ||
-      item.maSignal === "GOLDEN_CROSS" ||
-      item.maSignal === "BULLISH_ALIGN" ||
-      Boolean(item.chartPattern) ||
-      Boolean(item.candlePattern)
-    ))
+    !isTechnicalSell &&
+    (item.confluenceScore >= 50 ||
+      (item.confluenceScore >= 40 && (
+        item.squeezeState === "fired_bull" ||
+        item.squeezeState === "squeeze_on" ||
+        item.maSignal === "GOLDEN_CROSS" ||
+        item.maSignal === "BULLISH_ALIGN" ||
+        Boolean(item.chartPattern) ||
+        Boolean(item.candlePattern)
+      )))
   ) {
     passes.push("confluence");
   }
@@ -1633,6 +1646,7 @@ function detectPresets(item: {
   );
 
   if (
+    !isBrokenSupport &&
     item.hasBullishDivergence &&
     (isDiamondConfluence ||
       (hasCandleReversal && hasMaSupport) ||
@@ -1643,17 +1657,18 @@ function detectPresets(item: {
   }
 
   // 8b. SMC & Golden Pocket (A+ Orthogonal Confluence)
-  if (item.isGoldenPocket || item.setupGrade === "A+" || (item.confluenceScore >= 74 && item.isSmcOrderBlock)) {
+  if (!isBrokenSupport && (item.isGoldenPocket || item.setupGrade === "A+" || (item.confluenceScore >= 74 && item.isSmcOrderBlock))) {
     passes.push("smc_golden_pocket");
   }
 
   // 8c. Flip Zone Role Reversal Retest
-  if (item.isFlipZoneSupport) {
+  if (!isBrokenSupport && item.isFlipZoneSupport) {
     passes.push("flip_zone_retest");
   }
 
   // 9. VCP & Classic Patterns
   if (
+    !isTechnicalSell &&
     item.chartPattern &&
     (item.chartPattern.includes("VCP") ||
       item.chartPattern.includes("Cốc") ||
@@ -1666,19 +1681,21 @@ function detectPresets(item: {
 
   // 10. TTM Squeeze & Volatility Breakout (Biên độ 2)
   if (
-    item.squeezeState === "squeeze_on" ||
-    item.squeezeState === "fired_bull" ||
-    item.isSqueezeFiredBull === true ||
-    (item.isSqueezeOn === true && (item.squeezeBars == null || item.squeezeBars >= 4))
+    isNotSellSignal &&
+    (item.squeezeState === "squeeze_on" ||
+      item.squeezeState === "fired_bull" ||
+      item.isSqueezeFiredBull === true ||
+      (item.isSqueezeOn === true && (item.squeezeBars == null || item.squeezeBars >= 4)))
   ) {
     passes.push("ttm_squeeze");
   }
 
   // 10b. Sector Alpha Resonance: Ngành Dẫn Dắt (Biên độ 1)
   if (
-    item.isSectorLeading === true ||
-    item.sectorRrgQuadrant === "LEADING" ||
-    (item.sectorRrgQuadrant === "IMPROVING" && ((item.orcaMasterScore != null && item.orcaMasterScore >= 60) || item.confluenceScore >= 60))
+    isNotSellSignal &&
+    (item.isSectorLeading === true ||
+      item.sectorRrgQuadrant === "LEADING" ||
+      (item.sectorRrgQuadrant === "IMPROVING" && ((item.orcaMasterScore != null && item.orcaMasterScore >= 60) || item.confluenceScore >= 60)))
   ) {
     passes.push("sector_leading");
   }
@@ -1686,7 +1703,7 @@ function detectPresets(item: {
   // 11. Sát Điểm Mua Nhất (Near Buy Point / Buy Zone)
   const isNearBuy =
     !isChasingRisk &&
-    item.maSignal !== "DEATH_CROSS" &&
+    !isTechnicalSell &&
     (item.buyZoneStatus === "AT_BUY_POINT" ||
       item.buyZoneStatus === "NEAR_BUY_POINT" ||
       (item.absBuyDiff != null && item.absBuyDiff <= 2.2));
@@ -1748,10 +1765,11 @@ function detectPresets(item: {
 
   // 17. Nén Giá Phẳng & Cạn Von (Minervini Tight Closes & VDU)
   if (
-    (item.isTightCloses && item.isVolumeDryUp) ||
-    (item.isTightCloses && (item.volRatio20 == null || item.volRatio20 <= 0.85)) ||
-    (item.isVolumeDryUp && item.confluenceScore >= 50) ||
-    item.isWyckoffLps === true
+    !isTechnicalSell &&
+    ((item.isTightCloses && item.isVolumeDryUp) ||
+      (item.isTightCloses && (item.volRatio20 == null || item.volRatio20 <= 0.85)) ||
+      (item.isVolumeDryUp && item.confluenceScore >= 50) ||
+      item.isWyckoffLps === true)
   ) {
     passes.push("tight_closes_vdu");
   }

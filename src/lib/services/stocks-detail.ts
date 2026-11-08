@@ -455,27 +455,72 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         syncTimestampMs: Date.now(),
       };
 
-      if (technical?.tradeSignal?.plan) {
-        technical.tradeSignal.plan.buyPoint = screenerItem.buyPoint;
-        technical.tradeSignal.plan.entry = screenerItem.buyPoint;
-        technical.tradeSignal.plan.buyRange = screenerItem.buyRange;
-        technical.tradeSignal.plan.entryZone = screenerItem.buyRange ?? technical.tradeSignal.plan.entryZone;
-        technical.tradeSignal.plan.buyZoneStatus = liveZoneStatus;
-        technical.tradeSignal.plan.buyPointDiffPct = liveDiffPct;
-        technical.tradeSignal.plan.currentPriceDiffPct = liveDiffPct;
-        technical.tradeSignal.plan.absBuyDiff = liveAbsDiff;
-        technical.tradeSignal.plan.isExtended = screenerItem.isExtended || liveZoneStatus === "EXTENDED";
-        technical.tradeSignal.plan.chaseRisk = liveZoneStatus === "EXTENDED" ? "HIGH" : screenerItem.chaseRisk;
-        if (screenerItem.stopLoss) technical.tradeSignal.plan.stopLoss = screenerItem.stopLoss;
-        if (screenerItem.targetPrice) technical.tradeSignal.plan.takeProfit = screenerItem.targetPrice;
-        if (screenerItem.riskReward) technical.tradeSignal.plan.riskReward = screenerItem.riskReward;
-        if (screenerItem.buyStrategy) technical.tradeSignal.plan.entryStrategyVi = screenerItem.buyStrategy;
-        technical.tradeSignal.plan.isBuyTriggerNow = screenerItem.isBuyTriggerNow;
-        technical.tradeSignal.plan.buyTriggerScore = screenerItem.buyTriggerScore;
-        technical.tradeSignal.plan.buyTriggerReasonVi = screenerItem.buyTriggerReasonVi;
+      const tickRound = (n: number) => Number(n.toFixed(2));
+
+      if (technical?.tradeSignal) {
+        if (!technical.tradeSignal.plan) {
+          const entryPt = screenerItem.buyPoint;
+          const slPt = screenerItem.stopLoss ?? tickRound(entryPt * 0.95);
+          const tpPt = screenerItem.targetPrice ?? tickRound(entryPt * 1.15);
+          const riskVal = Math.abs(entryPt - slPt);
+          const rewardVal = Math.abs(tpPt - entryPt);
+          technical.tradeSignal.plan = {
+            side: "buy",
+            sideVi: "MUA",
+            entry: entryPt,
+            entryZone: screenerItem.buyRange ?? [entryPt * 0.99, entryPt * 1.015],
+            entryStrategyVi: screenerItem.buyStrategy || "Đồng thuận điểm mua định lượng Screener",
+            currentPriceDiffPct: liveDiffPct ?? 0,
+            buyPoint: entryPt,
+            buyRange: screenerItem.buyRange ?? [entryPt * 0.99, entryPt * 1.015],
+            buyZoneStatus: liveZoneStatus,
+            buyPointDiffPct: liveDiffPct,
+            absBuyDiff: liveAbsDiff,
+            isExtended: screenerItem.isExtended || liveZoneStatus === "EXTENDED",
+            chaseRisk: liveZoneStatus === "EXTENDED" ? "HIGH" : screenerItem.chaseRisk,
+            stopLoss: slPt,
+            takeProfit: tpPt,
+            takeProfit1: tickRound(entryPt + riskVal * 1.5),
+            takeProfit2: tpPt,
+            takeProfit3: tickRound(entryPt + riskVal * 3.0),
+            riskReward: screenerItem.riskReward ?? (riskVal > 0 ? Number((rewardVal / riskVal).toFixed(1)) : 2.5),
+            riskPct: entryPt > 0 ? Number(((riskVal / entryPt) * 100).toFixed(1)) : 5,
+            rewardPct: entryPt > 0 ? Number(((rewardVal / entryPt) * 100).toFixed(1)) : 15,
+            riskPerShare: riskVal,
+            invalidation: slPt,
+            basis: ["Screener Master Strategy"],
+            notes: [],
+            asymmetricScore: screenerItem.apexQuantScore ?? 80,
+            confluenceLayers: [screenerItem.buyStrategy || "Hội tụ kỹ thuật"],
+            actionVerdict: screenerItem.buyTriggerReasonVi || "Đồng thuận điểm mua định lượng Screener",
+            isBuyTriggerNow: screenerItem.isBuyTriggerNow,
+            buyTriggerScore: screenerItem.buyTriggerScore,
+            buyTriggerReasonVi: screenerItem.buyTriggerReasonVi,
+          };
+        } else {
+          technical.tradeSignal.plan.side = "buy";
+          technical.tradeSignal.plan.sideVi = "MUA";
+          technical.tradeSignal.plan.buyPoint = screenerItem.buyPoint;
+          technical.tradeSignal.plan.entry = screenerItem.buyPoint;
+          technical.tradeSignal.plan.buyRange = screenerItem.buyRange;
+          technical.tradeSignal.plan.entryZone = screenerItem.buyRange ?? technical.tradeSignal.plan.entryZone;
+          technical.tradeSignal.plan.buyZoneStatus = liveZoneStatus;
+          technical.tradeSignal.plan.buyPointDiffPct = liveDiffPct;
+          technical.tradeSignal.plan.currentPriceDiffPct = liveDiffPct;
+          technical.tradeSignal.plan.absBuyDiff = liveAbsDiff;
+          technical.tradeSignal.plan.isExtended = screenerItem.isExtended || liveZoneStatus === "EXTENDED";
+          technical.tradeSignal.plan.chaseRisk = liveZoneStatus === "EXTENDED" ? "HIGH" : screenerItem.chaseRisk;
+          if (screenerItem.stopLoss) technical.tradeSignal.plan.stopLoss = screenerItem.stopLoss;
+          if (screenerItem.targetPrice) technical.tradeSignal.plan.takeProfit = screenerItem.targetPrice;
+          if (screenerItem.riskReward) technical.tradeSignal.plan.riskReward = screenerItem.riskReward;
+          if (screenerItem.buyStrategy) technical.tradeSignal.plan.entryStrategyVi = screenerItem.buyStrategy;
+          technical.tradeSignal.plan.isBuyTriggerNow = screenerItem.isBuyTriggerNow;
+          technical.tradeSignal.plan.buyTriggerScore = screenerItem.buyTriggerScore;
+          technical.tradeSignal.plan.buyTriggerReasonVi = screenerItem.buyTriggerReasonVi;
+        }
       }
 
-      // Đảm bảo tính nhất quán: Nếu cổ phiếu được lọc vào nhóm Mua Kích Hoạt Tức Thời hoặc Sát Điểm Mua
+      // Đảm bảo tính nhất quán: Nếu cổ phiếu được lọc vào nhóm Mua Kích Hoạt Tức Thời, Sát Điểm Mua hoặc đạt các bộ lọc Mua
       // thì Tín hiệu Kỹ thuật bắt buộc phải đồng bộ sang "MUA", tuyệt đối không để xảy ra tình trạng "báo BÁN"
       if (technical?.tradeSignal) {
         const isActionableBuyZone =
@@ -486,9 +531,10 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
         const isActionableBuyPreset =
           screenerItem.presetsPassed?.includes("apex_buy_now") ||
           screenerItem.presetsPassed?.includes("near_buy_point") ||
-          screenerItem.isBuyTriggerNow === true;
+          screenerItem.isBuyTriggerNow === true ||
+          (screenerItem.presetsPassed && screenerItem.presetsPassed.length > 1);
 
-        if ((isActionableBuyPreset || isActionableBuyZone) && !screenerItem.isExtended && liveZoneStatus !== "EXTENDED") {
+        if ((isActionableBuyPreset || isActionableBuyZone) && !screenerItem.isExtended && liveZoneStatus !== "EXTENDED" && liveZoneStatus !== "BELOW_SUPPORT") {
           technical.tradeSignal.action = "buy";
           technical.tradeSignal.actionVi = "MUA";
           const curConf = typeof technical.tradeSignal.confidence === "number" ? technical.tradeSignal.confidence : 60;
@@ -499,6 +545,21 @@ async function produceVnStockDetail(sym: string): Promise<{ detail: VnStockDetai
           if (technical.tradeSignal.reasons) {
             technical.tradeSignal.reasons = technical.tradeSignal.reasons.filter((r) => !r.toLowerCase().includes("giảm") && !r.toLowerCase().includes("bán"));
             technical.tradeSignal.reasons.unshift(screenerItem.buyTriggerReasonVi || "Đồng thuận điểm mua định lượng Screener");
+          }
+        } else if (technical.tradeSignal.action === "sell" && (isActionableBuyPreset || !screenerItem.isExtended) && liveZoneStatus !== "BELOW_SUPPORT") {
+          // Triệt tiêu xung đột: Cổ phiếu đạt chuẩn bộ lọc Mua thì kỹ thuật tuyệt đối không báo BÁN
+          // Điều chỉnh sang QUAN SÁT (chờ nhịp điều chỉnh hoặc tích lũy xác nhận)
+          technical.tradeSignal.action = "watch";
+          technical.tradeSignal.actionVi = "QUAN SÁT";
+          technical.tradeSignal.confidence = Math.max(50, typeof technical.tradeSignal.confidence === "number" ? technical.tradeSignal.confidence : 50);
+          technical.tradeSignal.bias = 0;
+          if (technical.tradeSignal.reasons) {
+            technical.tradeSignal.reasons = technical.tradeSignal.reasons.filter((r) => !r.toLowerCase().includes("bán"));
+            technical.tradeSignal.reasons.unshift(
+              liveZoneStatus === "WAIT_PULLBACK"
+                ? "Chờ nhịp rung lắc tích lũy về điểm mua chuẩn"
+                : "Chờ xác nhận lực cầu tại vùng tích lũy"
+            );
           }
         }
       }

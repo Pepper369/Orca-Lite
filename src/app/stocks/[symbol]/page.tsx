@@ -321,10 +321,6 @@ const DecisionStrip = memo(function DecisionStrip({
       : String(trend ?? "Chưa rõ");
 
   const ts = technical?.tradeSignal;
-  const signal =
-    ts?.action === "buy" ? "MUA" : ts?.action === "sell" ? "BÁN" : "QUAN SÁT";
-  const tone = signal === "MUA" ? "up" : signal === "BÁN" ? "down" : "neutral";
-  const Icon = signal === "MUA" ? ArrowUpRight : signal === "BÁN" ? ArrowDownRight : Activity;
   const plan = ts?.plan ?? null;
 
   const rsi = technical?.rsi14 != null ? technical.rsi14.toFixed(1) : "—";
@@ -365,6 +361,14 @@ const DecisionStrip = memo(function DecisionStrip({
 
   const isTriggerNow = Boolean(plan?.isBuyTriggerNow ?? screenerSync?.isBuyTriggerNow);
   const triggerScore = plan?.buyTriggerScore ?? screenerSync?.buyTriggerScore ?? 85;
+
+  let signal =
+    ts?.action === "buy" ? "MUA" : ts?.action === "sell" ? "BÁN" : "QUAN SÁT";
+  if ((isTriggerNow || liveZoneStatus === "AT_BUY_POINT" || liveZoneStatus === "NEAR_BUY_POINT" || buyPt > 0) && signal === "BÁN") {
+    signal = isTriggerNow ? "MUA" : "QUAN SÁT";
+  }
+  const tone = signal === "MUA" ? "up" : signal === "BÁN" ? "down" : "neutral";
+  const Icon = signal === "MUA" ? ArrowUpRight : signal === "BÁN" ? ArrowDownRight : Activity;
 
   return (
     <div
