@@ -6,7 +6,6 @@ import {
   Layers,
   Globe,
   Award,
-  Users2,
   TrendingUp,
   TrendingDown,
   Sparkles,

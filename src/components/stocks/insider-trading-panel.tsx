@@ -5,7 +5,7 @@ import { useApi } from "@/lib/hooks";
 import type { InsiderDealsResult } from "@/lib/services/stock-insider-deals";
 import { Loading, Panel, EmptyState } from "@/components/ui";
 import {
-  Users2,
+  Users,
   TrendingUp,
   TrendingDown,
   ArrowRightLeft,
@@ -39,7 +39,7 @@ export const InsiderTradingPanel = memo(function InsiderTradingPanel({ symbol }:
 
   const title = (
     <span className="flex items-center gap-2">
-      <Users2 className="size-4 text-accent-primary" /> Giao Dịch Người Nội Bộ & Ban Lãnh Đạo ({symbol})
+      <Users className="size-4 text-accent-primary" /> Giao Dịch Người Nội Bộ & Ban Lãnh Đạo ({symbol})
     </span>
   );
 
