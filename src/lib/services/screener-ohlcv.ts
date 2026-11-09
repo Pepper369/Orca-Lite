@@ -10,15 +10,27 @@ import type { OhlcvBar } from "../types";
 
 type OhlcvPack = Awaited<ReturnType<typeof getVnOhlcv>>;
 
+// High-speed in-memory L1 cache with stale fallback to protect CF Workers budget
+const screenerOhlcvL1 = new Map<string, { data: { bars: OhlcvBar[]; pack: OhlcvPack | null }; exp: number }>();
+const OHLCV_L1_TTL_MS = 45_000;
+
 /**
  * Shared OHLCV fetch for screeners — sequential first to cut CF Workers subrequest burn.
  * Prioritizes official VNStock API when configured, cascading to VNDirect Dchart, VNDirect OHLCV, and public feeds.
+ * Includes short L1 memory cache and resilient stale fallback.
  */
 export async function fetchOhlcvResilient(
   symbol: string,
   bars = 260,
 ): Promise<{ bars: OhlcvBar[]; pack: OhlcvPack | null }> {
   const sym = symbol.trim().toUpperCase();
+  const cKey = `${sym}:${bars}`;
+  const hitL1 = screenerOhlcvL1.get(cKey);
+
+  if (hitL1 && Date.now() < hitL1.exp && hitL1.data.bars.length >= 20) {
+    return hitL1.data;
+  }
+
   const isIndex = isVnIndexSymbol(sym);
 
   const attempts: Array<{
@@ -57,6 +69,8 @@ export async function fetchOhlcvResilient(
     accept: (v: OhlcvBar[]) => Array.isArray(v) && v.length >= 20,
   });
 
+  let result: { bars: OhlcvBar[]; pack: OhlcvPack | null } | null = null;
+
   // Sequential firstHealthy — fewer simultaneous subrequests than race (CF Error 1102).
   try {
     const hit = await firstHealthy(
@@ -67,7 +81,7 @@ export async function fetchOhlcvResilient(
       })),
       { budgetMs: 8_000, perAttemptMs: 4_000, label: `screener-ohlcv:${sym}` },
     );
-    return {
+    result = {
       bars: hit.value,
       pack: { bars: hit.value, meta: { source: hit.sourceId, sourceTimestampMs: Date.now() } } as any,
     };
@@ -81,15 +95,29 @@ export async function fetchOhlcvResilient(
         })),
         { perAttemptMs: 3_500, label: `screener-ohlcv-race:${sym}` },
       );
-      return {
+      result = {
         bars: hit.value,
         pack: { bars: hit.value, meta: { source: hit.sourceId, sourceTimestampMs: Date.now() } } as any,
       };
     } catch {
       const pack = await getVnOhlcv(sym, bars).catch(() => null);
-      return { bars: pack?.bars ?? [], pack };
+      if (pack?.bars?.length) {
+        result = { bars: pack.bars, pack };
+      }
     }
   }
+
+  // Graceful degradation: Fallback to stale L1 cache if network fetch failed
+  if (!result || result.bars.length < 20) {
+    if (hitL1 && hitL1.data.bars.length >= 20) {
+      return hitL1.data;
+    }
+    return { bars: result?.bars ?? [], pack: result?.pack ?? null };
+  }
+
+  // Cache fresh valid bars
+  screenerOhlcvL1.set(cKey, { data: result, exp: Date.now() + OHLCV_L1_TTL_MS });
+  return result;
 }
 
 /** Bounded concurrency map (same pattern used across screeners). */

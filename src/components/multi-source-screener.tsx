@@ -41,7 +41,12 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const [instFilter, setInstFilter] = useState<"ALL" | "HIGH_INST">("ALL");
   const [quantFilter, setQuantFilter] = useState<"ALL" | "QUANT_EDGE" | "OU_OVERSOLD">("ALL");
   const [buyZoneFilter, setBuyZoneFilter] = useState<"ALL" | "NEAR_BUY" | "AT_BUY">("ALL");
-  const [sortBy, setSortBy] = useState<"upside" | "foreign" | "inst" | "quant" | "symbol" | "near_buy">("near_buy");
+  const [smartMoneyFilter, setSmartMoneyFilter] = useState<"ALL" | "INFLOW" | "ABSORPTION">("ALL");
+  const [rsFilter, setRsFilter] = useState<"ALL" | "RS_70" | "RS_80">("ALL");
+  const [techGuardFilter, setTechGuardFilter] = useState<"ALL" | "APPROVED_ONLY">("ALL");
+  const [sortBy, setSortBy] = useState<
+    "upside" | "foreign" | "inst" | "quant" | "symbol" | "near_buy" | "rs" | "smart_money" | "master_score"
+  >("near_buy");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const items = useMemo(() => data ?? [], [data]);
@@ -87,6 +92,31 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         return false;
       }
 
+      // Smart Money filter
+      if (smartMoneyFilter === "INFLOW" && (item.smartMoneyScore == null || item.smartMoneyScore < 60)) {
+        return false;
+      }
+      if (
+        smartMoneyFilter === "ABSORPTION" &&
+        item.smartMoneySignal !== "SPRING_ABSORPTION" &&
+        item.smartMoneySignal !== "HEAVY_ACCUMULATION"
+      ) {
+        return false;
+      }
+
+      // RS Rating filter (O'Neil)
+      if (rsFilter === "RS_70" && (item.rsRating == null || item.rsRating < 70)) {
+        return false;
+      }
+      if (rsFilter === "RS_80" && (item.rsRating == null || item.rsRating < 80)) {
+        return false;
+      }
+
+      // Technical Consistency Guard (Loại bỏ Death Cross / Vỡ hỗ trợ)
+      if (techGuardFilter === "APPROVED_ONLY" && item.isTechnicalBuyApproved !== true) {
+        return false;
+      }
+
       return true;
     }).sort((a, b) => {
       let diff = 0;
@@ -100,12 +130,18 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         diff = (b.institutionOwnershipPct ?? 0) - (a.institutionOwnershipPct ?? 0);
       } else if (sortBy === "quant") {
         diff = (b.quantEdgeScore ?? 0) - (a.quantEdgeScore ?? 0);
+      } else if (sortBy === "rs") {
+        diff = (b.rsRating ?? 0) - (a.rsRating ?? 0);
+      } else if (sortBy === "smart_money") {
+        diff = (b.smartMoneyScore ?? 0) - (a.smartMoneyScore ?? 0);
+      } else if (sortBy === "master_score") {
+        diff = (b.orcaMasterScore ?? 0) - (a.orcaMasterScore ?? 0);
       } else if (sortBy === "symbol") {
         diff = a.symbol.localeCompare(b.symbol);
       }
       return sortDir === "desc" ? -diff : diff;
     });
-  }, [items, query, foreignFilter, researchFilter, instFilter, quantFilter, sortBy, sortDir]);
+  }, [items, query, foreignFilter, researchFilter, instFilter, quantFilter, buyZoneFilter, smartMoneyFilter, rsFilter, techGuardFilter, sortBy, sortDir]);
 
   if (isLoading && !data) {
     return (
@@ -117,12 +153,14 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
 
   const buyRecoCount = items.filter((i) => i.rating?.includes("MUA")).length;
   const netBuyForeignCount = items.filter((i) => i.foreignBuyRatioPct >= 55).length;
-  const highUpsideCount = items.filter((i) => (i.targetUpsidePct ?? 0) >= 15).length;
+  const rsLeaderCount = items.filter((i) => (i.rsRating ?? 0) >= 70).length;
+  const smartMoneyInCount = items.filter((i) => (i.smartMoneyScore ?? 0) >= 60).length;
+  const techApprovedCount = items.filter((i) => i.isTechnicalBuyApproved === true).length;
 
   return (
     <div className="space-y-4">
       {/* Banner Thống kê nhanh */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
             <span>Khuyến Nghị Mua (Orca Research)</span>
@@ -130,40 +168,51 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-xl font-bold text-emerald-400">{buyRecoCount}</span>
-            <span className="text-xs text-text-muted">/ {items.length} mã VN30</span>
+            <span className="text-xs text-text-muted">/ {items.length} mã quét</span>
           </div>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>Ngoại Gom Ròng Realtime (Orca Flow)</span>
+            <span>Ngoại Gom Ròng (Orca Flow)</span>
             <Globe className="size-4 text-purple-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-xl font-bold text-purple-400">{netBuyForeignCount}</span>
-            <span className="text-xs text-text-muted">mã lực cầu ngoại &gt; 55%</span>
+            <span className="text-xs text-text-muted">mã cầu ngoại &gt; 55%</span>
           </div>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>Dư Địa Tăng Trưởng &gt; 15%</span>
+            <span>Cá Mập Gom (Smart Money)</span>
+            <Zap className="size-4 text-amber-400" />
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-xl font-bold text-amber-400">{smartMoneyInCount}</span>
+            <span className="text-xs text-text-muted">mã gom ngầm lớn</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
+          <div className="flex items-center justify-between text-xs text-text-muted">
+            <span>RS Leader O&apos;Neil (&ge; 70)</span>
             <TrendingUp className="size-4 text-cyan-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-xl font-bold text-cyan-400">{highUpsideCount}</span>
-            <span className="text-xs text-text-muted">mã chiết khấu hấp dẫn</span>
+            <span className="text-xl font-bold text-cyan-400">{rsLeaderCount}</span>
+            <span className="text-xs text-text-muted">mã xung lực dẫn dắt</span>
           </div>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface-elevated/40 p-3.5">
           <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>Cơ Cấu Tổ Chức & Ban Lãnh Đạo</span>
-            <Users2 className="size-4 text-amber-400" />
+            <span>Chuẩn Kỹ Thuật (Tech Guard)</span>
+            <ShieldCheck className="size-4 text-emerald-400" />
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-xl font-bold text-amber-400">Orca IQ</span>
-            <span className="text-xs text-text-muted">chuẩn hóa 100%</span>
+            <span className="text-xl font-bold text-emerald-400">{techApprovedCount}</span>
+            <span className="text-xs text-text-muted">đồng thuận không báo bán</span>
           </div>
         </div>
       </div>
@@ -364,6 +413,82 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   Bắt đáy OU Z &le; -1.4
                 </button>
               </div>
+
+              {/* Smart Money Filter */}
+              <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSmartMoneyFilter("ALL")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    smartMoneyFilter === "ALL" ? "bg-surface-elevated text-text-primary" : "text-text-muted"
+                  }`}
+                >
+                  Tất cả dòng tiền
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmartMoneyFilter("INFLOW")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    smartMoneyFilter === "INFLOW" ? "bg-amber-500/20 text-amber-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Cá mập gom (&ge; 60)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmartMoneyFilter("ABSORPTION")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    smartMoneyFilter === "ABSORPTION" ? "bg-emerald-500/20 text-emerald-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Hấp thụ cung
+                </button>
+              </div>
+
+              {/* RS Rating O'Neil Filter */}
+              <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setRsFilter("ALL")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    rsFilter === "ALL" ? "bg-surface-elevated text-text-primary" : "text-text-muted"
+                  }`}
+                >
+                  Mọi RS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRsFilter("RS_70")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    rsFilter === "RS_70" ? "bg-cyan-500/20 text-cyan-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  RS &ge; 70 (Leader)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRsFilter("RS_80")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    rsFilter === "RS_80" ? "bg-emerald-500/20 text-emerald-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  RS &ge; 80 (Super)
+                </button>
+              </div>
+
+              {/* Technical Consistency Guard Toggle */}
+              <button
+                type="button"
+                onClick={() => setTechGuardFilter((prev) => (prev === "ALL" ? "APPROVED_ONLY" : "ALL"))}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  techGuardFilter === "APPROVED_ONLY"
+                    ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300 font-bold"
+                    : "border-border-subtle bg-surface-base text-text-muted"
+                }`}
+              >
+                <ShieldCheck className="size-3.5" />
+                <span>Bảo Vệ Kỹ Thuật (Loại Death Cross/Gãy nền)</span>
+              </button>
             </div>
           </div>
 
@@ -400,6 +525,30 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   <th
                     className="py-2.5 px-3 cursor-pointer hover:text-text-primary"
                     onClick={() => {
+                      setSortBy("rs");
+                      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                    }}
+                  >
+                    <div className="flex items-center gap-1 text-cyan-400">
+                      <span>RS & Master</span>
+                      <ArrowUpDown className="size-3" />
+                    </div>
+                  </th>
+                  <th
+                    className="py-2.5 px-3 cursor-pointer hover:text-text-primary"
+                    onClick={() => {
+                      setSortBy("smart_money");
+                      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                    }}
+                  >
+                    <div className="flex items-center gap-1 text-amber-400">
+                      <span>Cá Mập & VSA</span>
+                      <ArrowUpDown className="size-3" />
+                    </div>
+                  </th>
+                  <th
+                    className="py-2.5 px-3 cursor-pointer hover:text-text-primary"
+                    onClick={() => {
                       setSortBy("foreign");
                       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
                     }}
@@ -429,7 +578,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                     }}
                   >
                     <div className="flex items-center gap-1">
-                      <span>Sở hữu Tổ chức / Lãnh đạo</span>
+                      <span>Sở hữu Tổ chức</span>
                       <ArrowUpDown className="size-3" />
                     </div>
                   </th>
@@ -445,7 +594,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                       <ArrowUpDown className="size-3" />
                     </div>
                   </th>
-                  <th className="py-2.5 px-3">P/E vs TB 3Y</th>
+                  <th className="py-2.5 px-3">Bảo Vệ Kỹ Thuật</th>
                   <th className="py-2.5 pl-3 text-right">Thao tác</th>
                 </tr>
               </thead>
@@ -527,6 +676,70 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                         ) : (
                           <span className="text-text-muted text-[10px]">—</span>
                         )}
+                      </td>
+
+                      {/* Cột Mới: RS & Master Rating */}
+                      <td className="py-3 px-3">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-text-muted">RS:</span>
+                            <span
+                              className={`font-mono font-bold text-xs ${
+                                (item.rsRating ?? 0) >= 80
+                                  ? "text-emerald-400"
+                                  : (item.rsRating ?? 0) >= 70
+                                  ? "text-cyan-400"
+                                  : "text-text-secondary"
+                              }`}
+                            >
+                              {item.rsRating != null ? item.rsRating : "—"}
+                            </span>
+                            {item.isMarketLeader && (
+                              <span className="rounded bg-cyan-500/20 px-1 py-0.2 text-[8px] font-bold text-cyan-300 border border-cyan-500/30">
+                                LEADER
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 text-[10px] text-text-muted">
+                            <span>Master:</span>
+                            <span className="font-mono font-bold text-amber-300">
+                              {item.orcaMasterScore != null ? item.orcaMasterScore : "—"}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Cột Mới: Cá Mập & VSA */}
+                      <td className="py-3 px-3">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-text-muted">Dòng tiền:</span>
+                            <span
+                              className={`font-mono font-bold text-xs ${
+                                (item.smartMoneyScore ?? 0) >= 70
+                                  ? "text-amber-400"
+                                  : (item.smartMoneyScore ?? 0) >= 50
+                                  ? "text-emerald-400"
+                                  : "text-text-secondary"
+                              }`}
+                            >
+                              {item.smartMoneyScore != null ? item.smartMoneyScore : "—"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[10px]">
+                            {item.vsaSignalVi ? (
+                              <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[9px] font-medium text-purple-300 border border-purple-500/30 truncate max-w-[120px]">
+                                {item.vsaSignalVi}
+                              </span>
+                            ) : item.smartMoneySignalVi ? (
+                              <span className="text-text-muted text-[10px] truncate max-w-[120px]">
+                                {item.smartMoneySignalVi}
+                              </span>
+                            ) : (
+                              <span className="text-text-muted text-[10px]">—</span>
+                            )}
+                          </div>
+                        </div>
                       </td>
 
                       {/* Cột 3: Ngoại Live */}
@@ -618,15 +831,35 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                         </div>
                       </td>
 
-                      {/* Cột 7: P/E */}
+                      {/* Cột: Bảo Vệ Kỹ Thuật & Định Giá P/E */}
                       <td className="py-3 px-3">
-                        <div className="flex flex-col text-[11px]">
-                          <span className="text-text-primary font-mono font-medium">
-                            {item.pe != null ? item.pe.toFixed(1) : "—"}
-                          </span>
-                          <span className="text-text-muted text-[10px]">
-                            TB 3Y: {item.pe3yAvg != null ? item.pe3yAvg.toFixed(1) : "—"}
-                          </span>
+                        <div className="flex flex-col gap-0.5 text-[11px]">
+                          {item.isTechnicalBuyApproved ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
+                              <ShieldCheck className="size-3" />
+                              <span>Chuẩn Mua 🟢</span>
+                            </span>
+                          ) : item.isBrokenSupport ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-300 border border-rose-500/30 whitespace-nowrap">
+                              <span>Vỡ hỗ trợ ⚠️</span>
+                            </span>
+                          ) : item.maSignal === "DEATH_CROSS" ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-300 border border-rose-500/30 whitespace-nowrap">
+                              <span>Death Cross ⚠️</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-surface-base px-1.5 py-0.5 text-[10px] font-medium text-text-muted border border-border-subtle whitespace-nowrap">
+                              <span>Quan sát 🟡</span>
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1 text-[10px] text-text-muted">
+                            <span>P/E: {item.pe != null ? item.pe.toFixed(1) : "—"}</span>
+                            {item.superTrendDir && (
+                              <span className={item.superTrendDir === "up" ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                                {item.superTrendDir === "up" ? "▲ Up" : "▼ Down"}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
 

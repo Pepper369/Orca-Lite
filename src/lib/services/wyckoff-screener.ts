@@ -82,9 +82,19 @@ const SETUP_VI: Record<WyckoffSetup, string> = {
   watch: "Quan sát",
 };
 
-function pickSetup(w: WyckoffSnapshot): WyckoffSetup {
+function pickSetup(w: WyckoffSnapshot, lastClose?: number): WyckoffSetup {
   const codes = new Set((w.eventCodes ?? []).map((c) => c.toUpperCase()));
   const blob = (w.events ?? []).join(" ").toLowerCase();
+
+  // Guard: Nếu giá gãy hỗ trợ Ice level nghiêm trọng hoặc đang trong pha Markdown sâu, không cho phép báo điểm mua giả
+  const isBrokenIce = lastClose != null && w.iceLevel != null && w.iceLevel > 0 && lastClose < w.iceLevel * 0.98;
+  const isSevereDowntrend = w.phase === "markdown" && w.bias === "bearish";
+
+  if (isBrokenIce || isSevereDowntrend) {
+    if (codes.has("SOW") || blob.includes("sow")) return "sow-breakdown";
+    return "watch";
+  }
+
   if (w.springTested || codes.has("SPRING_TESTED")) return "spring-tested";
   if (w.lpsConfirmed || codes.has("LPS")) return "lps-pullback";
   if (codes.has("SPRING") || blob.includes("spring")) return "spring";
@@ -136,7 +146,8 @@ export async function screenWyckoff(args?: {
     const w = analyzeWyckoff(bars, { benchmarkBars: indexBars });
     const q = quoteMap.get(symbol);
     const sec = getSecurity(symbol);
-    const setup = pickSetup(w);
+    const lastClose = bars[bars.length - 1]?.close;
+    const setup = pickSetup(w, lastClose);
     const row: WyckoffScreenRow = {
       symbol,
       name: sec?.name ?? q?.name ?? null,

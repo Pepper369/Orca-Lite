@@ -61,6 +61,32 @@ export interface MultiSourceStockItem {
   isMtfAligned?: boolean | null;
   mtfScore?: number | null;
   mtfBadgeVi?: string | null;
+  // Giai đoạn 9: Sức Mạnh Giá O'Neil (RS) & Orca Master Score
+  rsRating?: number | null;
+  rsTrend?: "IMPROVING" | "WEAKENING" | "NEUTRAL" | null;
+  isMarketLeader?: boolean;
+  orcaMasterScore?: number | null;
+  orcaMasterCategory?: string | null;
+  orcaMasterStrengthVi?: string | null;
+  // Giai đoạn 10: Dấu Chân Dòng Tiền Lớn (Smart Money Flow & VSA)
+  smartMoneyScore?: number | null;
+  smartMoneySignal?: string | null;
+  smartMoneySignalVi?: string | null;
+  activeBuyRatioPct?: number | null;
+  vsaSignal?: string | null;
+  vsaSignalVi?: string | null;
+  // Giai đoạn 11: Bộ Lọc Bảo Vệ Kỹ Thuật (Technical Consistency Guard)
+  apexQuantScore?: number | null;
+  apexCategoryVi?: string | null;
+  maSignal?: string | null;
+  superTrendDir?: string | null;
+  isBrokenSupport?: boolean;
+  isTechnicalBuyApproved?: boolean;
+  isSweetLaunchZone?: boolean | null;
+  sectorRrgQuadrant?: string | null;
+  sector?: string | null;
+  piotroskiFScore?: number | null;
+  altmanZone?: string | null;
 }
 
 const TTL_MS = 30_000; // 30s fresh cache cho screener realtime
@@ -117,44 +143,50 @@ export async function getMultiSourceScreenerData(): Promise<{
       const allItems = masterSnapshot.items ?? [];
       const itemMap = new Map(allItems.map((it) => [it.symbol, it]));
 
-      // 2. Lựa chọn Universe thanh khoản cao (~50 mã: VN30 + top khối lượng)
+      // 2. Lựa chọn Universe thanh khoản cao mở rộng (Tối đa 120 mã: VN30 + VN100 + top thanh khoản)
       const vn30Set = new Set<string>(VN30_BOARD.map((s) => s.toUpperCase()));
       const prioritySymbols = allItems
-        .filter((it) => vn30Set.has(it.symbol) || (it.volume != null && it.volume >= 200_000))
+        .filter(
+          (it) =>
+            vn30Set.has(it.symbol) ||
+            (it.volume != null && it.volume >= 100_000) ||
+            (it.marketCap != null && it.marketCap >= 3_000)
+        )
         .sort((a, b) => {
           const aVn30 = vn30Set.has(a.symbol) ? 1 : 0;
           const bVn30 = vn30Set.has(b.symbol) ? 1 : 0;
           if (aVn30 !== bVn30) return bVn30 - aVn30;
           return (b.volume ?? 0) - (a.volume ?? 0);
         })
-        .slice(0, 50)
+        .slice(0, 120)
         .map((it) => it.symbol);
 
       const targetSymbols: string[] = prioritySymbols.length > 0 ? prioritySymbols : [...VN30_BOARD];
 
-      // 3. Tải song song dữ liệu chuyên sâu đa nguồn qua mapPool 12 workers
+      // 3. Tải song song dữ liệu chuyên sâu đa nguồn qua mapPool 16 workers
       const enrichedItems: MultiSourceStockItem[] = [];
 
-      await mapPool(targetSymbols, 12, async (symbol: string) => {
+      await mapPool(targetSymbols, 16, async (symbol: string) => {
         const snap = itemMap.get(symbol);
         const price = snap?.price ?? 0;
 
-        // Truy vấn 3 nguồn chuyên biệt có L1 cache & timeout guard
+        // Truy vấn 3 nguồn chuyên biệt có L1 cache & timeout guard (graceful degradation)
         const [foreign, reportsRes, shareholdersRes] = await Promise.all([
           fetchCachedVpsForeign(symbol),
           fetchCachedVndReports(symbol),
           fetchCachedVietcapShareholders(symbol),
         ]);
 
-        // 2. VNDirect Research Reports
+        // 2. VNDirect Research Reports (với fallback từ Master Snapshot Consensus)
         const repData = reportsRes?.data ?? null;
-        const targetPrice = repData?.latestTargetPrice ?? null;
-        const targetUpsidePct =
-          targetPrice && price > 0
+        const targetPrice = repData?.latestTargetPrice ?? snap?.consensusTargetPrice ?? null;
+        let targetUpsidePct = repData
+          ? targetPrice && price > 0
             ? Math.round(((targetPrice - (price > 1000 ? price : price * 1000)) / (price > 1000 ? price : price * 1000)) * 10000) / 100
-            : null;
-        const rating = repData?.latestRating ?? null;
-        const reportCount = repData?.total ?? 0;
+            : null
+          : snap?.consensusUpsidePct ?? null;
+        const rating = repData?.latestRating ?? (targetUpsidePct && targetUpsidePct >= 15 ? "MUA (Định giá)" : null);
+        const reportCount = repData?.total ?? (snap?.consensusTargetPrice ? 1 : 0);
 
         // 3. Vietcap Shareholders
         const shData = shareholdersRes?.data ?? null;
@@ -170,6 +202,22 @@ export async function getMultiSourceScreenerData(): Promise<{
             ) / 10
           : null;
         const majorHoldersCount = shData?.majorHoldersCount ?? shList.length;
+
+        // 4. Bảo Vệ Kỹ Thuật (Technical Consistency Guard)
+        const isBroken = Boolean(snap?.isBrokenSupport || snap?.buyZoneStatus === "BELOW_SUPPORT");
+        const isDeathCross = snap?.maSignal === "DEATH_CROSS";
+        const isDownTrend = snap?.superTrendDir === "down" && snap?.maSignal !== "GOLDEN_CROSS";
+        const isTechnicalBuyApproved = !isBroken && !isDeathCross && !isDownTrend && Boolean(
+          snap && (
+            snap.maSignal === "GOLDEN_CROSS" ||
+            snap.maSignal === "BULLISH_ALIGN" ||
+            (snap.confluenceScore ?? 0) >= 50 ||
+            (snap.rsRating ?? 0) >= 65 ||
+            snap.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+            snap.smartMoneySignal === "SPRING_ABSORPTION" ||
+            snap.smartMoneySignal === "POCKET_PIVOT"
+          )
+        );
 
         enrichedItems.push({
           symbol,
@@ -190,9 +238,9 @@ export async function getMultiSourceScreenerData(): Promise<{
           beta: snap?.beta ?? null,
           high52w: null,
           low52w: null,
-          foreignBuyRatioPct: foreign?.buyRatioPct ?? 50,
+          foreignBuyRatioPct: foreign?.buyRatioPct ?? (snap?.foreignAccumulating ? 60 : 50),
           foreignNetVolume: foreign?.netVolume ?? null,
-          foreignNetValue: foreign?.netValue ?? null,
+          foreignNetValue: foreign?.netValue ?? (snap?.foreignNetVal != null ? snap.foreignNetVal * 1_000_000_000 : null),
           foreignRoom: foreign?.foreignRoom ?? null,
           quantEdgeScore: snap?.quantEdgeScore ?? null,
           ouZScore: snap?.ouZScore ?? null,
@@ -214,6 +262,32 @@ export async function getMultiSourceScreenerData(): Promise<{
           isMtfAligned: snap?.isMtfAligned ?? null,
           mtfScore: snap?.mtfScore ?? null,
           mtfBadgeVi: snap?.mtfBadgeVi ?? null,
+          // Sức Mạnh Giá O'Neil & Orca Master Score
+          rsRating: snap?.rsRating ?? null,
+          rsTrend: snap?.rsTrend ?? null,
+          isMarketLeader: snap?.isMarketLeader ?? false,
+          orcaMasterScore: snap?.orcaMasterScore ?? null,
+          orcaMasterCategory: snap?.orcaMasterCategory ?? null,
+          orcaMasterStrengthVi: snap?.orcaMasterStrengthVi ?? null,
+          // Dòng Tiền Lớn Smart Money & VSA
+          smartMoneyScore: snap?.smartMoneyScore ?? null,
+          smartMoneySignal: snap?.smartMoneySignal ?? null,
+          smartMoneySignalVi: snap?.smartMoneySignalVi ?? null,
+          activeBuyRatioPct: snap?.activeBuyRatioPct ?? null,
+          vsaSignal: snap?.vsaSignal ?? null,
+          vsaSignalVi: snap?.vsaSignalVi ?? null,
+          // Bảo vệ kỹ thuật
+          apexQuantScore: snap?.apexQuantScore ?? null,
+          apexCategoryVi: snap?.apexCategoryVi ?? null,
+          maSignal: snap?.maSignal ?? null,
+          superTrendDir: snap?.superTrendDir ?? null,
+          isBrokenSupport: isBroken,
+          isTechnicalBuyApproved,
+          isSweetLaunchZone: snap?.isSweetLaunchZone ?? null,
+          sectorRrgQuadrant: snap?.sectorRrgQuadrant ?? null,
+          sector: snap?.sector ?? null,
+          piotroskiFScore: snap?.piotroskiFScore ?? null,
+          altmanZone: snap?.altmanZone ?? null,
         });
       });
 

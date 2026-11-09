@@ -319,6 +319,7 @@ export type ScreenerStockItem = {
   isVsaNoSupplyTest?: boolean;
   // Precision MTF Alignment (Biên độ 5)
   isPrecisionMtfAligned?: boolean;
+  isBrokenSupport?: boolean;
   // Advanced Technical Recognition Engine (Nâng Cấp Nhận Diện Kỹ Thuật)
   isTightCloses?: boolean;
   tightCloseSpreadPct?: number | null;
