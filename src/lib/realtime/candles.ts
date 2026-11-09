@@ -53,7 +53,7 @@ function vnSessionDateKey(ts: number): string {
 }
 
 function vnDayBucket(ts: number): number {
-  return Date.parse(`${vnSessionDateKey(ts)}T15:00:00+07:00`);
+  return Date.parse(`${vnSessionDateKey(ts)}T00:00:00Z`);
 }
 
 function bucketFor(ts: number, tf: string, assetClass: "crypto" | "vn"): number {

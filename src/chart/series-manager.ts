@@ -289,8 +289,8 @@ export class SeriesManager {
       const align = (p: number) => {
         if (!(p > 0)) return p;
         const r = p / ref;
-        if (r > 50) return p / (r > 500 ? 1_000 : r);
-        if (r < 1 / 50) return p * (r < 1 / 500 ? 1_000 : Math.round(1 / r) || 1_000);
+        if (r > 500) return p / 1_000;
+        if (r < 1 / 500) return p * 1_000;
         return p;
       };
       open = align(open);
@@ -298,7 +298,7 @@ export class SeriesManager {
       low = align(low);
       close = align(close);
       const rClose = close / ref;
-      if (rClose > 30 || rClose < 1 / 30) return;
+      if (rClose > 10 || rClose < 0.1) return;
     }
 
     if (this.lastBarSec != null && t === this.lastBarSec && this.lastBarOhlc) {
@@ -496,40 +496,64 @@ export class SeriesManager {
   rebuildSrLines(ind: ChartIndicators | null, on: boolean) {
     const c = this.base();
     if (!c) return;
-    for (const l of this.srLines) c.removePriceLine(l.line);
+    for (const l of this.srLines) {
+      try {
+        c.removePriceLine(l.line);
+      } catch {
+        /* safety */
+      }
+    }
     this.srLines = [];
     if (!ind || !on) return;
-    for (const s of ind.srLevels.support.slice(0, 3)) {
-      this.srLines.push({
-        line: c.createPriceLine({ price: s, color: "rgba(46,194,126,0.55)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "" }),
-        kind: "s",
-        indicatorRef: c,
-      });
-    }
-    for (const r of ind.srLevels.resistance.slice(0, 3)) {
-      this.srLines.push({
-        line: c.createPriceLine({ price: r, color: "rgba(238,95,117,0.55)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "" }),
-        kind: "r",
-        indicatorRef: c,
-      });
+    try {
+      for (const s of ind.srLevels.support.slice(0, 3)) {
+        this.srLines.push({
+          line: c.createPriceLine({ price: s, color: "rgba(46,194,126,0.55)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "" }),
+          kind: "s",
+          indicatorRef: c,
+        });
+      }
+      for (const r of ind.srLevels.resistance.slice(0, 3)) {
+        this.srLines.push({
+          line: c.createPriceLine({ price: r, color: "rgba(238,95,117,0.55)", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "" }),
+          kind: "r",
+          indicatorRef: c,
+        });
+      }
+    } catch {
+      /* safety */
     }
   }
 
   addDrawingLine(price: number): IPriceLine | null {
     const c = this.base();
     if (!c) return null;
-    return c.createPriceLine({ price, color: T.warn, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "H" });
+    try {
+      return c.createPriceLine({ price, color: T.warn, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "H" });
+    } catch {
+      return null;
+    }
   }
 
   rebuildExtraLevels(levels: { label: string; price: number; color: string }[]) {
     const c = this.base();
     if (!c) return;
-    for (const l of this.extraLevelLines) c.removePriceLine(l);
+    for (const l of this.extraLevelLines) {
+      try {
+        c.removePriceLine(l);
+      } catch {
+        /* safety */
+      }
+    }
     this.extraLevelLines = [];
-    for (const lv of levels) {
-      this.extraLevelLines.push(
-        c.createPriceLine({ price: lv.price, color: lv.color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: lv.label }),
-      );
+    try {
+      for (const lv of levels) {
+        this.extraLevelLines.push(
+          c.createPriceLine({ price: lv.price, color: lv.color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: lv.label }),
+        );
+      }
+    } catch {
+      /* safety */
     }
   }
 

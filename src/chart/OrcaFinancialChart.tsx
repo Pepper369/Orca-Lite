@@ -1,9 +1,8 @@
 "use client";
 
 /**
- * ORCA FINANCIAL CHART — history + toggleable indicators.
- * Live: crypto WS · stock VNDirect · forex/commodity Biquote SSE.
- * TF switch: keepPreviousData=false so old-TF candles are never painted as new TF.
+ * ORCA FINANCIAL CHART — History + indicators + live stream.
+ * Streamlined UI, unified price scaling, zero background MTF bloat.
  */
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi } from "lightweight-charts";
@@ -18,9 +17,7 @@ import { Loading } from "@/components/ui";
 import { analyzeMoneyFlow } from "@/lib/engines/money-flow";
 import { buildSmcOverlay } from "@/chart/smc-overlay";
 import { buildWyckoffOverlay } from "@/chart/wyckoff-overlay";
-import type { WyckoffSnapshot } from "@/lib/engines/wyckoff-elliott";
 import { applySmcPriceLines, type SmcLineBag } from "@/chart/smc-series-helpers";
-import { analyzeMtfBias, companionTimeframes, type MtfBiasResult } from "@/lib/engines/mtf-bias";
 import type { OhlcvBar } from "@/lib/types";
 
 interface Props {
@@ -41,33 +38,22 @@ const CHART_KINDS: { id: ChartKind; label: string }[] = [
 
 type IndKey =
   | "ema"
-  | "ma10"
   | "ma20"
-  | "ma50"
-  | "ma100"
-  | "ma200"
   | "bollinger"
   | "vwap"
   | "rsi"
   | "macd"
   | "srLevels";
 
-const OVERLAY_INDS: { key: IndKey | "volume"; label: string; short: string; color: string }[] = [
-  { key: "ema", label: "EMA 20/50", short: "EMA", color: T.accent },
-  { key: "ma10", label: "MA 10", short: "MA10", color: "#f59e0b" },
-  { key: "ma20", label: "MA 20", short: "MA20", color: "#38bdf8" },
-  { key: "ma50", label: "MA 50", short: "MA50", color: "#a78bfa" },
-  { key: "ma100", label: "MA 100", short: "MA100", color: "#f472b6" },
-  { key: "ma200", label: "MA 200", short: "MA200", color: "#f87171" },
-  { key: "bollinger", label: "Bollinger", short: "BB", color: "#6ea8fe" },
-  { key: "vwap", label: "VWAP", short: "VWAP", color: T.info },
-  { key: "srLevels", label: "Support / Resistance", short: "S/R", color: T.warn },
-  { key: "volume", label: "Volume", short: "Vol", color: "#94a3b8" },
-];
-
-const OSC_INDS: { key: IndKey; label: string; short: string; color: string }[] = [
-  { key: "rsi", label: "RSI (14)", short: "RSI", color: T.purple },
-  { key: "macd", label: "MACD", short: "MACD", color: T.accent2 },
+const QUICK_INDICATORS: { key: IndKey | "volume"; label: string; short: string }[] = [
+  { key: "ema", label: "EMA 20/50", short: "EMA" },
+  { key: "ma20", label: "MA 20/50", short: "MA" },
+  { key: "bollinger", label: "Bollinger Bands", short: "BB" },
+  { key: "vwap", label: "VWAP", short: "VWAP" },
+  { key: "rsi", label: "RSI (14)", short: "RSI" },
+  { key: "macd", label: "MACD", short: "MACD" },
+  { key: "srLevels", label: "Hỗ trợ / Kháng cự", short: "S/R" },
+  { key: "volume", label: "Khối lượng", short: "Vol" },
 ];
 
 function normalizeKind(raw: string | undefined): ChartKind {
@@ -139,7 +125,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   const smcLineBag = useRef<SmcLineBag>({ lines: [] });
   const [wyckoffOn, setWyckoffOn] = useState(false);
   const wyckoffLineBag = useRef<SmcLineBag>({ lines: [] });
-  const [mtfBias, setMtfBias] = useState<MtfBiasResult | null>(null);
+
   useEffect(() => {
     extraLevelsRef.current = extraLevels;
   }, [extraLevels]);
@@ -150,6 +136,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
     keepPreviousData: false,
     timeoutMs: 18_000,
   });
+
   useEffect(() => {
     dataRef.current = data ?? null;
   }, [data]);
@@ -215,7 +202,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
         chart.applyOptions({ width: hostRef.current.clientWidth });
         if (!cancelled) setEngineReady(true);
       } catch {
-        /* */
+        /* safety */
       }
     })();
 
@@ -227,7 +214,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
         chart?.remove();
         if (hostEl) hostEl.innerHTML = "";
       } catch {
-        /* */
+        /* safety */
       }
       chartRef.current = null;
       mgrRef.current = null;
@@ -259,7 +246,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       try {
         mgr.setHistory([], kindRef.current);
       } catch {
-        /* */
+        /* safety */
       }
     }
 
@@ -311,7 +298,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       if (extraLevels?.length) mgr.rebuildExtraLevels(extraLevels);
       chart.timeScale().fitContent();
     } catch {
-      /* */
+      /* safety */
     }
   }, [data, tf, prefs.volume, prefs.indicators, extraLevels, engineReady, isValidating]);
 
@@ -338,7 +325,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       applySmcPriceLines(series, smcLineBag.current, overlay.levels);
       if (overlay.markers.length) mgr.applyMarkers(overlay.markers as any);
     } catch {
-      /* */
+      /* safety */
     }
   }, [data, smcOn, engineReady, tf]);
 
@@ -369,71 +356,9 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       applySmcPriceLines(series, wyckoffLineBag.current, wyckoffOverlay.levels);
       if (wyckoffOverlay.markers.length) mgr.applyMarkers(wyckoffOverlay.markers as any);
     } catch {
-      /* */
+      /* safety */
     }
   }, [wyckoffOverlay, wyckoffOn, engineReady]);
-
-  const companions = companionTimeframes(tf, tfs);
-  const shouldRunMtf = Boolean(symbol && companions.length >= 2);
-  const [prevShouldRunMtf, setPrevShouldRunMtf] = useState(shouldRunMtf);
-  if (prevShouldRunMtf !== shouldRunMtf) {
-    setPrevShouldRunMtf(shouldRunMtf);
-    if (!shouldRunMtf && mtfBias != null) {
-      setMtfBias(null);
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!shouldRunMtf) return;
-    const runMtf = async () => {
-      try {
-        const seriesByTf: Record<string, OhlcvBar[]> = {};
-        await Promise.all(
-          companions.map(async (t) => {
-            const lim = historyLimit(assetType, t);
-            const url = `/api/v1/chart/history?symbol=${encodeURIComponent(symbol)}&assetType=${assetType}&timeframe=${t}&limit=${Math.min(lim, 400)}`;
-            const res = await fetch(url);
-            if (!res.ok) return;
-            const json = await res.json();
-            const candles =
-              (json?.data?.candles as ChartCandle[] | undefined) ??
-              (json?.candles as ChartCandle[] | undefined);
-            if (!candles?.length) return;
-            seriesByTf[t] = candles.map((c) => ({
-              time: c.time,
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-              volume: c.volume ?? 0,
-            }));
-          }),
-        );
-        if (cancelled) return;
-        if (Object.keys(seriesByTf).length) setMtfBias(analyzeMtfBias(seriesByTf));
-        else setMtfBias(null);
-      } catch {
-        if (!cancelled) setMtfBias(null);
-      }
-    };
-    if (typeof requestIdleCallback !== "undefined") {
-      const id = requestIdleCallback(() => {
-        void runMtf();
-      }, { timeout: 1_200 });
-      return () => {
-        cancelled = true;
-        cancelIdleCallback(id);
-      };
-    }
-    const t = window.setTimeout(() => {
-      void runMtf();
-    }, 80);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [symbol, tf, assetType, tfs, companions, shouldRunMtf]);
 
   const supportsLive = supportsLiveChart(assetType);
   const canLive = Boolean(engineReady && supportsLive && symbol);
@@ -474,23 +399,21 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
             const lastHist = hist?.length ? hist[hist.length - 1] : null;
             if (assetType === "stock" && lastHist && lastHist.close > 0 && c.close > 0) {
               const ratio = c.close / lastHist.close;
-              if (ratio > 50) {
-                const factor = ratio > 500 ? 1_000 : ratio;
+              if (ratio > 500) {
                 candle = {
                   ...candle,
-                  open: candle.open / factor,
-                  high: candle.high / factor,
-                  low: candle.low / factor,
-                  close: candle.close / factor,
+                  open: candle.open / 1000,
+                  high: candle.high / 1000,
+                  low: candle.low / 1000,
+                  close: candle.close / 1000,
                 };
-              } else if (ratio < 1 / 50) {
-                const factor = ratio < 1 / 500 ? 1_000 : Math.round(1 / ratio);
+              } else if (ratio < 1 / 500) {
                 candle = {
                   ...candle,
-                  open: candle.open * factor,
-                  high: candle.high * factor,
-                  low: candle.low * factor,
-                  close: candle.close * factor,
+                  open: candle.open * 1000,
+                  high: candle.high * 1000,
+                  low: candle.low * 1000,
+                  close: candle.close * 1000,
                 };
               }
             }
@@ -506,7 +429,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
               }
             }
           } catch {
-            /* */
+            /* safety */
           }
         },
         onResyncNeeded: () => {
@@ -544,10 +467,14 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       return;
     }
     const ind = settings.chart.indicators;
-    const offByDefault = key === "bollinger" || key.startsWith("ma");
-    const cur = offByDefault ? !!ind[key as keyof typeof ind] : ind[key as keyof typeof ind] !== false;
+    const cur = key === "bollinger" || key === "ma20"
+      ? !!ind[key as keyof typeof ind]
+      : ind[key as keyof typeof ind] !== false;
     const next = !cur;
     const nextInd = { ...ind, [key]: next };
+    if (key === "ma20") {
+      nextInd.ma50 = next;
+    }
 
     if (mgr && key !== "srLevels") {
       const vis = {
@@ -577,13 +504,10 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
 
   const isIndOn = (key: IndKey | "volume") => {
     if (key === "volume") return prefs.volume !== false;
-    if (key === "bollinger" || key.startsWith("ma"))
+    if (key === "bollinger" || key === "ma20")
       return !!prefs.indicators?.[key as keyof typeof prefs.indicators];
     return prefs.indicators?.[key as keyof typeof prefs.indicators] !== false;
   };
-
-  // UI below is unchanged from upstream — chips + chart host
-  // (full toolbar retained via original file; live gate is the critical change)
 
   const liveBadge =
     liveState?.state === "live"
@@ -595,164 +519,177 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
           : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-1 border-b border-border-subtle px-2 py-1.5">
-        <span className="mr-1 text-[11px] font-semibold text-text-primary">{title ?? symbol}</span>
-        {liveBadge && (
-          <span className="rounded bg-positive/15 px-1.5 py-0.5 text-[9px] font-bold text-positive">{liveBadge}</span>
-        )}
-        <div className="ml-auto flex flex-wrap gap-0.5">
+    <div className="flex h-full min-h-0 flex-col bg-surface-primary text-text-primary">
+      {/* 1. Header Toolbar: Symbol, Status, Timeframes, Chart Styles */}
+      <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-border-subtle/80 px-2.5 py-1.5 bg-surface-elevated/40">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-bold tracking-tight text-text-primary">{title ?? symbol}</span>
+          {liveBadge && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                liveBadge === "LIVE"
+                  ? "bg-positive/15 text-positive border border-positive/30 animate-pulse"
+                  : "bg-surface-elevated text-text-muted"
+              }`}
+            >
+              {liveBadge}
+            </span>
+          )}
+        </div>
+
+        {/* Timeframe Selector Pills */}
+        <div className="flex items-center gap-0.5 bg-surface-primary/70 p-0.5 rounded-lg border border-border-subtle/60">
           {tfs.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTf(t)}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                tf === t ? "bg-accent-primary/20 text-accent-primary" : "text-text-muted hover:text-text-primary"
+              className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${
+                tf === t
+                  ? "bg-accent-primary text-white shadow-sm"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-elevated/60"
               }`}
             >
               {(TF_LABEL[t] ?? t).toUpperCase()}
             </button>
           ))}
         </div>
+
+        {/* Chart Kind Segmented Selector */}
+        <div className="flex items-center gap-0.5 bg-surface-primary/70 p-0.5 rounded-lg border border-border-subtle/60">
+          {CHART_KINDS.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              onClick={() => setKind(k.id)}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+                activeKind === k.id
+                  ? "bg-surface-elevated text-accent-primary font-bold shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-border-subtle px-2 py-1">
-        {OVERLAY_INDS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            title={t.label}
-            onClick={() => toggleInd(t.key)}
-            className={`rounded border px-1.5 py-0.5 text-[10px] ${
-              isIndOn(t.key)
-                ? "border-transparent bg-surface-elevated text-text-primary"
-                : "border-border-subtle text-text-muted"
-            }`}
-          >
-            {t.short}
-          </button>
-        ))}
-        {OSC_INDS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            title={t.label}
-            onClick={() => toggleInd(t.key)}
-            className={`rounded border px-1.5 py-0.5 text-[10px] ${
-              isIndOn(t.key)
-                ? "border-transparent bg-surface-elevated text-text-primary"
-                : "border-border-subtle text-text-muted"
-            }`}
-          >
-            {t.short}
-          </button>
-        ))}
-        {CHART_KINDS.map((k) => (
-          <button
-            key={k.id}
-            type="button"
-            onClick={() => setKind(k.id)}
-            className={`rounded px-1.5 py-0.5 text-[10px] ${
-              activeKind === k.id ? "text-accent-primary" : "text-text-muted"
-            }`}
-          >
-            {k.label}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1">
+
+      {/* 2. Indicators & Overlays Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-1 border-b border-border-subtle/60 px-2.5 py-1 text-[10px]">
+        {/* Core Indicators */}
+        <div className="flex flex-wrap items-center gap-1">
+          {QUICK_INDICATORS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              title={t.label}
+              onClick={() => toggleInd(t.key)}
+              className={`rounded px-2 py-0.5 text-[10px] font-medium transition border ${
+                isIndOn(t.key)
+                  ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary font-semibold"
+                  : "border-border-subtle/50 text-text-muted hover:text-text-primary hover:border-border-subtle"
+              }`}
+            >
+              {t.short}
+            </button>
+          ))}
+        </div>
+
+        {/* Advanced Overlays: SMC & Wyckoff */}
+        <div className="flex items-center gap-1 ml-auto">
           <button
             type="button"
             title="Smart Money Concepts (FVG, OrderBlock, Swings, Liquidity)"
             onClick={() => setSmcOn((v) => !v)}
-            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium transition ${
+            className={`rounded border px-2 py-0.5 text-[10px] font-medium transition ${
               smcOn
-                ? "border-cyan-500/50 bg-cyan-500/20 text-cyan-300 font-semibold"
-                : "border-border-subtle text-text-muted hover:text-text-primary"
+                ? "border-cyan-500/60 bg-cyan-500/20 text-cyan-300 font-bold shadow-sm"
+                : "border-border-subtle/60 text-text-muted hover:text-cyan-400"
             }`}
           >
             SMC
           </button>
           <button
             type="button"
-            title="Hệ thống Wyckoff VSA Master 6.0 (Ice, Creek, Midline, SL, T1, T2 & Markers)"
+            title="Wyckoff VSA Master (Phase, Ice, Creek, Stops, Targets & RS)"
             onClick={() => setWyckoffOn((v) => !v)}
-            className={`rounded border px-1.5 py-0.5 text-[10px] font-medium transition ${
+            className={`rounded border px-2 py-0.5 text-[10px] font-medium transition ${
               wyckoffOn
-                ? "border-amber-500/50 bg-amber-500/20 text-amber-300 font-semibold"
-                : "border-border-subtle text-text-muted hover:text-text-primary"
+                ? "border-amber-500/60 bg-amber-500/20 text-amber-300 font-bold shadow-sm"
+                : "border-border-subtle/60 text-text-muted hover:text-amber-400"
             }`}
           >
             WYCKOFF
           </button>
         </div>
       </div>
+
+      {/* 3. Wyckoff Analysis Ribbon (Single-line Compact) */}
       {wyckoffOn && wyckoffSnap && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle/80 bg-surface-elevated/40 px-2 py-1 text-[10px]">
-          <span className="font-semibold text-text-primary">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle/70 bg-surface-elevated/30 px-2.5 py-1 text-[10px] text-text-secondary">
+          <span className="font-bold text-amber-300">
             Wyckoff {wyckoffSnap.trModel ? `(${wyckoffSnap.trModel === "Base" ? "Base TR" : "Top TR"})` : ""}:
           </span>
-          <span className="font-medium text-accent-primary">
+          <span className="font-semibold text-text-primary">
             {wyckoffSnap.phaseVi}{wyckoffSnap.subPhase ? ` · Pha ${wyckoffSnap.subPhase}` : ""}
           </span>
           {wyckoffSnap.channelPosPct != null && (
-            <span className="text-text-muted">
-              · Kênh: <b className="text-text-primary font-mono">{wyckoffSnap.channelPosPct}%</b>
-            </span>
-          )}
-          {wyckoffSnap.causeWeeks != null && (
-            <span className="text-text-muted">
-              · Tích lũy: <b className="text-text-primary">{wyckoffSnap.causeWeeks}w</b>
-            </span>
+            <span>· Kênh: <b className="font-mono text-text-primary">{wyckoffSnap.channelPosPct}%</b></span>
           )}
           {wyckoffSnap.stopLoss != null && (
-            <span className="font-mono text-rose-400">
-              · SL: <b>{wyckoffSnap.stopLoss}</b>
-            </span>
+            <span className="font-mono text-rose-400">· SL: <b>{wyckoffSnap.stopLoss.toFixed(2)}</b></span>
           )}
           {wyckoffSnap.target1 != null && (
-            <span className="font-mono text-emerald-400">
-              · T1: <b>{wyckoffSnap.target1}</b>{wyckoffSnap.rr1 ? ` (R:R 1:${wyckoffSnap.rr1})` : ""}
-            </span>
-          )}
-          {wyckoffSnap.target2 != null && (
-            <span className="font-mono text-cyan-400">
-              · T2: <b>{wyckoffSnap.target2}</b>{wyckoffSnap.rr2 ? ` (R:R 1:${wyckoffSnap.rr2})` : ""}
-            </span>
+            <span className="font-mono text-emerald-400">· T1: <b>{wyckoffSnap.target1.toFixed(2)}</b></span>
           )}
           {wyckoffSnap.rsScore != null && (
-            <span className={wyckoffSnap.isRsAboveMa49 ? "font-mono text-emerald-400 font-semibold" : "font-mono text-text-muted"}>
+            <span className={wyckoffSnap.isRsAboveMa49 ? "font-mono text-emerald-400 font-bold" : "font-mono text-text-muted"}>
               · RS: <b>{wyckoffSnap.rsScore > 0 ? `+${wyckoffSnap.rsScore}` : wyckoffSnap.rsScore}%</b>
-              {wyckoffSnap.isLeaderITF ? " ⭐ Leader ITF" : ""}
+              {wyckoffSnap.isLeaderITF ? " ⭐ Leader" : ""}
             </span>
           )}
           {wyckoffSnap.marketRoro && (
             <span
-              className={`rounded px-1.5 py-0.2 font-bold ${
+              className={`rounded px-1.5 py-0.5 font-bold ${
                 wyckoffSnap.marketRoro.environment === "RISK_ON"
                   ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
                   : "bg-rose-500/20 text-rose-400 border border-rose-500/40"
               }`}
             >
-              VN-Index: {wyckoffSnap.marketRoro.environment === "RISK_ON" ? "Risk-On 🟢" : "Risk-Off 🔴"}
+              {wyckoffSnap.marketRoro.environment === "RISK_ON" ? "Risk-On 🟢" : "Risk-Off 🔴"}
             </span>
           )}
         </div>
       )}
+
+      {/* 4. Indicator Readout Inline (Clean 2-decimal formatting) */}
       {readout && (
-        <div className="flex flex-wrap gap-3 px-2 py-1 text-[10px] text-text-secondary">
-          {readout.rsi != null && <span>RSI <b className="text-text-primary">{readout.rsi.toFixed(1)}</b></span>}
-          {readout.ema20 != null && <span>EMA20 <b className="text-text-primary">{readout.ema20.toFixed(4)}</b></span>}
+        <div className="flex flex-wrap items-center gap-3 px-2.5 py-0.5 text-[10px] text-text-secondary border-b border-border-subtle/30 bg-surface-primary/50">
+          {readout.rsi != null && (
+            <span>RSI: <b className="font-mono text-text-primary">{readout.rsi.toFixed(1)}</b></span>
+          )}
+          {readout.ema20 != null && (
+            <span>EMA20: <b className="font-mono text-text-primary">{readout.ema20.toFixed(2)}</b></span>
+          )}
+          {readout.ema50 != null && (
+            <span>EMA50: <b className="font-mono text-text-primary">{readout.ema50.toFixed(2)}</b></span>
+          )}
           {readout.hist != null && (
             <span>
-              MACD hist{" "}
-              <b className={readout.hist >= 0 ? "text-up" : "text-down"}>{readout.hist.toFixed(5)}</b>
+              MACD Hist:{" "}
+              <b className={`font-mono ${readout.hist >= 0 ? "text-up" : "text-down"}`}>
+                {readout.hist >= 0 ? `+${readout.hist.toFixed(2)}` : readout.hist.toFixed(2)}
+              </b>
             </span>
           )}
         </div>
       )}
-      <div ref={hostRef} className="min-h-0 flex-1" style={{ minHeight: Math.max(200, height - 80) }} />
+
+      {/* 5. Chart Canvas */}
+      <div ref={hostRef} className="relative min-h-0 flex-1 w-full" style={{ minHeight: Math.max(220, height - 70) }} />
+
       {isLoading && !data && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background-secondary/60">
+        <div className="absolute inset-0 flex items-center justify-center bg-background-secondary/60 backdrop-blur-[1px]">
           <Loading rows={2} />
         </div>
       )}

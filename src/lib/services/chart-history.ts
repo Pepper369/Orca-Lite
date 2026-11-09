@@ -6,6 +6,7 @@ import { getYahooChart, yahooIntervalFor, yahooSymbolForPair, yahooCryptoSymbol 
 import { getBiquotePublicOhlc, biquoteIntervalFor } from "../providers/forex";
 import { getVnOhlcv } from "./stocks";
 import { fetchVndDchartHistory } from "../providers/vndirect-dchart";
+import { isVnIndexSymbol } from "../providers/vndirect";
 import { buildSyntheticBars } from "./derivatives-scalp";
 import { validateBars, detectGaps } from "../quality";
 import {
@@ -30,7 +31,7 @@ import {
   canonicalIndexSymbol,
   validateIndexCandles,
   toCandle,
-  scaleVnStockToFullVnd,
+  normalizeVnStockCandles,
 } from "./chart-core";
 
 export type {
@@ -267,8 +268,9 @@ export async function getChartHistory(
             candles: bars.map((b) => toCandle(b)),
             source,
           };
-          if (!isDeriv) {
-            series.candles = scaleVnStockToFullVnd(series.candles);
+          const isIndex = isVnIndexSymbol(symbol) || canonicalIndexSymbol(symbol) != null;
+          if (!isDeriv && !isIndex) {
+            series.candles = normalizeVnStockCandles(series.candles);
           }
         } else if (args.assetType === "forex" || args.assetType === "commodity") {
           series = await forexCandles(symbol, tf, limit);

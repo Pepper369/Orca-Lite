@@ -32,7 +32,7 @@ export function attachMarkers(series: ISeriesApi<"Candlestick">, markers: Signal
     .sort((a, b) => a.time - b.time)
     .slice(-60)
     .map((m): SeriesMarker<Time> => {
-      const st = STYLE[m.type];
+      const st = STYLE[m.type] ?? { color: T.accent, shape: "circle" as Shape, position: "aboveBar" as Pos };
       return {
         time: toSec(m.time),
         shape: st.shape,

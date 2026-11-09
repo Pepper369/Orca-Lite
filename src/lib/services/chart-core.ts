@@ -93,20 +93,22 @@ export function toCandle(b: OhlcvBar): ChartCandle {
   return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
 }
 
-export function scaleVnStockToFullVnd(candles: ChartCandle[]): ChartCandle[] {
+export function normalizeVnStockCandles(candles: ChartCandle[]): ChartCandle[] {
   if (!candles.length) return candles;
   const sample = candles.slice(-20);
   const avg = sample.reduce((s, c) => s + c.close, 0) / sample.length;
-  if (avg > 500) return candles;
+  if (avg <= 500) return candles;
   return candles.map((c) => ({
     time: c.time,
-    open: c.open * 1000,
-    high: c.high * 1000,
-    low: c.low * 1000,
-    close: c.close * 1000,
+    open: c.open / 1000,
+    high: c.high / 1000,
+    low: c.low / 1000,
+    close: c.close / 1000,
     volume: c.volume,
   }));
 }
+
+export const scaleVnStockToFullVnd = normalizeVnStockCandles;
 
 function points(times: number[], values: (number | null)[]): IndicatorPoint[] {
   const step = times.length > 1200 ? Math.ceil(times.length / 1200) : 1;

@@ -325,9 +325,7 @@ export class ChartLiveManager {
         const tfMs = TF_MS[timeframe] ?? 0;
         const bucket =
           timeframe === "1d" || timeframe === "1w" || timeframe === "1M" || timeframe === "12M"
-            ? assetType === "forex" || assetType === "commodity"
-              ? Date.parse(`${dayKey}T00:00:00Z`)
-              : Date.parse(`${dayKey}T15:00:00+07:00`)
+            ? Date.parse(`${dayKey}T00:00:00Z`)
             : tfMs
               ? Math.floor((d.ts ?? Date.now()) / tfMs) * tfMs
               : Date.parse(`${dayKey}T00:00:00Z`);
