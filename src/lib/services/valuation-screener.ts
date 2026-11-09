@@ -6,6 +6,7 @@ import { getVndValuationRatios, priceQuoteToVnd } from "../providers/vndirect-co
 import { getFundamentalSnapshots, mapPool, normalizeSymbols, type FundamentalSnapshot } from "../financial/snapshots";
 import { sectorOf, getSecurity } from "../vn/master";
 import { WORKERS_BUDGET, resolveSnapshotConcurrency } from "../data-engine/workers-budget";
+import { getMasterScreenerSnapshot, type ScreenerStockItem } from "./screener-snapshot-service";
 
 function exchangeOf(symbol: string): string | null {
   return getSecurity(symbol)?.exchange ?? null;
@@ -30,6 +31,10 @@ export type ValuationScreenRow = {
   reportDate: string | null;
   sourceNote: string;
   score: number;
+  // Cross-Pillar Technical Consistency Guard
+  techStatus?: "SAFE" | "CAUTION" | "BLOCKED";
+  isTechnicalApproved?: boolean;
+  maSignal?: string | null;
 };
 
 export type ValuationFilterOpts = {
@@ -54,6 +59,7 @@ export type ValuationFilterOpts = {
   minPrice?: number;
   maxPrice?: number;
   limit?: number;
+  techGuardOnly?: boolean;
 };
 
 export const DEFAULT_SYMBOLS =
@@ -236,6 +242,7 @@ function passes(row: ValuationScreenRow, f: ValuationFilterOpts): boolean {
   if (!check(row.dividendYieldPct, f.minDividendYield, f.maxDividendYield)) return false;
   if (!check(row.marketCap, f.minMarketCap, f.maxMarketCap)) return false;
   if (!check(row.price, f.minPrice, f.maxPrice)) return false;
+  if (f.techGuardOnly && row.techStatus === "BLOCKED") return false;
   return true;
 }
 
@@ -308,8 +315,43 @@ export async function screenValuation(opts: ValuationFilterOpts = {}) {
     };
   }
 
-  let rows = pack.allRows.filter((r) => passes(r, opts));
+  const masterSnap = await getMasterScreenerSnapshot().catch(() => null);
+  const masterMap = new Map<string, ScreenerStockItem>((masterSnap?.items ?? []).map((it) => [it.symbol, it]));
+
+  const enrichedRows = pack.allRows.map((r) => {
+    const row = { ...r };
+    const master = masterMap.get(row.symbol);
+    if (master) {
+      if (row.price == null && master.price) row.price = master.price;
+      const isDeathCross = master.maSignal === "DEATH_CROSS";
+      const isBroken = Boolean(master.isBrokenSupport || master.buyZoneStatus === "BELOW_SUPPORT");
+      const isDowntrend = master.superTrendDir === "down" && master.maSignal !== "GOLDEN_CROSS";
+      if (isDeathCross || isBroken || isDowntrend) {
+        row.techStatus = "BLOCKED";
+        row.isTechnicalApproved = false;
+        row.score = Math.round(row.score * 0.7); // Phạt điểm mã cơ bản định giá rẻ nhưng đồ thị đang gãy
+      } else if (
+        master.maSignal === "GOLDEN_CROSS" ||
+        master.maSignal === "BULLISH_ALIGN" ||
+        (master.confluenceScore ?? 0) >= 50
+      ) {
+        row.techStatus = "SAFE";
+        row.isTechnicalApproved = true;
+      } else {
+        row.techStatus = "CAUTION";
+        row.isTechnicalApproved = false;
+      }
+      row.maSignal = master.maSignal;
+    } else {
+      row.techStatus = "CAUTION";
+      row.isTechnicalApproved = false;
+    }
+    return row;
+  });
+
+  let rows = enrichedRows.filter((r) => passes(r, opts));
   if (opts.sector) rows = rows.filter((r) => r.sector === opts.sector);
+  rows.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
   const limit = Math.min(opts.limit ?? 80, 100);
   rows = rows.slice(0, limit);
 

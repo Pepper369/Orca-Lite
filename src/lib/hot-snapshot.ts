@@ -21,7 +21,8 @@ export type HotSlot =
   | "commodities"
   | "screener-fundamental"
   | "screener-valuation"
-  | "screener-minervini";
+  | "screener-minervini"
+  | "screener-master";
 
 type SlotEntry = {
   data: unknown;

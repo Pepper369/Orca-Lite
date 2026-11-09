@@ -2,6 +2,7 @@ import "server-only";
 
 import { cached } from "../cache";
 import { buildMeta } from "../freshness";
+import { putHot, getHot } from "../hot-snapshot";
 import { getMultiQuotes } from "./multi-quote";
 import { getVpsBatchForeignFlow } from "../providers/vps";
 import { getFundamentalSnapshots, type FundamentalSnapshot } from "../financial/snapshots";
@@ -1904,7 +1905,7 @@ export async function getMasterScreenerSnapshot(): Promise<MasterSnapshotPayload
     return memoryMasterSnapshot.payload;
   }
 
-  // Fast-path 2: Serve stale memory (< 15 mins) and trigger background refresh
+  // Fast-path 2: Serve stale memory (< 15 mins) and trigger background refresh (SWR)
   if (memoryMasterSnapshot && now < memoryMasterSnapshot.staleUntil) {
     if (!isRefreshingMaster) {
       isRefreshingMaster = true;
@@ -1916,6 +1917,7 @@ export async function getMasterScreenerSnapshot(): Promise<MasterSnapshotPayload
               freshUntil: Date.now() + 60_000,
               staleUntil: Date.now() + 15 * 60_000,
             };
+            putHot("screener-master", fresh, { source: "master-screener-producer", version: fresh.version });
           }
         })
         .catch((err) => {
@@ -1928,9 +1930,42 @@ export async function getMasterScreenerSnapshot(): Promise<MasterSnapshotPayload
     return memoryMasterSnapshot.payload;
   }
 
+  // Fast-path 3: COLD-START RESILIENCE via L2 Persistent Hot Snapshot (Triệt tiêu 15-20s cold start)
+  const hotL2 = await getHot<MasterSnapshotPayload>("screener-master").catch(() => null);
+  if (hotL2?.data && hotL2.data.items && hotL2.data.items.length > 0) {
+    memoryMasterSnapshot = {
+      payload: hotL2.data,
+      freshUntil: Date.now() + 30_000,
+      staleUntil: Date.now() + 15 * 60_000,
+    };
+    if (!isRefreshingMaster) {
+      isRefreshingMaster = true;
+      void executeProducer()
+        .then((fresh) => {
+          if (fresh && fresh.items && fresh.items.length > 0) {
+            memoryMasterSnapshot = {
+              payload: fresh,
+              freshUntil: Date.now() + 60_000,
+              staleUntil: Date.now() + 15 * 60_000,
+            };
+            putHot("screener-master", fresh, { source: "master-screener-producer", version: fresh.version });
+          }
+        })
+        .catch((err) => console.warn("[Screener] Background warm from L2 failed:", err))
+        .finally(() => { isRefreshingMaster = false; });
+    }
+    return hotL2.data;
+  }
+
   try {
     const fresh = await executeProducer();
     if (fresh && fresh.items && fresh.items.length > 0) {
+      memoryMasterSnapshot = {
+        payload: fresh,
+        freshUntil: Date.now() + 60_000,
+        staleUntil: Date.now() + 15 * 60_000,
+      };
+      putHot("screener-master", fresh, { source: "master-screener-producer", version: fresh.version });
       return fresh;
     }
   } catch (err) {
@@ -2903,6 +2938,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           isAbsorptionSpike: entry.techFeatures.isAbsorptionSpike,
           isVsaNoSupplyTest: entry.techFeatures.isVsaNoSupplyTest,
           isPrecisionMtfAligned: entry.techFeatures.isPrecisionMtfAligned,
+          isBrokenSupport: Boolean(entry.buyPointPlan.buyZoneStatus === "BELOW_SUPPORT" || (entry.price != null && entry.buyPointPlan.stopLoss != null && entry.price < entry.buyPointPlan.stopLoss)),
           // Advanced Technical Recognition Engine (Nâng Cấp Nhận Diện Kỹ Thuật)
           isTightCloses: entry.techFeatures.isTightCloses,
           tightCloseSpreadPct: entry.techFeatures.tightCloseSpreadPct,

@@ -90,6 +90,32 @@ export async function GET(req: Request) {
     }
   }
 
+  // master-snapshot hub
+  {
+    const s = Date.now();
+    try {
+      const snap = await runGuarded(
+        async () => {
+          const { getMasterScreenerSnapshot } = await import("@/lib/services/screener-snapshot-service");
+          return getMasterScreenerSnapshot().catch(() => null);
+        },
+        {
+          label: "cron-screener-master",
+          wallMs: Math.min(10_000, WORKERS_BUDGET.cronDomainWallMs),
+          maxSubrequests: 16,
+          maxConcurrent: 2,
+        },
+      );
+      if (snap?.items?.length) {
+        results.master = { ok: true, ms: Date.now() - s, note: `${snap.items.length} items` };
+      } else {
+        results.master = { ok: false, ms: Date.now() - s, note: "empty" };
+      }
+    } catch (e) {
+      results.master = { ok: false, ms: Date.now() - s, note: e instanceof Error ? e.message : "err" };
+    }
+  }
+
   const okCount = Object.values(results).filter((r) => r.ok).length;
   if (!okCount) {
     return unavailable("screener-warm", "Không warm được screener nào");

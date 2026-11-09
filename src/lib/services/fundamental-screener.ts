@@ -11,6 +11,7 @@ import { sectorOf, getSecurity, type VnExchange } from "../vn/master";
 import { resolveListedEquityUniverse, listedEquityUniverseSync } from "../financial/equity-universe";
 import { WORKERS_BUDGET, clampUniverse, resolveSnapshotConcurrency } from "../data-engine/workers-budget";
 import { readLatestMarketScan } from "./market-screener-snapshots";
+import { getMasterScreenerSnapshot, type ScreenerStockItem } from "./screener-snapshot-service";
 
 function exchangeOf(symbol: string): string | null {
   return getSecurity(symbol)?.exchange ?? null;
@@ -42,6 +43,10 @@ export type FundamentalScreenRow = {
   healthScore: number | null;
   reportDate: string | null;
   score: number;
+  // Cross-Pillar Technical Consistency Guard
+  techStatus?: "SAFE" | "CAUTION" | "BLOCKED";
+  isTechnicalApproved?: boolean;
+  maSignal?: string | null;
 };
 
 export type FundamentalFilterOpts = {
@@ -78,6 +83,7 @@ export type FundamentalFilterOpts = {
   minPrice?: number;
   maxPrice?: number;
   limit?: number;
+  techGuardOnly?: boolean;
 };
 
 function bandScore(v: number | null, bands: [number, number][]): number | null {
@@ -200,6 +206,7 @@ function passesFilters(row: FundamentalScreenRow, f: FundamentalFilterOpts): boo
   )
     return false;
   if (f.requirePositiveFcf && (row.fcfTtm == null || row.fcfTtm <= 0)) return false;
+  if (f.techGuardOnly && row.techStatus === "BLOCKED") return false;
   return true;
 }
 
@@ -307,8 +314,45 @@ export async function screenFundamental(opts: FundamentalFilterOpts = {}) {
   const allRows = pack.allRows ?? [];
   const scanned = pack.scanned ?? 0;
   const withData = pack.withData ?? 0;
-  let rows = allRows.filter((r) => passesFilters(r, opts));
+
+  // Cross-Pillar Technical Consistency Guard: Đối chiếu trực tiếp với Master Snapshot
+  const masterSnap = await getMasterScreenerSnapshot().catch(() => null);
+  const masterMap = new Map<string, ScreenerStockItem>((masterSnap?.items ?? []).map((it) => [it.symbol, it]));
+
+  const enrichedRows = allRows.map((r) => {
+    const row = { ...r };
+    const master = masterMap.get(row.symbol);
+    if (master) {
+      if (row.price == null && master.price) row.price = master.price;
+      const isDeathCross = master.maSignal === "DEATH_CROSS";
+      const isBroken = Boolean(master.isBrokenSupport || master.buyZoneStatus === "BELOW_SUPPORT");
+      const isDowntrend = master.superTrendDir === "down" && master.maSignal !== "GOLDEN_CROSS";
+      if (isDeathCross || isBroken || isDowntrend) {
+        row.techStatus = "BLOCKED";
+        row.isTechnicalApproved = false;
+        row.score = Math.round(row.score * 0.7); // Phạt điểm mã cơ bản tốt nhưng kỹ thuật đang gãy rơi tự do
+      } else if (
+        master.maSignal === "GOLDEN_CROSS" ||
+        master.maSignal === "BULLISH_ALIGN" ||
+        (master.confluenceScore ?? 0) >= 50
+      ) {
+        row.techStatus = "SAFE";
+        row.isTechnicalApproved = true;
+      } else {
+        row.techStatus = "CAUTION";
+        row.isTechnicalApproved = false;
+      }
+      row.maSignal = master.maSignal;
+    } else {
+      row.techStatus = "CAUTION";
+      row.isTechnicalApproved = false;
+    }
+    return row;
+  });
+
+  let rows = enrichedRows.filter((r) => passesFilters(r, opts));
   if (opts.sector) rows = rows.filter((r) => r.sector === opts.sector);
+  rows.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
   const limit = Math.min(opts.limit ?? 80, 100);
   rows = rows.slice(0, limit);
 

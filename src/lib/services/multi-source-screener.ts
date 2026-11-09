@@ -128,9 +128,18 @@ async function fetchCachedVietcapShareholders(sym: string) {
   return res;
 }
 
-export async function getMultiSourceScreenerData(): Promise<{
+export interface MultiSourceFilterOpts {
+  limit?: number;
+  offset?: number;
+  compact?: boolean;
+  techGuardOnly?: boolean;
+  q?: string;
+}
+
+export async function getMultiSourceScreenerData(opts?: MultiSourceFilterOpts): Promise<{
   data: MultiSourceStockItem[];
   meta: Meta;
+  total?: number;
 }> {
   const cacheKey = "screener:multi-source:pro-v3";
 
@@ -296,15 +305,115 @@ export async function getMultiSourceScreenerData(): Promise<{
     },
   });
 
+  let items = res.value;
+
+  // Filter & Pagination Options (Khắc phục Điểm nghẽn 4: Client-side Bloat & Payload Overhead)
+  if (opts) {
+    if (opts.q?.trim()) {
+      const q = opts.q.trim().toUpperCase();
+      items = items.filter((it) => it.symbol.includes(q) || it.name.toUpperCase().includes(q));
+    }
+    if (opts.techGuardOnly) {
+      items = items.filter((it) => it.isTechnicalBuyApproved === true);
+    }
+    const total = items.length;
+    const offset = Math.max(0, opts.offset ?? 0);
+    const limit = opts.limit && opts.limit > 0 ? opts.limit : items.length;
+    items = items.slice(offset, offset + limit);
+
+    // Compact Projection: Rút gọn 80% dung lượng payload khi client chỉ cần bảng view
+    if (opts.compact) {
+      items = items.map((it) => ({
+        symbol: it.symbol,
+        name: it.name,
+        price: it.price,
+        changePercent: it.changePercent,
+        volume: it.volume,
+        targetPrice: it.targetPrice,
+        targetUpsidePct: it.targetUpsidePct,
+        rating: it.rating,
+        reportCount: it.reportCount,
+        institutionOwnershipPct: it.institutionOwnershipPct,
+        leadershipOwnershipPct: it.leadershipOwnershipPct,
+        majorHoldersCount: it.majorHoldersCount,
+        pe: it.pe,
+        pb: it.pb,
+        pe3yAvg: it.pe3yAvg,
+        beta: it.beta,
+        high52w: it.high52w,
+        low52w: it.low52w,
+        foreignBuyRatioPct: it.foreignBuyRatioPct,
+        foreignNetVolume: it.foreignNetVolume,
+        foreignNetValue: it.foreignNetValue,
+        foreignRoom: it.foreignRoom,
+        quantEdgeScore: it.quantEdgeScore,
+        ouZScore: it.ouZScore,
+        ouHalfLife: it.ouHalfLife,
+        tripleBarrierRiskReward: it.tripleBarrierRiskReward,
+        quantAnomalyTag: it.quantAnomalyTag,
+        confluenceScore: it.confluenceScore,
+        confluenceBadge: it.confluenceBadge,
+        buyPoint: it.buyPoint,
+        buyPointDiffPct: it.buyPointDiffPct,
+        absBuyDiff: it.absBuyDiff,
+        buyZoneStatus: it.buyZoneStatus,
+        buyRange: it.buyRange,
+        stopLoss: it.stopLoss,
+        targetPricePlan: it.targetPricePlan,
+        riskReward: it.riskReward,
+        buyStrategy: it.buyStrategy,
+        mtfConsensus: it.mtfConsensus,
+        isMtfAligned: it.isMtfAligned,
+        mtfScore: it.mtfScore,
+        mtfBadgeVi: it.mtfBadgeVi,
+        rsRating: it.rsRating,
+        rsTrend: it.rsTrend,
+        isMarketLeader: it.isMarketLeader,
+        orcaMasterScore: it.orcaMasterScore,
+        orcaMasterCategory: it.orcaMasterCategory,
+        orcaMasterStrengthVi: it.orcaMasterStrengthVi,
+        smartMoneyScore: it.smartMoneyScore,
+        smartMoneySignal: it.smartMoneySignal,
+        smartMoneySignalVi: it.smartMoneySignalVi,
+        activeBuyRatioPct: it.activeBuyRatioPct,
+        vsaSignal: it.vsaSignal,
+        vsaSignalVi: it.vsaSignalVi,
+        apexQuantScore: it.apexQuantScore,
+        apexCategoryVi: it.apexCategoryVi,
+        maSignal: it.maSignal,
+        superTrendDir: it.superTrendDir,
+        isBrokenSupport: it.isBrokenSupport,
+        isTechnicalBuyApproved: it.isTechnicalBuyApproved,
+        isSweetLaunchZone: it.isSweetLaunchZone,
+        sectorRrgQuadrant: it.sectorRrgQuadrant,
+        sector: it.sector,
+        piotroskiFScore: it.piotroskiFScore,
+        altmanZone: it.altmanZone,
+      }));
+    }
+
+    const meta = buildMeta({
+      source: "multi-source-composite-screener (VPS + SSI + VNDirect + Vietcap + OQuant)",
+      sourceTimestampMs: Date.now(),
+      hasData: items.length > 0,
+      cached: res.cached,
+      stale: res.stale,
+      note: `Bộ lọc đa nguồn (${items.length}/${total} mã) - Hợp nhất Giá Realtime, Khối ngoại, Báo cáo và Ưu thế Quant.`,
+      slas: { liveSlaMs: 5_000, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
+    });
+
+    return { data: items, meta, total };
+  }
+
   const meta = buildMeta({
     source: "multi-source-composite-screener (VPS + SSI + VNDirect + Vietcap + OQuant)",
     sourceTimestampMs: Date.now(),
-    hasData: res.value.length > 0,
+    hasData: items.length > 0,
     cached: res.cached,
     stale: res.stale,
-    note: `Bộ lọc đa nguồn toàn diện (${res.value.length} mã) - Hợp nhất Giá Realtime, Khối ngoại, Báo cáo phân tích và Ưu thế Quant.`,
+    note: `Bộ lọc đa nguồn toàn diện (${items.length} mã) - Hợp nhất Giá Realtime, Khối ngoại, Báo cáo phân tích và Ưu thế Quant.`,
     slas: { liveSlaMs: 5_000, freshSlaMs: TTL_MS, delayedSlaMs: STALE_MS },
   });
 
-  return { data: res.value, meta };
+  return { data: items, meta, total: items.length };
 }
