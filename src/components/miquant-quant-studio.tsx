@@ -65,6 +65,7 @@ import { StockQuantFlowValuationWidget } from "@/components/stocks/quant-flow-va
 import { DeepFinancialsPanel } from "@/components/stocks/deep-financials-panel";
 import { AnalyticReportsPanel } from "@/components/stocks/analytic-reports-panel";
 import { SignedDisclosuresPanel } from "@/components/stocks/signed-disclosures-panel";
+import { FireAntQuantStudio } from "@/components/quant/fireant-quant-studio";
 
 function renderFormattedText(text: string) {
   if (!text) return null;
@@ -81,10 +82,10 @@ function renderFormattedText(text: string) {
   );
 }
 
-type ActiveTab = "bots" | "ranking" | "strategies" | "signals" | "institutional_lab";
+type ActiveTab = "fireant_studio" | "bots" | "ranking" | "strategies" | "signals" | "institutional_lab";
 
 export function OQuantStudio() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>("bots");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("fireant_studio");
   const [selectedBotId, setSelectedBotId] = useState<string>("bot_breakout_momentum");
   const [capitalInput, setCapitalInput] = useState<number>(100000000);
   const [allocationMode, setAllocationMode] = useState<AllocationMode>("EQUAL_WEIGHT");
@@ -446,10 +447,25 @@ export function OQuantStudio() {
       </div>
 
       {/* Main Tabs */}
-      <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-2">
+        <button
+          onClick={() => setActiveTab("fireant_studio")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+            activeTab === "fireant_studio"
+              ? "bg-accent-primary text-text-inverse shadow-sm"
+              : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
+          }`}
+        >
+          <Zap className="size-3.5 text-amber-400" />
+          <span>FireAnt Quant AI Studio</span>
+          <span className="rounded-full bg-accent-primary/20 px-1.5 py-0.2 text-[9px] text-accent-primary font-bold">
+            33 Chiến Lược
+          </span>
+        </button>
+
         <button
           onClick={() => setActiveTab("bots")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition cursor-pointer ${
             activeTab === "bots"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
@@ -516,6 +532,9 @@ export function OQuantStudio() {
           </span>
         </button>
       </div>
+
+      {/* TAB 0: FIREANT QUANT AI STUDIO */}
+      {activeTab === "fireant_studio" && <FireAntQuantStudio />}
 
       {/* TAB 1: 6 QUANT TRADING BOTS */}
       {activeTab === "bots" && (

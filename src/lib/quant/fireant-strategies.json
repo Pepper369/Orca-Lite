@@ -1,0 +1,281 @@
+[
+  {
+    "id": "golden-cross",
+    "kind": "strategy",
+    "title": "Golden Cross MA50 / MA200",
+    "description": "MA50 cắt lên MA200 thì mua, cắt xuống thì bán; chỉ mua khi VNINDEX > MA200, dừng lỗ trượt 15%.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"Golden Cross MA50 / MA200\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    fast: param.int(50, { min: 10, max: 100, label: \"MA nhanh\" }),\n    slow: param.int(200, { min: 100, max: 250, label: \"MA chậm\" }),\n    trail: param.pct(0.15, { min: 0.05, max: 0.3, label: \"Dừng lỗ trượt\" }),\n    calm: param.pct(0.67, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    const fast = ta.sma(d.close, p.fast);\n    const slow = ta.sma(d.close, p.slow);\n    return { entry: fast.crossAbove(slow), exit: fast.crossBelow(slow), score: d.value.rolling(20).mean() };\n  },\n  filter: (d, p) => {\n    // Bỏ các mã biến động mạnh nhất, đứng ngoài khi VNINDEX dưới MA200\n    const ok = d.ret.rolling(60).std().rank().lte(p.calm);\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  portfolio: { maxPositions: 10 },\n  risk: (p) => ({ trailingStop: p.trail }),\n});\n"
+  },
+  {
+    "id": "donchian-breakout",
+    "kind": "strategy",
+    "title": "Vượt đỉnh Donchian 55 phiên (Turtle)",
+    "description": "Mua khi giá vượt đỉnh 55 phiên và trên MA200, VNINDEX > MA200; bán khi thủng đáy 20 phiên.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"Vượt đỉnh Donchian 55 phiên (Turtle)\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    entryN: param.int(55, { min: 20, max: 120, label: \"Đỉnh N phiên\" }),\n    exitN: param.int(20, { min: 5, max: 60, label: \"Đáy N phiên\" }),\n    trail: param.pct(0.12, { min: 0.05, max: 0.3, label: \"Dừng lỗ trượt\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => ({\n    // Chỉ lấy điểm vượt đỉnh trong xu hướng dài hạn tăng (giá trên MA200)\n    entry: d.close.gt(d.high.highest(p.entryN).shift(1)).and(d.close.gt(ta.sma(d.close, 200))),\n    exit: d.close.lt(d.low.lowest(p.exitN).shift(1)),\n    score: d.volume.div(d.volume.rolling(20).mean()),\n  }),\n  filter: (d, p) => (p.market ? d.bench.close.gt(ta.sma(d.bench.close, 200)) : d.tradable),\n  portfolio: { maxPositions: 8 },\n  risk: (p) => ({ trailingStop: p.trail }),\n});\n"
+  },
+  {
+    "id": "macd-volume",
+    "kind": "strategy",
+    "title": "MACD cắt lên kèm khối lượng",
+    "description": "Histogram MACD cắt lên 0, KL > 1.5 lần TB20, giá trên MA200, mã biến động thấp; bán khi MACD < 0.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"MACD cắt lên kèm khối lượng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    volMult: param.num(1.5, { min: 1, max: 4, step: 0.1, label: \"KL / TB20 tối thiểu\" }),\n    calm: param.pct(0.4, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    const m = ta.macd(d.close, 12, 26, 9);\n    const volSpike = d.volume.gt(d.volume.rolling(20).mean().mul(p.volMult));\n    // Vào khi histogram cắt lên 0 có khối lượng, trong xu hướng dài hạn tăng; giữ tới khi đường MACD xuống dưới 0\n    // (thoát theo histogram thì lệnh quá ngắn, phí và thuế ăn hết lợi nhuận). Nhiều tín hiệu cùng lúc: ưu tiên mã\n    // thanh khoản cao\n    return {\n      entry: m.hist.crossAbove(0).and(volSpike).and(d.close.gt(ta.sma(d.close, 200))),\n      exit: m.macd.lt(0),\n      score: d.value.rolling(20).mean(),\n    };\n  },\n  filter: (d, p) => {\n    const ok = d.ret.rolling(60).std().rank().lte(p.calm);\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  portfolio: { maxPositions: 8 },\n  risk: { stopLoss: 0.08 },\n});\n"
+  },
+  {
+    "id": "breakout-52w",
+    "kind": "strategy",
+    "title": "Vượt đỉnh 52 tuần kèm khối lượng",
+    "description": "Giá vượt đỉnh 52 tuần, KL ≥ 1.5 lần TB20, VNINDEX > MA200; bán khi thủng MA50 / dừng lỗ trượt 20%.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"Vượt đỉnh 52 tuần kèm khối lượng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    volMult: param.num(1.5, { min: 1, max: 4, step: 0.1, label: \"KL / TB20 tối thiểu\" }),\n    trail: param.pct(0.2, { min: 0.05, max: 0.3, label: \"Dừng lỗ trượt\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    // Đóng cửa cao hơn mọi phiên trong 250 phiên trước đó, khối lượng tăng mạnh xác nhận\n    const newHigh = d.close.gt(d.close.highest(250).shift(1));\n    const volSpike = d.volume.gt(d.volume.rolling(20).mean().mul(p.volMult));\n    return {\n      entry: newHigh.and(volSpike),\n      exit: d.close.lt(ta.sma(d.close, 50)),\n      score: d.close.pct(126),\n    };\n  },\n  // Thị trường chung xấu (VNINDEX dưới MA200) thì không mở vị thế mới\n  filter: (d, p) => (p.market ? d.bench.close.gt(ta.sma(d.bench.close, 200)) : d.tradable),\n  portfolio: { maxPositions: 8 },\n  risk: (p) => ({ trailingStop: p.trail }),\n});\n"
+  },
+  {
+    "id": "supertrend",
+    "kind": "strategy",
+    "title": "Supertrend chuyển sang tăng",
+    "description": "Mua khi Supertrend(14, 3) chuyển sang tăng, giá và VNINDEX trên MA200; bán khi Supertrend báo giảm.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"Supertrend chuyển sang tăng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    n: param.int(14, { min: 5, max: 30, label: \"Chu kỳ ATR\" }),\n    mult: param.num(3, { min: 1, max: 5, step: 0.5, label: \"Hệ số ATR\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    // dir = 1 khi Supertrend báo xu hướng tăng, −1 khi báo giảm\n    const st = ta.supertrend(d, p.n, p.mult);\n    return {\n      entry: st.dir.crossAbove(0).and(d.close.gt(ta.sma(d.close, 200))),\n      exit: st.dir.lt(0),\n      score: d.close.pct(63),\n    };\n  },\n  filter: (d, p) => (p.market ? d.bench.close.gt(ta.sma(d.bench.close, 200)) : d.tradable),\n  portfolio: { maxPositions: 8 },\n  risk: { stopLoss: 0.1 },\n});\n"
+  },
+  {
+    "id": "ema-adx",
+    "kind": "strategy",
+    "title": "EMA 20 / 50 có lọc ADX",
+    "description": "Mua ở phiên đầu EMA20 > EMA50, ADX > 20, +DI > −DI, mã biến động thấp; bán khi EMA20 xuống dưới EMA50.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"EMA 20 / 50 có lọc ADX\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    fast: param.int(20, { min: 5, max: 50, label: \"EMA nhanh\" }),\n    slow: param.int(50, { min: 20, max: 150, label: \"EMA chậm\" }),\n    minAdx: param.int(20, { min: 10, max: 40, label: \"ADX tối thiểu\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    const fast = ta.ema(d.close, p.fast);\n    const slow = ta.ema(d.close, p.slow);\n    const dmi = ta.adx(d, 14);\n    // Xu hướng tăng đủ mạnh: EMA nhanh trên EMA chậm, ADX trên ngưỡng, phe mua áp đảo (+DI > −DI)\n    const trend = fast.gt(slow).and(dmi.adx.gt(p.minAdx)).and(dmi.plusDI.gt(dmi.minusDI));\n    return {\n      entry: trend.and(trend.shift(1).not()),\n      exit: fast.lt(slow),\n      score: dmi.adx,\n    };\n  },\n  // Bỏ nhóm biến động mạnh nhất (tín hiệu xu hướng của mã đầu cơ hay gãy)\n  filter: (d, p) => {\n    const ok = d.ret.rolling(60).std().rank().lte(p.calm);\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  portfolio: { maxPositions: 8 },\n  risk: { stopLoss: 0.08 },\n});\n"
+  },
+  {
+    "id": "ichimoku-cloud",
+    "kind": "strategy",
+    "title": "Ichimoku: giá vượt lên trên mây",
+    "description": "Mua khi giá cắt lên trên mây, Tenkan trên Kijun; bán khi giá thủng đáy mây hoặc VNINDEX xuống dưới MA200.",
+    "category": "Xu hướng",
+    "code": "strategy({\n  name: \"Ichimoku: giá vượt lên trên mây\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    tenkan: param.int(9, { min: 5, max: 20, label: \"Tenkan\" }),\n    kijun: param.int(26, { min: 15, max: 60, label: \"Kijun\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d, p) => {\n    const ich = ta.ichimoku(d, p.tenkan, p.kijun, p.kijun * 2);\n    // Mây của phiên hôm nay là Span A / B tính từ `kijun` phiên trước (mây được vẽ dịch về phía trước)\n    const spanA = ich.spanA.shift(p.kijun);\n    const spanB = ich.spanB.shift(p.kijun);\n    // VNINDEX xuống dưới MA200 thì bán luôn (điều kiện thị trường viết thành panel nhiều mã: d.close.gt(0).and(…))\n    const weak = d.close.gt(0).and(d.bench.close.lt(ta.sma(d.bench.close, 200)));\n    const below = d.close.lt(spanA.min(spanB));\n    return {\n      entry: d.close.crossAbove(spanA.max(spanB)).and(ich.tenkan.gt(ich.kijun)),\n      exit: p.market ? below.or(weak) : below,\n      score: d.close.pct(63),\n    };\n  },\n  filter: (d, p) => (p.market ? d.bench.close.gt(ta.sma(d.bench.close, 200)) : d.tradable),\n  portfolio: { maxPositions: 8 },\n  risk: { stopLoss: 0.1 },\n});\n"
+  },
+  {
+    "id": "rsi-pullback",
+    "kind": "strategy",
+    "title": "RSI hồi phục trong xu hướng tăng",
+    "description": "Mua VN30 khi RSI(14) cắt lên 30 trên MA200, bán khi RSI > 70 — mẫu kinh điển để tập tối ưu, kiểm định.",
+    "category": "Đảo chiều",
+    "code": "// RSI hồi phục: mua mã VN30 khi RSI cắt lên khỏi vùng quá bán mà giá vẫn trên MA200, bán khi RSI quá mua hoặc thủng MA50.\n// Mẫu kinh điển để tập Tối ưu và Kiểm định: bắt nhịp hồi ngắn hạn ở Việt Nam khó thắng phí, thuế và T+2 — thử đổi\n// ngưỡng, cắt lỗ hay rổ mã rồi xem kết quả có vững không.\nstrategy({\n  name: \"RSI hồi phục trong xu hướng tăng\",\n  universe: universe(\"VN30\"),\n  period: { from: \"2016-01-01\" },\n  params: {\n    len: param.int(14, { min: 2, max: 30, label: \"Chu kỳ RSI\" }),\n    lower: param.num(30, { min: 10, max: 45, label: \"Ngưỡng mua\" }),\n    upper: param.num(70, { min: 55, max: 90, label: \"Ngưỡng bán\" }),\n    stop: param.pct(0.07, { min: 0.03, max: 0.2, label: \"Cắt lỗ\" }),\n  },\n  signals: (d, p) => {\n    const r = ta.rsi(d.close, p.len);\n    const uptrend = d.close.gt(ta.sma(d.close, 200));\n    return {\n      entry: r.crossAbove(p.lower).and(uptrend),\n      exit: r.gt(p.upper).or(d.close.crossBelow(ta.sma(d.close, 50))),\n      score: r.neg(),\n    };\n  },\n  portfolio: { maxPositions: 5 },\n  risk: (p) => ({ stopLoss: p.stop }),\n});\n"
+  },
+  {
+    "id": "ma20-pullback",
+    "kind": "strategy",
+    "title": "Mua điều chỉnh về MA20 trong xu hướng tăng",
+    "description": "MA20 > MA50 > MA200: mua khi giá chạm MA20 rồi đóng cửa trên, mã biến động thấp; bán khi thủng MA50.",
+    "category": "Đảo chiều",
+    "code": "strategy({\n  name: \"Mua điều chỉnh về MA20 trong xu hướng tăng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    trail: param.pct(0.1, { min: 0.05, max: 0.25, label: \"Dừng lỗ trượt\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  signals: (d) => {\n    const ma20 = ta.sma(d.close, 20);\n    const ma50 = ta.sma(d.close, 50);\n    const ma200 = ta.sma(d.close, 200);\n    // Các đường MA xếp tăng dần và MA50 đang đi lên\n    const uptrend = ma20.gt(ma50).and(ma50.gt(ma200)).and(ma50.gt(ma50.shift(10)));\n    // Trong phiên giá lùi chạm MA20 nhưng đóng cửa vẫn trên MA20\n    const bounce = d.low.lte(ma20).and(d.close.gt(ma20));\n    return { entry: uptrend.and(bounce), exit: d.close.lt(ma50), score: d.close.pct(63) };\n  },\n  // Bỏ nhóm biến động mạnh nhất: nhịp chỉnh về MA20 của mã đầu cơ hay thành gãy xu hướng\n  filter: (d, p) => {\n    const ok = d.ret.rolling(60).std().rank().lte(p.calm);\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  portfolio: { maxPositions: 10 },\n  risk: (p) => ({ trailingStop: p.trail }),\n});\n"
+  },
+  {
+    "id": "momentum-6-1",
+    "kind": "strategy",
+    "title": "Momentum 6-1 xoay vòng hàng tháng",
+    "description": "10 mã tăng mạnh nhất 6 tháng (bỏ tháng gần nhất) trong nửa rổ biến động thấp; nghỉ khi VNINDEX < MA200.",
+    "category": "Xoay vòng",
+    "code": "strategy({\n  name: \"Momentum 6-1 xoay vòng hàng tháng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    lookback: param.int(126, { min: 60, max: 252, label: \"Số phiên đo đà tăng\" }),\n    skip: param.int(21, { min: 0, max: 42, label: \"Bỏ qua gần nhất\" }),\n    top: param.int(10, { min: 3, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.5, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d, p) => d.close.shift(p.skip).pct(p.lookback - p.skip),\n  filter: (d, p) => {\n    // Bỏ các mã biến động mạnh nhất (đà tăng của mã đầu cơ dễ gãy), đứng ngoài khi VNINDEX dưới MA200\n    const ok = d.close.gt(ta.sma(d.close, 100)).and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  // Mỗi mã tối đa 1/top vốn: ít mã đủ điều kiện thì phần còn lại để tiền mặt\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "momentum-market-filter",
+    "kind": "strategy",
+    "title": "Momentum 12-1 có lọc VNINDEX",
+    "description": "Mỗi tháng nắm 10 mã tăng mạnh nhất 12 tháng (bỏ tháng gần nhất), biến động thấp; VNINDEX < MA200 thì giữ tiền.",
+    "category": "Xoay vòng",
+    "code": "strategy({\n  name: \"Momentum 12-1 có lọc VNINDEX\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    lookback: param.int(250, { min: 120, max: 250, label: \"Số phiên đo đà tăng\" }),\n    top: param.int(10, { min: 3, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.5, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    ma: param.int(200, { min: 50, max: 250, label: \"MA của VNINDEX\" }),\n  },\n  rank: (d, p) => d.close.shift(21).pct(p.lookback - 21),\n  // Bỏ nửa rổ biến động mạnh nhất; VNINDEX dưới MA thì không mã nào đủ điều kiện → kỳ đó giữ tiền mặt\n  filter: (d, p) =>\n    d.close\n      .gt(ta.sma(d.close, 100))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm))\n      .and(d.bench.close.gt(ta.sma(d.bench.close, p.ma))),\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "near-high-rotation",
+    "kind": "strategy",
+    "title": "Gần đỉnh 52 tuần xoay vòng hàng tháng",
+    "description": "Mỗi tháng nắm 10 mã sát đỉnh 52 tuần nhất trong số mã trên MA200, biến động thấp; nghỉ khi VNINDEX < MA200.",
+    "category": "Xoay vòng",
+    "code": "strategy({\n  name: \"Gần đỉnh 52 tuần xoay vòng hàng tháng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    top: param.int(10, { min: 3, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  // Giá hiện tại / đỉnh 52 tuần: càng gần 1 càng ít áp lực bán chốt lời phía trên\n  rank: (d) => d.close.div(d.high.highest(250)),\n  // Bỏ nhóm biến động mạnh nhất (sát đỉnh nhờ vài phiên trần dễ gãy), VNINDEX dưới MA200 thì giữ tiền\n  filter: (d, p) => {\n    const ok = d.close.gt(ta.sma(d.close, 200)).and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "sharpe-momentum",
+    "kind": "strategy",
+    "title": "Momentum điều chỉnh theo biến động",
+    "description": "Xếp hạng theo mức tăng 6 tháng chia độ biến động — ưu tiên mã tăng đều; nghỉ khi VNINDEX < MA200.",
+    "category": "Xoay vòng",
+    "code": "strategy({\n  name: \"Momentum điều chỉnh theo biến động\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    lookback: param.int(126, { min: 60, max: 250, label: \"Số phiên đo đà tăng\" }),\n    top: param.int(10, { min: 3, max: 30, label: \"Số mã nắm giữ\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  // Mức tăng chia cho độ biến động: ưu tiên mã tăng đều thay vì tăng nhờ vài phiên trần\n  rank: (d, p) => d.close.pct(p.lookback).div(d.ret.rolling(p.lookback).std()),\n  filter: (d, p) => {\n    const ok = d.close.gt(ta.sma(d.close, 100));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"invvol\" }),\n});\n"
+  },
+  {
+    "id": "sector-rotation",
+    "kind": "strategy",
+    "title": "Xoay vòng theo ngành dẫn dắt",
+    "description": "Mỗi tháng chọn 3 ngành tăng mạnh nhất 6 tháng, nắm 10 mã mạnh nhất trong đó; nghỉ khi VNINDEX < MA200.",
+    "category": "Xoay vòng",
+    "code": "strategy({\n  name: \"Xoay vòng theo ngành dẫn dắt\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    lookback: param.int(126, { min: 20, max: 250, label: \"Số phiên đo đà tăng\" }),\n    sectors: param.int(3, { min: 1, max: 6, label: \"Số ngành mạnh nhất\" }),\n    top: param.int(10, { min: 3, max: 20, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.67, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d, p) => {\n    const mom = d.close.pct(p.lookback);\n    // Gom chỉ số các mã theo ngành\n    const groups = new Map();\n    d.meta.forEach((m, i) => {\n      if (!m.industry) return;\n      if (!groups.has(m.industry)) groups.set(m.industry, []);\n      groups.get(m.industry).push(i);\n    });\n    const rows = d.symbols.map(() => new Float32Array(d.days.length).fill(NaN));\n    for (let t = 0; t < d.days.length; t++) {\n      // Đà tăng trung bình của từng ngành (cần ít nhất 3 mã có dữ liệu)\n      const ranked = [];\n      for (const members of groups.values()) {\n        const vals = members.map((i) => mom.get(i, t)).filter((v) => v === v);\n        if (vals.length >= 3) ranked.push({ members, avg: vals.reduce((a, b) => a + b, 0) / vals.length });\n      }\n      ranked.sort((a, b) => b.avg - a.avg);\n      // Chỉ chấm điểm các mã thuộc những ngành mạnh nhất; điểm = đà tăng của chính mã đó\n      for (const g of ranked.slice(0, p.sectors)) for (const i of g.members) rows[i][t] = mom.get(i, t);\n    }\n    return Panel.fromRows(d.symbols, d.days, rows);\n  },\n  filter: (d, p) => {\n    // Bỏ các mã biến động mạnh nhất, đứng ngoài khi VNINDEX dưới MA200\n    const ok = d.close.gt(ta.sma(d.close, 50)).and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\" }),\n});\n"
+  },
+  {
+    "id": "quality-persistence",
+    "kind": "strategy",
+    "title": "ROE từ 15% ba năm liền + động lượng",
+    "description": "Mã có ROE ≥ 15% ở cả 3 BCTC năm gần nhất; mỗi tháng nắm 10 mã đà tăng 6 tháng mạnh nhất — sụt giảm thấp.",
+    "category": "Phòng thủ",
+    "usesQdf": true,
+    "code": "// Chất lượng bền vững: chỉ xét doanh nghiệp có ROE từ 15% ở cả ba BCTC năm gần nhất đã công bố (không chỉ một năm đẹp);\n// mỗi tháng mua các mã có đà tăng 6 tháng (bỏ tháng gần nhất) mạnh nhất, trên MA100, trong nhóm biến động thấp. VNINDEX\n// dưới MA200 thì giữ tiền. Mỗi mã tối đa 1/top vốn — danh mục phòng thủ, sụt giảm thấp hơn hẳn thị trường.\nconst roeYear = (d, ago) => d.fin(\"ROE\", { period: \"year\", ago });\n\nstrategy({\n  name: \"ROE từ 15% ba năm liền + động lượng\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minRoe: param.pct(0.15, { min: 0.08, max: 0.3, label: \"ROE tối thiểu mỗi năm\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.shift(21).pct(105),\n  filter: (d, p) => {\n    const ok = roeYear(d, 0)\n      .gte(p.minRoe)\n      .and(roeYear(d, 1).gte(p.minRoe))\n      .and(roeYear(d, 2).gte(p.minRoe))\n      .and(d.close.gt(ta.sma(d.close, 100)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "low-volatility",
+    "kind": "strategy",
+    "title": "Biến động thấp + ROE cao xoay vòng hàng quý",
+    "description": "Mỗi quý nắm 15 mã biến động 60 phiên thấp nhất trong số mã có lãi, ROE ≥ 12%, trên MA200 — phòng thủ.",
+    "category": "Phòng thủ",
+    "usesQdf": true,
+    "code": "// Biến động thấp + ROE cao: mỗi quý nắm các mã có độ lệch chuẩn lợi nhuận 60 phiên thấp nhất, nhưng chỉ trong số mã có\n// lãi, ROE từ 12% (BCTC đã công bố) và giá trên MA200 — mã ít biến động vì đang bị bỏ quên, đi ngang trong xu hướng giảm\n// bị loại. VNINDEX dưới MA200 thì giữ tiền. Tỷ trọng nghịch với biến động, mỗi mã tối đa 1/top vốn.\nstrategy({\n  name: \"Biến động thấp + ROE cao xoay vòng hàng quý\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"quarter\",\n  params: {\n    window: param.int(60, { min: 20, max: 250, label: \"Cửa sổ biến động\" }),\n    minRoe: param.pct(0.12, { min: 0, max: 0.3, label: \"ROE tối thiểu\" }),\n    top: param.int(15, { min: 5, max: 40, label: \"Số mã\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d, p) => d.ret.rolling(p.window).std().neg(),\n  filter: (d, p) => {\n    const ok = d.eps.gt(0).and(d.roe.gte(p.minRoe)).and(d.close.gt(ta.sma(d.close, 200)));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"invvol\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "dual-momentum",
+    "kind": "strategy",
+    "title": "Dual momentum ETF VN30 / tiền mặt",
+    "description": "Nắm ETF E1VFVN30 khi lợi nhuận 12 tháng dương và giá trên MA200, ngược lại giữ tiền mặt. Xem xét hàng tháng.",
+    "category": "Phòng thủ",
+    "code": "strategy({\n  name: \"Dual momentum ETF VN30 / tiền mặt\",\n  universe: universe([\"E1VFVN30\"]),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: { lookback: param.int(250, { min: 60, max: 250, label: \"Số phiên đo đà\" }) },\n  weights: (d, p) => d.close.pct(p.lookback).gt(0).and(d.close.gt(ta.sma(d.close, 200))).mul(0.98),\n});\n"
+  },
+  {
+    "id": "low-beta",
+    "kind": "strategy",
+    "title": "Beta thấp xoay vòng hàng quý",
+    "description": "Mỗi quý nắm 15 mã beta thấp nhất đang trên MA200, nghỉ khi VNINDEX < MA200 — ít bị cuốn theo nhịp giảm.",
+    "category": "Phòng thủ",
+    "code": "strategy({\n  name: \"Beta thấp xoay vòng hàng quý\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"quarter\",\n  params: {\n    window: param.int(250, { min: 60, max: 500, label: \"Cửa sổ tính beta\" }),\n    top: param.int(15, { min: 5, max: 40, label: \"Số mã\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d, p) => {\n    // Beta = cov(lợi nhuận mã, lợi nhuận VNINDEX) / var(lợi nhuận VNINDEX) trên `window` phiên\n    const m = d.bench.close.pct(1);\n    const r = d.ret;\n    const cov = r.mul(m).rolling(p.window).mean().sub(r.rolling(p.window).mean().mul(m.rolling(p.window).mean()));\n    return cov.div(m.rolling(p.window).var()).neg();\n  },\n  // Beta thấp thường là mã đang giảm riêng lẻ: chỉ chọn mã trên MA200, đứng ngoài khi VNINDEX dưới MA200\n  filter: (d, p) => {\n    const ok = d.close.gt(ta.sma(d.close, 200));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\" }),\n});\n"
+  },
+  {
+    "id": "vn30-trend",
+    "kind": "strategy",
+    "title": "Rổ VN30 khi VNINDEX trên MA200",
+    "description": "Nắm đều 30 mã VN30 khi VNINDEX trên MA200 (vùng đệm 2%), bán hết khi chỉ số xuống dưới MA200.",
+    "category": "Phòng thủ",
+    "code": "strategy({\n  name: \"Rổ VN30 khi VNINDEX trên MA200\",\n  universe: universe(\"VN30\"),\n  period: { from: \"2016-01-01\" },\n  params: {\n    ma: param.int(200, { min: 50, max: 250, label: \"MA của VNINDEX\" }),\n    band: param.pct(0.02, { min: 0, max: 0.1, label: \"Vùng đệm quanh MA\" }),\n  },\n  signals: (d, p) => {\n    const vn = d.bench.close;\n    const ma = ta.sma(vn, p.ma);\n    // Tín hiệu của VNINDEX áp cho mọi mã trong rổ; vùng đệm tránh mua bán liên tục khi chỉ số đi quanh MA\n    const listed = d.close.gt(0);\n    return { entry: listed.and(vn.gt(ma.mul(1 + p.band))), exit: listed.and(vn.lt(ma.mul(1 - p.band))) };\n  },\n  portfolio: { maxPositions: 30 },\n});\n"
+  },
+  {
+    "id": "foreign-rotation",
+    "kind": "strategy",
+    "title": "Xoay vòng theo khối ngoại mua ròng",
+    "description": "Mỗi tháng nắm 8 mã HOSE top 60 được khối ngoại mua ròng 20 phiên mạnh nhất (so với GT giao dịch).",
+    "category": "Dòng tiền",
+    "usesFlows": true,
+    "code": "strategy({\n  name: \"Xoay vòng theo khối ngoại mua ròng\",\n  universe: universe(\"HOSE\").top(60),\n  period: { from: \"2019-01-01\" },\n  rebalance: \"month\",\n  params: {\n    days: param.int(20, { min: 5, max: 60, label: \"Số phiên cộng dồn\" }),\n    top: param.int(8, { min: 3, max: 20, label: \"Số mã nắm giữ\" }),\n  },\n  // Mua ròng của khối ngoại so với GT giao dịch của chính mã; chỉ chọn mã đang được mua ròng\n  rank: (d, p) => d.foreignNet.rolling(p.days).sum().div(d.value.rolling(p.days).sum()),\n  select: (p) => ({ top: p.top, weight: \"equal\", minScore: 0 }),\n});\n"
+  },
+  {
+    "id": "institutional-flow",
+    "kind": "strategy",
+    "title": "Xoay vòng theo khối ngoại và tự doanh",
+    "description": "Mỗi tháng nắm 8 mã HOSE top 60 có tổng mua ròng khối ngoại + tự doanh 20 phiên cao nhất. Từ 6/2020.",
+    "category": "Dòng tiền",
+    "usesFlows": true,
+    "code": "strategy({\n  name: \"Xoay vòng theo khối ngoại và tự doanh\",\n  universe: universe(\"HOSE\").top(60),\n  // Dữ liệu tự doanh có từ khoảng giữa năm 2020\n  period: { from: \"2020-06-01\" },\n  rebalance: \"month\",\n  params: {\n    days: param.int(20, { min: 5, max: 60, label: \"Số phiên cộng dồn\" }),\n    top: param.int(8, { min: 3, max: 20, label: \"Số mã nắm giữ\" }),\n  },\n  rank: (d, p) => {\n    // Tổng mua ròng của hai khối tổ chức so với GT giao dịch của mã (phiên thiếu dữ liệu tính là 0)\n    const net = d.foreignNet.fillna(0).add(d.propNet.fillna(0));\n    return net.rolling(p.days).sum().div(d.value.rolling(p.days).sum());\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", minScore: 0 }),\n});\n"
+  },
+  {
+    "id": "net-cash-momentum",
+    "kind": "strategy",
+    "title": "Tiền mặt ròng + động lượng",
+    "description": "Doanh nghiệp tiền mặt nhiều hơn nợ vay, có lãi; mỗi tháng nắm 10 mã đà tăng 6 tháng mạnh nhất, biến động thấp.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Tiền mặt ròng + động lượng: chỉ xét doanh nghiệp có tiền nhiều hơn nợ vay (tiền, tương đương tiền và đầu tư ngắn hạn\n// trừ vay ngắn và dài hạn, theo BCTC quý đã công bố trước phiên tái cân bằng) và đang có lãi; mỗi tháng mua các mã có đà\n// tăng 6 tháng (bỏ tháng gần nhất) mạnh nhất, trên MA100, trong nhóm biến động thấp. VNINDEX dưới MA200 thì giữ tiền.\n// Mỗi mã tối đa 1/top vốn: ít mã đủ điều kiện thì phần còn lại để tiền mặt, không dồn vốn vào một hai mã.\nconst netCash = (d) =>\n  d.fin(\"Cash\")\n    .add(d.fin(\"CashEquivalent\").fillna(0))\n    .add(d.fin(\"ShortTermFinancialInvestment\").fillna(0))\n    .sub(d.fin(\"ShortTermInterestBearingDebt\").fillna(0))\n    .sub(d.fin(\"LongTermInterestBearingDebt\").fillna(0));\n\nstrategy({\n  name: \"Tiền mặt ròng + động lượng\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.shift(21).pct(105),\n  filter: (d, p) => {\n    const ok = netCash(d)\n      .gt(0)\n      .and(d.eps.gt(0))\n      .and(d.close.gt(ta.sma(d.close, 100)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "growth-trend",
+    "kind": "strategy",
+    "title": "Tăng trưởng lợi nhuận trong xu hướng tăng",
+    "description": "LN tăng ≥ 20%, doanh thu tăng so cùng kỳ, trên MA200, biến động thấp; mỗi tháng nắm 10 mã đà tăng mạnh nhất.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Tăng trưởng lợi nhuận trong xu hướng tăng: chỉ xét mã có lợi nhuận và doanh thu tăng so cùng kỳ (BCTC đã công bố),\n// giá trên MA200, trong nhóm biến động thấp; mỗi tháng mua các mã có đà tăng 6 tháng (bỏ tháng gần nhất) mạnh nhất.\n// VNINDEX dưới MA200 thì giữ tiền. Mỗi mã tối đa 1/top vốn: ít mã đủ điều kiện thì phần còn lại để tiền mặt.\nstrategy({\n  name: \"Tăng trưởng lợi nhuận trong xu hướng tăng\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minGrowth: param.pct(0.2, { min: 0, max: 1, label: \"Tăng trưởng LN tối thiểu\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.shift(21).pct(105),\n  filter: (d, p) => {\n    const ok = d.profitGrowth\n      .gte(p.minGrowth)\n      .and(d.revenueGrowth.gt(0))\n      .and(d.close.gt(ta.sma(d.close, 200)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "roic-momentum",
+    "kind": "strategy",
+    "title": "ROIC cao + động lượng",
+    "description": "Doanh nghiệp ROIC ≥ 12% (dùng vốn hiệu quả); mỗi tháng nắm 10 mã đà tăng 6 tháng mạnh nhất, biến động thấp.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// ROIC cao + động lượng: chỉ xét doanh nghiệp dùng vốn hiệu quả (ROIC 4 quý từ 12%, theo BCTC quý đã công bố trước phiên\n// tái cân bằng); mỗi tháng mua các mã có đà tăng 6 tháng (bỏ tháng gần nhất) mạnh nhất, trên MA100, trong nhóm biến động\n// thấp. VNINDEX dưới MA200 thì giữ tiền. Mỗi mã tối đa 1/top vốn.\nstrategy({\n  name: \"ROIC cao + động lượng\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minRoic: param.pct(0.12, { min: 0.05, max: 0.3, label: \"ROIC tối thiểu\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.shift(21).pct(105),\n  filter: (d, p) => {\n    const ok = d.fin(\"ROIC\")\n      .gte(p.minRoic)\n      .and(d.close.gt(ta.sma(d.close, 100)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "dividend-yield",
+    "kind": "strategy",
+    "title": "Cổ tức bền vững xoay vòng hàng quý",
+    "description": "Mỗi quý nắm 10 mã cổ tức tiền 12 tháng cao nhất (≥ 4%) có lãi, ROE ≥ 10%, chi trả ≤ 90% lợi nhuận.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Cổ tức bền vững: mỗi quý mua các cổ phiếu có tỷ suất cổ tức tiền 12 tháng cao nhất (cổ tức tiền đã GDKHQ trong 250 phiên\n// ÷ giá hiện tại), nhưng chỉ trong số mã trả được lâu dài: đang có lãi, ROE từ 10%, tỷ lệ chi trả của BCTC năm gần nhất\n// không quá 90% lợi nhuận (không vay hay bán tài sản để chia). Bỏ nhóm biến động mạnh nhất, VNINDEX dưới MA200 thì giữ\n// tiền; mỗi mã tối đa 1/top vốn.\nstrategy({\n  name: \"Cổ tức bền vững xoay vòng hàng quý\",\n  universe: universe(\"HOSE\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"quarter\",\n  params: {\n    minYield: param.pct(0.04, { min: 0, max: 0.12, label: \"Tỷ suất cổ tức tối thiểu\" }),\n    maxPayout: param.pct(0.9, { min: 0.3, max: 1.5, label: \"Tỷ lệ chi trả tối đa\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.dividendYield,\n  filter: (d, p) => {\n    const ok = d.dividendYield\n      .gte(p.minYield)\n      .and(d.eps.gt(0))\n      .and(d.roe.gte(0.1))\n      .and(d.fin(\"PayoutRatio\", { period: \"year\" }).lte(p.maxPayout))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", minScore: 0, maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "cash-earnings-momentum",
+    "kind": "strategy",
+    "title": "Lợi nhuận có tiền về + động lượng",
+    "description": "Dòng tiền kinh doanh 4 quý ≥ LNST, ROE ≥ 12%; mỗi tháng nắm 10 mã đà tăng 6 tháng mạnh nhất, biến động thấp.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Lợi nhuận có tiền về + động lượng: chỉ xét doanh nghiệp có dòng tiền kinh doanh 4 quý không thấp hơn LNST cổ đông mẹ\n// 4 quý (lợi nhuận thật sự thu được tiền, không nằm ở phải thu, tồn kho) và ROE từ 12%, theo BCTC quý đã công bố trước\n// phiên tái cân bằng; mỗi tháng mua các mã có đà tăng 6 tháng (bỏ tháng gần nhất) mạnh nhất, trên MA100, trong nhóm biến\n// động thấp. VNINDEX dưới MA200 thì giữ tiền. Mỗi mã tối đa 1/top vốn.\nstrategy({\n  name: \"Lợi nhuận có tiền về + động lượng\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minRoe: param.pct(0.12, { min: 0.05, max: 0.3, label: \"ROE tối thiểu\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.6, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.shift(21).pct(105),\n  filter: (d, p) => {\n    const cfo = d.fin(\"CashflowFromOperatingActivity\", { ttm: true });\n    const profit = d.fin(\"ParentCompanyShareholderProfitAfterTax\", { ttm: true });\n    const ok = cfo\n      .gte(profit)\n      .and(profit.gt(0))\n      .and(d.roe.gte(p.minRoe))\n      .and(d.close.gt(ta.sma(d.close, 100)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "garp",
+    "kind": "strategy",
+    "title": "Tăng trưởng với giá hợp lý (GARP)",
+    "description": "Mỗi tháng nắm 10 mã HOSE LNST 4 quý tăng ≥ 15%, ROE ≥ 15%, P/E ≤ 15, giá trên MA200; ưu tiên P/E thấp.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Tăng trưởng với giá hợp lý (GARP): LNST cổ đông mẹ 4 quý tăng so với 4 quý trước đó, ROE cao, P/E vừa phải và giá\n// trên MA200; mỗi tháng mua các mã lợi suất lợi nhuận (EPS / giá) cao nhất. LNST 4 quý cộng từ BCTC quý đã công bố\n// trước phiên tái cân bằng (d.fin với ttm, không nhìn trước); P/E theo giá hiện tại.\nstrategy({\n  name: \"Tăng trưởng với giá hợp lý (GARP)\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minGrowth: param.pct(0.15, { min: 0, max: 0.5, label: \"Tăng trưởng LNST 4 quý tối thiểu\" }),\n    maxPe: param.num(15, { min: 6, max: 25, step: 1, label: \"P/E tối đa\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.earningsYield,\n  filter: (d, p) => {\n    const profit = d.fin(\"ParentCompanyShareholderProfitAfterTax\", { ttm: true });\n    const before = d.fin(\"ParentCompanyShareholderProfitAfterTax\", { ttm: true, ago: 4 });\n    const ok = profit\n      .div(before.where(before.gt(0)))\n      .sub(1)\n      .gte(p.minGrowth)\n      .and(d.fin(\"ROE\").gte(0.15))\n      .and(d.pe.gt(0))\n      .and(d.pe.lte(p.maxPe))\n      .and(d.close.gt(ta.sma(d.close, 200)));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\" }),\n});\n"
+  },
+  {
+    "id": "earnings-acceleration",
+    "kind": "strategy",
+    "title": "Lợi nhuận quý tăng tốc",
+    "description": "Mỗi tháng nắm 10 mã LNST quý tăng ≥ 20% so cùng kỳ và nhanh hơn quý trước, doanh thu tăng, giá trên MA200.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Lợi nhuận quý tăng tốc: LNST cổ đông mẹ của quý gần nhất tăng mạnh so cùng kỳ và tăng nhanh hơn quý trước,\n// doanh thu cũng tăng, giá trên MA200. Mỗi tháng nắm các mã tăng trưởng mạnh nhất. Số liệu quý lấy từ BCTC đã công bố\n// trước phiên tái cân bằng (d.fin, không nhìn trước); kỳ cùng kỳ năm trước ≤ 0 thì bỏ qua (tăng trưởng không có nghĩa).\nconst lnst = (d, ago) => d.fin(\"ParentCompanyShareholderProfitAfterTax\", { ago });\nconst growth = (d, k) => lnst(d, k).div(lnst(d, k + 4).where(lnst(d, k + 4).gt(0))).sub(1);\n\nstrategy({\n  name: \"Lợi nhuận quý tăng tốc\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minGrowth: param.pct(0.2, { min: 0, max: 1, label: \"Tăng trưởng LNST quý tối thiểu\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => growth(d, 0),\n  filter: (d, p) => {\n    const now = growth(d, 0);\n    const before = growth(d, 1);\n    const sale = d.fin(\"NetSale\");\n    const saleBefore = d.fin(\"NetSale\", { ago: 4 });\n    const ok = now\n      .gte(p.minGrowth)\n      .and(now.gt(before))\n      .and(before.gt(0))\n      .and(sale.gt(saleBefore))\n      .and(d.close.gt(ta.sma(d.close, 200)));\n    return p.market ? ok.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : ok;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\" }),\n});\n"
+  },
+  {
+    "id": "value-quality",
+    "kind": "strategy",
+    "title": "Giá trị + chất lượng: P/E thấp, ROE cao",
+    "description": "Mỗi tháng nắm 10 mã HOSE P/E thấp nhất có ROE ≥ 15%, nợ vừa phải, lợi nhuận tăng, giá trên MA100.",
+    "category": "Cơ bản",
+    "usesQdf": true,
+    "code": "// Giá trị + chất lượng: mỗi tháng mua các cổ phiếu P/E thấp nhất (lợi suất lợi nhuận cao nhất) trong số mã có lãi,\n// ROE cao, nợ phải trả vừa phải và lợi nhuận tăng so cùng kỳ. EPS, ROE, tăng trưởng lấy từ BCTC đã công bố trước phiên\n// tái cân bằng (không nhìn trước). Giá phải trên MA100 (tránh mã rẻ vì đang bị bán tháo) và không thuộc nhóm biến động\n// mạnh nhất; mỗi mã tối đa 1/top vốn.\nstrategy({\n  name: \"Giá trị + chất lượng: P/E thấp, ROE cao\",\n  universe: universe(\"HOSE\").liquid(10e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    minRoe: param.pct(0.15, { min: 0.05, max: 0.3, label: \"ROE tối thiểu\" }),\n    maxDebt: param.num(1.5, { min: 0.5, max: 5, step: 0.5, label: \"Nợ phải trả / vốn chủ tối đa\" }),\n    top: param.int(10, { min: 5, max: 30, label: \"Số mã nắm giữ\" }),\n    calm: param.pct(0.7, { min: 0.2, max: 1, label: \"Nhóm biến động thấp (% rổ)\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.earningsYield,\n  // Ngân hàng không có chỉ tiêu nợ phải trả / vốn chủ → không loại\n  filter: (d, p) =>\n    d.eps.gt(0)\n      .and(d.roe.gte(p.minRoe))\n      .and(d.debtToEquity.fillna(0).lte(p.maxDebt))\n      .and(d.profitGrowth.gt(0))\n      .and(d.close.gt(ta.sma(d.close, 100)))\n      .and(d.ret.rolling(60).std().rank().lte(p.calm))\n      .and(p.market ? d.bench.close.gt(ta.sma(d.bench.close, 200)) : d.tradable),\n  select: (p) => ({ top: p.top, weight: \"equal\", minScore: 0, maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "pattern-breakout",
+    "kind": "strategy",
+    "title": "Mua khi phá vỡ mẫu hình tăng giá",
+    "description": "Mua khi giá vượt miệng cốc, đỉnh giữa hai đáy hoặc cạnh trên tam giác tăng kèm khối lượng, VNINDEX trên MA200; giữ tối đa 120 phiên, cắt lỗ 12%.",
+    "category": "Mẫu hình",
+    "code": "// Mua khi phá vỡ mẫu hình tăng giá: cốc tay cầm, hai đáy (W), tam giác tăng — vào lệnh ở phiên giá đóng cửa vượt miệng cốc / đỉnh\n// giữa / cạnh trên lần đầu với khối lượng từ `minVol` lần TB20 (ta.patterns, ZigZag nhân quả). Lợi thế của mẫu hình tích lũy chậm\n// trong 2–3 tháng nên giữ lâu (mặc định tối đa 120 phiên) và cắt lỗ rộng; giữ 60 phiên, cắt lỗ 8% thì gần như mất lợi thế.\n// Kết quả nhạy với cách thoát lệnh và phụ thuộc nhiều vào năm 2021 — xem \"bỏ năm tốt nhất\" trước khi dùng.\nstrategy({\n  name: \"Mua khi phá vỡ mẫu hình tăng giá\",\n  universe: universe(\"ALL\").liquid(3e9).top(240),\n  period: { from: \"2016-01-01\" },\n  params: {\n    cup: param.bool(true, { label: \"Cốc tay cầm\" }),\n    w: param.bool(true, { label: \"Hai đáy (W)\" }),\n    tri: param.bool(true, { label: \"Tam giác tăng\" }),\n    minVol: param.num(1.5, { min: 1, max: 3, step: 0.1, label: \"KL phiên phá vỡ / TB20 từ\" }),\n    th: param.pct(0.08, { min: 0.05, max: 0.12, label: \"Ngưỡng đỉnh / đáy (ZigZag)\" }),\n    hold: param.int(120, { min: 20, max: 250, label: \"Giữ tối đa (phiên)\" }),\n    stop: param.pct(0.12, { min: 0.05, max: 0.25, label: \"Cắt lỗ\" }),\n    market: param.bool(true, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  portfolio: { maxPositions: 10, sizing: \"equal\" },\n  risk: (p) => ({ stopLoss: p.stop, maxHoldDays: p.hold }),\n  signals: (d, p) => {\n    const only = [p.cup && \"cup\", p.w && \"doubleBottom\", p.tri && \"ascTriangle\"].filter(Boolean);\n    if (!only.length) throw new Error(\"Chọn ít nhất một mẫu hình\");\n    const pt = ta.patterns(d, { only, th: p.th, minVol: p.minVol });\n    let entry = pt.breakout.gt(0);\n    if (p.market) entry = entry.and(d.bench.close.gt(ta.sma(d.bench.close, 200)));\n    // Nhiều tín hiệu cùng phiên: ưu tiên phiên phá vỡ khối lượng lớn\n    return { entry, score: pt.volRatio };\n  },\n});\n"
+  },
+  {
+    "id": "big30-inflation",
+    "kind": "strategy",
+    "title": "Rổ cổ phiếu lớn theo lạm phát",
+    "description": "Nắm đều 30 mã thanh khoản lớn nhất HOSE khi lạm phát (CPI so cùng kỳ) không tăng so với 3 tháng trước; lạm phát tăng thì để tiền mặt.",
+    "category": "Vĩ mô",
+    "usesQdf": true,
+    "code": "// Rổ cổ phiếu lớn theo lạm phát (tên cũ \"Rổ cổ phiếu lớn theo đèn lạm phát\"): nắm đều 30 mã thanh khoản lớn nhất HOSE (theo thời\n// điểm), cân bằng hàng tháng; khi lạm phát (CPI so cùng kỳ) cao hơn `look` phiên trước thì để tiền mặt. Số CPI là số đã công bố\n// trước từng phiên nên không nhìn trước. 2016–10/2026: lợi nhuận gần như rổ luôn nắm (khoảng 9,6% so với 9,4%/năm) nhưng sụt giảm\n// tối đa còn khoảng −21% thay vì −51%.\nstrategy({\n  name: \"Rổ cổ phiếu lớn theo lạm phát\",\n  universe: universe(\"HOSE\").liquid(20e9).top(30),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    light: param.bool(true, { label: \"Để tiền mặt khi lạm phát tăng\" }),\n    look: param.int(63, { min: 21, max: 126, label: \"So CPI với bao nhiêu phiên trước\" }),\n    rates: param.bool(false, { label: \"Thêm điều kiện lãi suất (LNH qua đêm tăng)\" }),\n  },\n  rank: (d) => d.value.rolling(20).mean(),\n  filter: (d, p) => {\n    let ok = d.close.gt(0);\n    if (p.light) {\n      const cpi = d.macro(\"cpi_yoy\");\n      ok = ok.and(cpi.gt(cpi.shift(p.look)).not());\n    }\n    if (p.rates) {\n      const ib = d.macro(\"ib_on\");\n      ok = ok.and(ib.rolling(20).mean().gt(ib.rolling(120).mean()).not());\n    }\n    return ok;\n  },\n  select: { top: 30, weight: \"equal\", maxWeight: 1 / 30 },\n});\n"
+  },
+  {
+    "id": "rate-cycle-rotation",
+    "kind": "strategy",
+    "title": "Xoay vòng ngành theo chu kỳ lãi suất",
+    "description": "Lãi suất liên ngân hàng 3 tháng giảm: nắm chứng khoán, bất động sản, bán lẻ; lãi suất tăng: chuyển sang điện, nước, dược, thực phẩm. Chọn mã đà tăng 3 tháng mạnh nhất.",
+    "category": "Vĩ mô",
+    "usesQdf": true,
+    "code": "// Xoay vòng ngành theo chu kỳ lãi suất: lãi suất liên ngân hàng 3 tháng (TB 20 phiên) thấp hơn `look` phiên trước → nắm nhóm hưởng\n// lợi khi tiền rẻ (chứng khoán, bất động sản, bán lẻ); lãi suất tăng → nhóm phòng thủ (điện, nước, dược, thực phẩm, đồ uống) hoặc\n// tiền mặt. Trong nhóm chọn `top` mã đà tăng 3 tháng mạnh nhất, trên MA50. Thử nghiệm: chỉ khoảng ba chu kỳ lãi suất từ 2014 và\n// kết quả nhạy với cách đo (so với 42 hoặc 126 phiên thay vì 63 thì lợi nhuận giảm mạnh).\nconst SENSITIVE = /môi giới|bất động sản|Bán lẻ/i;\nconst DEFENSIVE = /Điện|nước|Dược|thực phẩm|Đồ uống|Bia/i;\nstrategy({\n  name: \"Xoay vòng ngành theo chu kỳ lãi suất\",\n  universe: universe(\"ALL\").liquid(5e9).top(240),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    top: param.int(8, { min: 3, max: 20, label: \"Số mã nắm giữ\" }),\n    defensive: param.bool(true, { label: \"Lãi suất tăng thì nắm nhóm phòng thủ (tắt = tiền mặt)\" }),\n    look: param.int(63, { min: 21, max: 126, label: \"So lãi suất với bao nhiêu phiên trước\" }),\n    market: param.bool(false, { label: \"Chỉ mua khi VNINDEX > MA200\" }),\n  },\n  rank: (d) => d.close.pct(63),\n  filter: (d, p) => {\n    const nT = d.days.length;\n    const group = (re) => Panel.fromRows(d.symbols, d.days, d.meta.map((m) => new Float32Array(nT).fill(re.test(`${m.industry || \"\"} ${m.sector || \"\"}`) ? 1 : 0)));\n    const ib = d.macro(\"ib_3m\").rolling(20).mean();\n    const easing = ib.lt(ib.shift(p.look));\n    const sensitive = group(SENSITIVE).gt(0).and(easing);\n    const ok = p.defensive ? sensitive.or(group(DEFENSIVE).gt(0).and(easing.not())) : sensitive;\n    const trend = ok.and(d.close.gt(ta.sma(d.close, 50)));\n    return p.market ? trend.and(d.bench.close.gt(ta.sma(d.bench.close, 200))) : trend;\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  },
+  {
+    "id": "securities-rate-cycle",
+    "kind": "strategy",
+    "title": "Cổ phiếu chứng khoán theo chu kỳ lãi suất",
+    "description": "Chỉ nắm 5 mã chứng khoán đà tăng mạnh nhất khi lãi suất liên ngân hàng 3 tháng thấp hơn 3 tháng trước; còn lại để tiền mặt.",
+    "category": "Vĩ mô",
+    "usesQdf": true,
+    "code": "// Cổ phiếu chứng khoán theo chu kỳ lãi suất: chỉ nắm `top` mã chứng khoán đà tăng 3 tháng mạnh nhất khi lãi suất liên ngân hàng 3 tháng\n// (TB 20 phiên) thấp hơn 3 tháng trước — tiền rẻ thì thanh khoản và lợi nhuận môi giới, tự doanh tăng; còn lại để tiền mặt.\n// 2016–10/2026 khoảng 14,5%/năm so với 2,6% nếu luôn nắm nhóm này, năm 2022 giảm khoảng 20% thay vì 67%. Thử nghiệm: dùng lãi suất\n// qua đêm thay cho 3 tháng thì kết quả kém hẳn.\nstrategy({\n  name: \"Cổ phiếu chứng khoán theo chu kỳ lãi suất\",\n  universe: universe(\"ALL\").industry(\"Dịch vụ môi giới\").liquid(3e9).top(30),\n  period: { from: \"2016-01-01\" },\n  rebalance: \"month\",\n  params: {\n    cycle: param.bool(true, { label: \"Chỉ nắm khi lãi suất LNH 3 tháng giảm\" }),\n    top: param.int(5, { min: 2, max: 15, label: \"Số mã nắm giữ\" }),\n  },\n  rank: (d) => d.close.pct(63),\n  filter: (d, p) => {\n    const ok = d.close.gt(0);\n    if (!p.cycle) return ok;\n    const ib = d.macro(\"ib_3m\").rolling(20).mean();\n    return ok.and(ib.lt(ib.shift(63)));\n  },\n  select: (p) => ({ top: p.top, weight: \"equal\", maxWeight: 1 / p.top }),\n});\n"
+  }
+]
