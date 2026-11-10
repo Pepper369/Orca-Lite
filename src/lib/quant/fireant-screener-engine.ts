@@ -472,3 +472,4 @@ export function scanFireAntScreener(screenerId: string): ScreenerCandidate[] {
 function fmtNum(v: number): string {
   return v.toLocaleString("vi-VN");
 }
+

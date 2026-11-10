@@ -16,6 +16,7 @@ const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: false },
   output: "standalone",
   serverExternalPackages: ["pg"],
+  transpilePackages: ["lucide-react"],
   experimental: {
     optimizePackageImports: ["lucide-react", "lightweight-charts"],
   },
