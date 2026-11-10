@@ -39,7 +39,8 @@ type Universe =
   | "divergence"
   | "macro-radar"
   | "systemic-radar"
-  | "alpha-beta";
+  | "alpha-beta"
+  | "fireant-screener";
 
 export type ScreenerGroupId = "growth_trend" | "quant_alpha" | "macro_sector" | "fundamental_val";
 
@@ -63,6 +64,7 @@ export const SCREENER_GROUPS: {
       { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
       { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
       { id: "confluence", label: "Siêu Hội Tụ (Confluence)" },
+      { id: "fireant-screener", label: "Bộ lọc Kỹ thuật FireAnt (5 Mẫu)" },
       { id: "oquant-quant", label: "OQuant AI Studio & Bots" },
       { id: "ma-cross", label: "Đường MA (Golden/Death Cross)" },
       { id: "divergence", label: "Phân kỳ (Divergence)" },
@@ -154,6 +156,10 @@ const ScreenerBacktestModal = dynamic(
 );
 const MacroRadarCard = dynamic(
   () => import("@/components/macro-radar-card").then((m) => m.MacroRadarCard),
+  { ssr: false, loading: PanelFallback }
+);
+const FireAntScreenerPanel = dynamic(
+  () => import("@/components/screener/fireant-screener-panel").then((m) => m.FireAntScreenerPanel),
   { ssr: false, loading: PanelFallback }
 );
 
@@ -286,6 +292,9 @@ function ScreenerInner() {
           onOpenBacktest={() => setShowBacktest(true)}
         />
       );
+      break;
+    case "fireant-screener":
+      body = <FireAntScreenerPanel />;
       break;
     case "systemic-radar":
       body = <SystemicRiskRadarPanel />;

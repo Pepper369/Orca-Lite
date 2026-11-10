@@ -1,0 +1,571 @@
+[
+  {
+    "id": "breakout_volume",
+    "name": "Bứt phá vượt đỉnh kèm khối lượng",
+    "explain": "Giá vượt đỉnh 1 năm cùng khối lượng dự kiến vượt trung bình 20 phiên tối thiểu 50%. Đây là mẫu hình khởi đầu nhịp tăng mới được dòng tiền xác nhận.",
+    "styleId": "momentum",
+    "icon": "Rocket",
+    "color": "#F97316",
+    "featured": true,
+    "conditions": [
+      {
+        "definitionId": "AbovePreviousHigh",
+        "parameters": {
+          "period": 5
+        }
+      },
+      {
+        "definitionId": "EstimatedVolumeSurge",
+        "parameters": {
+          "period": 3,
+          "percentage": 0.5
+        }
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "trend_start_ma20",
+    "name": "Chớm vào xu hướng tăng",
+    "explain": "Giá vừa cắt lên đường MA20 và đã tăng ít nhất 2 phiên liên tiếp, thanh khoản đủ lớn. Phù hợp tìm điểm mua sớm khi xu hướng ngắn hạn mới hình thành.",
+    "styleId": "momentum",
+    "icon": "TrendingUp",
+    "color": "#FB923C",
+    "conditions": [
+      {
+        "definitionId": "PriceCrossAboveSMA",
+        "parameters": {
+          "period": 3
+        }
+      },
+      {
+        "definitionId": "PriceUpConsecutiveDays",
+        "operator": "GreaterThan",
+        "rangeValue1": 2
+      },
+      {
+        "definitionId": "AvgVolume20d",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "strong_rs",
+    "name": "Cổ phiếu dẫn dắt",
+    "explain": "Sức mạnh giá RS trên 80 (mạnh hơn 80% thị trường) và đã tăng trên 15% trong 3 tháng. Tìm những mã đang được thị trường ưu ái nhất.",
+    "styleId": "momentum",
+    "icon": "Crown",
+    "color": "#EAB308",
+    "conditions": [
+      {
+        "definitionId": "RS",
+        "operator": "GreaterThan",
+        "rangeValue1": 80
+      },
+      {
+        "definitionId": "PriceChange3m",
+        "operator": "GreaterThan",
+        "rangeValue1": 15
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 500
+      }
+    ]
+  },
+  {
+    "id": "growth",
+    "name": "Tăng trưởng mạnh quý gần nhất",
+    "explain": "Lợi nhuận quý gần nhất tăng trên 20%, doanh thu tăng trên 15%, ROE trên 15% và vốn hoá trên 1.000 tỷ. Doanh nghiệp đang tăng tốc với nền tảng sinh lời tốt.",
+    "styleId": "growth",
+    "icon": "Sprout",
+    "color": "#22C55E",
+    "featured": true,
+    "conditions": [
+      {
+        "definitionId": "ProfitGrowth_MRQ",
+        "operator": "GreaterThan",
+        "rangeValue1": 20
+      },
+      {
+        "definitionId": "SalesGrowth_MRQ",
+        "operator": "GreaterThan",
+        "rangeValue1": 15
+      },
+      {
+        "definitionId": "ROE",
+        "operator": "GreaterThan",
+        "rangeValue1": 15
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 1000
+      }
+    ]
+  },
+  {
+    "id": "smallcap_growth",
+    "name": "Vốn hoá nhỏ đang lớn nhanh",
+    "explain": "Vốn hoá 300–3.000 tỷ, lợi nhuận 4 quý tăng trên 30% và EPS trên 2.000đ. Nhóm có dư địa tăng giá lớn nhưng biến động cao hơn blue-chip.",
+    "styleId": "growth",
+    "icon": "Flame",
+    "color": "#84CC16",
+    "conditions": [
+      {
+        "definitionId": "MarketCap",
+        "operator": "Between",
+        "rangeValue1": 300,
+        "rangeValue2": 3000
+      },
+      {
+        "definitionId": "ProfitGrowth_TTM",
+        "operator": "GreaterThan",
+        "rangeValue1": 30
+      },
+      {
+        "definitionId": "EPS",
+        "operator": "GreaterThan",
+        "rangeValue1": 2000
+      }
+    ]
+  },
+  {
+    "id": "value",
+    "name": "Rẻ so với lợi nhuận và tài sản",
+    "explain": "P/E dương và dưới 10, P/B dưới 1.5 nhưng ROE vẫn trên 12%. Cách chọn cổ phiếu giá trị kinh điển: rẻ nhưng vẫn làm ăn hiệu quả.",
+    "styleId": "value",
+    "icon": "Gem",
+    "color": "#0EA5E9",
+    "featured": true,
+    "conditions": [
+      {
+        "definitionId": "PE",
+        "operator": "Between",
+        "rangeValue1": 0,
+        "rangeValue2": 10
+      },
+      {
+        "definitionId": "PB",
+        "operator": "LessThan",
+        "rangeValue1": 1.5
+      },
+      {
+        "definitionId": "ROE",
+        "operator": "GreaterThan",
+        "rangeValue1": 12
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 500
+      }
+    ]
+  },
+  {
+    "id": "dividend",
+    "name": "Cổ tức tiền mặt cao, nợ thấp",
+    "explain": "Cổ tức tiền mặt trên 2.000đ/CP, lợi nhuận 4 quý trên 100 tỷ và nợ/vốn chủ dưới 1. Dành cho nhà đầu tư muốn thu nhập đều đặn từ cổ tức.",
+    "styleId": "value",
+    "icon": "Coins",
+    "color": "#06B6D4",
+    "conditions": [
+      {
+        "definitionId": "CashDividend",
+        "operator": "GreaterThan",
+        "rangeValue1": 2000
+      },
+      {
+        "definitionId": "Profit",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      },
+      {
+        "definitionId": "TotalDebtOverEquity",
+        "operator": "LessThan",
+        "rangeValue1": 1
+      }
+    ]
+  },
+  {
+    "id": "foreign_flow",
+    "name": "Khối ngoại đang mua ròng",
+    "explain": "Nước ngoài mua ròng trên 5 tỷ trong phiên với tổng khối lượng trên 200.000 cổ phiếu. Theo dấu dòng tiền ngoại thường đi trước xu hướng.",
+    "styleId": "flow",
+    "icon": "Globe",
+    "color": "#14B8A6",
+    "featured": true,
+    "conditions": [
+      {
+        "definitionId": "ForeignerNetBuyValue",
+        "operator": "GreaterThan",
+        "rangeValue1": 5
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 200000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "institution_backed",
+    "name": "Tổ chức nắm giữ lớn",
+    "explain": "Tổ chức sở hữu trên 30%, có trên 3 tổ chức nước ngoài là cổ đông, vốn hoá trên 1.000 tỷ. Cổ phiếu được \"tiền lớn\" thẩm định và nắm giữ.",
+    "styleId": "flow",
+    "icon": "Building2",
+    "color": "#0D9488",
+    "conditions": [
+      {
+        "definitionId": "OwnershipOfOrganizations",
+        "operator": "GreaterThan",
+        "rangeValue1": 30
+      },
+      {
+        "definitionId": "NrOfForeignOrganizations",
+        "operator": "GreaterThan",
+        "rangeValue1": 3
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 1000
+      }
+    ]
+  },
+  {
+    "id": "bluechip_safe",
+    "name": "Blue-chip tài chính lành mạnh",
+    "explain": "Vốn hoá trên 10.000 tỷ, thanh toán hiện hành trên 1.5, nợ/vốn chủ dưới 1 và ROE trên 10%. Nền tảng vững cho danh mục dài hạn.",
+    "styleId": "safety",
+    "icon": "ShieldCheck",
+    "color": "#6366F1",
+    "conditions": [
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 10000
+      },
+      {
+        "definitionId": "CurrentRatio",
+        "operator": "GreaterThan",
+        "rangeValue1": 1.5
+      },
+      {
+        "definitionId": "TotalDebtOverEquity",
+        "operator": "LessThan",
+        "rangeValue1": 1
+      },
+      {
+        "definitionId": "ROE",
+        "operator": "GreaterThan",
+        "rangeValue1": 10
+      }
+    ]
+  },
+  {
+    "id": "oversold_bounce",
+    "name": "Quá bán, chờ hồi phục",
+    "explain": "RSI(14) dưới 30, giá đã giảm trên 10% trong 1 tháng nhưng thanh khoản vẫn tốt. Tìm cơ hội bắt đáy kỹ thuật, nên kết hợp thêm tín hiệu xác nhận.",
+    "styleId": "technical",
+    "icon": "Waves",
+    "color": "#8B5CF6",
+    "conditions": [
+      {
+        "definitionId": "RSIBelowOverSoldLine",
+        "parameters": {
+          "overSold": 30
+        }
+      },
+      {
+        "definitionId": "PriceChange1m",
+        "operator": "LessThan",
+        "rangeValue1": -10
+      },
+      {
+        "definitionId": "AvgVolume20d",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "macd_buy",
+    "name": "MACD vừa phát tín hiệu mua",
+    "explain": "MACD vừa cắt lên đường tín hiệu, khối lượng phiên trên 100.000. Tín hiệu mua kinh điển cho thấy động lượng tăng đang mạnh lên.",
+    "styleId": "technical",
+    "icon": "Activity",
+    "color": "#A855F7",
+    "conditions": [
+      {
+        "definitionId": "MACDCrossAboveSignalLine"
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "active_buy_pressure",
+    "name": "Bên mua chủ động áp đảo",
+    "explain": "Trên 60% khối lượng khớp do bên mua chủ động đẩy giá, thanh khoản phiên trên 500.000 và giá đang tăng. Dấu hiệu dòng tiền vào thật ngay trong phiên.",
+    "styleId": "flow",
+    "icon": "HandCoins",
+    "color": "#0EA5E9",
+    "conditions": [
+      {
+        "definitionId": "ActiveBuyVolume",
+        "operator": "GreaterThan",
+        "rangeValue1": 60
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 500000
+      },
+      {
+        "definitionId": "PricePercentChange",
+        "operator": "GreaterThan",
+        "rangeValue1": 1
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "foreign_accumulate",
+    "name": "Khối ngoại gom, giá chưa tăng nóng",
+    "explain": "Nước ngoài mua ròng nhưng giá 1 tháng vẫn đi ngang trong khoảng -10% đến 10%. Mua khi dòng tiền ngoại đã vào mà thị trường chưa đẩy giá.",
+    "styleId": "flow",
+    "icon": "PiggyBank",
+    "color": "#2DD4BF",
+    "conditions": [
+      {
+        "definitionId": "ForeignerNetBuyValue",
+        "operator": "GreaterThan",
+        "rangeValue1": 1
+      },
+      {
+        "definitionId": "PriceChange1m",
+        "operator": "Between",
+        "rangeValue1": -10,
+        "rangeValue2": 10
+      },
+      {
+        "definitionId": "AvgVolume20d",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "low_beta_defensive",
+    "name": "Phòng thủ, ít biến động",
+    "explain": "Beta dưới 1 (dao động nhẹ hơn thị trường), cổ tức tiền mặt trên 1.000đ/CP, vốn hoá trên 5.000 tỷ và ROE trên 10%. Nhóm giữ danh mục ổn định khi thị trường rung lắc.",
+    "styleId": "safety",
+    "icon": "Umbrella",
+    "color": "#818CF8",
+    "conditions": [
+      {
+        "definitionId": "Beta",
+        "operator": "LessThan",
+        "rangeValue1": 1
+      },
+      {
+        "definitionId": "CashDividend",
+        "operator": "GreaterThan",
+        "rangeValue1": 1000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 5000
+      },
+      {
+        "definitionId": "ROE",
+        "operator": "GreaterThan",
+        "rangeValue1": 10
+      }
+    ]
+  },
+  {
+    "id": "quality_business",
+    "name": "Doanh nghiệp chất lượng cao",
+    "explain": "Biên lãi gộp trên 30%, lãi ròng trên 15%, ROE trên 15% và nợ/vốn chủ dưới 1. Lợi thế cạnh tranh rõ và không phụ thuộc đòn bẩy.",
+    "styleId": "safety",
+    "icon": "Award",
+    "color": "#4F46E5",
+    "conditions": [
+      {
+        "definitionId": "GrossMargin",
+        "operator": "GreaterThan",
+        "rangeValue1": 30
+      },
+      {
+        "definitionId": "AfterTaxMargin",
+        "operator": "GreaterThan",
+        "rangeValue1": 15
+      },
+      {
+        "definitionId": "ROE",
+        "operator": "GreaterThan",
+        "rangeValue1": 15
+      },
+      {
+        "definitionId": "TotalDebtOverEquity",
+        "operator": "LessThan",
+        "rangeValue1": 1
+      }
+    ]
+  },
+  {
+    "id": "canslim",
+    "name": "Tăng trưởng dẫn dắt (CANSLIM rút gọn)",
+    "explain": "EPS 4 quý tăng trên 25%, doanh thu quý gần nhất tăng trên 20% và sức mạnh giá RS trên 70. Kết hợp nền tảng mạnh với việc thị trường đã công nhận.",
+    "styleId": "growth",
+    "icon": "Target",
+    "color": "#16A34A",
+    "conditions": [
+      {
+        "definitionId": "EPSGrowth_TTM",
+        "operator": "GreaterThan",
+        "rangeValue1": 25
+      },
+      {
+        "definitionId": "SalesGrowth_MRQ",
+        "operator": "GreaterThan",
+        "rangeValue1": 20
+      },
+      {
+        "definitionId": "RS",
+        "operator": "GreaterThan",
+        "rangeValue1": 70
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 1000
+      }
+    ]
+  },
+  {
+    "id": "reversal_up",
+    "name": "Giảm nhiều phiên rồi đảo chiều",
+    "explain": "Đã giảm liên tục trên 3 phiên trước khi bật tăng trở lại, thanh khoản còn tốt. Điểm mua kỹ thuật sau nhịp chỉnh, không cần gói nâng cao.",
+    "styleId": "technical",
+    "icon": "CornerUpRight",
+    "color": "#9333EA",
+    "conditions": [
+      {
+        "definitionId": "PriceDownConsecutiveDaysBeforeUp",
+        "operator": "GreaterThan",
+        "rangeValue1": 3
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 300
+      }
+    ]
+  },
+  {
+    "id": "mfi_money_return",
+    "name": "Dòng tiền quay lại (MFI)",
+    "explain": "Chỉ số dòng tiền MFI(14) vừa thoát khỏi vùng quá bán cùng thanh khoản trên 100.000. MFI tính cả khối lượng nên xác nhận dòng tiền tốt hơn RSI.",
+    "styleId": "technical",
+    "icon": "Gauge",
+    "color": "#6D28D9",
+    "conditions": [
+      {
+        "definitionId": "MFICrossAboveOverSoldLine",
+        "parameters": {
+          "overSold": 20
+        }
+      },
+      {
+        "definitionId": "Volume",
+        "operator": "GreaterThan",
+        "rangeValue1": 100000
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  },
+  {
+    "id": "bollinger_break",
+    "name": "Bứt khỏi dải Bollinger",
+    "explain": "Giá thoát ra ngoài biên trên Bollinger (20, 2σ) cùng khối lượng dự kiến vượt trung bình 5 phiên tối thiểu 50%. Báo hiệu biến động mạnh vừa bắt đầu.",
+    "styleId": "technical",
+    "icon": "Zap",
+    "color": "#7C3AED",
+    "conditions": [
+      {
+        "definitionId": "PriceCrossAboveBollingerBands",
+        "parameters": {
+          "stdDev": 2
+        }
+      },
+      {
+        "definitionId": "EstimatedVolumeSurge",
+        "parameters": {
+          "period": 0,
+          "percentage": 0.5
+        }
+      },
+      {
+        "definitionId": "MarketCap",
+        "operator": "GreaterThan",
+        "rangeValue1": 100
+      }
+    ]
+  }
+]

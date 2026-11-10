@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import {
   Play,
   RefreshCw,
@@ -8,6 +9,7 @@ import {
   Check,
   Copy,
   Sliders,
+  Filter,
   BarChart2,
   ShieldCheck,
   Terminal,
@@ -247,6 +249,14 @@ export function FireAntQuantStudio() {
               />
               <span className="text-text-muted ml-1">đ</span>
             </div>
+
+            <Link
+              href="/screener?universe=fireant-screener"
+              className="flex items-center gap-1.5 rounded-lg border border-accent-primary/30 bg-accent-primary/10 px-3 py-1.5 text-xs font-semibold text-accent-primary hover:bg-accent-primary hover:text-white transition cursor-pointer"
+            >
+              <Filter className="size-3.5" />
+              <span>Bộ lọc FireAnt (5 Mẫu)</span>
+            </Link>
 
             <button
               onClick={() => {
@@ -1047,3 +1057,4 @@ export function FireAntQuantStudio() {
     </div>
   );
 }
+
