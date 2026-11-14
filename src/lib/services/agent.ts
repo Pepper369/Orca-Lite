@@ -19,6 +19,7 @@ import {
 import { buildVnMarketBriefing } from "./market-briefing";
 import { createResponseContext, domainsForRoute, routeQuestion, type AgentResponseContext, type AgentRoute } from "./agent-router";
 import { runInDataHub } from "../data-engine";
+import { isScreenerQuery, getFastScreenerFeed } from "./fast-datafeed-hub";
 
 /** Hard wall for data-engine calls so agent never hangs past the serverless budget */
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -240,7 +241,36 @@ async function answerQuestionInner(
   const DATA_MS = 22_000;
 
   try {
-    if (domainsForRoute(route).length > 0) {
+    if (isScreenerQuery(question)) {
+      const screener = await withTimeout(getFastScreenerFeed(question), DATA_MS, null);
+      if (screener && screener.topStocks.length > 0) {
+        const criteriaText = screener.criteriaSummary.length ? screener.criteriaSummary.join(" · ") : "Định lượng chuẩn mực";
+        const narrative = `## 🎯 BÁO CÁO SÀNG LỌC CỔ PHIẾU ĐỊNH LƯỢNG (ORCA QUANT SCREENER HUB)\n` +
+          `> **Tiêu chí sàng lọc:** ${criteriaText} | **Số mã thỏa mãn:** **${screener.matchedCount} mã** (Top ${screener.topStocks.length} mã tối ưu nhất)\n\n` +
+          `### 1. BẢNG XẾP HẠNG CỔ PHIẾU THỎA MÃN BỘ LỌC ĐỊNH LƯỢNG\n` +
+          `${screener.markdownTable}\n\n` +
+          `### 2. ĐỘNG LỰC CỐT LÕI & ĐIỂM NHẤN CỦA TỪNG MÃ ĐẠT CHUẨN\n` +
+          screener.topStocks.map((s, idx) => `**${idx + 1}. ${s.symbol} (${s.name} - ${s.sector}):** ${s.highlights}`).join("\n") +
+          `\n\n### 3. KIỂM ĐỊNH CÔNG THỨC TOÁN HỌC & BIÊN AN TOÀN ĐỊNH LƯỢNG (KaTeX)\n` +
+          `- **Hiệu quả sinh lời trên vốn (KaTeX):** $ROE = \\frac{\\text{LNST}}{\\text{Vốn CSH}} \\ge ${criteriaText.includes("ROE") ? "20\\%" : "15\\%"}$\n` +
+          `- **Định giá thu nhập (KaTeX):** $P/E = \\frac{\\text{Thị giá}}{\\text{EPS}} \\le 12\\text{x}$ (Biên an toàn định giá $MOS \\ge 15-20\\%$)\n` +
+          `- **Xung lực phục hồi & Chân sóng:** Khóa vùng Sweet Launch Zone $0.8\\% - 7.5\\%$ từ đáy, Overhead Room $\\ge 5.0\\%$.\n` +
+          `- **Tỷ số Lợi nhuận / Rủi ro:** Kế hoạch Triple-Barrier kỳ vọng $R:R \\ge 2.2\\text{x}$, Stop Loss $1.0\\text{x}$ ATR.\n\n` +
+          `### 4. BẪY ĐỊNH LƯỢNG CẦN LƯU Ý (FORENSIC CAVEATS)\n` +
+          screener.filterCaveats.map((c) => `• **${c}**`).join("\n");
+
+        built = {
+          narrative,
+          contract: { screener },
+          sectionsUsed: ["screener", "multi-factor-quant"],
+          symbols: screener.topStocks.map((s) => s.symbol),
+          freshnesses: ["FRESH"],
+          unavailable: false,
+        };
+      } else {
+        built = await withTimeout(buildUniverseOverview(), DATA_MS, EMPTY_BUILT);
+      }
+    } else if (domainsForRoute(route).length > 0) {
       const routed = await buildRoutedContext(route, question, deep);
       built = routed.built;
       responses = routed.responses;

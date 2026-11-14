@@ -1,7 +1,7 @@
 import "server-only";
 
-/** Document sources for Phase A RAG */
-export type RagSource = "guide" | "news" | "note" | "bctc";
+/** Document sources for Phase A & Phase 3 RAG */
+export type RagSource = "guide" | "news" | "note" | "bctc" | "disclosure" | "report";
 
 export type RagBranch = "market" | "stock" | "industry" | "commodity" | "general";
 
@@ -26,6 +26,8 @@ export interface RagRetrieveOpts {
   includeNews?: boolean;
   /** include built-in AI_* guide corpus */
   includeGuides?: boolean;
+  /** include official disclosures & research reports */
+  includeDisclosures?: boolean;
 }
 
 export interface RagRetrieveResult {
@@ -34,6 +36,7 @@ export interface RagRetrieveResult {
     guideHits: number;
     newsHits: number;
     dbHits: number;
+    disclosureHits?: number;
     tookMs: number;
   };
 }

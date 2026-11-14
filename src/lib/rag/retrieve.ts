@@ -5,6 +5,8 @@ import { databaseConfigured, db } from "../../db";
 import { newsArticles, ragChunks } from "../../db/schema";
 import { lexicalScore, tokenizeQuery } from "./chunk";
 import { filterGuidesByBranch } from "./guides-corpus";
+import { getVndSignedDisclosures, getVndAnalyticReports } from "../providers/vndirect-news";
+import { queryFaKnowledgeBase } from "./fa-knowledge-base";
 import type { RagBranch, RagPassage, RagRetrieveOpts, RagRetrieveResult } from "./types";
 
 function detectBranch(question: string, explicit?: RagBranch): RagBranch {
@@ -102,7 +104,60 @@ async function retrieveDbChunks(tokens: string[], symbols: string[], limit: numb
   }
 }
 
-/** Hybrid retrieve Phase A: guides + news + rag_chunks (lexical, no embedding). */
+async function retrieveDisclosures(tokens: string[], symbols: string[], limit: number): Promise<RagPassage[]> {
+  if (!symbols.length) return [];
+  const out: RagPassage[] = [];
+  try {
+    const sym = symbols[0];
+    const [disclosures, reports] = await Promise.allSettled([
+      getVndSignedDisclosures(sym, 12),
+      getVndAnalyticReports(sym, 8),
+    ]);
+
+    if (disclosures.status === "fulfilled") {
+      for (const d of disclosures.value) {
+        const body = `${d.title}\nLoại công bố: ${d.type} · Nguồn: ${d.source}${d.attachments.length ? ` · File đính kèm: ${d.attachments.map(a => a.name).join(", ")}` : ""}`;
+        let score = lexicalScore(body, tokens) + boostSymbol(body, symbols) + 0.15;
+        if (/bctc|báo cáo tài chính|kiểm toán|giải trình|nghị quyết|đhđcđ/i.test(tokens.join(" "))) {
+          score += 0.25;
+        }
+        out.push({
+          id: `disc-${d.id}`,
+          source: "disclosure",
+          title: `[Công bố thông tin chính thức] ${d.title}`,
+          content: body.slice(0, 800),
+          symbol: d.symbol,
+          score,
+          sourceTs: d.date ? `${d.date}T${d.time || "00:00:00"}+07:00` : null,
+          url: d.newsUrl || d.attachments[0]?.url,
+        });
+      }
+    }
+
+    if (reports.status === "fulfilled") {
+      for (const r of reports.value) {
+        const body = `${r.title}\nKhuyến nghị: ${r.rating ?? "—"} · Giá mục tiêu: ${r.targetPrice ? r.targetPrice.toLocaleString("vi-VN") + " ₫" : "—"}\n${r.abstract ?? ""}`;
+        let score = lexicalScore(body, tokens) + boostSymbol(body, symbols) + 0.1;
+        out.push({
+          id: `rep-${r.id}`,
+          source: "report",
+          title: `[Báo cáo Phân tích Research] ${r.title}`,
+          content: body.slice(0, 800),
+          symbol: r.symbol,
+          score,
+          sourceTs: r.date ? `${r.date}T00:00:00+07:00` : null,
+          url: r.pdfUrl || r.url,
+        });
+      }
+    }
+
+    return out.sort((a, b) => b.score - a.score).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Hybrid retrieve Phase A & 3: guides + news + official disclosures + research reports + db chunks. */
 export async function retrieveRag(opts: RagRetrieveOpts): Promise<RagRetrieveResult> {
   const t0 = performance.now();
   const topK = Math.min(12, Math.max(2, opts.topK ?? 5));
@@ -112,10 +167,12 @@ export async function retrieveRag(opts: RagRetrieveOpts): Promise<RagRetrieveRes
 
   const includeGuides = opts.includeGuides !== false;
   const includeNews = opts.includeNews !== false;
+  const includeDisclosures = opts.includeDisclosures !== false;
 
   let guideHits = 0;
   let newsHits = 0;
   let dbHits = 0;
+  let disclosureHits = 0;
   const pool: RagPassage[] = [];
 
   if (includeGuides) {
@@ -128,12 +185,22 @@ export async function retrieveRag(opts: RagRetrieveOpts): Promise<RagRetrieveRes
     const ensured = take.length ? take : guides.slice(0, 1);
     guideHits = ensured.length;
     pool.push(...ensured);
+
+    // Bổ sung kho tri thức nghiệp vụ FA & Benchmark ngành Việt Nam
+    const faDocs = queryFaKnowledgeBase(opts.question, symbols, 3);
+    pool.push(...faDocs);
   }
 
   if (includeNews) {
     const news = await retrieveNews(tokens, symbols, topK);
     newsHits = news.length;
     pool.push(...news);
+  }
+
+  if (includeDisclosures && symbols.length) {
+    const disclosures = await retrieveDisclosures(tokens, symbols, topK);
+    disclosureHits = disclosures.length;
+    pool.push(...disclosures);
   }
 
   const dbParts = await retrieveDbChunks(tokens, symbols, topK);
@@ -151,7 +218,7 @@ export async function retrieveRag(opts: RagRetrieveOpts): Promise<RagRetrieveRes
 
   return {
     passages: merged,
-    meta: { guideHits, newsHits, dbHits, tookMs: Math.round(performance.now() - t0) },
+    meta: { guideHits, newsHits, dbHits, disclosureHits, tookMs: Math.round(performance.now() - t0) },
   };
 }
 

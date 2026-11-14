@@ -34,19 +34,19 @@ interface Msg {
 }
 
 const SUGGESTED = [
-  "Thị trường đang diễn ra chuyện gì?",
-  "Phân tích cổ phiếu FPT",
-  "Phân tích BTC hiện tại",
-  "ETH có đang mạnh hơn BTC không? So sánh giúp",
-  "Giá vàng thế giới và vàng SJC hôm nay thế nào?",
-  "EUR/USD đang có xu hướng gì?",
-  "Tin tức đáng chú ý gần đây",
+  "Phân tích BCTC và chất lượng lợi nhuận của HPG",
+  "Định giá cổ phiếu FPT theo mô hình P/E, P/B và DCF",
+  "Kiểm tra điểm Piotroski F-Score và Altman Z-Score của VNM",
+  "So sánh biên lợi nhuận và sức khỏe tài chính MBB vs TCB",
+  "Đánh giá tiêu chuẩn CANSLIM và tăng trưởng EPS của DGC",
+  "Cổ phiếu nào đang trả cổ tức tiền mặt cao và an toàn nhất?",
+  "Phân tích tác động vĩ mô và lãi suất lên nhóm ngành Thép",
 ];
 
 const MAX_HISTORY = 8;
 
 function renderInline(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\$[^$]+\$)/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return (
@@ -55,8 +55,130 @@ function renderInline(text: string) {
         </strong>
       );
     }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code key={i} className="rounded bg-canvas-2/80 px-1.5 py-0.5 font-mono text-[11px] text-accent font-medium">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+      return (
+        <span key={i} className="font-mono text-accent font-semibold px-0.5">
+          {part.slice(1, -1)}
+        </span>
+      );
+    }
     return <span key={i}>{part}</span>;
   });
+}
+
+type MarkdownBlock =
+  | { type: "h2"; text: string }
+  | { type: "h3"; text: string }
+  | { type: "h4"; text: string }
+  | { type: "hr" }
+  | { type: "callout"; lines: string[] }
+  | { type: "table"; headers: string[]; rows: string[][] }
+  | { type: "list"; items: string[] }
+  | { type: "paragraph"; text: string }
+  | { type: "space" };
+
+function parseMarkdownBlocks(rawText: string): MarkdownBlock[] {
+  const lines = rawText.split("\n");
+  const blocks: MarkdownBlock[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+
+    // 1. Empty lines
+    if (!trimmed) {
+      blocks.push({ type: "space" });
+      i++;
+      continue;
+    }
+
+    // 2. Horizontal divider
+    if (trimmed === "---" || trimmed === "***" || trimmed === "___") {
+      blocks.push({ type: "hr" });
+      i++;
+      continue;
+    }
+
+    // 3. Headings
+    if (trimmed.startsWith("## ")) {
+      blocks.push({ type: "h2", text: trimmed.slice(3).trim() });
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      blocks.push({ type: "h3", text: trimmed.slice(4).trim() });
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("#### ")) {
+      blocks.push({ type: "h4", text: trimmed.slice(5).trim() });
+      i++;
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      blocks.push({ type: "h2", text: trimmed.slice(2).trim() });
+      i++;
+      continue;
+    }
+
+    // 4. Blockquotes / Callout (> ...)
+    if (trimmed.startsWith(">")) {
+      const calloutLines: string[] = [];
+      while (i < lines.length && lines[i]!.trim().startsWith(">")) {
+        calloutLines.push(lines[i]!.trim().replace(/^>\s*/, ""));
+        i++;
+      }
+      blocks.push({ type: "callout", lines: calloutLines });
+      continue;
+    }
+
+    // 5. Markdown Tables (| ... |)
+    if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i]!.trim().startsWith("|") && lines[i]!.trim().endsWith("|")) {
+        tableLines.push(lines[i]!.trim());
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        const parseRow = (r: string) =>
+          r
+            .slice(1, -1)
+            .split("|")
+            .map((c) => c.trim());
+        const headers = parseRow(tableLines[0]!);
+        const isSep = /^[:\s\-|]+$/.test(tableLines[1]!);
+        const rowStart = isSep ? 2 : 1;
+        const rows = tableLines.slice(rowStart).map(parseRow);
+        blocks.push({ type: "table", headers, rows });
+        continue;
+      }
+    }
+
+    // 6. Lists (- , * , • , 1. )
+    if (/^[-*•]\s+|^\d+\.\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*•]\s+|^\d+\.\s+/.test(lines[i]!.trim())) {
+        items.push(lines[i]!.trim());
+        i++;
+      }
+      blocks.push({ type: "list", items });
+      continue;
+    }
+
+    // 7. Normal paragraph
+    blocks.push({ type: "paragraph", text: trimmed });
+    i++;
+  }
+
+  return blocks;
 }
 
 export default function AgentPage() {
@@ -64,7 +186,7 @@ export default function AgentPage() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "agent",
-      text: "Chào bạn — mình là ORCA Agent. Có thể hỏi về thị trường, cổ phiếu, hoặc tài chính cá nhân / gia sản. Mình nhớ ngữ cảnh trong phiên trò chuyện này.",
+      text: "Chào bạn — mình là ORCA FA AI Agent. Mình chuyên sâu về Phân tích Cơ bản (FA), Bóc tách BCTC, Định giá Doanh nghiệp (DCF, P/E, P/B), Piotroski F-Score, Altman Z-Score và Hệ thống lọc cổ phiếu CANSLIM/Tăng trưởng. Hãy nhập mã cổ phiếu hoặc câu hỏi cần phân tích!",
     },
   ]);
   const [input, setInput] = useState("");
@@ -74,28 +196,103 @@ export default function AgentPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   function renderAnswer(text: string) {
-    return text.split("\n").map((line, index) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("## ")) {
-        return (
-          <h3 key={index} className="mt-3 text-sm font-semibold text-accent first:mt-0">
-            {trimmed.slice(3)}
-          </h3>
-        );
+    const blocks = parseMarkdownBlocks(text);
+    return blocks.map((block, index) => {
+      switch (block.type) {
+        case "callout":
+          return (
+            <div
+              key={index}
+              className="my-3 rounded-lg border-l-4 border-accent bg-accent/10 px-4 py-3 text-xs leading-relaxed text-ink shadow-xs"
+            >
+              {block.lines.map((l, li) => (
+                <p key={li} className={li > 0 ? "mt-1.5" : ""}>
+                  {renderInline(l)}
+                </p>
+              ))}
+            </div>
+          );
+        case "table":
+          return (
+            <div
+              key={index}
+              className="my-3 overflow-x-auto rounded-lg border border-line bg-canvas/40 shadow-xs"
+            >
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-canvas-2/80 border-b border-line text-ink font-semibold">
+                  <tr>
+                    {block.headers.map((h, hi) => (
+                      <th key={hi} className="px-3.5 py-2.5 text-accent whitespace-nowrap">
+                        {renderInline(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line/40">
+                  {block.rows.map((row, ri) => (
+                    <tr key={ri} className="hover:bg-canvas-2/40 transition-colors">
+                      {row.map((cell, ci) => (
+                        <td key={ci} className="px-3.5 py-2 text-ink-2 whitespace-normal">
+                          {renderInline(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        case "h2":
+          return (
+            <h2
+              key={index}
+              className="mt-4 mb-2 text-sm font-bold text-accent tracking-wide flex items-center gap-1.5 border-b border-line/40 pb-1.5 first:mt-0"
+            >
+              {renderInline(block.text)}
+            </h2>
+          );
+        case "h3":
+          return (
+            <h3
+              key={index}
+              className="mt-3.5 mb-1 text-xs font-semibold text-ink flex items-center gap-1"
+            >
+              {renderInline(block.text)}
+            </h3>
+          );
+        case "h4":
+          return (
+            <h4
+              key={index}
+              className="mt-2.5 mb-1 text-[11px] font-medium text-ink-2"
+            >
+              {renderInline(block.text)}
+            </h4>
+          );
+        case "hr":
+          return <hr key={index} className="my-3.5 border-line/50" />;
+        case "list":
+          return (
+            <div key={index} className="my-2 space-y-1 pl-1">
+              {block.items.map((item, ii) => (
+                <div key={ii} className="flex items-start gap-2 text-xs text-ink-2 break-words">
+                  <span className="text-accent mt-0.5">•</span>
+                  <span className="flex-1">
+                    {renderInline(item.replace(/^[-*•]\s+|^\d+\.\s+/, ""))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        case "space":
+          return <div key={index} className="h-1.5" />;
+        case "paragraph":
+          return (
+            <p key={index} className="my-1.5 text-xs leading-relaxed text-ink break-words">
+              {renderInline(block.text)}
+            </p>
+          );
       }
-      if (/^[-•] /.test(trimmed)) {
-        return (
-          <div key={index} className="ml-3 break-words">
-            {renderInline(trimmed)}
-          </div>
-        );
-      }
-      if (!trimmed) return <div key={index} className="h-2" />;
-      return (
-        <p key={index} className="break-words">
-          {renderInline(line)}
-        </p>
-      );
     });
   }
 
