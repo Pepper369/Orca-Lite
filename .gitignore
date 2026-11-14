@@ -40,3 +40,10 @@ CLAUDE.md
 # Graphify output
 graphify-out/
 
+# Local LLM / GGUF weights & binaries (never push >100MB binaries to GitHub)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+models/*.zip
+models/bin/
+

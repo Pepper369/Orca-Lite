@@ -6,6 +6,15 @@ import { getQuantInsightForQuery } from "@/lib/services/quant-knowledge-base";
 import { getVnIndices } from "@/lib/services/stocks-board";
 import { generateOrcaDynamicAiReport } from "@/lib/engines/orca-dynamic-ai-intelligence";
 import { executeContextualAiPipeline } from "@/lib/engines/orca-contextual-reasoning-engine";
+import { MiquantFinancialIntelligence } from "@/lib/services/miquant-ai";
+import { DualAiConsensusEngine } from "@/lib/services/dual-ai-consensus";
+import { buildFastDatafeedContext, getFastScreenerFeed } from "@/lib/services/fast-datafeed-hub";
+import { isVnSymbol } from "@/lib/vn/master";
+import {
+  detectQueryIntent,
+  buildStructuredSystemPrompt,
+  isScreenerQuery,
+} from "@/lib/services/response-structure-architect";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -63,9 +72,11 @@ function extractAmountFromText(text: string): number | null {
 }
 
 function extractTickerFromQuery(q: string): string | null {
+  if (isScreenerQuery(q)) return null;
+
   const upper = q.toUpperCase();
   const explicitMatch = q.match(/(?:mã|cổ\s*phiếu|cp|ticker|symbol)\s+([A-Za-z]{3})\b/i);
-  if (explicitMatch) {
+  if (explicitMatch && isVnSymbol(explicitMatch[1].toUpperCase())) {
     return explicitMatch[1].toUpperCase();
   }
 
@@ -75,10 +86,11 @@ function extractTickerFromQuery(q: string): string | null {
     "MUA", "GIA", "DON", "TIEN", "TIET", "LUONG", "CHI", "APP", "API", "NOW",
     "TOP", "DAT", "VAY", "NOI", "CAN", "XEM", "CHO", "TOI", "COI", "HOI",
     "LAM", "SAO", "NEN", "QUA", "CAC", "MOT", "HAI", "BAA", "BON", "NAM",
-    "DAY", "HAY", "LAI", "THI", "KHI", "VOI", "DOC", "NHA"
+    "DAY", "HAY", "LAI", "THI", "KHI", "VOI", "DOC", "NHA", "PHI", "ROE",
+    "ROA", "EPS", "PEE", "PBB", "BCT", "BCTC", "RSI", "MAC", "ATR", "CFO"
   ]);
   for (const w of words) {
-    if (!skipWords.has(w)) {
+    if (!skipWords.has(w) && isVnSymbol(w)) {
       return w;
     }
   }
@@ -480,7 +492,57 @@ export async function POST(req: Request) {
     const fixed = facts.fixedExpenses ?? 0;
     const totalExp = facts.totalExpenses ?? 0;
 
-    // 0. Pipeline Huấn luyện Thấu hiểu Ngữ cảnh Chuyên sâu (Contextual Intelligence Pipeline)
+    const skipLlm = Boolean(body.skipLlm || body.useFastHeuristic);
+
+    // 0. Khi LLM được cấu hình (GGUF Local C++ llama-server hoặc Cloud Gateway):
+    // Tự động phân loại ngữ cảnh, sinh system prompt theo cấu trúc mẫu chuẩn và tiêm live datafeed grounding
+    if (!skipLlm && llmConfigured()) {
+      try {
+        const fastFeed = await buildFastDatafeedContext(question);
+        const intentResult = detectQueryIntent(question, fastFeed);
+
+        // Nạp thêm tính toán định lượng chuyên sâu làm grounding nếu có
+        let contextualGrounding = "";
+        try {
+          const contextualDraft = await executeContextualAiPipeline(question, facts);
+          if (contextualDraft?.answer) {
+            contextualGrounding = `\n\nTHAM KHẢO TÍNH TOÁN ĐỊNH LƯỢNG NỘI BỘ (GROUNDING REFERENCE):\n${contextualDraft.answer.slice(0, 1500)}\n`;
+          }
+        } catch {
+          // non-blocking
+        }
+
+        const assembledContext = (fastFeed.assembledPromptContext || "") + contextualGrounding;
+        const systemPrompt = buildStructuredSystemPrompt(intentResult, assembledContext);
+
+        const chatHistory = history.map((h: { sender: string; text: string }) => ({
+          role: (h.sender === "user" ? "user" : "assistant") as "user" | "assistant",
+          content: h.text,
+        }));
+
+        const llmResult = await llmChat("reasoning", {
+          system: systemPrompt,
+          user: question,
+          history: chatHistory,
+          temperature: 0.72,
+          maxTokens: 550,
+          timeoutMs: 14_000,
+        });
+
+        if (llmResult?.text && llmResult.text.trim().length > 20) {
+          return ok({
+            answer: llmResult.text.trim(),
+            detectedIntent: intentResult.intent,
+            model: "Orca-FA GGUF (Local C++ Engine)",
+            datafeedGrounding: fastFeed.summary,
+          });
+        }
+      } catch (llmErr) {
+        console.warn("[Ask Orca API] LLM gặp sự cố, tự động chuyển sang bộ tư duy thích ứng nội bộ:", llmErr);
+      }
+    }
+
+    // 1. Pipeline Huấn luyện Thấu hiểu Ngữ cảnh Chuyên sâu (Contextual Intelligence Pipeline)
     // Bao gồm: So sánh đối đầu 2 mã, Phân tích cổ phiếu theo trọng tâm, Luân chuyển dòng tiền nhóm ngành, Kịch bản đời thực
     const contextualResult = await executeContextualAiPipeline(question, facts);
     if (contextualResult) {
@@ -494,6 +556,36 @@ export async function POST(req: Request) {
         latencyMs: contextualResult.latencyMs,
         sourceNote: contextualResult.sourceNote,
       });
+    }
+
+    // 1.1 Sàng lọc Cổ phiếu Định lượng Trực tiếp từ FastDatafeed Screener Hub (Fallback)
+    if (isScreenerQuery(question)) {
+      const screener = await getFastScreenerFeed(question);
+      if (screener && screener.topStocks.length > 0) {
+        const criteriaText = screener.criteriaSummary.length ? screener.criteriaSummary.join(" · ") : "Định lượng chuẩn mực";
+        const answer = `## 🎯 BÁO CÁO SÀNG LỌC CỔ PHIẾU ĐỊNH LƯỢNG (ORCA QUANT SCREENER HUB)\n` +
+          `> **Tiêu chí sàng lọc trích xuất:** ${criteriaText} | **Số mã thỏa mãn:** **${screener.matchedCount} mã** (Top ${screener.topStocks.length} mã tối ưu nhất)\n\n` +
+          `### 1. BẢNG XẾP HẠNG CỔ PHIẾU THỎA MÃN BỘ LỌC ĐỊNH LƯỢNG\n` +
+          `${screener.markdownTable}\n\n` +
+          `### 2. ĐỘNG LỰC CỐT LÕI & ĐIỂM NHẤN CỦA TỪNG MÃ ĐẠT CHUẨN\n` +
+          screener.topStocks.map((s, idx) => `**${idx + 1}. ${s.symbol} (${s.name} - ${s.sector}):** ${s.highlights}`).join("\n") +
+          `\n\n### 3. KIỂM ĐỊNH CÔNG THỨC TOÁN HỌC & BIÊN AN TOÀN ĐỊNH LƯỢNG (KaTeX)\n` +
+          `- **Hiệu quả sinh lời trên vốn (KaTeX):** $ROE = \\frac{\\text{LNST}}{\\text{Vốn CSH}} \\ge ${criteriaText.includes("ROE") ? "20\\%" : "15\\%"}$\n` +
+          `- **Định giá thu nhập (KaTeX):** $P/E = \\frac{\\text{Thị giá}}{\\text{EPS}} \\le 12\\text{x}$ (Biên an toàn định giá $MOS \\ge 15-20\\%$)\n` +
+          `- **Xung lực phục hồi & Chân sóng:** Khóa vùng Sweet Launch Zone $0.8\\% - 7.5\\%$ từ đáy, Dư địa cản trên Overhead Room $\\ge 5.0\\%$.\n` +
+          `- **Tỷ số Lợi nhuận / Rủi ro:** Kế hoạch Triple-Barrier kỳ vọng $R:R \\ge 2.2\\text{x}$, Stop Loss $1.0\\text{x}$ ATR.\n\n` +
+          `### 4. BẪY ĐỊNH LƯỢNG CẦN LƯU Ý (FORENSIC CAVEATS)\n` +
+          screener.filterCaveats.map((c) => `• **${c}**`).join("\n") +
+          `\n\n> **Tuyên bố miễn trừ trách nhiệm**: Phân tích được tạo tự động bởi hệ thống mô hình định lượng Orca AI dựa trên dữ liệu công khai và dữ liệu thị trường trực tiếp. Nội dung mang tính chất tham khảo cho mục đích nghiên cứu, không cấu thành lời mời chào mua bán chứng khoán hay cam kết lợi nhuận đầu tư.`;
+
+        return ok({
+          answer,
+          domain: "quant_strategy",
+          detectedIntent: "SCREENER_FILTER",
+          model: "Orca Dynamic Quant AI Engine (Live Datafeed)",
+          datafeedGrounding: `Screener lọc được ${screener.matchedCount} mã thỏa mãn (${criteriaText})`,
+        });
+      }
     }
 
     // 1. Phân tích Cổ phiếu thời gian thực từ Live Datafeed (Fallback)
@@ -543,6 +635,25 @@ export async function POST(req: Request) {
             );
           }
 
+          // DUAL-AI CONSENSUS (MIQUANT + FIREANT REVERSE-ENGINEERED INTELLIGENCE)
+          try {
+            const consensus = await DualAiConsensusEngine.getConsensus(ticker, question);
+            if (consensus) {
+              const pa = consensus.priceAnalysis;
+              const upside = pa.upsidePercent ? ` (Biên an toàn / Upside: +${pa.upsidePercent}%)` : "";
+              quantExtras.push(
+                `🏛️ **ORCA DUAL-AI CONSENSUS (MIQUANT + FIREANT):**\n` +
+                `• Đồng thuận AI: **${consensus.verdictLabelVi}** (Điểm tin cậy: **${consensus.consensusScore}/100**)\n` +
+                (pa.targetPrice ? `• Định giá mục tiêu AI: **${pa.targetPrice.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} ₫**${upside}\n` : "") +
+                `• Động lực tăng trưởng chính: ${consensus.catalysts.slice(0, 2).join("; ") || "Đang cập nhật"}\n` +
+                (consensus.factChecks.length > 0 ? `• Thẩm định thông tin: ${consensus.factChecks[0].claim} (${consensus.factChecks[0].verdict === "VERIFIED_TRUE" ? "✅ Đã kiểm chứng" : "⚠️ Cần thận trọng"})\n` : "") +
+                (pa.pdfReportUrl ? `• 📄 [Tải Báo cáo Định giá Chi tiết PDF](${pa.pdfReportUrl})` : "")
+              );
+            }
+          } catch (cErr) {
+            // Non-blocking fallback
+          }
+
           if (quantExtras.length > 0) {
             narrativeAnswer += `\n\n---\n### 🔬 PHÂN TÍCH ĐỊNH LƯỢNG NÂNG CAO:\n` + quantExtras.join("\n\n");
           }
@@ -564,8 +675,59 @@ export async function POST(req: Request) {
       }
     }
 
+    // 1.5 Truy vấn Lọc Cổ Phiếu Theo Tiêu Chí Đa Nhân Tố (Live Screener Hub Fallback)
+    const isScreenerDirect = isScreenerQuery(question);
+    if (isScreenerDirect) {
+      try {
+        const feed = await buildFastDatafeedContext(question);
+        if (feed.screenerResult && feed.screenerResult.topStocks.length > 0) {
+          const sr = feed.screenerResult;
+          const criteriaText = sr.criteriaSummary.length > 0
+            ? sr.criteriaSummary.map((c) => `• **${c}**`).join("\n")
+            : "• Sàng lọc định lượng đa nhân tố (Hiệu quả sinh lời, Định giá, Sức khỏe BCTC và Dòng tiền)";
+
+          const deepDives = sr.topStocks.slice(0, 3).map((s, idx) => {
+            const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉";
+            return (
+              `### ${medal} **${s.symbol} - ${s.name} (${s.sector})**\n` +
+              `• **Thị giá & Định giá:** Giá: **${s.price.toLocaleString("vi-VN")}đ** (${s.changePercent >= 0 ? "+" : ""}${s.changePercent.toFixed(2)}%) · P/E: **${s.pe ? s.pe.toFixed(1) + "x" : "—"}** · P/B: **${s.pb ? s.pb.toFixed(1) + "x" : "—"}**\n` +
+              `• **Sức khỏe & Sinh lời:** ROE: **${s.roe ? s.roe.toFixed(1) + "%" : "—"}** · Cổ tức tiền mặt: **${s.divYield ? s.divYield.toFixed(1) + "%/năm" : "—"}** · F-Score: **${s.fScore ? s.fScore + "/9" : "—"}**\n` +
+              `• **Luận điểm cốt lõi:** ${s.highlights}\n` +
+              `• **Vị thế kỹ thuật:** ${s.apexZone || "Tích lũy tạo nền"} (Khoảng trống cản trên Overhead Room đảm bảo ≥ 5.0% để không dính cản T+2.5).`
+            );
+          });
+
+          const answer =
+            `Chào bạn! Dưới đây là kết quả **Sàng Lọc Cổ Phiếu Định Lượng** cập nhật từ hệ thống Datafeed thời gian thực của Orca FA theo đúng tiêu chí bạn yêu cầu:\n\n` +
+            `### 🎯 BỘ TIÊU CHÍ SÀNG LỌC ĐÃ CHUẨN HÓA:\n${criteriaText}\n\n` +
+            `### 📊 BẢNG XẾP HẠNG TOP CỔ PHIẾU ĐẠT TIÊU CHÍ:\n${sr.markdownTable}\n\n` +
+            `---\n### 🔬 PHÂN TÍCH ĐIỂM SÁNG ĐỘNG LỰC CỦA TOP 3 MÃ NỔI BẬT:\n\n${deepDives.join("\n\n")}\n\n` +
+            `---\n### ⚠️ CẢNH BÁO BẪY SỐ LIỆU ĐỊNH LƯỢNG (FILTER CAVEATS):\n` +
+            sr.filterCaveats.map((c, i) => `${i + 1}. ${c}`).join("\n") +
+            `\n\n### 🛡️ CHIẾN LƯỢC GIẢI NGÂN & KẾ HOẠCH TRIPLE-BARRIER:\n` +
+            `• **Vùng tích lũy:** Ưu tiên giải ngân khi cổ phiếu vận động trong **Vùng Vàng Sweet Launch Zone (cách đáy $0.8\\% - 7.5\\%$)**.\n` +
+            `• **Ngưỡng chặn lỗ:** Cắt lỗ kỷ luật theo biên độ ATR ($1.0\\text{x}$ ATR tương đương $5 - 7\\%$).\n` +
+            `• **Tỷ số Lợi nhuận/Rủi ro:** Thiết lập mục tiêu chốt lời đảm bảo $R:R \\ge 2.2\\text{x}$.\n\n` +
+            `> ⚠️ **Khuyến cáo:** Nội dung phân tích trên do ORCA FA tổng hợp dựa trên dữ liệu BCTC và biến động thị trường thời gian thực, chỉ mang tính chất tham khảo định lượng. Không được coi là lời mời chào mua bán chứng khoán hay cam kết lợi nhuận đầu tư.`;
+
+          return ok({
+            answer,
+            model: "Orca Screener Datafeed Hub (Live)",
+            sourceNote: "100% In-House Live Screener Datafeed",
+            datafeedGrounding: feed.summary,
+          });
+        }
+      } catch (screenerErr) {
+        console.warn("[Ask Orca] Lỗi lấy dữ liệu screener trực tiếp:", screenerErr);
+      }
+    }
+
     // 2. Diễn biến Thị trường & Chỉ số VN-Index thời gian thực từ Live Datafeed
-    const isMarketQuery = /thị\s*trường|vn-?index|vn30|hose|hnx|upcom/i.test(question);
+    const isMarketQuery =
+      /^(?:xem\s+)?(?:thị\s*trường|vn-?index|vn30|hose|hnx|upcom)\b/i.test(question) ||
+      (/\b(?:thị\s*trường|vn-?index|vn30)\b/i.test(question) &&
+        /hôm nay|thế nào|tổng quan|diễn biến|tăng hay giảm|chỉ số|điểm/i.test(question) &&
+        !/kẹp hàng|t\+|lãi|nợ|cổ phiếu|mã|râu|vol/i.test(question));
     if (isMarketQuery) {
       try {
         const indicesRes = await getVnIndices();
@@ -607,73 +769,44 @@ ${lines.join("\n")}
       }
     }
 
-    // Nếu có LLM cấu hình, gọi LLM gateway với Prompt đa kịch bản, tự nhiên, linh hoạt
-    if (llmConfigured()) {
+    // 2.1 Truy vấn Hàng hóa Toàn cầu & Tác động đến Cổ phiếu VN (Live Commodity Feed)
+    const isCommodityDirectQuery =
+      /\b(giá|thị trường|biến động|cập nhật|xem)?\s*(dầu|dầu thô|brent|wti|xăng|quặng sắt|thép|hrc|đồng|nhôm|phân bón|urê|ure|cà phê|cao su|gạo)\b/i.test(question) &&
+      !/cổ phiếu|bctc|pe|pb|lợi nhuận|doanh thu/i.test(question);
+    if (isCommodityDirectQuery) {
       try {
-        const systemPrompt = `Bạn là ORCA AI — Trợ lý Cố vấn Tài chính Cá nhân và Thị trường thông minh của hệ thống ORCA Financial.
-Bạn được huấn luyện dựa trên bộ tri thức quản trị tài chính thực tế tại Việt Nam (thu nhập, chi phí nhà trọ, sinh hoạt phí đô thị, thuế TNCN, BHXH, thói quen tiêu dùng, vàng nhẫn 9999, quỹ mở, lãi suất ngân hàng và dữ liệu chứng khoán).
+        const feed = await buildFastDatafeedContext(question);
+        if (feed.matchedCommodities && feed.matchedCommodities.length > 0) {
+          const commItems = feed.matchedCommodities.map((c) => {
+            const bene = c.beneficiaryStocks?.length ? `• **Mã hưởng lợi:** ${c.beneficiaryStocks.map((s) => `\`${s}\``).join(", ")}` : "";
+            const head = c.headwindStocks?.length ? `• **Mã chịu áp lực:** ${c.headwindStocks.map((s) => `\`${s}\``).join(", ")}` : "";
+            const chg = c.changePercent != null ? ` (${c.changePercent >= 0 ? "+" : ""}${c.changePercent.toFixed(2)}%)` : "";
+            return (
+              `📦 **${c.name} (${c.symbol}):** **${c.price.toLocaleString("vi-VN")} ${c.unit || c.currency}**${chg}\n` +
+              `• **Nhóm ngành:** ${c.impactedSector || c.group}\n` +
+              (bene ? `${bene}\n` : "") +
+              (head ? `${head}\n` : "") +
+              (c.mechanism ? `• **Cơ chế tác động:** ${c.mechanism}` : "")
+            );
+          });
 
-TÍNH CÁCH & PHONG CÁCH GIAO TIẾP:
-- Xưng hô chuyên nghiệp, gần gũi: Tự xưng là "ORCA" hoặc "tôi", gọi người dùng là "bạn". Tuyệt đối không dùng emoji, sticker hoặc biểu tượng trang trí cảm xúc. Trình bày rõ ràng, mạch lạc, trực diện theo chuẩn văn phong tài chính hiện đại.
-- Đồng cảm, không phán xét: Hiểu rằng tài chính cá nhân gắn liền với cảm xúc, hoàn cảnh sống thực tế và áp lực đời thường.
-- Sắc sảo, định lượng: Đưa ra các con số VND cụ thể dựa trên số liệu sổ tài chính thực tế dưới đây. Không đưa ra lời khuyên sáo rỗng hay đạo lý chung chung.
+          const answer =
+            `Chào bạn! Dưới đây là dữ liệu giá hàng hóa và nguyên vật liệu toàn cầu cập nhật từ hệ thống Datafeed thời gian thực của Orca:\n\n` +
+            commItems.join("\n\n") +
+            `\n\n---\n💡 **Khuyến nghị định lượng:** Biến động giá hàng hóa thế giới thường phản ánh vào biên lợi nhuận gộp của doanh nghiệp niêm yết sau độ trễ 1-2 quý (tồn kho nguyên liệu). Hãy đối soát thêm BCTC và tồn kho của từng mã để có quyết định đầu tư tối ưu!`;
 
-TRI THỨC & NGUYÊN TẮC LINH HOẠT (QUAN TRỌNG):
-- KHÔNG BẮT BUỘC RẬP KHUÔN: Đừng biến mọi câu trả lời thành bảng 50/30/20 trừ khi người dùng hỏi cụ thể về chia lương. Hãy trả lời đúng trọng tâm câu hỏi của người dùng.
-- TƯ DUY ĐA KỊCH BẢN (SCENARIO-BASED): Luôn đưa ra 2–3 phương án lựa chọn (VD: Kịch bản Thận trọng vs Kịch bản Cân bằng vs Kịch bản Tăng tốc) để người dùng chủ động chọn lối đi phù hợp với lối sống của họ.
-- BIẾN THỂ THỰC TẾ:
-  + Nếu sống ở đô thị lớn (Hà Nội, TP.HCM) và tiền trọ/cố định cao (>50% lương), đề xuất công thức 60/25/15 thay vì ép 50/30/20.
-  + Nếu người dùng lỡ tiêu lố hoặc căng thẳng tài chính: Đưa ra kế hoạch hạ nhiệt 14 ngày, đóng băng chi tiêu tùy ý mà không làm giảm nhu cầu cơ bản.
-  + Tiền thưởng/thu nhập bất ngờ: Chia 3 ngăn (Gia cố đệm an toàn/dập nợ, Tích sản sinh lời, Nhu cầu cá nhân hợp lý).
-  + Mua trả góp: Tổng nghĩa vụ nợ không vượt quá 20–25% lương net. Đề xuất tăng tỷ lệ trả trước (down payment) nếu cần.
-  + Đầu tư/Tiết kiệm/Vàng: Thế kiềng 3 chân tùy theo khẩu vị rủi ro.
-  + CHỨNG KHOÁN & BỘ LỌC CỔ PHIẾU: Khi người dùng hỏi về lọc cổ phiếu, mua mã gì, cổ tức hay tín hiệu kỹ thuật: Hãy sử dụng tri thức từ Orca Multi-Source Screener (hơn 17 bộ lọc), Dividend Intelligence (VNM, VEA, MBB trả tiền mặt 6-8%/năm vs lãi suất ngân hàng 5.0%), và giới thiệu công cụ "Backtest Mô Phỏng (OQuant)" trên trang /screener.
-  + TRI THỨC ĐỊNH LƯỢNG 16 NĂM THỰC NGHIỆM TTCK VIỆT NAM (2010 - 2026 / 47.000 DATA POINTS):
-    * Buy & Hold VN30 đạt CAGR +15.37%/năm, Sharpe 0.81, đánh bại lướt sóng ngắn hạn sau khi trừ đủ phí giao dịch 0.15% + thuế bán 0.1% + trượt giá 0.2% trên vòng quay T+2.5.
-    * Nghịch lý RSI > 70: Thống kê 45.000 nến ngày chứng minh mua khi RSI > 70 cho lợi nhuận kỳ vọng 60 ngày tiếp theo trung bình +9.23% (tỷ lệ thắng 60%), cao hơn nhiều so với mua bắt đáy RSI < 30 (+6.32%). Đây là hiệu ứng Momentum dòng tiền bứt phá, không phải tín hiệu để bán non.
-    * Đột biến khối lượng Volume Surge (>= 2x MA20) kèm giá tăng >= +0.5%: Xác nhận tiền lớn gom hàng (Accumulation), xác suất duy trì đà tăng sau 20 phiên gấp 2.3 lần so với phiên volume thấp.
-    * 90% nhà đầu tư cá nhân thua lỗ vì bẫy chu kỳ T+2.5, đu đỉnh FOMO và gồng lỗ đến mức bị call margin. Tuyệt đối không trung bình giá xuống khi cổ phiếu gãy MA50. Ngưỡng cắt lỗ kỷ luật là -7% đến -10%.
-
-BỐI CẢNH SỔ TÀI CHÍNH THỰC TẾ:
-- Kỳ ghi chép: ${facts.period || "Hiện tại"}
-- Nơi sinh sống: ${facts.location || "TP.HCM / Hà Nội"}
-- Giai đoạn cuộc sống: ${facts.lifeStage || "Độc thân / Tích lũy"}
-- Ưu tiên hàng đầu: ${facts.primaryPriority || "Cân bằng & Tích lũy tài sản"}
-- Thu nhập thực nhận (Net): ${formatVnd(net)}/tháng (Gross: ${formatVnd(gross)})
-- Tổng chi tiêu: ${formatVnd(totalExp)}/tháng (Chi cố định: ${formatVnd(fixed)}, Chi linh hoạt: ${formatVnd(facts.variableExpenses)})
-- Tỷ lệ chi cố định: ${(facts.fixedCostRatio ?? 0).toFixed(1)}% thu nhập
-- Tiết kiệm hàng tháng: ${formatVnd(facts.monthlySavings)} (Tỷ lệ tiết kiệm: ${(facts.savingsRate ?? 0).toFixed(1)}%)
-- Quỹ khẩn cấp: Đủ trang trải ${(facts.emergencyFundMonths ?? 0).toFixed(1)} tháng chi tiêu
-- Tổng nợ: ${formatVnd(facts.totalDebt)}
-- Tài sản ròng (Net Worth): ${formatVnd(facts.netWorth)}
-- Điểm sức khỏe tài chính: ${facts.healthScore ?? 75}/100 (${facts.healthRating || "Khá"})
-${facts.debtsList && facts.debtsList.length > 0 ? `- Danh sách nợ: ${JSON.stringify(facts.debtsList)}` : "- Không có khoản nợ nào"}
-${facts.goalsList && facts.goalsList.length > 0 ? `- Mục tiêu: ${JSON.stringify(facts.goalsList)}` : "- Chưa tạo mục tiêu cụ thể"}
-`;
-
-        const chatHistory = history.map((h: { sender: string; text: string }) => ({
-          role: (h.sender === "user" ? "user" : "assistant") as "user" | "assistant",
-          content: h.text,
-        }));
-
-        const llmResult = await llmChat("reasoning", {
-          system: systemPrompt,
-          user: question,
-          history: chatHistory,
-          temperature: 0.72,
-          maxTokens: 1400,
-          timeoutMs: 15_000,
-        });
-
-        if (llmResult?.text && llmResult.text.trim().length > 20) {
-          return ok({ answer: llmResult.text.trim() });
+          return ok({
+            answer,
+            model: "Orca Commodity Datafeed Hub (Live)",
+            sourceNote: "100% In-House Live Commodity Datafeed",
+          });
         }
-      } catch (llmErr) {
-        console.warn("[Ask Orca API] LLM gặp sự cố, chuyển sang bộ tư duy thích ứng cục bộ:", llmErr);
+      } catch (commErr) {
+        console.warn("[Ask Orca] Lỗi lấy dữ liệu hàng hóa trực tiếp:", commErr);
       }
     }
 
-    // Engine tư duy thích ứng linh hoạt bám sát tri thức dataset
+    // Engine tư duy thích ứng linh hoạt bám sát tri thức dataset (Fallback dự phòng)
     const adaptiveAnswer = generateAdaptiveAnswer(question, facts);
     return ok({ answer: adaptiveAnswer });
   } catch (err) {

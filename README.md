@@ -1,13 +1,13 @@
-# Orca Financial Lite
+# Orca Financial (Full Option)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Pepper369/Orca-Lite/main/public/icon.png" alt="Orca Financial Logo" width="100" height="100" style="border-radius: 20%;" onerror="this.style.display='none'"/>
 </p>
 
 <p align="center">
-  <strong>Nền tảng Phân tích Tài chính Đa tài sản, Định lượng & Quản lý Tài chính Cá nhân Tinh gọn</strong>
+  <strong>Nền tảng Phân tích Tài chính Toàn diện Đa tài sản, Định lượng & Trợ lý Trí tuệ Nhân tạo Orca AI</strong>
   <br />
-  <em>Tối ưu hóa cho Next.js 16 Turbopack • Google AI Studio (Gemini 2.0) • Đa thị trường Việt Nam & Quốc tế</em>
+  <em>Next.js 16 • Orca Local GGUF LLM (Qwen2.5-3B) • Google AI Studio (Gemini 2.0) • Đa thị trường Toàn diện</em>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/React-19.2-blue?style=flat-square&logo=react" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-blue?style=flat-square&logo=typescript" alt="TypeScript" />
   <img src="https://img.shields.io/badge/TailwindCSS-v4.1-38bdf8?style=flat-square&logo=tailwindcss" alt="Tailwind CSS" />
-  <img src="https://img.shields.io/badge/Gemini_AI-2.0_Flash-orange?style=flat-square&logo=google" alt="Gemini AI" />
+  <img src="https://img.shields.io/badge/Orca_AI-Local_GGUF_%2B_Gemini-8b5cf6?style=flat-square&logo=openai" alt="Orca AI" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
 </p>
 

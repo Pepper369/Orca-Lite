@@ -1,13 +1,15 @@
 {
-  "name": "orca-lite",
+  "name": "orca-financial",
   "version": "1.0.0",
   "private": true,
-  "description": "Orca Financial Lite — Lightweight Next.js Financial Platform with Google AI Studio (Gemini 2.0)",
+  "description": "Orca Financial (Full Option) — Nền tảng Phân tích Tài chính Toàn diện Đa tài sản, Định lượng & Trợ lý Trí tuệ Nhân tạo Orca AI",
   "engines": {
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "next dev -p 3000 -H 0.0.0.0",
+    "dev": "powershell -ExecutionPolicy Bypass -File src/scripts/model/dev_with_gguf.ps1",
+    "dev:next": "next dev --webpack -p 3000 -H 0.0.0.0",
+    "dev:turbo": "next dev -p 3000 -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

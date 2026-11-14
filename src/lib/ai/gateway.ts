@@ -1,9 +1,10 @@
 import "server-only";
 import { env } from "../env";
 import { httpJson } from "../http";
+import { isLocalGgufModelId, resolveLocalGgufConfig } from "./local-gguf";
 
 /**
- * LLM GATEWAY — OpenRouter-first + fast cascade (production).
+ * LLM GATEWAY — OpenRouter-first + fast cascade (production) + optional Local GGUF runtime.
  * Race first 2 models, cap attempts, short fallback timeout, soft cooldown.
  *
  * v2: higher default max_tokens, optional top_p, slightly longer timeouts
@@ -11,14 +12,14 @@ import { httpJson } from "../http";
  */
 
 export type LlmRole = "reasoning" | "analysis" | "classification" | "report";
-export type LlmBackend = "openrouter" | "groq";
+export type LlmBackend = "openrouter" | "groq" | "local-gguf";
 
 export interface LlmResult {
   text: string;
   model: string;
   role: LlmRole;
   latencyMs: number;
-  provider: "openrouter" | "groq" | "openai-compatible";
+  provider: "openrouter" | "groq" | "openai-compatible" | "local-gguf";
   attemptedModels?: string[];
   usedBackendFallback?: boolean;
   raced?: boolean;
@@ -78,18 +79,26 @@ export function modelFor(role: LlmRole): string {
 }
 
 export function modelsFor(role: LlmRole): string[] {
+  const localGguf = resolveLocalGgufConfig();
+  const withLocal = (list: string[]) => {
+    if (!localGguf.enabled) return dedupeModels(list);
+    return localGguf.priority === "primary"
+      ? dedupeModels([localGguf.model, ...list])
+      : dedupeModels([...list, localGguf.model]);
+  };
+
   if (env.geminiApiKey) {
-    return dedupeModels([
+    return withLocal([
       "gemini-2.0-flash",
       "gemini-1.5-flash",
       firstDefined(env.aiModelReport, env.aiModelAnalysis),
       "google/gemini-2.0-flash-001",
       env.openrouterModel,
       "gemini-1.5-pro",
-    ]);
+    ].filter((v): v is string => Boolean(v)));
   }
   if (role === "reasoning") {
-    return dedupeModels([
+    return withLocal([
       firstDefined(env.aiModelReasoning, process.env.AI_MODEL_REASONING),
       "google/gemini-2.0-flash-001",
       ...env.aiModelReasoningFallbacks,
@@ -97,10 +106,10 @@ export function modelsFor(role: LlmRole): string[] {
       env.aiModel,
       "nvidia/nemotron-3-super-120b-a12b:free",
       "openrouter/free",
-    ]);
+    ].filter((v): v is string => Boolean(v)));
   }
   if (role === "report") {
-    return dedupeModels([
+    return withLocal([
       "google/gemini-2.0-flash-001",
       firstDefined(env.aiModelReport, env.aiModelAnalysis, process.env.AI_MODEL_REPORT, process.env.AI_MODEL_ANALYSIS),
       ...env.aiModelReportFallbacks,
@@ -110,10 +119,10 @@ export function modelsFor(role: LlmRole): string[] {
       "inclusionai/ling-3.0-flash-fin:free",
       "qwen/qwen3.8-27b:free",
       "openrouter/free",
-    ]);
+    ].filter((v): v is string => Boolean(v)));
   }
   if (role === "analysis") {
-    return dedupeModels([
+    return withLocal([
       "google/gemini-2.0-flash-001",
       firstDefined(env.aiModelAnalysis, env.aiModelReport, process.env.AI_MODEL_ANALYSIS, process.env.AI_MODEL_REPORT),
       ...env.aiModelAnalysisFallbacks,
@@ -123,9 +132,9 @@ export function modelsFor(role: LlmRole): string[] {
       "inclusionai/ling-3.0-flash-fin:free",
       "qwen/qwen3.8-27b:free",
       "openrouter/free",
-    ]);
+    ].filter((v): v is string => Boolean(v)));
   }
-  return dedupeModels([
+  return withLocal([
     "google/gemini-2.0-flash-001",
     env.openrouterModel,
     env.aiModel,
@@ -133,7 +142,7 @@ export function modelsFor(role: LlmRole): string[] {
     ...env.aiModelClassificationFallbacks,
     "qwen/qwen3.8-27b:free",
     "openrouter/free",
-  ]);
+  ].filter((v): v is string => Boolean(v)));
 }
 
 function resolveProvider(model: string, backend?: LlmBackend): {
@@ -141,6 +150,17 @@ function resolveProvider(model: string, backend?: LlmBackend): {
   apiKey: string | undefined;
   provider: LlmResult["provider"];
 } {
+  const localGguf = resolveLocalGgufConfig();
+  if (
+    backend === "local-gguf" ||
+    (localGguf.enabled && isLocalGgufModelId(model, localGguf.model))
+  ) {
+    return {
+      baseUrl: localGguf.baseUrl ?? "http://127.0.0.1:8080/v1",
+      apiKey: localGguf.apiKey || "local-gguf",
+      provider: "local-gguf",
+    };
+  }
   if (backend === "groq") {
     return {
       baseUrl: (env.groqBaseUrl ?? "https://api.groq.com/openai/v1").replace(/\/$/, ""),
@@ -197,7 +217,13 @@ function resolveProvider(model: string, backend?: LlmBackend): {
 }
 
 export function llmConfigured(): boolean {
-  return Boolean(env.geminiApiKey || env.openrouterApiKey || env.aiApiKey || env.groqApiKey);
+  return Boolean(
+    env.geminiApiKey ||
+      env.openrouterApiKey ||
+      env.aiApiKey ||
+      env.groqApiKey ||
+      resolveLocalGgufConfig().enabled,
+  );
 }
 
 export function llmRegistryInfo() {
@@ -210,12 +236,14 @@ export function llmRegistryInfo() {
   }
   const sample = modelFor("analysis");
   const { baseUrl, provider } = resolveProvider(sample);
+  const localGguf = resolveLocalGgufConfig();
   return {
     configured: llmConfigured(),
     provider,
     baseUrl,
     models,
     cascades,
+    localGguf,
     cascadeEnabled: true,
     cascadeMode: cascadeMode(),
     maxCascade: maxCascade(),
@@ -308,10 +336,11 @@ async function callOnce(
     };
     if (opts.topP != null) body.top_p = opts.topP;
 
+    const effectiveTimeoutMs = provider === "local-gguf" ? Math.max(timeoutMs, 120_000) : timeoutMs;
     const res = await httpJson<ChatResponse>(`${baseUrl}/chat/completions`, {
       provider: `llm:${provider}:${role}`,
       method: "POST",
-      timeoutMs,
+      timeoutMs: effectiveTimeoutMs,
       retries: 0,
       headers,
       body: JSON.stringify(body),

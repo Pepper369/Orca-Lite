@@ -1,5 +1,7 @@
 import { ok, badRequest, fail } from "@/lib/envelope";
 import { answerQuestion, type AgentHistoryTurn } from "@/lib/services/agent";
+import { runAgenticFinancialReasoning } from "@/lib/ai/agent-runner";
+import { llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +17,7 @@ type AgentRequestBody = {
     style?: "analyst" | "technical" | "brief";
     language?: "vi" | "en";
     riskDisclosure?: "standard" | "detailed" | "off";
+    agentic?: boolean;
   };
 };
 
@@ -58,6 +61,36 @@ export async function POST(req: Request) {
     : [];
 
   try {
+    // Nếu client bật explicit agentic mode:
+    if (body.preferences?.agentic && llmConfigured()) {
+      try {
+        const agenticRes = await runAgenticFinancialReasoning(question);
+        if (
+          agenticRes?.answer &&
+          agenticRes.answer.trim().length >= 100 &&
+          !agenticRes.answer.includes("Đã hoàn tất phân tích số liệu")
+        ) {
+          return ok(
+            {
+              answer: agenticRes.answer,
+              mode: "agentic_tools",
+              model: agenticRes.model,
+              steps: agenticRes.steps,
+              toolsUsed: agenticRes.toolsUsed,
+              confidence: "HIGH",
+            },
+            {
+              source: "orca-agentic-fa-loop",
+              freshness: "FRESH",
+              cached: false,
+            }
+          );
+        }
+      } catch {
+        /* Fallback sang standard pipeline */
+      }
+    }
+
     const { result, meta } = await answerQuestion(question, body.preferences ?? {}, history);
     return ok(result, meta);
   } catch (e) {
