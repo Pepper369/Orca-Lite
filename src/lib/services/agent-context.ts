@@ -16,7 +16,10 @@ import { computeInvestmentPerformance } from "../financial/investment-performanc
 import { fetchVndDchartHistory } from "../providers/vndirect-dchart";
 import { getVndValuationRatios, getVndEquitySnapshot } from "../providers/vndirect-company";
 import { buildVn } from "./agent-vn-stock";
+import { MiquantFinancialIntelligence } from "./miquant-ai";
+import { DualAiConsensusEngine } from "./dual-ai-consensus";
 import { getSectorTrendSnapshot } from "./sector-trend";
+import { getEconomicCalendar } from "../providers/economic-calendar";
 import type { EconomicSnapshot } from "../economic-data";
 import type { FreshnessStatus } from "../types";
 
@@ -422,6 +425,23 @@ export async function buildRatesMacroContext(kind: "rates" | "macro" | "both"): 
   pack("Lãi suất & tỷ giá", "currency-interest-rate", rates);
   pack("Kinh tế vĩ mô", "macro-economic", macro);
 
+  // Bổ sung Lịch kinh tế Việt Nam & Quốc tế
+  try {
+    const calendar = await getEconomicCalendar().catch(() => null);
+    if (calendar?.events?.length) {
+      sectionsUsed.push("economic-calendar");
+      const highImpact = calendar.events.filter((e) => e.impact === "HIGH").slice(0, 5);
+      const lines = highImpact.map((e) => `- **[${e.country}] ${e.title}** (${e.date}${e.time ? ` ${e.time}` : ""}): ${e.vnMarketImpactVi}`);
+      sections.push(`## Lịch sự kiện vĩ mô & Mùa BCTC\n- Mùa BCTC hiện tại: **${calendar.earningsSeasonWindow.period}** (${calendar.earningsSeasonWindow.description})\n${lines.join("\n")}`);
+      contract.calendar = {
+        upcoming: highImpact,
+        earningsWindow: calendar.earningsSeasonWindow,
+      };
+    }
+  } catch {
+    /* non-fatal */
+  }
+
   if (!sections.length) {
     return {
       narrative: "Chưa lấy được bảng lãi suất / vĩ mô từ VietnamBiz.",
@@ -520,11 +540,31 @@ export async function enrichVnStockPerformance(symbol: string): Promise<string> 
 export async function buildVnStockFull(symbol: string, deep: boolean): Promise<AgentBuilt> {
   const base = await buildVn(symbol, deep);
   const extra = await enrichVnStockPerformance(symbol);
-  if (extra) {
+  let dualAiNarrative = "";
+  try {
+    const consensus = await DualAiConsensusEngine.getConsensus(symbol);
+    if (consensus) {
+      dualAiNarrative = `\n\n## Đồng Thuận Trí Tuệ Kép (MIQuant AI + FireAnt AI)\n- Khuyến nghị Đồng thuận: **${consensus.verdictLabelVi}** (Tin cậy: **${consensus.consensusScore}/100**)\n`;
+      if (consensus.priceAnalysis.targetPrice) {
+        const up = consensus.priceAnalysis.upsidePercent ? ` (Upside: +${consensus.priceAnalysis.upsidePercent}%)` : "";
+        dualAiNarrative += `- Giá trị hợp lý AI: **${consensus.priceAnalysis.targetPrice.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} đ**${up}\n`;
+      }
+      if (consensus.catalysts.length > 0) {
+        dualAiNarrative += `- Động lực chính: ${consensus.catalysts[0]}\n`;
+      }
+      if (consensus.priceAnalysis.pdfReportUrl) {
+        dualAiNarrative += `- Báo cáo định giá PDF: [Tải báo cáo](${consensus.priceAnalysis.pdfReportUrl})\n`;
+      }
+    }
+  } catch {
+    // Non-blocking
+  }
+
+  if (extra || dualAiNarrative) {
     return {
       ...base,
-      narrative: `${base.narrative}\n\n${extra}`,
-      sectionsUsed: [...base.sectionsUsed, "investment-performance", "bctc", "ratios"],
+      narrative: `${base.narrative}\n\n${extra}${dualAiNarrative}`,
+      sectionsUsed: [...base.sectionsUsed, "investment-performance", "bctc", "ratios", "dual-ai-consensus"],
     };
   }
   return base;

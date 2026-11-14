@@ -42,9 +42,6 @@ export interface AgentResponseContext {
 export const DOMAIN_LABELS: Record<Exclude<AgentDomain, "general">, string> = {
   market: "Thị trường", industry: "Ngành", stock: "Cổ phiếu", commodity: "Hàng hóa",
 };
-export const DOMAIN_GUIDES: Record<Exclude<AgentDomain, "general">, string> = {
-  market: "AI_MARKET_GUIDE.md", industry: "AI_INDUSTRY_GUIDE.md", stock: "AI_STOCK_GUIDE.md", commodity: "AI_COMMODITY_GUIDE.md",
-};
 import { isVnSymbol } from "@/lib/vn/master";
 
 const NON_STOCK_TOKENS = new Set([

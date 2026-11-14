@@ -413,7 +413,8 @@ export function generateOrcaDynamicAiReport(input: DynamicAiInput): DynamicAiRep
   lines.push(`- **Điểm Cắt Lỗ Kỷ Luật (Stop Loss):** **${tripleBarrier.lowerBarrierPrice.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} ₫** (Cách -${tripleBarrier.stopLossReturnPct.toFixed(1)}% theo biến động ATR).`);
   lines.push(`- **Mục Tiêu Chốt Lời 1 (Take Profit 1):** **${tripleBarrier.upperBarrierPrice.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} ₫** (Lợi nhuận kỳ vọng +${tripleBarrier.targetReturnPct.toFixed(1)}%).`);
   lines.push(`- **Mục Tiêu Chốt Lời 2 (Take Profit 2):** **${tp2Price.toLocaleString("vi-VN", { maximumFractionDigits: 1 })} ₫** (Lợi nhuận kỳ vọng +${(tripleBarrier.targetReturnPct * 1.5).toFixed(1)}%).`);
-  lines.push(`- **Tỷ Số Lợi Nhuận / Rủi Ro (Risk/Reward):** Đạt **${tripleBarrier.riskRewardRatio}x** ${tripleBarrier.riskRewardRatio >= 2.0 ? "(Thỏa mãn điều kiện R:R chuẩn mực định lượng)" : ""}.`);
+  lines.push(`- **Tỷ Số Lợi Nhuận / Rủi Ro (Risk/Reward KaTeX):** $R:R = \\frac{\\text{TP} - P_0}{P_0 - \\text{SL}} = ${tripleBarrier.riskRewardRatio}\\text{x}$ ${tripleBarrier.riskRewardRatio >= 2.0 ? "(Thỏa mãn điều kiện $R:R \\ge 2.2\\text{x}$ chuẩn mực định lượng)" : ""}.`);
+  lines.push(`- **Biên An Toàn & Định Giá (KaTeX):** $P/E = \\frac{\\text{Thị giá}}{\\text{EPS}}$, $P/B = \\frac{\\text{Thị giá}}{\\text{BVPS}}$, Biên an toàn định giá $MOS \\ge 15-20\\%$.`);
   lines.push("");
   lines.push(`*Báo cáo được tính toán trực tiếp từ Datafeed thời gian thực và Hệ thống Định lượng Đa tầng Orca Quant Engine.*`);
 
