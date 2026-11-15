@@ -562,7 +562,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
           <main
             className={
               "orca-main-scroll min-h-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0 " +
-              (isFullViewport ? "overflow-y-auto md:overflow-hidden flex flex-col" : "overflow-y-auto")
+              (isFullViewport ? "overflow-hidden flex flex-col h-full" : "overflow-y-auto")
             }
           >
               <ErrorBoundary name="page" resetKey={pathname}>
@@ -571,7 +571,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
                   className={
                     "orca-page-transition " +
                     (isFullViewport
-                      ? "flex-1 min-h-0 flex flex-col p-1.5 sm:p-2.5"
+                      ? "flex-1 min-h-0 flex flex-col h-full p-1.5 sm:p-2.5 overflow-hidden"
                       : "p-2 sm:p-3.5 max-w-[1600px] mx-auto w-full")
                   }
                 >

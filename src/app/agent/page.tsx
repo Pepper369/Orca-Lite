@@ -228,15 +228,6 @@ export default function AgentPage() {
     }));
   }
 
-  function scrollToBottom(smooth = true) {
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTo({
-      top: el.scrollHeight,
-      behavior: smooth ? "smooth" : "auto",
-    });
-  }
-
   function renderAnswer(text: string, isStreaming?: boolean) {
     const blocks = parseMarkdownBlocks(text);
     return (
@@ -452,13 +443,19 @@ export default function AgentPage() {
     messagesRef.current = messages;
   }, [messages]);
 
+  const userScrolledUpRef = useRef(false);
+  const isAutoScrollingRef = useRef(false);
+
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
 
     const onScroll = () => {
+      if (isAutoScrollingRef.current) return;
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollBottom(dist > 160);
+      const isUp = dist > 60;
+      userScrolledUpRef.current = isUp;
+      setShowScrollBottom(isUp);
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -468,19 +465,34 @@ export default function AgentPage() {
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const nearBottom = distanceFromBottom < 160;
-    if (!nearBottom && messages.length > 2) return;
-    const reduceMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    // Đang có người dùng chủ động cuộn lên đọc: tuyệt đối không giật màn hình xuống
+    if (userScrolledUpRef.current) return;
+
+    isAutoScrollingRef.current = true;
+    el.scrollTop = el.scrollHeight;
     requestAnimationFrame(() => {
-      el.scrollTo({
-        top: el.scrollHeight,
-        behavior: reduceMotion ? "auto" : "smooth",
-      });
+      isAutoScrollingRef.current = false;
     });
   }, [messages, busy]);
+
+  function scrollToBottom(smooth = true) {
+    const el = listRef.current;
+    if (!el) return;
+    userScrolledUpRef.current = false;
+    setShowScrollBottom(false);
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: smooth ? "smooth" : "auto",
+    });
+  }
+
+  const handleOuterWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = listRef.current;
+    if (!el) return;
+    if (e.target !== el && !el.contains(e.target as Node)) {
+      el.scrollTop += e.deltaY;
+    }
+  };
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -505,6 +517,8 @@ export default function AgentPage() {
   async function ask(q: string) {
     const question = q.trim();
     if (!question || busy) return;
+    userScrolledUpRef.current = false;
+    setShowScrollBottom(false);
     setBusy(true);
 
     const controller = new AbortController();
@@ -694,7 +708,10 @@ export default function AgentPage() {
   const showSuggestions = messages.length <= 2;
 
   return (
-    <div className="agent-shell mx-auto flex h-full min-h-0 w-full max-w-4xl flex-1 flex-col gap-2 overflow-x-clip">
+    <div
+      onWheel={handleOuterWheel}
+      className="agent-shell mx-auto flex h-full min-h-0 w-full max-w-4xl flex-1 flex-col gap-2 overflow-hidden select-text"
+    >
       <Panel pad={false} className="shrink-0">
         <div className="flex items-center justify-between gap-3 p-3 sm:p-4">
           <div className="min-w-0">
@@ -712,7 +729,7 @@ export default function AgentPage() {
 
       <div
         ref={listRef}
-        className="chat-scroll agent-messages min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden rounded-xl border border-line bg-panel p-3 sm:p-3.5"
+        className="chat-scroll agent-messages min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden rounded-xl border border-line bg-panel p-3 sm:p-3.5 overscroll-contain touch-pan-y"
       >
         {messages.map((m, i) => (
           <div
@@ -790,7 +807,7 @@ export default function AgentPage() {
       <div className={`agent-composer flex min-w-0 shrink-0 flex-col gap-2 overflow-hidden rounded-xl border border-line bg-canvas px-2.5 pb-2 pt-2 shadow-[0_-4px_16px_rgba(0,0,0,0.25)] transition-all duration-300 ${busy ? "agent-ambient-active border-accent/60" : ""}`}>
         {showSuggestions && (
           <div className="agent-chips -mx-0.5 min-w-0" role="list" aria-label="Câu hỏi gợi ý">
-            <div className="agent-chips-track flex gap-1.5 pb-0.5">
+            <div className="agent-chips-track flex gap-1.5 pb-0.5 overflow-x-auto overflow-y-hidden overscroll-x-contain">
               {SUGGESTED.map((s) => (
                 <button
                   key={s}
