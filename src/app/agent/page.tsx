@@ -729,7 +729,7 @@ export default function AgentPage() {
 
       <div
         ref={listRef}
-        className="chat-scroll agent-messages min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden rounded-xl border border-line bg-panel p-3 sm:p-3.5 overscroll-contain touch-pan-y"
+        className="chat-scroll agent-messages min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden rounded-xl border border-line bg-panel p-3 sm:p-3.5 pr-2 sm:pr-2.5 overscroll-contain touch-pan-y"
       >
         {messages.map((m, i) => (
           <div

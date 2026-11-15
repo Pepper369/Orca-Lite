@@ -99,6 +99,44 @@ html {
 }
 .orca-main-scroll::-webkit-scrollbar-track { background: transparent; }
 
+/* ——— Agent AI Chat Scrollbar — Always visible, tactile and easy to drag ——— */
+.agent-messages {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-accent-primary, #3b82f6) 65%, var(--color-border-default, #243556)) rgba(15, 24, 48, 0.35);
+}
+
+.agent-messages::-webkit-scrollbar {
+  width: 9px;
+}
+
+.agent-messages::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--color-surface-elevated, #121c33) 40%, transparent);
+  border-radius: 9999px;
+  margin: 6px 0;
+}
+
+.agent-messages::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-accent-primary, #3b82f6) 60%, var(--color-border-default, #243556));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  min-height: 48px;
+  transition: background-color 150ms ease;
+  cursor: grab;
+}
+
+.agent-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent-primary, #3b82f6);
+  border: 1px solid transparent;
+  cursor: grab;
+}
+
+.agent-messages::-webkit-scrollbar-thumb:active {
+  background: var(--color-accent-2, #60a5fa);
+  cursor: grabbing;
+}
+
 /* ——— Page route enter — soft, no blank flash ——— */
 @keyframes orca-page-in {
   from {
