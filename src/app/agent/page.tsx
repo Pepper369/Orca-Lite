@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, CornerDownLeft, ShieldCheck, Square } from "lucide-react";
+import { ArrowDown, Bot, Check, ChevronDown, Copy, CornerDownLeft, ShieldCheck, Square } from "lucide-react";
 import type { ApiResponse, Meta } from "@/lib/types";
 import { Badge, Panel } from "@/components/ui";
 import { useSettings } from "@/lib/settings";
@@ -206,119 +206,154 @@ export default function AgentPage() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [stepperOpenMap, setStepperOpenMap] = useState<Record<number, boolean>>({});
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  function renderAnswer(text: string) {
-    const blocks = parseMarkdownBlocks(text);
-    return blocks.map((block, index) => {
-      switch (block.type) {
-        case "callout":
-          return (
-            <div
-              key={index}
-              className="my-3 rounded-lg border-l-4 border-accent bg-accent/10 px-4 py-3 text-xs leading-relaxed text-ink shadow-xs"
-            >
-              {block.lines.map((l, li) => (
-                <p key={li} className={li > 0 ? "mt-1.5" : ""}>
-                  {renderInline(l)}
-                </p>
-              ))}
-            </div>
-          );
-        case "table":
-          return (
-            <div
-              key={index}
-              className="my-3 overflow-x-auto rounded-lg border border-line bg-canvas/40 shadow-xs"
-            >
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-canvas-2/80 border-b border-line text-ink font-semibold">
-                  <tr>
-                    {block.headers.map((h, hi) => (
-                      <th key={hi} className="px-3.5 py-2.5 text-accent whitespace-nowrap">
-                        {renderInline(h)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/40">
-                  {block.rows.map((row, ri) => (
-                    <tr key={ri} className="hover:bg-canvas-2/40 transition-colors">
-                      {row.map((cell, ci) => (
-                        <td key={ci} className="px-3.5 py-2 text-ink-2 whitespace-normal">
-                          {renderInline(cell)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-        case "h2":
-          return (
-            <h2
-              key={index}
-              className="mt-4 mb-2 text-sm font-bold text-accent tracking-wide flex items-center gap-1.5 border-b border-line/40 pb-1.5 first:mt-0"
-            >
-              {renderInline(block.text)}
-            </h2>
-          );
-        case "h3":
-          return (
-            <h3
-              key={index}
-              className="mt-3.5 mb-1 text-xs font-semibold text-ink flex items-center gap-1"
-            >
-              {renderInline(block.text)}
-            </h3>
-          );
-        case "h4":
-          return (
-            <h4
-              key={index}
-              className="mt-2.5 mb-1 text-[11px] font-medium text-ink-2"
-            >
-              {renderInline(block.text)}
-            </h4>
-          );
-        case "hr":
-          return <hr key={index} className="my-3.5 border-line/50" />;
-        case "list":
-          return (
-            <div key={index} className="my-2 space-y-1 pl-1">
-              {block.items.map((item, ii) => (
-                <div key={ii} className="flex items-start gap-2 text-xs text-ink-2 break-words">
-                  <span className="text-accent mt-0.5">•</span>
-                  <span className="flex-1">
-                    {renderInline(item.replace(/^[-*•]\s+|^\d+\.\s+/, ""))}
-                  </span>
-                </div>
-              ))}
-            </div>
-          );
-        case "space":
-          return <div key={index} className="h-1.5" />;
-        case "paragraph":
-          return (
-            <p key={index} className="my-1.5 text-xs leading-relaxed text-ink break-words">
-              {renderInline(block.text)}
-            </p>
-          );
-      }
+  function copyMessage(text: string, index: number) {
+    if (!text || typeof navigator === "undefined") return;
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  }
+
+  function toggleStepper(msgIndex: number) {
+    setStepperOpenMap((prev) => ({
+      ...prev,
+      [msgIndex]: prev[msgIndex] !== undefined ? !prev[msgIndex] : false,
+    }));
+  }
+
+  function scrollToBottom(smooth = true) {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: smooth ? "smooth" : "auto",
     });
   }
 
-  function renderStepper(m: Msg) {
-    if (!m.steps?.length) return null;
+  function renderAnswer(text: string, isStreaming?: boolean) {
+    const blocks = parseMarkdownBlocks(text);
     return (
-      <details
-        className="my-2.5 rounded-lg border border-accent/30 bg-accent/5 p-2.5 text-xs text-ink-2 shadow-xs transition-all"
-        open={Boolean(m.streaming)}
-      >
-        <summary className="cursor-pointer font-medium text-accent flex items-center justify-between select-none">
+      <div className="relative">
+        {blocks.map((block, index) => {
+          switch (block.type) {
+            case "callout":
+              return (
+                <div
+                  key={index}
+                  className="my-3 rounded-lg border-l-4 border-accent bg-accent/10 px-4 py-3 text-xs leading-relaxed text-ink shadow-xs"
+                >
+                  {block.lines.map((l, li) => (
+                    <p key={li} className={li > 0 ? "mt-1.5" : ""}>
+                      {renderInline(l)}
+                    </p>
+                  ))}
+                </div>
+              );
+            case "table":
+              return (
+                <div
+                  key={index}
+                  className="my-3 overflow-x-auto rounded-lg border border-line bg-canvas/40 shadow-xs"
+                >
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-canvas-2/80 border-b border-line text-ink font-semibold">
+                      <tr>
+                        {block.headers.map((h, hi) => (
+                          <th key={hi} className="px-3.5 py-2.5 text-accent whitespace-nowrap">
+                            {renderInline(h)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line/40">
+                      {block.rows.map((row, ri) => (
+                        <tr key={ri} className="hover:bg-canvas-2/40 transition-colors">
+                          {row.map((cell, ci) => (
+                            <td key={ci} className="px-3.5 py-2 text-ink-2 whitespace-normal">
+                              {renderInline(cell)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            case "h2":
+              return (
+                <h2
+                  key={index}
+                  className="mt-4 mb-2 text-sm font-bold text-accent tracking-wide flex items-center gap-1.5 border-b border-line/40 pb-1.5 first:mt-0"
+                >
+                  {renderInline(block.text)}
+                </h2>
+              );
+            case "h3":
+              return (
+                <h3
+                  key={index}
+                  className="mt-3.5 mb-1 text-xs font-semibold text-ink flex items-center gap-1"
+                >
+                  {renderInline(block.text)}
+                </h3>
+              );
+            case "h4":
+              return (
+                <h4
+                  key={index}
+                  className="mt-2.5 mb-1 text-[11px] font-medium text-ink-2"
+                >
+                  {renderInline(block.text)}
+                </h4>
+              );
+            case "hr":
+              return <hr key={index} className="my-3.5 border-line/50" />;
+            case "list":
+              return (
+                <div key={index} className="my-2 space-y-1 pl-1">
+                  {block.items.map((item, ii) => (
+                    <div key={ii} className="flex items-start gap-2 text-xs text-ink-2 break-words">
+                      <span className="text-accent mt-0.5">•</span>
+                      <span className="flex-1">
+                        {renderInline(item.replace(/^[-*•]\s+|^\d+\.\s+/, ""))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            case "space":
+              return <div key={index} className="h-1.5" />;
+            case "paragraph":
+              return (
+                <p key={index} className="my-1.5 text-xs leading-relaxed text-ink break-words">
+                  {renderInline(block.text)}
+                </p>
+              );
+          }
+        })}
+        {isStreaming && <span className="agent-caret" aria-hidden="true" />}
+      </div>
+    );
+  }
+
+  function renderStepper(m: Msg, msgIndex: number) {
+    if (!m.steps?.length) return null;
+    const isOpen = stepperOpenMap[msgIndex] ?? Boolean(m.streaming);
+
+    return (
+      <div className="my-2.5 overflow-hidden rounded-lg border border-accent/25 bg-accent/5 text-xs text-ink-2 shadow-xs transition-all">
+        <button
+          type="button"
+          onClick={() => toggleStepper(msgIndex)}
+          className="w-full cursor-pointer px-3 py-2 font-medium text-accent flex items-center justify-between select-none hover:bg-accent/10 transition-colors"
+        >
           <span className="flex items-center gap-2">
             {m.streaming ? (
               <span className="relative flex h-2 w-2">
@@ -330,32 +365,45 @@ export default function AgentPage() {
             )}
             Tiến trình tư duy CFA ReAct ({m.steps.length} bước)
           </span>
-          <span className="text-[10px] text-ink-3">Chi tiết</span>
-        </summary>
-        <div className="mt-2.5 space-y-2 border-t border-accent/20 pt-2">
-          {m.steps.map((s, idx) => (
-            <div key={idx} className="rounded border border-line/60 bg-canvas/60 p-2 text-[11px] space-y-1">
-              <div className="font-medium text-accent flex items-center gap-1.5">
-                <span className="font-bold">Bước {s.step}:</span>
-                <span className="text-ink font-normal">{s.thought}</span>
+          <div className="flex items-center gap-1.5 text-[10px] text-ink-3">
+            <span>{isOpen ? "Thu gọn" : "Chi tiết"}</span>
+            <ChevronDown
+              className={`size-3.5 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+            />
+          </div>
+        </button>
+        <div
+          className="agent-stepper-content"
+          data-open={isOpen ? "true" : "false"}
+        >
+          <div className="agent-stepper-inner px-3 pb-2.5 pt-1 space-y-2 border-t border-accent/15">
+            {m.steps.map((s, idx) => (
+              <div
+                key={idx}
+                className="rounded border border-line/60 bg-canvas/60 p-2 text-[11px] space-y-1 transition-all"
+              >
+                <div className="font-medium text-accent flex items-center gap-1.5">
+                  <span className="font-bold">Bước {s.step}:</span>
+                  <span className="text-ink font-normal">{s.thought}</span>
+                </div>
+                {s.toolCall && (
+                  <div className="font-mono text-[10px] text-ink-2 bg-canvas-2/80 px-2 py-1 rounded border border-line/40 break-all">
+                    🛠️ <strong>Tool:</strong> <span className="text-accent">{s.toolCall.name}</span> ({JSON.stringify(s.toolCall.args)})
+                  </div>
+                )}
+                {s.observation != null && (
+                  <div className="text-[10px] text-ink-3 pl-1">
+                    🔍 <strong>Kết quả:</strong>{" "}
+                    {typeof s.observation === "string"
+                      ? s.observation
+                      : "Đã thu thập và thẩm định số liệu thành công"}
+                  </div>
+                )}
               </div>
-              {s.toolCall && (
-                <div className="font-mono text-[10px] text-ink-2 bg-canvas-2/80 px-2 py-1 rounded border border-line/40">
-                  🛠️ <strong>Tool:</strong> <span className="text-accent">{s.toolCall.name}</span> ({JSON.stringify(s.toolCall.args)})
-                </div>
-              )}
-              {s.observation != null && (
-                <div className="text-[10px] text-ink-3 pl-1">
-                  🔍 <strong>Kết quả:</strong>{" "}
-                  {typeof s.observation === "string"
-                    ? s.observation
-                    : "Đã thu thập và thẩm định số liệu thành công"}
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </details>
+      </div>
     );
   }
 
@@ -407,8 +455,21 @@ export default function AgentPage() {
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
+
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollBottom(dist > 160);
+    };
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const nearBottom = distanceFromBottom < 140;
+    const nearBottom = distanceFromBottom < 160;
     if (!nearBottom && messages.length > 2) return;
     const reduceMotion =
       typeof window !== "undefined" &&
@@ -656,21 +717,43 @@ export default function AgentPage() {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`agent-msg flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+            className={`agent-msg agent-msg-enter flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`rounded-lg border px-3.5 py-2.5 text-[13px] leading-relaxed ${
+              className={`group relative rounded-lg border px-3.5 py-2.5 text-[13px] leading-relaxed transition-all ${
                 m.role === "user"
-                  ? "max-w-[min(100%,28rem)] border-accent/30 bg-accent/10 text-ink"
-                  : "w-full max-w-full border-line bg-panel-2 text-ink"
+                  ? "max-w-[min(100%,28rem)] border-accent/30 bg-accent/10 text-ink shadow-xs"
+                  : "w-full max-w-full border-line bg-panel-2 text-ink shadow-sm hover:border-line/80"
               }`}
             >
+              {m.role === "agent" && m.text && !m.streaming && (
+                <div className="absolute right-2.5 top-2.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10">
+                  <button
+                    type="button"
+                    onClick={() => copyMessage(m.text, i)}
+                    className="flex items-center gap-1 rounded-md bg-canvas/90 px-2 py-1 text-[11px] text-ink-3 hover:text-accent border border-line/60 shadow-xs cursor-pointer transition-colors backdrop-blur-xs"
+                    title="Sao chép câu trả lời"
+                  >
+                    {copiedIndex === i ? (
+                      <>
+                        <Check className="size-3 text-up" />
+                        <span className="text-up text-[10px] font-medium">Đã chép</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="size-3" />
+                        <span className="text-[10px]">Sao chép</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
               <div className="space-y-1.5 break-words [overflow-wrap:anywhere] [word-break:break-word]">
                 {m.role === "agent" ? (
                   <>
                     {renderStructured(m)}
-                    {renderStepper(m)}
-                    {renderAnswer(m.text)}
+                    {renderStepper(m, i)}
+                    {renderAnswer(m.text, m.streaming)}
                   </>
                 ) : (
                   m.text
@@ -690,9 +773,21 @@ export default function AgentPage() {
           </div>
         )}
         <div ref={bottomRef} className="h-3 shrink-0" aria-hidden />
+        {showScrollBottom && (
+          <div className="sticky bottom-3 flex justify-center z-20 pointer-events-none">
+            <button
+              type="button"
+              onClick={() => scrollToBottom(true)}
+              className="agent-scroll-pill pointer-events-auto flex items-center gap-1.5 rounded-full border border-accent/40 bg-panel-2/95 px-3 py-1.5 text-xs font-medium text-accent shadow-lg backdrop-blur-md hover:bg-accent hover:text-canvas transition-all cursor-pointer"
+            >
+              <ArrowDown className="size-3.5" />
+              <span>Cuộn xuống mới nhất</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="agent-composer flex min-w-0 shrink-0 flex-col gap-2 overflow-hidden rounded-xl border border-line bg-canvas px-2.5 pb-2 pt-2 shadow-[0_-4px_16px_rgba(0,0,0,0.25)]">
+      <div className={`agent-composer flex min-w-0 shrink-0 flex-col gap-2 overflow-hidden rounded-xl border border-line bg-canvas px-2.5 pb-2 pt-2 shadow-[0_-4px_16px_rgba(0,0,0,0.25)] transition-all duration-300 ${busy ? "agent-ambient-active border-accent/60" : ""}`}>
         {showSuggestions && (
           <div className="agent-chips -mx-0.5 min-w-0" role="list" aria-label="Câu hỏi gợi ý">
             <div className="agent-chips-track flex gap-1.5 pb-0.5">
