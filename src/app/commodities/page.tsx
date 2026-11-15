@@ -68,6 +68,7 @@ export default function CommoditiesPage() {
     refreshInterval: 5 * 60_000,
     keepPreviousData: true,
     timeoutMs: 5_000,
+    initialData: (BOOTSTRAP_COMMODITIES_DATA as unknown as Data),
   });
 
   const activeData = (data?.catalog?.length ? data : BOOTSTRAP_COMMODITIES_DATA) as unknown as Data;

@@ -10,8 +10,14 @@ export function prefetchRouteApis(href: string): void {
   const apis: string[] = [];
   if (path === "/" || path === "") {
     apis.push("/api/v1/stocks?board=vn30", "/api/v1/market/intel", "/api/v1/market/global");
-  } else if (path === "/stocks" || path.startsWith("/stocks/")) {
+  } else if (path === "/stocks") {
     apis.push("/api/v1/stocks?board=vn30", "/api/v1/stocks?board=full");
+  } else if (path.startsWith("/stocks/")) {
+    const rawSym = path.slice("/stocks/".length).split("/")[0]?.toUpperCase() ?? "";
+    const sym = rawSym.replace(/[^A-Z0-9]/g, "");
+    if (sym) {
+      apis.push(`/api/v1/stocks/${encodeURIComponent(sym)}`);
+    }
   } else if (path === "/crypto" || path.startsWith("/crypto/")) {
     apis.push("/api/v1/crypto/markets?limit=120", "/api/v1/crypto/markets?limit=60");
   } else if (path === "/forex" || path.startsWith("/forex/")) {

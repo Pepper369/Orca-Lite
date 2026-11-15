@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
   transpilePackages: ["lucide-react"],
   experimental: {
     optimizePackageImports: ["lucide-react", "lightweight-charts"],
+    staleTimes: {
+      dynamic: 180,
+      static: 600,
+    },
   },
   poweredByHeader: false,
   compress: true,

@@ -19,6 +19,7 @@ export function CryptoMarketPage() {
     refreshInterval: 15_000,
     keepPreviousData: true,
     timeoutMs: 5_000,
+    initialData: (BOOTSTRAP_CRYPTO_DATA as MarketsData),
   });
   const { fmtUsd } = usePrefCurrency();
   const [tab, setTab] = useState<FilterTab>("volume");

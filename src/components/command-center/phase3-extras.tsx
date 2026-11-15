@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import type { MarketIntel } from "@/lib/services/market-intel";
 import type { NewsArticle } from "@/lib/types";
 import { fmtCompact } from "@/components/ui";
@@ -174,9 +175,9 @@ export function NewsFlowPanel({ articles }: { articles: NewsArticle[] }) {
         </div>
       )}
       <div className="border-t border-border-subtle/60 px-3 py-1.5 text-right">
-        <a href="/news" className="text-[11px] text-accent-primary hover:underline">
+        <Link href="/news" prefetch={true} className="text-[11px] text-accent-primary hover:underline">
           Tất cả tin →
-        </a>
+        </Link>
       </div>
     </article>
   );

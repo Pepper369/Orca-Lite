@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/hooks";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { getSettingsSnapshot } from "@/lib/settings";
 import { searchSecurities, VN_INDICES, sectorOf } from "@/lib/vn/master";
 import { looksLikeVnTicker } from "@/lib/vn/ipo-seeds";
@@ -262,7 +263,11 @@ export function GlobalSearch() {
               {items.map((it, i) => (
                 <li key={it.key + i}>
                   <button
-                    onMouseEnter={() => setSel(i)}
+                    onMouseEnter={() => {
+                      setSel(i);
+                      prefetchRouteApis(it.href);
+                    }}
+                    onTouchStart={() => prefetchRouteApis(it.href)}
                     onClick={() => go(it)}
                     className={`flex w-full items-center gap-2.5 px-3 py-2 text-left ${
                       i === sel ? "bg-accent-primary/12" : ""

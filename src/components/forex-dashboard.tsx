@@ -13,6 +13,7 @@ export function ForexDashboard() {
     refreshInterval: 25_000,
     keepPreviousData: true,
     timeoutMs: 5_000,
+    initialData: (BOOTSTRAP_FOREX_DATA as ForexMarket),
   });
 
   const activeData = (data?.rows?.length ? data : BOOTSTRAP_FOREX_DATA) as ForexMarket;

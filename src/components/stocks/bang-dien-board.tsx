@@ -2,6 +2,8 @@
 
 import "./bang-dien.css";
 import { memo, useMemo, useState } from "react";
+import Link from "next/link";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { SectorCompareChart } from "@/components/stocks/sector-compare-chart";
 import { SectorScrollRail, SectorColumnShell } from "@/components/stocks/sector-scroll-rail";
 import { sectorOf, VN_SECTOR_MAP } from "@/lib/vn/master";
@@ -329,12 +331,20 @@ const SectorColumn = memo(
         </div>
         <div className="bd-col-rows">
           {col.rows.map((q) => (
-            <a key={q.symbol} href={`/stocks/${q.symbol}`} className={`bd-row ${rowTone(q)}`} title={`${q.symbol}${q.name ? ` · ${q.name}` : ""}`}>
+            <Link
+              key={q.symbol}
+              href={`/stocks/${q.symbol}`}
+              className={`bd-row ${rowTone(q)}`}
+              title={`${q.symbol}${q.name ? ` · ${q.name}` : ""}`}
+              prefetch={false}
+              onMouseEnter={() => prefetchRouteApis(`/stocks/${q.symbol}`)}
+              onTouchStart={() => prefetchRouteApis(`/stocks/${q.symbol}`)}
+            >
               <span className="bd-sym">{q.symbol}</span>
               <span className="num text-right font-medium tabular-nums">{fmtNum(q.price, 2)}</span>
               <span className="num text-right font-semibold tabular-nums">{pctLabel(q.changePercent)}</span>
               <span className="num text-right text-[11px] opacity-80">{q.volume != null ? fmtCompact(q.volume) : "—"}</span>
-            </a>
+            </Link>
           ))}
         </div>
       </div>

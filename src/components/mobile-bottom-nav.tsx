@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import {
   TrendingUp,
   FlaskConical,
@@ -157,7 +158,10 @@ export function MobileBottomNav({
             <Link
               key={tab.id}
               href={tab.href}
+              prefetch={true}
               onClick={(e) => onNav(tab.href, e)}
+              onTouchStart={() => prefetchRouteApis(tab.href)}
+              onMouseEnter={() => prefetchRouteApis(tab.href)}
               className={
                 "relative flex h-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg transition-transform active:scale-90 " +
                 (isActive

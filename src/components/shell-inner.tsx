@@ -140,8 +140,10 @@ function DesktopNavItem({
     <Link
       href={href}
       suppressHydrationWarning
+      prefetch={true}
       onClick={(e) => onNav(href, e)}
       onMouseEnter={() => onHover(href)}
+      onTouchStart={() => onHover(href)}
       className={
         "orca-nav-item group relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[13px] leading-none " +
         (active
@@ -173,11 +175,13 @@ function MobileNavItem({
     <Link
       href={href}
       suppressHydrationWarning
+      prefetch={true}
       onClick={(e) => {
         onNav(href, e);
         onClose();
       }}
       onMouseEnter={() => onHover(href)}
+      onTouchStart={() => onHover(href)}
       className={
         "orca-nav-item group relative flex min-h-11 shrink-0 items-center gap-2.5 rounded-lg px-3 text-[14px] leading-none " +
         (active
@@ -264,17 +268,17 @@ export function ShellInner({ children }: { children: ReactNode }) {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         e.preventDefault();
       }
-      if (href === "/agent" || href === "#ask_orca") {
+      if (href === "#ask_orca") {
         window.dispatchEvent(
           new CustomEvent("orca:open-ai-widget", {
-            detail: { mode: href === "#ask_orca" ? "finance" : "market" },
+            detail: { mode: "finance" },
           }),
         );
         return;
       }
       const hashTab = href.split("#")[1];
       if (hashTab) window.dispatchEvent(new CustomEvent("orca:personal-finance-tab", { detail: hashTab }));
-      markAppNavigating(320);
+      markAppNavigating(60);
       signalNavStart();
       startTransition(() => router.push(href));
     },
@@ -568,7 +572,6 @@ export function ShellInner({ children }: { children: ReactNode }) {
                 </div>
               </ErrorBoundary>
             </main>
-          );
         </div>
       </div>
       <MobileBottomNav
