@@ -4,6 +4,7 @@ import "./bang-dien.css";
 import { memo, useMemo, useState } from "react";
 import Link from "next/link";
 import { prefetchRouteApis } from "@/lib/nav-prefetch";
+import { clientCacheWarm } from "@/lib/client-cache";
 import { SectorCompareChart } from "@/components/stocks/sector-compare-chart";
 import { SectorScrollRail, SectorColumnShell } from "@/components/stocks/sector-scroll-rail";
 import { sectorOf, VN_SECTOR_MAP } from "@/lib/vn/master";
@@ -337,8 +338,14 @@ const SectorColumn = memo(
               className={`bd-row ${rowTone(q)}`}
               title={`${q.symbol}${q.name ? ` · ${q.name}` : ""}`}
               prefetch={false}
-              onMouseEnter={() => prefetchRouteApis(`/stocks/${q.symbol}`)}
-              onTouchStart={() => prefetchRouteApis(`/stocks/${q.symbol}`)}
+              onMouseEnter={() => {
+                prefetchRouteApis(`/stocks/${q.symbol}`);
+                clientCacheWarm(`/api/v1/stocks/${q.symbol}`);
+              }}
+              onTouchStart={() => {
+                prefetchRouteApis(`/stocks/${q.symbol}`);
+                clientCacheWarm(`/api/v1/stocks/${q.symbol}`);
+              }}
             >
               <span className="bd-sym">{q.symbol}</span>
               <span className="num text-right font-medium tabular-nums">{fmtNum(q.price, 2)}</span>

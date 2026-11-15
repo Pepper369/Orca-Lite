@@ -276,6 +276,11 @@ export function GlobalSearch() {
                     onMouseEnter={() => {
                       setSel(i);
                       prefetchRouteApis(it.href);
+                      try {
+                        router.prefetch(it.href);
+                      } catch {
+                        /* ignore */
+                      }
                     }}
                     onTouchStart={() => prefetchRouteApis(it.href)}
                     onClick={() => go(it)}

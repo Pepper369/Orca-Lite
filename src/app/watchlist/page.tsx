@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApi } from "@/lib/hooks";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { loadWatchlist, saveWatchlist, type WatchItem } from "@/components/watchlist-button";
 import { DEFAULT_VN_WATCHLIST } from "@/lib/vn/master";
 import type { CryptoSummary } from "@/lib/services/crypto";
@@ -162,7 +163,12 @@ export default function WatchlistPage() {
                     </button>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <Link href={href} className="text-[13px] font-semibold hover:text-accent">
+                    <Link
+                      href={href}
+                      prefetch={true}
+                      onMouseEnter={() => prefetchRouteApis(href)}
+                      className="text-[13px] font-semibold hover:text-accent"
+                    >
                       {it.symbol}
                     </Link>
                     <span className="ml-2 text-[10px] text-ink-3">

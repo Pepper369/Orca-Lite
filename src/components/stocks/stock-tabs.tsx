@@ -75,7 +75,12 @@ export function StockTabs({ symbol }: { symbol: string }) {
               data-active={active ? "true" : undefined}
               aria-busy={isTabPending || undefined}
               onMouseEnter={() => {
-                // P7-C: warm tab APIs before click
+                // P7-C: warm route and APIs before click for zero-latency transition
+                try {
+                  router.prefetch(href);
+                } catch {
+                  /* ignore */
+                }
                 if (t.key === "financials") {
                   prefetchApi(`/api/v1/stocks/${symbol}/financials`, 18_000);
                 } else if (t.key === "fundamentals") {

@@ -194,10 +194,20 @@ function ScreenerInner() {
   const params = useSearchParams();
   const [universe, setUniverse] = useState<Universe>(() => parseUniverse(params.get("universe")));
   const [showBacktest, setShowBacktest] = useState(false);
+  const [visited, setVisited] = useState<Set<Universe>>(() => new Set([parseUniverse(params.get("universe"))]));
   const sector = params.get("sector");
 
   const initialGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id ?? "quant_alpha";
   const [selectedGroup, setSelectedGroup] = useState<ScreenerGroupId>(initialGroup);
+
+  useEffect(() => {
+    setVisited((prev) => {
+      if (prev.has(universe)) return prev;
+      const next = new Set(prev);
+      next.add(universe);
+      return next;
+    });
+  }, [universe]);
 
   useEffect(() => {
     const parentGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id;
@@ -208,256 +218,227 @@ function ScreenerInner() {
 
   const currentGroupItems = SCREENER_GROUPS.find((g) => g.id === selectedGroup)?.items ?? SCREENER_GROUPS[0].items;
 
-  let body: React.ReactNode;
-  switch (universe) {
-    case "apex-buy-now":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="apex_buy_now"
-          defaultView="orca_master"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "apex-quant":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="orca_apex_quant"
-          defaultView="orca_master"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "historical-edge":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="historical_edge"
-          defaultView="orca_master"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "orca-master":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="orca_master_elite"
-          defaultView="orca_master"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "smart-money":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="smart_money_inflow"
-          defaultView="smart_money"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "buy-point":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="near_buy_point"
-          defaultView="buy_point"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "multi-source":
-      body = <MultiSourceScreener />;
-      break;
-    case "quant-edge":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="quant_edge"
-          defaultView="quant"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "confluence":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="confluence"
-          defaultView="confluence"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "fireant-screener":
-      body = <FireAntScreenerPanel />;
-      break;
-    case "systemic-radar":
-      body = <SystemicRiskRadarPanel />;
-      break;
-    case "macro-radar":
-      body = <MacroRadarCard />;
-      break;
-    case "oquant-quant":
-    case "miquant-quant":
-      body = <OQuantStudio />;
-      break;
-    case "ma-cross":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="ma_cross"
-          defaultView="technical"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "sector-flow":
-      body = <SectorFlowScreener />;
-      break;
-    case "rrg-rotation":
-      body = <RrgChart />;
-      break;
-    case "four-m":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="fa_fortress"
-          defaultView="valuation"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "crypto":
-      body = <CryptoScreener />;
-      break;
-    case "alpha-beta":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="quant_low_beta"
-          defaultView="quant"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "divergence":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="bottom_confluence"
-          defaultView="confluence"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "candlestick":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="mtf_candle_cluster"
-          defaultView="confluence"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "ma-confluence":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="bottom_confluence"
-          defaultView="confluence"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "wyckoff":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="vsa_no_supply"
-          defaultView="technical"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "canslim":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="canslim"
-          defaultView="profitability"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "rs-leaders":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="rs_leaders"
-          defaultView="technical"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "piotroski":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="piotroski_diamonds"
-          defaultView="health"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "minervini":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="tight_closes_vdu"
-          defaultView="technical"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "elliott":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="bottom_confluence"
-          defaultView="technical"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "valuation":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="value"
-          defaultView="valuation"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    case "fundamental":
-      body = (
-        <VnScreener
-          defaultSector={sector}
-          defaultPreset="fa_fortress"
-          defaultView="health"
-          onOpenBacktest={() => setShowBacktest(true)}
-        />
-      );
-      break;
-    default:
-      body = <VnScreener defaultSector={sector} onOpenBacktest={() => setShowBacktest(true)} />;
-  }
+  const renderPanel = (u: Universe) => {
+    switch (u) {
+      case "apex-buy-now":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="apex_buy_now"
+            defaultView="orca_master"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "apex-quant":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="orca_apex_quant"
+            defaultView="orca_master"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "historical-edge":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="historical_edge"
+            defaultView="orca_master"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "orca-master":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="orca_master_elite"
+            defaultView="orca_master"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "smart-money":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="smart_money_inflow"
+            defaultView="smart_money"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "buy-point":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="near_buy_point"
+            defaultView="buy_point"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "multi-source":
+        return <MultiSourceScreener />;
+      case "quant-edge":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="quant_edge"
+            defaultView="quant"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "confluence":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="confluence"
+            defaultView="confluence"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "fireant-screener":
+        return <FireAntScreenerPanel />;
+      case "systemic-radar":
+        return <SystemicRiskRadarPanel />;
+      case "macro-radar":
+        return <MacroRadarCard />;
+      case "oquant-quant":
+      case "miquant-quant":
+        return <OQuantStudio />;
+      case "ma-cross":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="ma_cross"
+            defaultView="technical"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "sector-flow":
+        return <SectorFlowScreener />;
+      case "rrg-rotation":
+        return <RrgChart />;
+      case "four-m":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="fa_fortress"
+            defaultView="valuation"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "crypto":
+        return <CryptoScreener />;
+      case "alpha-beta":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="quant_low_beta"
+            defaultView="quant"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "divergence":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="bottom_confluence"
+            defaultView="confluence"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "candlestick":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="mtf_candle_cluster"
+            defaultView="confluence"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "ma-confluence":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="bottom_confluence"
+            defaultView="confluence"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "wyckoff":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="vsa_no_supply"
+            defaultView="technical"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "canslim":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="canslim"
+            defaultView="profitability"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "rs-leaders":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="rs_leaders"
+            defaultView="technical"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "piotroski":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="piotroski_diamonds"
+            defaultView="health"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "minervini":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="tight_closes_vdu"
+            defaultView="technical"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "elliott":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="bottom_confluence"
+            defaultView="technical"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "valuation":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="value"
+            defaultView="valuation"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      case "fundamental":
+        return (
+          <VnScreener
+            defaultSector={sector}
+            defaultPreset="fa_fortress"
+            defaultView="health"
+            onOpenBacktest={() => setShowBacktest(true)}
+          />
+        );
+      default:
+        return <VnScreener defaultSector={sector} onOpenBacktest={() => setShowBacktest(true)} />;
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -539,9 +520,19 @@ function ScreenerInner() {
           <p className="mt-1.5 text-[10px] text-text-muted sm:hidden">← Vuốt ngang để chọn thêm bộ lọc →</p>
         </div>
       </Panel>
-      <SoftPanel name={universe} resetKey={universe}>
-        {body}
-      </SoftPanel>
+      <div className="screener-keep-alive-views">
+        {Array.from(visited).map((u) => (
+          <div
+            key={u}
+            style={{ display: u === universe ? "block" : "none" }}
+            aria-hidden={u !== universe}
+          >
+            <SoftPanel name={u} resetKey={u}>
+              {renderPanel(u)}
+            </SoftPanel>
+          </div>
+        ))}
+      </div>
       <ScreenerBacktestModal isOpen={showBacktest} onClose={() => setShowBacktest(false)} />
     </div>
   );

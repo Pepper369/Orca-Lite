@@ -3,6 +3,8 @@
 import { memo, useEffect, useMemo, useRef, useState, use, type ReactNode } from "react";
 import Link from "next/link";
 import { prefetchApi, useApi } from "@/lib/hooks";
+import { clientCacheWarm } from "@/lib/client-cache";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import type { VnStockDetail } from "@/lib/services/stocks";
 import { AddToWatchlist } from "@/components/watchlist-button";
 import { QuickPaperTradeButton } from "@/components/portfolio/quick-paper-trade-modal";
@@ -37,15 +39,15 @@ export default function StockSymbolLayout({
     ts: number;
   } | null>(null);
 
-  // Realtime live tick polling from VNDirect/VPS provider
+  // Realtime live tick polling from VNDirect/VPS provider with visibility gating
   useEffect(() => {
     if (!symbol) return;
     let disposed = false;
     async function fetchLive() {
-      if (disposed) return;
+      if (disposed || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
       try {
         const res = await fetch(
-          `/api/v1/chart/live-quote?symbol=${encodeURIComponent(symbol)}&assetType=stock&_=${Date.now()}`
+          `/api/v1/chart/live-quote?symbol=${encodeURIComponent(symbol)}&assetType=stock`
         );
         if (!res.ok) return;
         const j = await res.json();
@@ -63,7 +65,7 @@ export default function StockSymbolLayout({
       }
     }
     fetchLive();
-    const timer = setInterval(fetchLive, 3000);
+    const timer = setInterval(fetchLive, 4000);
     return () => {
       disposed = true;
       clearInterval(timer);
@@ -367,6 +369,11 @@ export default function StockSymbolLayout({
                 <Link
                   key={p}
                   href={`/stocks/${p}`}
+                  prefetch={true}
+                  onMouseEnter={() => {
+                    prefetchRouteApis(`/stocks/${p}`);
+                    clientCacheWarm(`/api/v1/stocks/${p}`);
+                  }}
                   className={`px-2 py-0.5 rounded font-mono font-medium transition-all shrink-0 ${
                     p === symbol
                       ? "bg-accent-primary/20 text-accent-primary font-bold border border-accent-primary/30"

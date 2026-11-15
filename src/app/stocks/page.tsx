@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApi } from "@/lib/hooks";
+import { clientCacheWarm } from "@/lib/client-cache";
+import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { VN_SECTOR_MAP, DEFAULT_VN_WATCHLIST, sectorOf } from "@/lib/vn/master";
 import type { IndexQuote, Quote } from "@/lib/types";
 import { Badge, Chg, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
@@ -332,6 +334,11 @@ export default function VnMarketCenterPage() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <Link
                             href={`/stocks/${qu.symbol}`}
+                            prefetch={true}
+                            onMouseEnter={() => {
+                              prefetchRouteApis(`/stocks/${qu.symbol}`);
+                              clientCacheWarm(`/api/v1/stocks/${qu.symbol}`);
+                            }}
                             className="font-semibold text-accent-primary hover:underline font-mono"
                           >
                             {qu.symbol}

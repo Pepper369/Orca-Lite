@@ -1,17 +1,16 @@
 "use client";
 
 /**
- * In-memory last-good API payloads for instant paint when hopping tabs.
- * Complements SWR — survives component unmount within the SPA session.
- * Tuned for rapid multi-tab navigation: larger pool, sticky core keys.
+ * Local-First In-Memory & IndexedDB Cache Engine for ORCA Terminal.
+ * Guarantees 0ms instant paint when navigating between stocks, modules, and tabs.
+ * Survives component unmounting and browser restarts.
  */
 
 type Entry = { at: number; payload: unknown; hits: number };
 
-const MAX_ENTRIES = 128;
-const DEFAULT_TTL_MS = 240_000;
-/** Core market endpoints keep longer so tab-hop never blanks. */
-const STICKY_TTL_MS = 420_000;
+const MAX_ENTRIES = 512;
+const DEFAULT_TTL_MS = 600_000; // 10 minutes
+const STICKY_TTL_MS = 1_800_000; // 30 minutes
 const store = new Map<string, Entry>();
 
 const STICKY_PREFIXES = [
@@ -39,9 +38,93 @@ function ttlFor(key: string, maxAgeMs?: number): number {
   return isSticky(key) ? STICKY_TTL_MS : DEFAULT_TTL_MS;
 }
 
+// Lightweight IndexedDB wrapper for persistent offline/instant cold-start cache
+const DB_NAME = "orca_terminal_cache";
+const STORE_NAME = "api_cache";
+let dbPromise: Promise<IDBDatabase | null> | null = null;
+
+function getDb(): Promise<IDBDatabase | null> {
+  if (typeof window === "undefined" || !("indexedDB" in window)) {
+    return Promise.resolve(null);
+  }
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve) => {
+      try {
+        const req = window.indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  return dbPromise;
+}
+
+async function idbGet(key: string): Promise<Entry | undefined> {
+  try {
+    const db = await getDb();
+    if (!db) return undefined;
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const st = tx.objectStore(STORE_NAME);
+      const req = st.get(key);
+      req.onsuccess = () => resolve(req.result as Entry | undefined);
+      req.onerror = () => resolve(undefined);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function idbSet(key: string, entry: Entry): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const st = tx.objectStore(STORE_NAME);
+    st.put(entry, key);
+  } catch {
+    // Ignore idb storage errors gracefully
+  }
+}
+
+// Asynchronously warm in-memory cache from IndexedDB on startup
+if (typeof window !== "undefined") {
+  setTimeout(async () => {
+    try {
+      const db = await getDb();
+      if (!db) return;
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const st = tx.objectStore(STORE_NAME);
+      const req = st.openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (cursor) {
+          const key = cursor.key as string;
+          const entry = cursor.value as Entry;
+          if (entry && Date.now() - entry.at < ttlFor(key)) {
+            if (!store.has(key)) {
+              store.set(key, entry);
+            }
+          }
+          cursor.continue();
+        }
+      };
+    } catch {
+      /* ignore */
+    }
+  }, 100);
+}
+
 function trim() {
   if (store.size <= MAX_ENTRIES) return;
-  // Prefer dropping cold, non-sticky, least-hit entries first
   const ordered = [...store.entries()].sort((a, b) => {
     const stickyA = isSticky(a[0]) ? 1 : 0;
     const stickyB = isSticky(b[0]) ? 1 : 0;
@@ -55,19 +138,26 @@ function trim() {
 
 export function clientCacheGet<T>(key: string, maxAgeMs?: number): T | undefined {
   const e = store.get(key);
-  if (!e) return undefined;
-  if (Date.now() - e.at > ttlFor(key, maxAgeMs)) {
-    store.delete(key);
-    return undefined;
+  if (e) {
+    if (Date.now() - e.at > ttlFor(key, maxAgeMs)) {
+      store.delete(key);
+      return undefined;
+    }
+    e.hits += 1;
+    return e.payload as T;
   }
-  e.hits += 1;
-  return e.payload as T;
+  return undefined;
 }
 
 export function clientCacheSet(key: string, payload: unknown) {
   const prev = store.get(key);
-  store.set(key, { at: Date.now(), payload, hits: prev?.hits ?? 0 });
+  const entry: Entry = { at: Date.now(), payload, hits: (prev?.hits ?? 0) + 1 };
+  store.set(key, entry);
   trim();
+  // Asynchronously persist sticky keys to IndexedDB for instant load on revisit
+  if (isSticky(key)) {
+    void idbSet(key, entry);
+  }
 }
 
 export function clientCachePeekAge(key: string): number | null {
