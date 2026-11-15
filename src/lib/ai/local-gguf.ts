@@ -102,3 +102,47 @@ export function resolveLocalGgufConfig(artifactPath?: string): LocalGgufEndpoint
   };
 }
 
+let lastHeartbeatTime = 0;
+let lastHeartbeatStatus = false;
+const HEARTBEAT_TTL_MS = 10_000;
+
+/**
+ * Fast non-blocking heartbeat check (500ms timeout) to verify whether llama-server is currently responsive.
+ * Caches positive/negative ping results for 10s to minimize socket churn.
+ */
+export async function checkLocalGgufHeartbeat(timeoutMs = 600): Promise<boolean> {
+  const cfg = resolveLocalGgufConfig();
+  if (!cfg.enabled || !cfg.baseUrl) return false;
+
+  const now = Date.now();
+  if (now - lastHeartbeatTime < HEARTBEAT_TTL_MS) {
+    return lastHeartbeatStatus;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    const res = await fetch(`${cfg.baseUrl}/health`, {
+      method: "GET",
+      signal: controller.signal,
+    }).catch(() =>
+      fetch(`${cfg.baseUrl}/models`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+        signal: controller.signal,
+      })
+    );
+    clearTimeout(timer);
+
+    lastHeartbeatStatus = Boolean(res && (res.ok || res.status === 200 || res.status === 401));
+    lastHeartbeatTime = now;
+    return lastHeartbeatStatus;
+  } catch {
+    lastHeartbeatStatus = false;
+    lastHeartbeatTime = now;
+    return false;
+  }
+}
+
+

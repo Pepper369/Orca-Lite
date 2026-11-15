@@ -44,7 +44,7 @@ type Universe =
 
 export type ScreenerGroupId = "growth_trend" | "quant_alpha" | "macro_sector" | "fundamental_val";
 
-export const SCREENER_GROUPS: {
+const SCREENER_GROUPS: {
   id: ScreenerGroupId;
   title: string;
   badge: string;

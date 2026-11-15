@@ -469,3 +469,123 @@ export async function llmChat(role: LlmRole, opts: ChatOptions): Promise<LlmResu
 
   return null;
 }
+
+export interface StreamChatOptions extends ChatOptions {
+  onToken?: (chunk: string) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Streaming LLM chat with real-time token callback via SSE / ReadableStream.
+ * Falls back to cascade if provider stream fails.
+ */
+export async function llmChatStream(
+  role: LlmRole,
+  opts: StreamChatOptions
+): Promise<LlmResult | null> {
+  if (!opts.onToken) {
+    return llmChat(role, opts);
+  }
+
+  const model = opts.modelOverride ?? modelFor(role);
+  const { baseUrl, apiKey, provider } = resolveProvider(model, opts.backend);
+  if (!apiKey) {
+    const res = await llmChat(role, opts);
+    if (res?.text) opts.onToken(res.text);
+    return res;
+  }
+
+  const t0 = performance.now();
+  const history = (opts.history ?? [])
+    .filter((t) => t.content?.trim())
+    .slice(-16)
+    .map((t) => ({
+      role: t.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content: t.content.trim().slice(0, 2_500),
+    }));
+
+  const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
+    { role: "system", content: opts.system },
+    ...history,
+    { role: "user", content: opts.user },
+  ];
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (provider === "openrouter") {
+    headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_SITE_URL?.startsWith("http")
+      ? process.env.NEXT_PUBLIC_SITE_URL
+      : "https://orcamulti.duyanhphan13579dz.workers.dev";
+    headers["X-Title"] = "Orca Multi Finance";
+  }
+
+  try {
+    const body: Record<string, unknown> = {
+      model,
+      temperature: opts.temperature ?? 0.3,
+      max_tokens: opts.maxTokens ?? 2000,
+      messages,
+      stream: true,
+    };
+    if (opts.topP != null) body.top_p = opts.topP;
+
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      const fb = await llmChat(role, opts);
+      if (fb?.text) opts.onToken(fb.text);
+      return fb;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedText = "";
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith("data:")) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        if (jsonStr === "[DONE]") break;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed?.choices?.[0]?.delta?.content ?? "";
+          if (delta) {
+            accumulatedText += delta;
+            opts.onToken(delta);
+          }
+        } catch {
+          // ignore malformed chunk
+        }
+      }
+    }
+
+    return {
+      text: accumulatedText.trim(),
+      model,
+      role,
+      latencyMs: Math.round(performance.now() - t0),
+      provider,
+    };
+  } catch (err) {
+    if (opts.signal?.aborted) return null;
+    const fallback = await llmChat(role, opts);
+    if (fallback?.text) opts.onToken(fallback.text);
+    return fallback;
+  }
+}
+

@@ -14,7 +14,10 @@ import { fetchVndirectFinancials } from "../../financial/vndirect-fs";
 import { runFundamentalValuation } from "../../services/fundamental-valuation";
 import { getVndSignedDisclosures, getVndAnalyticReports } from "../../providers/vndirect-news";
 import { screenFundamental } from "../../services/fundamental-screener";
-import { getVnQuotes } from "../../services/stocks";
+import { getVnQuotes, getVnOhlcv } from "../../services/stocks";
+import { getVnOrderBook } from "../../services/stock-orderbook";
+import { analyzeWyckoff } from "../../engines/wyckoff-elliott";
+import { analyzeVsaBars } from "../../engines/vsa-engine";
 
 export interface ToolDefinition {
   name: string;
@@ -118,6 +121,28 @@ export const ORCA_FA_TOOLS: ToolDefinition[] = [
         text: { type: "string", description: "Toàn văn nội dung bài đăng, tin nhắn phím hàng hoặc nhận định cần thẩm định" },
       },
       required: ["symbol", "text"],
+    },
+  },
+  {
+    name: "tool_get_orderbook_flow",
+    description: "Trích xuất độ sâu sổ lệnh 3 bước giá (Bids/Asks), chênh lệch áp lực cung cầu (imbalance), và khối lượng khớp lệnh chủ động (chủ động mua vs chủ động bán) trong phiên của một mã cổ phiếu.",
+    parameters: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Mã cổ phiếu (ví dụ: SSI, HPG, VND)" },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "tool_get_wyckoff_vsa_signals",
+    description: "Phân tích cấu trúc pha Wyckoff (Pha A-E, Tích lũy / Phân phối, Spring / Upthrust) và các tín hiệu nến Volume Spread Analysis (No Supply, Shakeout, Stopping Volume, Effort vs Result) trên chuỗi nến ngày.",
+    parameters: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Mã cổ phiếu (ví dụ: HPG, FPT, VHM)" },
+      },
+      required: ["symbol"],
     },
   },
 ];
@@ -306,6 +331,67 @@ export async function executeOrcaTool(
               analysis: c.analysisVi,
             })),
             bctcRealityCheck: report.bctcRealityCheck,
+          },
+        };
+      }
+
+      case "tool_get_orderbook_flow": {
+        if (!symbol) return { success: false, result: null, error: "Thiếu mã cổ phiếu" };
+        const obRes = await getVnOrderBook(symbol).catch(() => null);
+        if (!obRes?.book) return { success: false, result: null, error: `Không lấy được sổ lệnh cho ${symbol}` };
+        const b = obRes.book;
+        const totalTrade = (b.tradeBuyVol || 0) + (b.tradeSellVol || 0);
+        const buyPressurePct = totalTrade > 0 ? Math.round(((b.tradeBuyVol || 0) / totalTrade) * 100) : 50;
+
+        return {
+          success: true,
+          result: {
+            symbol,
+            lastPrice: b.lastPrice,
+            bidTop3: b.bids.slice(0, 3),
+            askTop3: b.asks.slice(0, 3),
+            bidTotal: b.bidTotal,
+            askTotal: b.askTotal,
+            imbalancePct: b.imbalance != null ? Math.round(b.imbalance * 100) : 0,
+            tradeBuyVol: b.tradeBuyVol,
+            tradeSellVol: b.tradeSellVol,
+            buyPressurePct,
+            session: b.session,
+            fromLastSession: Boolean(b.fromLastSession),
+          },
+        };
+      }
+
+      case "tool_get_wyckoff_vsa_signals": {
+        if (!symbol) return { success: false, result: null, error: "Thiếu mã cổ phiếu" };
+        const ohlcvRes = await getVnOhlcv(symbol, 80).catch(() => null);
+        const bars = ohlcvRes?.bars ?? [];
+        if (!bars || bars.length < 20) {
+          return { success: false, result: null, error: `Không đủ dữ liệu lịch sử nến ngày cho ${symbol}` };
+        }
+        const [wyckoff, vsa] = await Promise.all([
+          analyzeWyckoff(bars),
+          analyzeVsaBars(bars),
+        ]);
+
+        return {
+          success: true,
+          result: {
+            symbol,
+            phase: wyckoff.phase,
+            subPhase: wyckoff.subPhase,
+            bias: wyckoff.bias,
+            events: wyckoff.events,
+            range: wyckoff.range,
+            vsaSummary: vsa.summaryVi,
+            vsaLatestSignal: vsa.latestSignal
+              ? {
+                  code: vsa.latestSignal.code,
+                  nameVi: vsa.latestSignal.nameVi,
+                  nature: vsa.latestSignal.nature,
+                  descriptionVi: vsa.latestSignal.descriptionVi,
+                }
+              : null,
           },
         };
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, CornerDownLeft, ShieldCheck } from "lucide-react";
+import { Bot, CornerDownLeft, ShieldCheck, Square } from "lucide-react";
 import type { ApiResponse, Meta } from "@/lib/types";
 import { Badge, Panel } from "@/components/ui";
 import { useSettings } from "@/lib/settings";
@@ -10,15 +10,22 @@ import type { AgentResponseContext, AgentRoute } from "@/lib/services/agent-rout
 
 interface AgentResult {
   answer: string;
-  mode: "deterministic" | "llm";
-  intent: string;
+  mode: "deterministic" | "llm" | "agentic_tools";
+  intent?: string;
   model: string | null;
   confidence: "HIGH" | "MEDIUM" | "LOW";
-  dataQuality: "HIGH" | "MEDIUM" | "LOW";
-  dataFreshness: string;
-  context: { sectionsUsed: string[]; symbols: string[] };
-  route: AgentRoute;
-  responses: AgentResponseContext[];
+  dataQuality?: "HIGH" | "MEDIUM" | "LOW";
+  dataFreshness?: string;
+  context?: { sectionsUsed: string[]; symbols: string[] };
+  route?: AgentRoute;
+  responses?: AgentResponseContext[];
+  steps?: Array<{
+    step: number;
+    thought: string;
+    toolCall?: { name: string; args: Record<string, unknown> };
+    observation?: unknown;
+  }>;
+  toolsUsed?: string[];
 }
 
 interface Msg {
@@ -31,6 +38,14 @@ interface Msg {
   dataQuality?: string;
   model?: string | null;
   responses?: AgentResponseContext[];
+  steps?: Array<{
+    step: number;
+    thought: string;
+    toolCall?: { name: string; args: Record<string, unknown> };
+    observation?: unknown;
+  }>;
+  toolsUsed?: string[];
+  streaming?: boolean;
 }
 
 const SUGGESTED = [
@@ -296,6 +311,54 @@ export default function AgentPage() {
     });
   }
 
+  function renderStepper(m: Msg) {
+    if (!m.steps?.length) return null;
+    return (
+      <details
+        className="my-2.5 rounded-lg border border-accent/30 bg-accent/5 p-2.5 text-xs text-ink-2 shadow-xs transition-all"
+        open={Boolean(m.streaming)}
+      >
+        <summary className="cursor-pointer font-medium text-accent flex items-center justify-between select-none">
+          <span className="flex items-center gap-2">
+            {m.streaming ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+              </span>
+            ) : (
+              <span className="text-up font-bold">✓</span>
+            )}
+            Tiến trình tư duy CFA ReAct ({m.steps.length} bước)
+          </span>
+          <span className="text-[10px] text-ink-3">Chi tiết</span>
+        </summary>
+        <div className="mt-2.5 space-y-2 border-t border-accent/20 pt-2">
+          {m.steps.map((s, idx) => (
+            <div key={idx} className="rounded border border-line/60 bg-canvas/60 p-2 text-[11px] space-y-1">
+              <div className="font-medium text-accent flex items-center gap-1.5">
+                <span className="font-bold">Bước {s.step}:</span>
+                <span className="text-ink font-normal">{s.thought}</span>
+              </div>
+              {s.toolCall && (
+                <div className="font-mono text-[10px] text-ink-2 bg-canvas-2/80 px-2 py-1 rounded border border-line/40">
+                  🛠️ <strong>Tool:</strong> <span className="text-accent">{s.toolCall.name}</span> ({JSON.stringify(s.toolCall.args)})
+                </div>
+              )}
+              {s.observation != null && (
+                <div className="text-[10px] text-ink-3 pl-1">
+                  🔍 <strong>Kết quả:</strong>{" "}
+                  {typeof s.observation === "string"
+                    ? s.observation
+                    : "Đã thu thập và thẩm định số liệu thành công"}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    );
+  }
+
   function renderStructured(m: Msg) {
     if (!m.responses?.length) return null;
     return (
@@ -358,10 +421,33 @@ export default function AgentPage() {
     });
   }, [messages, busy]);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  function stopGenerating() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setBusy(false);
+      setMessages((prev) => {
+        if (!prev.length) return prev;
+        const last = { ...prev[prev.length - 1] };
+        if (last.role === "agent" && last.streaming) {
+          last.streaming = false;
+          last.text = last.text ? `${last.text}\n\n*[Đã dừng phản hồi]*` : "*[Đã dừng phản hồi]*";
+          return [...prev.slice(0, -1), last];
+        }
+        return prev;
+      });
+    }
+  }
+
   async function ask(q: string) {
     const question = q.trim();
     if (!question || busy) return;
     setBusy(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     const prior = messagesRef.current
       .filter((m) => m.text?.trim())
@@ -377,76 +463,168 @@ export default function AgentPage() {
     const payload = {
       question,
       history: prior,
-      preferences: settings.ai,
-    };
-
-    const callOnce = async () => {
-      const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 55_000);
-      try {
-        const res = await fetch("/api/v1/agent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-        const json = (await res.json()) as ApiResponse<AgentResult>;
-        return { res, json };
-      } finally {
-        window.clearTimeout(timer);
-      }
+      preferences: {
+        ...settings.ai,
+        agentic: true,
+        stream: true,
+      },
     };
 
     try {
-      let lastErr = "";
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const { res, json } = await callOnce();
-          if (json.success) {
-            setMessages((m) => [
-              ...m,
-              {
-                role: "agent",
-                text: json.data.answer,
-                meta: json.meta,
-                mode: json.data.mode,
-                intent: json.data.intent,
-                confidence: json.data.confidence,
-                dataQuality: json.data.dataQuality,
-                model: json.data.model,
-                responses: json.data.responses,
-              },
-            ]);
-            return;
-          }
-          lastErr = json.error?.message ?? `HTTP ${res.status}`;
-          if (res.status >= 500 && attempt < 2) {
-            await new Promise((r) => setTimeout(r, 800 * attempt));
-            continue;
-          }
-          setMessages((m) => [...m, { role: "agent", text: `Không xử lý được: ${lastErr}` }]);
-          return;
-        } catch (e) {
-          lastErr =
-            e instanceof Error
-              ? e.name === "AbortError"
-                ? "hết thời gian chờ (55s)"
-                : e.message
-              : "network";
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 1_000 * attempt));
-            continue;
+      const res = await fetch("/api/v1/agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+
+      if (contentType.includes("text/event-stream") && res.body) {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "agent",
+            text: "",
+            streaming: true,
+            steps: [],
+            confidence: "HIGH",
+          },
+        ]);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop() ?? "";
+
+          for (const rawBlock of blocks) {
+            const block = rawBlock.trim();
+            if (!block) continue;
+            let event = "message";
+            let dataStr = "";
+            for (const line of block.split("\n")) {
+              if (line.startsWith("event:")) event = line.slice(6).trim();
+              if (line.startsWith("data:")) dataStr = line.slice(5).trim();
+            }
+
+            if (!dataStr) continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (event === "step") {
+                setMessages((prev) => {
+                  if (!prev.length) return prev;
+                  const last = { ...prev[prev.length - 1] };
+                  if (last.role === "agent") {
+                    const currentSteps = last.steps ? [...last.steps] : [];
+                    currentSteps.push(data);
+                    last.steps = currentSteps;
+                    return [...prev.slice(0, -1), last];
+                  }
+                  return prev;
+                });
+              } else if (event === "token") {
+                const chunk = data.chunk || "";
+                if (chunk) {
+                  setMessages((prev) => {
+                    if (!prev.length) return prev;
+                    const last = { ...prev[prev.length - 1] };
+                    if (last.role === "agent") {
+                      last.text = (last.text || "") + chunk;
+                      return [...prev.slice(0, -1), last];
+                    }
+                    return prev;
+                  });
+                }
+              } else if (event === "done") {
+                setMessages((prev) => {
+                  if (!prev.length) return prev;
+                  const last = { ...prev[prev.length - 1] };
+                  if (last.role === "agent") {
+                    last.streaming = false;
+                    if (data.answer && (!last.text || last.text.length < data.answer.length)) {
+                      last.text = data.answer;
+                    }
+                    last.mode = data.mode ?? last.mode;
+                    last.model = data.model ?? last.model;
+                    last.confidence = data.confidence ?? last.confidence;
+                    last.meta = data.meta ?? last.meta;
+                    if (data.steps && (!last.steps || last.steps.length === 0)) {
+                      last.steps = data.steps;
+                    }
+                    return [...prev.slice(0, -1), last];
+                  }
+                  return prev;
+                });
+              } else if (event === "error") {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "agent", text: `Lỗi luồng stream: ${data.message || "Không xác định"}` },
+                ]);
+              }
+            } catch {
+              /* ignore malformed chunk */
+            }
           }
         }
+
+        setMessages((prev) => {
+          if (!prev.length) return prev;
+          const last = { ...prev[prev.length - 1] };
+          if (last.role === "agent" && last.streaming) {
+            last.streaming = false;
+            return [...prev.slice(0, -1), last];
+          }
+          return prev;
+        });
+        return;
+      }
+
+      // Fallback nếu server trả về JSON thông thường
+      const json = (await res.json()) as ApiResponse<AgentResult>;
+      if (json.success) {
+        setMessages((m) => [
+          ...m,
+          {
+            role: "agent",
+            text: json.data.answer,
+            meta: json.meta,
+            mode: json.data.mode,
+            intent: json.data.intent,
+            confidence: json.data.confidence,
+            dataQuality: json.data.dataQuality,
+            model: json.data.model,
+            responses: json.data.responses,
+            steps: json.data.steps,
+            toolsUsed: json.data.toolsUsed,
+          },
+        ]);
+      } else {
+        setMessages((m) => [...m, { role: "agent", text: `Không xử lý được: ${json.error?.message ?? "Lỗi server"}` }]);
+      }
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        return;
       }
       setMessages((m) => [
         ...m,
         {
           role: "agent",
-          text: `Kết nối tới agent thất bại (${lastErr}) — đã thử 2 lần. Kiểm tra /api/v1/system/llm hoặc thử lại sau.`,
+          text: `Kết nối tới agent thất bại (${e instanceof Error ? e.message : "network"}). Kiểm tra kết nối mạng hoặc thử lại sau.`,
         },
       ]);
     } finally {
+      abortControllerRef.current = null;
       setBusy(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -491,6 +669,7 @@ export default function AgentPage() {
                 {m.role === "agent" ? (
                   <>
                     {renderStructured(m)}
+                    {renderStepper(m)}
                     {renderAnswer(m.text)}
                   </>
                 ) : (
@@ -549,13 +728,24 @@ export default function AgentPage() {
             maxLength={800}
             className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3.5 py-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:border-accent/40 focus:outline-none"
           />
-          <button
-            type="submit"
-            disabled={busy || !input.trim()}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent/90 px-3.5 py-2.5 text-[13px] font-semibold text-canvas transition-opacity hover:bg-accent disabled:opacity-50"
-          >
-            <CornerDownLeft className="size-4" /> Gửi
-          </button>
+          {busy ? (
+            <button
+              type="button"
+              onClick={stopGenerating}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-rose-500/90 hover:bg-rose-600 px-3.5 py-2.5 text-[13px] font-semibold text-white transition-colors cursor-pointer"
+              title="Dừng phản hồi"
+            >
+              <Square className="size-3.5 fill-current" /> Dừng
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={busy || !input.trim()}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent/90 px-3.5 py-2.5 text-[13px] font-semibold text-canvas transition-opacity hover:bg-accent disabled:opacity-50 cursor-pointer"
+            >
+              <CornerDownLeft className="size-4" /> Gửi
+            </button>
+          )}
         </form>
         <p className="text-center text-[10px] text-ink-3">
           Enter để gửi · tối đa 800 ký tự · ORCA nghiên cứu — không phải khuyến nghị

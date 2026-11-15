@@ -18,6 +18,7 @@ type AgentRequestBody = {
     language?: "vi" | "en";
     riskDisclosure?: "standard" | "detailed" | "off";
     agentic?: boolean;
+    stream?: boolean;
   };
 };
 
@@ -61,6 +62,86 @@ export async function POST(req: Request) {
     : [];
 
   try {
+    const wantsStream =
+      Boolean(body.preferences?.stream) ||
+      Boolean(req.headers.get("accept")?.includes("text/event-stream"));
+
+    if (wantsStream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          const sendEvent = (event: string, data: unknown) => {
+            try {
+              controller.enqueue(
+                encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+              );
+            } catch {
+              /* Stream may be closed by client */
+            }
+          };
+
+          try {
+            const useAgentic = Boolean(body.preferences?.agentic && llmConfigured());
+            if (useAgentic) {
+              const agenticRes = await runAgenticFinancialReasoning(question, {
+                signal: req.signal,
+                onStep: (step) => sendEvent("step", step),
+                onToken: (chunk) => sendEvent("token", { chunk }),
+              });
+
+              if (agenticRes?.answer) {
+                sendEvent("done", {
+                  answer: agenticRes.answer,
+                  mode: "agentic_tools",
+                  model: agenticRes.model,
+                  steps: agenticRes.steps,
+                  toolsUsed: agenticRes.toolsUsed,
+                  confidence: "HIGH",
+                  meta: {
+                    source: "orca-agentic-fa-loop",
+                    freshness: "FRESH",
+                    cached: false,
+                  },
+                });
+                controller.close();
+                return;
+              }
+            }
+
+            // Fallback sang standard pipeline
+            const { result, meta } = await answerQuestion(question, body.preferences ?? {}, history);
+            const text = result.answer;
+            const words = text.split(/(\s+)/);
+            for (let i = 0; i < words.length; i += 4) {
+              if (req.signal.aborted) break;
+              const slice = words.slice(i, i + 4).join("");
+              sendEvent("token", { chunk: slice });
+            }
+
+            sendEvent("done", {
+              ...result,
+              meta,
+            });
+            controller.close();
+          } catch (err) {
+            sendEvent("error", {
+              message: err instanceof Error ? err.message : "Lỗi xử lý luồng stream",
+            });
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
     // Nếu client bật explicit agentic mode:
     if (body.preferences?.agentic && llmConfigured()) {
       try {

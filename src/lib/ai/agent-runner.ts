@@ -8,7 +8,7 @@
  */
 
 import "server-only";
-import { llmChat } from "./gateway";
+import { llmChat, llmChatStream } from "./gateway";
 import { ORCA_FA_TOOLS, executeOrcaTool } from "./tools/fa-tools";
 
 export interface AgenticStep {
@@ -26,6 +26,13 @@ export interface AgenticExecutionResult {
   steps: AgenticStep[];
   model: string;
   toolsUsed: string[];
+}
+
+export interface AgenticRunnerOptions {
+  maxSteps?: number;
+  onStep?: (step: AgenticStep) => void;
+  onToken?: (token: string) => void;
+  signal?: AbortSignal;
 }
 
 function synthesizeFallbackFromObservations(question: string, steps: AgenticStep[]): string | null {
@@ -79,7 +86,7 @@ function synthesizeFallbackFromObservations(question: string, steps: AgenticStep
 
 export async function runAgenticFinancialReasoning(
   question: string,
-  opts?: { maxSteps?: number }
+  opts?: AgenticRunnerOptions
 ): Promise<AgenticExecutionResult | null> {
   const maxSteps = Math.min(Math.max(opts?.maxSteps ?? 3, 1), 5);
   const steps: AgenticStep[] = [];
@@ -112,6 +119,8 @@ QUY TẮC BẮT BUỘC:
   let currentContext = `CÂU HỎI CỦA NGƯỜI DÙNG: "${question}"\n`;
 
   for (let step = 1; step <= maxSteps; step++) {
+    if (opts?.signal?.aborted) return null;
+
     const res = await llmChat("reasoning", {
       system,
       user: currentContext,
@@ -134,6 +143,7 @@ QUY TẮC BẮT BUỘC:
       parsed = JSON.parse(cleaned);
     } catch {
       if (res.text.trim().length >= 100) {
+        opts?.onToken?.(res.text.trim());
         return {
           answer: res.text.trim(),
           steps,
@@ -152,7 +162,10 @@ QUY TẮC BẮT BUỘC:
 
     // Nếu Agent đã kết luận với câu trả lời đầy đủ
     if ((!toolName || parsed.final_answer) && parsed.final_answer && parsed.final_answer.trim().length >= 80) {
-      steps.push({ step, thought, observation: "Hoàn tất phân tích" });
+      const finalStep: AgenticStep = { step, thought, observation: "Hoàn tất phân tích" };
+      steps.push(finalStep);
+      opts?.onStep?.(finalStep);
+      opts?.onToken?.(parsed.final_answer.trim());
       return {
         answer: parsed.final_answer.trim(),
         steps,
@@ -172,12 +185,14 @@ QUY TẮC BẮT BUỘC:
     const isError = !execRes.success || Boolean(execRes.error);
     const obsData = isError ? { error: execRes.error || "Không lấy được dữ liệu từ nguồn này" } : execRes.result;
 
-    steps.push({
+    const completedStep: AgenticStep = {
       step,
       thought,
       toolCall: { name: toolName, args },
       observation: obsData,
-    });
+    };
+    steps.push(completedStep);
+    opts?.onStep?.(completedStep);
 
     if (isError) {
       currentContext += `\n[BƯỚC ${step} - THẤT BẠI]:
@@ -193,8 +208,10 @@ GHI CHÚ KIỂM ĐỊNH MÂU THUẪN (CONTRADICTION CHECK): Hãy đối chiếu 
     }
   }
 
+  if (opts?.signal?.aborted) return null;
+
   // Lượt tổng kết cuối cùng nếu có context
-  const finalSummary = await llmChat("analysis", {
+  const finalSummary = await llmChatStream("analysis", {
     system: `Bạn là ORCA FA Copilot — Giám đốc Khối Phân tích Nghiên cứu Cổ phiếu (Head of Equity Research).
 Dựa trên toàn bộ suy nghĩ và kết quả công cụ thu thập được, hãy viết bài phân tích cơ bản chuyên sâu chuẩn CFA.
 YÊU CẦU BẮT BUỘC VỀ PHÂN TÍCH & TRÍCH DẪN AUDIT TRAIL:
@@ -204,6 +221,8 @@ YÊU CẦU BẮT BUỘC VỀ PHÂN TÍCH & TRÍCH DẪN AUDIT TRAIL:
     user: currentContext,
     temperature: 0.35,
     maxTokens: 2500,
+    onToken: opts?.onToken,
+    signal: opts?.signal,
   });
 
   if (finalSummary?.text && finalSummary.text.trim().length >= 100) {
@@ -218,6 +237,7 @@ YÊU CẦU BẮT BUỘC VỀ PHÂN TÍCH & TRÍCH DẪN AUDIT TRAIL:
   // Fallback tổng hợp từ observations nếu LLM không trả về text
   const synthesized = synthesizeFallbackFromObservations(question, steps);
   if (synthesized) {
+    opts?.onToken?.(synthesized);
     return {
       answer: synthesized,
       steps,
