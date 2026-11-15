@@ -529,8 +529,8 @@
 .stock-sticky-head {
   position: sticky;
   top: 0;
-  z-index: 30;
-  background: color-mix(in srgb, var(--color-background-primary, #070b16) 92%, transparent);
+  z-index: 20;
+  background: color-mix(in srgb, var(--color-background-primary, #070b16) 95%, transparent);
   backdrop-filter: blur(8px);
   transition: box-shadow 0.2s ease;
 }

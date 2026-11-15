@@ -35,14 +35,18 @@
   color: var(--color-text-primary);
 }
 .stock-hero-name {
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   color: var(--color-text-secondary);
+  max-width: min(22rem, 38vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stock-hero-price-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.45rem 0.75rem;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
   margin-top: 0.35rem;
 }
 .stock-hero-price {
@@ -85,11 +89,12 @@
 .stock-stat-value--down { color: var(--color-down); }
 
 .stock-band-grid {
-  display: grid;
+  display: inline-grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.28rem;
-  max-width: 18rem;
-  margin-top: 0.4rem;
+  width: auto;
+  min-width: 14rem;
+  margin-top: 0;
 }
 .stock-band-cell {
   display: flex;

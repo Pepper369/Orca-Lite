@@ -119,18 +119,26 @@ function TickerStrip({
 }
 
 function MarketPulse({ intel }: { intel: MarketIntel }) {
-  const c = intel.condition;
-  const score = Math.round(c.score);
+  const c = intel.condition ?? {
+    score: 50,
+    rating: "NEUTRAL" as const,
+    drivers: [],
+    risks: [],
+    components: [],
+    confidence: "LOW",
+    coverage: 0,
+  };
+  const score = Math.round(c.score ?? 50);
   const needle = Math.max(0, Math.min(100, score));
   const tagCls = RATING_TAG[c.rating] ?? RATING_TAG.NEUTRAL;
   const headline =
-    c.drivers[0] ??
+    c.drivers?.[0] ??
     (score >= 57
       ? "Thị trường nghiêng tích cực"
       : score <= 43
         ? "Thị trường nghiêng tiêu cực"
         : "Thị trường trung tính / phân hóa");
-  const metrics = c.components.filter((x) => x.available && x.score != null).slice(0, 6);
+  const metrics = (c.components ?? []).filter((x) => x.available && x.score != null).slice(0, 6);
   return (
     <article className="cc-panel">
       <div className="cc-panel-head">
@@ -145,10 +153,10 @@ function MarketPulse({ intel }: { intel: MarketIntel }) {
         <div className="min-w-0 flex-1">
           <b className="block text-[13px] text-text-primary">{headline}</b>
           <p className="mt-1 line-clamp-2 text-[11px] text-text-muted">
-            {c.risks[0] ? `Rủi ro: ${c.risks[0]}` : intel.sessionHint}
+            {c.risks?.[0] ? `Rủi ro: ${c.risks[0]}` : intel.sessionHint}
           </p>
           <p className="mt-0.5 text-[10px] text-text-muted">
-            Tin cậy {c.confidence} · phủ dữ liệu {Math.round(c.coverage * 100)}%
+            Tin cậy {c.confidence} · phủ dữ liệu {Math.round((c.coverage ?? 0) * 100)}%
           </p>
         </div>
       </div>
@@ -430,11 +438,15 @@ function TopMovers({ quotes }: { quotes: Quote[] }) {
 }
 
 function AiBrief({ intel }: { intel: MarketIntel }) {
-  const c = intel.condition;
+  const c = intel.condition ?? {
+    rating: "NEUTRAL" as const,
+    drivers: [],
+    risks: [],
+  };
   const summary =
-    c.drivers[0] && c.risks[0]
+    c.drivers?.[0] && c.risks?.[0]
       ? `${c.drivers[0]} Đồng thời cần lưu ý: ${c.risks[0]}`
-      : c.drivers[0] || c.risks[0] || intel.sessionHint || "Đang tổng hợp brief thị trường…";
+      : c.drivers?.[0] || c.risks?.[0] || intel.sessionHint || "Đang tổng hợp brief thị trường…";
   return (
     <article className="cc-panel">
       <div className="cc-panel-head">
@@ -505,7 +517,9 @@ export function CommandCenter({
             <h1 className="text-base font-semibold tracking-tight text-text-primary sm:text-lg">
               MARKET COMMAND CENTER
             </h1>
-            <Badge tone={intel.session.trading ? "up" : "neutral"}>{intel.session.labelVi}</Badge>
+            <Badge tone={intel.session?.trading ? "up" : "neutral"}>
+              {intel.session?.labelVi ?? "Thị trường"}
+            </Badge>
             {meta ? <FreshnessDot status={meta.freshness} ageMs={meta.ageMs} /> : null}
           </div>
           <p className="mt-0.5 text-[11px] text-text-muted">

@@ -76,6 +76,49 @@ app.get("/api/v1/chart/live-quote", async (c) => {
   return GET(c.req.raw);
 });
 
+// Market intelligence & snapshots direct bridges
+app.get("/api/v1/market/intel", async (c) => {
+  const { GET } = await import("@/app/api/v1/market/intel/route");
+  return GET();
+});
+
+app.get("/api/v1/market/snapshot", async (c) => {
+  const { GET } = await import("@/app/api/v1/market/snapshot/route");
+  return GET();
+});
+
+app.get("/api/v1/market/global", async (c) => {
+  const { GET } = await import("@/app/api/v1/market/global/route");
+  return GET();
+});
+
+app.get("/api/v1/sentiment", async (c) => {
+  const { GET } = await import("@/app/api/v1/sentiment/route");
+  return GET(c.req.raw);
+});
+
+// Crypto detail direct bridge
+app.get("/api/v1/crypto/:symbol", async (c) => {
+  const symbol = c.req.param("symbol");
+  if (symbol === "markets") {
+    const { GET } = await import("@/app/api/v1/crypto/markets/route");
+    return GET(c.req.raw);
+  }
+  const { GET } = await import("@/app/api/v1/crypto/[symbol]/route");
+  return GET(c.req.raw, { params: Promise.resolve({ symbol }) });
+});
+
+// Forex detail direct bridge
+app.get("/api/v1/forex/:symbol", async (c) => {
+  const symbol = c.req.param("symbol");
+  if (symbol === "markets") {
+    const { GET } = await import("@/app/api/v1/forex/markets/route");
+    return GET();
+  }
+  const { GET } = await import("@/app/api/v1/forex/[symbol]/route");
+  return GET(c.req.raw, { params: Promise.resolve({ symbol }) });
+});
+
 app.get("/api/v1/stocks/screener", async (c) => {
   const { GET } = await import("@/app/api/v1/stocks/screener/route");
   return GET(c.req.raw);
@@ -153,7 +196,7 @@ app.all("/api/*", async (c) => {
   const segments = pathname.split("/").filter(Boolean);
 
   try {
-    const cacheKey = segments.map((s, idx) => (s.startsWith("v1") || idx < 2 ? s : "*")).join("/");
+    const cacheKey = segments.join("/");
     let matched = routeCache.get(cacheKey);
 
     if (!matched) {

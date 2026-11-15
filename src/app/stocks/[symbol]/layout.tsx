@@ -21,12 +21,14 @@ const VN30_QUICK_SWITCHER = ["HPG", "SSI", "VNM", "FPT", "MWG", "TCB", "MBB", "D
 export default function StockSymbolLayout({
   children,
   params,
+  symbol: propSymbol,
 }: {
   children: ReactNode;
-  params: Promise<{ symbol: string }>;
+  params?: Promise<{ symbol: string }>;
+  symbol?: string;
 }) {
-  const resolvedParams = use(params);
-  const symbol = resolvedParams.symbol.toUpperCase();
+  const resolvedParams = params ? use(params) : null;
+  const symbol = (propSymbol || resolvedParams?.symbol || "").toUpperCase();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
   const [showStatsWhenStuck, setShowStatsWhenStuck] = useState(false);
@@ -187,7 +189,7 @@ export default function StockSymbolLayout({
     <div className="stock-workspace stock-page-body">
       <div ref={sentinelRef} aria-hidden="true" className="stock-sticky-sentinel" />
       <div className="stock-sticky-head" data-stuck={stuck ? "true" : "false"}>
-        <Panel pad={false} className="stock-hero-panel overflow-visible">
+        <Panel pad={false} className="stock-hero-panel overflow-hidden">
           <div className="stock-hero">
             <div className="stock-hero-main">
               <div className="stock-hero-title-row">

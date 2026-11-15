@@ -230,12 +230,52 @@ export function Dashboard({ initialData }: { initialData?: DashboardInitialData 
     initialData: initialData?.global ?? undefined,
   });
 
-  // Tối ưu giải pháp 1: Nếu chưa có dữ liệu mạng về, nạp ngay dữ liệu bootstrap để người dùng có thể test tức thì
-  const displayIntel = useMemo(() => {
-    if (intel) return intel;
-    const synth = synthesizeIntel(board);
-    if (synth) return synth;
-    return createBootstrapIntel(board);
+  // Tối ưu giải pháp: Đảm bảo intel luôn có đầy đủ cấu trúc dữ liệu an toàn, không bao giờ crash UI
+  const displayIntel = useMemo<MarketIntel>(() => {
+    const base = createBootstrapIntel(board);
+    if (!intel) {
+      const synth = synthesizeIntel(board);
+      return synth ?? base;
+    }
+    const rawIntel = intel as unknown as Record<string, unknown>;
+    const rawSession = (rawIntel.session ?? rawIntel.vnSession) as typeof base.session | undefined;
+
+    return {
+      ...base,
+      ...intel,
+      session: {
+        ...base.session,
+        ...(typeof rawSession === "object" && rawSession ? rawSession : {}),
+      },
+      sessionHint: (rawIntel.sessionHint ?? rawIntel.vnSessionHint ?? base.sessionHint) as string,
+      indices: intel.indices?.length ? intel.indices : base.indices,
+      indicesAvailable: intel.indicesAvailable ?? Boolean(intel.indices?.length),
+      breadth: {
+        ...base.breadth,
+        ...(intel.breadth ?? {}),
+      },
+      liquidity: {
+        ...base.liquidity,
+        ...(intel.liquidity ?? {}),
+      },
+      flow: {
+        ...base.flow,
+        ...(intel.flow ?? {}),
+      },
+      crossAsset: intel.crossAsset?.length ? intel.crossAsset : base.crossAsset,
+      condition: {
+        ...base.condition,
+        ...(intel.condition ?? {}),
+        drivers: intel.condition?.drivers ?? base.condition.drivers,
+        risks: intel.condition?.risks ?? base.condition.risks,
+        components: intel.condition?.components ?? base.condition.components,
+      },
+      contributors: {
+        ...base.contributors,
+        ...(intel.contributors ?? {}),
+      },
+      news: intel.news?.length ? intel.news : base.news,
+    };
   }, [intel, board]);
 
   return (

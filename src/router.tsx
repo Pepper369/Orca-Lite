@@ -10,8 +10,11 @@ const ProTerminalPage = lazy(() => import("@/app/terminal/page"));
 const VnMarketCenterPage = lazy(() => import("@/app/stocks/page"));
 const ScreenerPage = lazy(() => import("@/app/screener/page"));
 const WatchlistPage = lazy(() => import("@/app/watchlist/page"));
+const StockSymbolLayout = lazy(() => import("@/app/stocks/[symbol]/layout"));
 const CryptoPage = lazy(() => import("@/app/crypto/page"));
+const CryptoDetailPage = lazy(() => import("@/components/crypto-detail").then((m) => ({ default: m.CryptoDetailPage })));
 const ForexPage = lazy(() => import("@/app/forex/page"));
+const ForexDetailPage = lazy(() => import("@/components/forex-detail").then((m) => ({ default: m.ForexDetailPage })));
 const CommoditiesPage = lazy(() => import("@/app/commodities/page"));
 const DerivativesPage = lazy(() => import("@/app/derivatives/page"));
 const MacroEconomicPage = lazy(() => import("@/app/macro-economic/page"));
@@ -52,16 +55,30 @@ export function AppRouter() {
       else if (segments[2] === "valuation") tab = "valuation";
       else if (segments[2] === "profile") tab = "profile";
 
-      content = <StockKeepAliveWorkspace symbol={symbol} initialTab={tab} />;
+      content = (
+        <StockSymbolLayout symbol={symbol}>
+          <StockKeepAliveWorkspace symbol={symbol} initialTab={tab} />
+        </StockSymbolLayout>
+      );
     }
   } else if (pathname === "/screener" || pathname.startsWith("/screener")) {
     content = <ScreenerPage />;
   } else if (pathname === "/watchlist") {
     content = <WatchlistPage />;
-  } else if (pathname === "/crypto" || pathname.startsWith("/crypto")) {
-    content = <CryptoPage />;
-  } else if (pathname === "/forex" || pathname.startsWith("/forex")) {
-    content = <ForexPage />;
+  } else if (segments[0] === "crypto") {
+    if (segments.length === 1) {
+      content = <CryptoPage />;
+    } else {
+      const symbol = segments[1].toUpperCase();
+      content = <CryptoDetailPage symbol={symbol} />;
+    }
+  } else if (segments[0] === "forex") {
+    if (segments.length === 1) {
+      content = <ForexPage />;
+    } else {
+      const pair = segments[1].toUpperCase().replace(/[^A-Z]/g, "");
+      content = <ForexDetailPage pair={pair} />;
+    }
   } else if (pathname === "/commodities") {
     content = <CommoditiesPage />;
   } else if (pathname === "/derivatives") {
