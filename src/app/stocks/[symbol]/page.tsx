@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { StockDetailClient } from "./stock-detail-client";
+import { StockKeepAliveWorkspace } from "@/components/stocks/stock-keep-alive-workspace";
 import { PageSkeleton } from "@/components/page-skeleton";
 
 export async function generateMetadata({ params }: { params: Promise<{ symbol: string }> }) {
@@ -17,7 +17,7 @@ export default async function StockDetailPage({ params }: { params: Promise<{ sy
 
   return (
     <Suspense fallback={<PageSkeleton />}>
-      <StockDetailClient symbol={symbol} />
+      <StockKeepAliveWorkspace symbol={symbol} initialTab="overview" />
     </Suspense>
   );
 }

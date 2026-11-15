@@ -25,17 +25,34 @@ export function StockTabs({ symbol }: { symbol: string }) {
   const [pending, startTransition] = useTransition();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [clientActiveTab, setClientActiveTab] = useState<string | null>(null);
 
   const [prevPathname, setPrevPathname] = useState(pathname);
   if (prevPathname !== pathname) {
     setPrevPathname(pathname);
     setPendingHref(null);
+    setClientActiveTab(null);
   }
+
+  // Listen to popstate to sync tabs on browser back/forward
+  useEffect(() => {
+    const onPop = () => {
+      const p = window.location.pathname;
+      let k = "overview";
+      if (p.includes("/financials")) k = "financials";
+      else if (p.includes("/fundamentals")) k = "fundamentals";
+      else if (p.includes("/valuation")) k = "valuation";
+      else if (p.includes("/profile")) k = "profile";
+      setClientActiveTab(k);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     const active = navRef.current?.querySelector<HTMLElement>("[data-active=true]");
     active?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
-  }, [pathname]);
+  }, [pathname, clientActiveTab]);
 
   const onRefresh = () => {
     if (refreshing) return;
@@ -63,8 +80,9 @@ export function StockTabs({ symbol }: { symbol: string }) {
       <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
         {TABS.map((t) => {
           const href = `${base}${t.href}`;
-          const active =
-            t.key === "overview"
+          const active = clientActiveTab
+            ? clientActiveTab === t.key
+            : t.key === "overview"
               ? pathname === base || pathname === `${base}/`
               : pathname.startsWith(href);
           const isTabPending = pending && pendingHref === href;
@@ -94,12 +112,18 @@ export function StockTabs({ symbol }: { symbol: string }) {
               }}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                if (active && !pending) return;
                 e.preventDefault();
-                setPendingHref(href);
-                markAppNavigating(280);
-                signalNavStart();
-                startTransition(() => router.push(href));
+                setClientActiveTab(t.key);
+                try {
+                  window.history.pushState(null, "", href);
+                } catch {
+                  /* ignore */
+                }
+                window.dispatchEvent(
+                  new CustomEvent("orca:stock-tab-change", {
+                    detail: { key: t.key, symbol, href },
+                  }),
+                );
               }}
               className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-t-md px-3.5 py-2.5 text-[12.5px] font-medium leading-snug transition-colors sm:min-h-0 sm:px-4 sm:py-2.5 ${
                 active

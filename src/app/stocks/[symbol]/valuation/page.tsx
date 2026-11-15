@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ValuationPanel } from "@/components/stocks/valuation-panel";
-import { ForecastPanel } from "@/components/stocks/forecast-panel";
+import { StockKeepAliveWorkspace } from "@/components/stocks/stock-keep-alive-workspace";
+import { Loading } from "@/components/ui";
 
 export default function StockValuationPage({
   params,
@@ -10,18 +10,12 @@ export default function StockValuationPage({
   params: Promise<{ symbol: string }>;
 }) {
   const [symbol, setSymbol] = useState("");
+
   useEffect(() => {
-    params.then((p) => setSymbol(p.symbol.toUpperCase()));
+    params.then((p) => setSymbol(p.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "")));
   }, [params]);
 
-  if (!symbol) {
-    return <div className="p-4 text-[12px] text-ink-3">Đang tải…</div>;
-  }
+  if (!symbol) return <Loading rows={6} label="Đang mở định giá…" />;
 
-  return (
-    <div className="stock-workspace">
-      <ValuationPanel symbol={symbol} showAnalyst />
-      <ForecastPanel symbol={symbol} />
-    </div>
-  );
+  return <StockKeepAliveWorkspace symbol={symbol} initialTab="valuation" />;
 }
