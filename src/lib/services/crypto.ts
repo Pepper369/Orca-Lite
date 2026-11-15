@@ -11,6 +11,7 @@ import { candleAggregator } from "../realtime/candles";
 import { eventBus } from "../events";
 import type { Meta, OhlcvBar, TechnicalSnapshot, CandlePattern } from "../types";
 import { firstHealthy } from "../data-engine/resilience";
+import { BOOTSTRAP_CRYPTO_ROWS, BOOTSTRAP_CRYPTO_SUMMARY } from "../bootstrap-data";
 
 export interface CryptoMarketRow {
   symbol: string;
@@ -341,7 +342,14 @@ export async function getCryptoMarkets(): Promise<{
         } catch {
           const lg = recall();
           if (lg) return lg;
-          throw new Error("all crypto sources empty");
+          return {
+            rows: BOOTSTRAP_CRYPTO_ROWS,
+            fetchedAt: Date.now(),
+            overlaid: 0,
+            invalid: 0,
+            suspect: 0,
+            source: "bootstrap-snapshot",
+          };
         }
       },
     });
@@ -349,7 +357,19 @@ export async function getCryptoMarkets(): Promise<{
     const pack = res.value;
     if (!pack?.rows?.length) {
       const lg = recall();
-      if (!lg) return null;
+      if (!lg) {
+        return {
+          rows: BOOTSTRAP_CRYPTO_ROWS,
+          summary: BOOTSTRAP_CRYPTO_SUMMARY,
+          meta: buildMeta({
+            source: "bootstrap-snapshot",
+            sourceTimestampMs: Date.now(),
+            stale: true,
+            partial: true,
+            note: "Phục hồi từ bootstrap snapshot crypto",
+          }),
+        };
+      }
       return {
         rows: lg.rows,
         summary: summarize(lg.rows, lg.fetchedAt),

@@ -32,6 +32,19 @@ async function parseAgentRequestBody(req: Request): Promise<AgentRequestBody | n
 
 /**
  * ORCA AI Agent — fetch-data-first reasoning over live platform data.
+ * GET /api/v1/agent — Health & capability check
+ */
+export async function GET() {
+  return ok({
+    service: "ORCA FA AI Agent",
+    status: "ready",
+    methods: ["POST", "GET"],
+    streaming: true,
+  });
+}
+
+/**
+ * ORCA AI Agent — fetch-data-first reasoning over live platform data.
  * POST { question: string, history?: { role, content }[], preferences? }
  *
  * Always returns JSON (never hangs naked): degraded answer if LLM/data fails.

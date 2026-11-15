@@ -3,6 +3,7 @@ import { getCryptoMarkets } from "@/lib/services/crypto";
 import { getHot, putHot } from "@/lib/hot-snapshot";
 import { buildMeta } from "@/lib/freshness";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
+import { BOOTSTRAP_CRYPTO_ROWS, BOOTSTRAP_CRYPTO_SUMMARY } from "@/lib/bootstrap-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -106,23 +107,14 @@ export async function GET(req: Request) {
       }
       return {
         data: {
-          rows: [],
-          summary: {
-            marketCount: 0,
-            advancers: 0,
-            decliners: 0,
-            avgChangePercent: 0,
-            totalQuoteVolume: 0,
-            btcChangePercent: null,
-            ethChangePercent: null,
-            fetchedAt: new Date().toISOString(),
-          },
+          rows: BOOTSTRAP_CRYPTO_ROWS.slice(0, limit),
+          summary: BOOTSTRAP_CRYPTO_SUMMARY,
         },
         meta: {
-          source: "crypto-shell",
+          source: "bootstrap-snapshot",
           partial: true,
           stale: true,
-          note: "Crypto markets tạm trống — đang kết nối lại",
+          note: "Phục hồi từ bootstrap snapshot crypto",
         },
       };
     },

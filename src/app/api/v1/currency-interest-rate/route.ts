@@ -1,11 +1,16 @@
-import { ok, unavailable } from "@/lib/envelope";
-import { getEconomicData } from "@/lib/services/economy";
+import { ok } from "@/lib/envelope";
+import { getEconomicData, economicMeta } from "@/lib/services/economy";
+import { BOOTSTRAP_CURRENCY_INTEREST_RATE } from "@/lib/bootstrap-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const result = await getEconomicData("currency-interest-rate");
-  if (!result) return unavailable("VietnamBiz Data · currency-interest-rate", "Chưa lấy được bảng lãi suất tiền tệ từ VietnamBiz. Vui lòng thử lại sau hoặc xem nguồn gốc.");
-  return ok(result.data, result.meta);
+  try {
+    const result = await getEconomicData("currency-interest-rate");
+    if (result) return ok(result.data, result.meta);
+  } catch {
+    /* */
+  }
+  return ok(BOOTSTRAP_CURRENCY_INTEREST_RATE, economicMeta(BOOTSTRAP_CURRENCY_INTEREST_RATE, { cached: true, stale: true }, 5));
 }

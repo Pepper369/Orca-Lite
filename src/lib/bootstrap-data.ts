@@ -1,6 +1,10 @@
-import type { IndexQuote, Quote, CryptoMarketRow, ForexRow } from "./types";
-import type { CryptoSummary } from "./services/crypto";
+import type { IndexQuote, Quote } from "./types";
+import type { CryptoMarketRow, CryptoSummary } from "./services/crypto";
+import type { ForexRow } from "./services/forex";
 import type { CommodityMarket } from "./services/commodities";
+import type { EconomicSnapshot } from "./economic-data";
+import type { WorldBankMacroBundle } from "./providers/worldbank";
+import { VN_MACRO_INDICATORS } from "./providers/worldbank";
 
 export const BOOTSTRAP_INDICES: IndexQuote[] = [
   { code: "VNINDEX", name: "VN-Index", value: 1286.5, change: 5.2, changePercent: 0.41, volume: 720000000, updatedAt: null },
@@ -92,30 +96,39 @@ export const BOOTSTRAP_CRYPTO_DATA = {
   summary: BOOTSTRAP_CRYPTO_SUMMARY,
 };
 
-const RAW_FOREX = [
-  { pair: "EURUSD", symbol: "EUR/USD", group: "major", price: 1.0852, changePercent: 0.12, updatedAt: new Date().toISOString() },
-  { pair: "GBPUSD", symbol: "GBP/USD", group: "major", price: 1.2985, changePercent: 0.24, updatedAt: new Date().toISOString() },
-  { pair: "USDJPY", symbol: "USD/JPY", group: "major", price: 152.45, changePercent: -0.18, updatedAt: new Date().toISOString() },
-  { pair: "AUDUSD", symbol: "AUD/USD", group: "major", price: 0.6582, changePercent: 0.35, updatedAt: new Date().toISOString() },
-  { pair: "USDCAD", symbol: "USD/CAD", group: "major", price: 1.3865, changePercent: -0.08, updatedAt: new Date().toISOString() },
-  { pair: "USDCHF", symbol: "USD/CHF", group: "major", price: 0.8845, changePercent: -0.05, updatedAt: new Date().toISOString() },
+const RAW_FOREX: Array<{
+  pair: string;
+  base: string;
+  quote: string;
+  symbol: string;
+  group: "major" | "cross" | "vnd" | "metal" | "energy";
+  price: number;
+  changePercent: number;
+  updatedAt: string;
+}> = [
+  { pair: "EURUSD", base: "EUR", quote: "USD", symbol: "EUR/USD", group: "major", price: 1.0852, changePercent: 0.12, updatedAt: new Date().toISOString() },
+  { pair: "GBPUSD", base: "GBP", quote: "USD", symbol: "GBP/USD", group: "major", price: 1.2985, changePercent: 0.24, updatedAt: new Date().toISOString() },
+  { pair: "USDJPY", base: "USD", quote: "JPY", symbol: "USD/JPY", group: "major", price: 152.45, changePercent: -0.18, updatedAt: new Date().toISOString() },
+  { pair: "AUDUSD", base: "AUD", quote: "USD", symbol: "AUD/USD", group: "major", price: 0.6582, changePercent: 0.35, updatedAt: new Date().toISOString() },
+  { pair: "USDCAD", base: "USD", quote: "CAD", symbol: "USD/CAD", group: "major", price: 1.3865, changePercent: -0.08, updatedAt: new Date().toISOString() },
+  { pair: "USDCHF", base: "USD", quote: "CHF", symbol: "USD/CHF", group: "major", price: 0.8845, changePercent: -0.05, updatedAt: new Date().toISOString() },
 
-  { pair: "EURGBP", symbol: "EUR/GBP", group: "cross", price: 0.8358, changePercent: -0.10, updatedAt: new Date().toISOString() },
-  { pair: "EURJPY", symbol: "EUR/JPY", group: "cross", price: 165.42, changePercent: -0.06, updatedAt: new Date().toISOString() },
-  { pair: "GBPJPY", symbol: "GBP/JPY", group: "cross", price: 197.95, changePercent: 0.05, updatedAt: new Date().toISOString() },
+  { pair: "EURGBP", base: "EUR", quote: "GBP", symbol: "EUR/GBP", group: "cross", price: 0.8358, changePercent: -0.10, updatedAt: new Date().toISOString() },
+  { pair: "EURJPY", base: "EUR", quote: "JPY", symbol: "EUR/JPY", group: "cross", price: 165.42, changePercent: -0.06, updatedAt: new Date().toISOString() },
+  { pair: "GBPJPY", base: "GBP", quote: "JPY", symbol: "GBP/JPY", group: "cross", price: 197.95, changePercent: 0.05, updatedAt: new Date().toISOString() },
 
-  { pair: "USDVND", symbol: "USD/VND", group: "vnd", price: 25450, changePercent: 0.08, updatedAt: new Date().toISOString() },
-  { pair: "EURVND", symbol: "EUR/VND", group: "vnd", price: 27618, changePercent: 0.20, updatedAt: new Date().toISOString() },
-  { pair: "JPYVND", symbol: "JPY/VND", group: "vnd", price: 166.9, changePercent: 0.26, updatedAt: new Date().toISOString() },
-  { pair: "GBPVND", symbol: "GBP/VND", group: "vnd", price: 33046, changePercent: 0.32, updatedAt: new Date().toISOString() },
+  { pair: "USDVND", base: "USD", quote: "VND", symbol: "USD/VND", group: "vnd", price: 25450, changePercent: 0.08, updatedAt: new Date().toISOString() },
+  { pair: "EURVND", base: "EUR", quote: "VND", symbol: "EUR/VND", group: "vnd", price: 27618, changePercent: 0.20, updatedAt: new Date().toISOString() },
+  { pair: "JPYVND", base: "JPY", quote: "VND", symbol: "JPY/VND", group: "vnd", price: 166.9, changePercent: 0.26, updatedAt: new Date().toISOString() },
+  { pair: "GBPVND", base: "GBP", quote: "VND", symbol: "GBP/VND", group: "vnd", price: 33046, changePercent: 0.32, updatedAt: new Date().toISOString() },
 
-  { pair: "XAUUSD", symbol: "XAU/USD (Vàng)", group: "metal", price: 2684.5, changePercent: 0.65, updatedAt: new Date().toISOString() },
-  { pair: "XAGUSD", symbol: "XAG/USD (Bạc)", group: "metal", price: 31.85, changePercent: 1.15, updatedAt: new Date().toISOString() },
-  { pair: "XPTUSD", symbol: "XPT/USD (Bạch kim)", group: "metal", price: 985.2, changePercent: 0.42, updatedAt: new Date().toISOString() },
+  { pair: "XAUUSD", base: "XAU", quote: "USD", symbol: "XAU/USD (Vàng)", group: "metal", price: 2684.5, changePercent: 0.65, updatedAt: new Date().toISOString() },
+  { pair: "XAGUSD", base: "XAG", quote: "USD", symbol: "XAG/USD (Bạc)", group: "metal", price: 31.85, changePercent: 1.15, updatedAt: new Date().toISOString() },
+  { pair: "XPTUSD", base: "XPT", quote: "USD", symbol: "XPT/USD (Bạch kim)", group: "metal", price: 985.2, changePercent: 0.42, updatedAt: new Date().toISOString() },
 
-  { pair: "USOIL", symbol: "Dầu WTI", group: "energy", price: 74.85, changePercent: -0.42, updatedAt: new Date().toISOString() },
-  { pair: "UKOIL", symbol: "Dầu Brent", group: "energy", price: 78.45, changePercent: -0.35, updatedAt: new Date().toISOString() },
-  { pair: "NATGAS", symbol: "Khí tự nhiên Gas", group: "energy", price: 2.85, changePercent: 2.45, updatedAt: new Date().toISOString() },
+  { pair: "USOIL", base: "USO", quote: "USD", symbol: "Dầu WTI", group: "energy", price: 74.85, changePercent: -0.42, updatedAt: new Date().toISOString() },
+  { pair: "UKOIL", base: "UKO", quote: "USD", symbol: "Dầu Brent", group: "energy", price: 78.45, changePercent: -0.35, updatedAt: new Date().toISOString() },
+  { pair: "NATGAS", base: "NG", quote: "USD", symbol: "Khí tự nhiên Gas", group: "energy", price: 2.85, changePercent: 2.45, updatedAt: new Date().toISOString() },
 ];
 
 export const BOOTSTRAP_FOREX_ROWS: ForexRow[] = RAW_FOREX.map((f) => ({
@@ -291,5 +304,264 @@ export const BOOTSTRAP_COMMODITIES_ROWS = [
 export const BOOTSTRAP_COMMODITIES_DATA = {
   catalog: BOOTSTRAP_COMMODITIES_CATALOG,
   rows: BOOTSTRAP_COMMODITIES_ROWS,
+};
+
+export const BOOTSTRAP_MACRO_ECONOMIC: EconomicSnapshot = {
+  dataset: "macro-economic",
+  sourceUrl: "https://data.vietnambiz.vn/macro-economic",
+  rows: [
+    {
+      id: "tang-truong-gdp",
+      name: "Tăng trưởng GDP (YoY)",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "7.09%", value: 7.09, isPercent: true },
+      previous: { text: "5.05%", value: 5.05, isPercent: true },
+      nextRelease: "Tháng 03/2025 (Ước tính Q1)",
+    },
+    {
+      id: "lam-phat-cpi-binh-quan",
+      name: "Chỉ số giá tiêu dùng CPI bình quân",
+      period: "Tháng 12/2024",
+      frequency: "month",
+      current: { text: "3.63%", value: 3.63, isPercent: true },
+      previous: { text: "3.25%", value: 3.25, isPercent: true },
+      nextRelease: "29 hàng tháng (GSO)",
+    },
+    {
+      id: "pmi-san-xuat",
+      name: "Chỉ số Nhà quản trị Mua hàng (PMI)",
+      period: "Tháng 01/2025",
+      frequency: "month",
+      current: { text: "51.2 điểm", value: 51.2, isPercent: false },
+      previous: { text: "50.8 điểm", value: 50.8, isPercent: false },
+      nextRelease: "01 hàng tháng (S&P Global)",
+    },
+    {
+      id: "von-fdi-thuc-hien",
+      name: "Vốn đầu tư trực tiếp nước ngoài (FDI thực hiện)",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "23.2 tỷ USD", value: 23.2, isPercent: false },
+      previous: { text: "22.4 tỷ USD", value: 22.4, isPercent: false },
+      nextRelease: "29 hàng tháng (GSO)",
+    },
+    {
+      id: "kim-ngach-xuat-khau",
+      name: "Tổng kim ngạch xuất khẩu hàng hóa",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "391.5 tỷ USD", value: 391.5, isPercent: false },
+      previous: { text: "355.5 tỷ USD", value: 355.5, isPercent: false },
+      nextRelease: "29 hàng tháng (Tổng cục Hải quan / GSO)",
+    },
+    {
+      id: "kim-ngach-nhap-khau",
+      name: "Tổng kim ngạch nhập khẩu hàng hóa",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "368.5 tỷ USD", value: 368.5, isPercent: false },
+      previous: { text: "327.5 tỷ USD", value: 327.5, isPercent: false },
+      nextRelease: "29 hàng tháng",
+    },
+    {
+      id: "thang-du-can-can-thuong-mai",
+      name: "Cán cân thương mại hàng hóa (Xuất siêu)",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "+23.0 tỷ USD", value: 23.0, isPercent: false },
+      previous: { text: "+28.0 tỷ USD", value: 28.0, isPercent: false },
+      nextRelease: "29 hàng tháng",
+    },
+    {
+      id: "chi-so-san-xuat-cong-nghiep-iip",
+      name: "Chỉ số sản xuất toàn ngành công nghiệp (IIP)",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "8.3%", value: 8.3, isPercent: true },
+      previous: { text: "1.5%", value: 1.5, isPercent: true },
+      nextRelease: "29 hàng tháng",
+    },
+  ],
+  fetchedAt: new Date().toISOString(),
+  warnings: [],
+};
+
+export const BOOTSTRAP_CURRENCY_INTEREST_RATE: EconomicSnapshot = {
+  dataset: "currency-interest-rate",
+  sourceUrl: "https://data.vietnambiz.vn/currency-interest-rate",
+  rows: [
+    {
+      id: "lai-suat-tai-cap-von-nhnn",
+      name: "Lãi suất tái cấp vốn (NHNN)",
+      period: "Hiện hành",
+      frequency: "other",
+      current: { text: "4.50%", value: 4.5, isPercent: true },
+      previous: { text: "4.50%", value: 4.5, isPercent: true },
+      nextRelease: null,
+    },
+    {
+      id: "lai-suat-tai-chiet-khau-nhnn",
+      name: "Lãi suất tái chiết khấu (NHNN)",
+      period: "Hiện hành",
+      frequency: "other",
+      current: { text: "3.00%", value: 3.0, isPercent: true },
+      previous: { text: "3.00%", value: 3.0, isPercent: true },
+      nextRelease: null,
+    },
+    {
+      id: "lai-suat-lien-ngan-hang-qua-dem",
+      name: "Lãi suất liên ngân hàng qua đêm (Overnight)",
+      period: "Phiên gần nhất",
+      frequency: "day",
+      current: { text: "4.25%", value: 4.25, isPercent: true },
+      previous: { text: "3.85%", value: 3.85, isPercent: true },
+      nextRelease: "Hàng ngày (NHNN)",
+    },
+    {
+      id: "lai-suat-lien-ngan-hang-1-tuan",
+      name: "Lãi suất liên ngân hàng kỳ hạn 1 tuần",
+      period: "Phiên gần nhất",
+      frequency: "day",
+      current: { text: "4.45%", value: 4.45, isPercent: true },
+      previous: { text: "4.10%", value: 4.1, isPercent: true },
+      nextRelease: "Hàng ngày",
+    },
+    {
+      id: "lai-suat-lien-ngan-hang-1-thang",
+      name: "Lãi suất liên ngân hàng kỳ hạn 1 tháng",
+      period: "Phiên gần nhất",
+      frequency: "day",
+      current: { text: "4.65%", value: 4.65, isPercent: true },
+      previous: { text: "4.30%", value: 4.3, isPercent: true },
+      nextRelease: "Hàng ngày",
+    },
+    {
+      id: "ty-gia-trung-tam-usdvnd",
+      name: "Tỷ giá trung tâm USD/VND (NHNN công bố)",
+      period: "Hôm nay",
+      frequency: "day",
+      current: { text: "24,260 VND", value: 24260, isPercent: false },
+      previous: { text: "24,250 VND", value: 24250, isPercent: false },
+      nextRelease: "Đầu giờ mỗi ngày làm việc",
+    },
+    {
+      id: "ty-gia-vcb-usdvnd",
+      name: "Tỷ giá bán USD/VND tại Vietcombank",
+      period: "Hôm nay",
+      frequency: "day",
+      current: { text: "25,450 VND", value: 25450, isPercent: false },
+      previous: { text: "25,380 VND", value: 25380, isPercent: false },
+      nextRelease: "Cập nhật liên tục trong phiên",
+    },
+    {
+      id: "lai-suat-tiet-kiem-12-thang-big4",
+      name: "Lãi suất huy động 12 tháng (Big 4 bình quân)",
+      period: "Tháng này",
+      frequency: "month",
+      current: { text: "4.80%", value: 4.8, isPercent: true },
+      previous: { text: "4.70%", value: 4.7, isPercent: true },
+      nextRelease: null,
+    },
+    {
+      id: "tang-truong-tin-dung-toan-he-thong",
+      name: "Tăng trưởng tín dụng toàn hệ thống",
+      period: "Năm 2024",
+      frequency: "year",
+      current: { text: "15.08%", value: 15.08, isPercent: true },
+      previous: { text: "13.71%", value: 13.71, isPercent: true },
+      nextRelease: "Báo cáo NHNN định kỳ",
+    },
+  ],
+  fetchedAt: new Date().toISOString(),
+  warnings: [],
+};
+
+export const BOOTSTRAP_WORLDBANK_VN: WorldBankMacroBundle = {
+  country: "VN",
+  series: [
+    {
+      id: "NY.GDP.MKTP.KD.ZG",
+      name: "GDP growth (annual %)",
+      unit: "%",
+      country: "VN",
+      countryName: "Vietnam",
+      observations: [
+        { date: "2024", value: 7.09 },
+        { date: "2023", value: 5.05 },
+        { date: "2022", value: 8.02 },
+        { date: "2021", value: 2.56 },
+        { date: "2020", value: 2.91 },
+        { date: "2019", value: 7.36 },
+        { date: "2018", value: 7.47 },
+      ],
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    },
+    {
+      id: "FP.CPI.TOTL.ZG",
+      name: "Inflation, consumer prices (annual %)",
+      unit: "%",
+      country: "VN",
+      countryName: "Vietnam",
+      observations: [
+        { date: "2024", value: 3.63 },
+        { date: "2023", value: 3.25 },
+        { date: "2022", value: 3.15 },
+        { date: "2021", value: 1.84 },
+        { date: "2020", value: 3.23 },
+        { date: "2019", value: 2.80 },
+      ],
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    },
+    {
+      id: "BX.KLT.DINV.WD.GD.ZS",
+      name: "Foreign direct investment, net inflows (% of GDP)",
+      unit: "%",
+      country: "VN",
+      countryName: "Vietnam",
+      observations: [
+        { date: "2024", value: 4.45 },
+        { date: "2023", value: 4.38 },
+        { date: "2022", value: 4.42 },
+        { date: "2021", value: 4.25 },
+        { date: "2020", value: 4.62 },
+      ],
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    },
+    {
+      id: "SL.UEM.TOTL.ZS",
+      name: "Unemployment, total (% of labor force)",
+      unit: "%",
+      country: "VN",
+      countryName: "Vietnam",
+      observations: [
+        { date: "2024", value: 2.24 },
+        { date: "2023", value: 2.28 },
+        { date: "2022", value: 2.32 },
+        { date: "2021", value: 2.38 },
+        { date: "2020", value: 2.10 },
+      ],
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    },
+    {
+      id: "NE.EXP.GNFS.ZS",
+      name: "Exports of goods and services (% of GDP)",
+      unit: "%",
+      country: "VN",
+      countryName: "Vietnam",
+      observations: [
+        { date: "2024", value: 89.2 },
+        { date: "2023", value: 87.5 },
+        { date: "2022", value: 91.3 },
+        { date: "2021", value: 93.3 },
+        { date: "2020", value: 86.8 },
+      ],
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    },
+  ],
+  groups: VN_MACRO_INDICATORS,
+  fetchedAt: new Date().toISOString(),
+  warnings: [],
+  latencyMs: 15,
 };
 

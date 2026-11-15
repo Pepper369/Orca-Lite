@@ -3,6 +3,7 @@ import { getForexMarkets } from "@/lib/services/forex";
 import { ensureCryptoForexRealtime } from "@/lib/realtime/crypto-forex-boot";
 import { putHot, getHot } from "@/lib/hot-snapshot";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
+import { BOOTSTRAP_FOREX_ROWS, BOOTSTRAP_FOREX_DATA } from "@/lib/bootstrap-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -73,14 +74,14 @@ export async function GET() {
       }
       return {
         data: {
-          rows: [],
-          usdStrengthNote: "Đang kết nối lại Biquote/Yahoo — thử refresh sau vài giây",
+          rows: BOOTSTRAP_FOREX_ROWS,
+          usdStrengthNote: BOOTSTRAP_FOREX_DATA.usdStrengthNote,
         },
         meta: {
-          source: "forex-shell",
+          source: "bootstrap-snapshot",
           partial: true,
           stale: true,
-          note: "shell ≤15s",
+          note: "Phục hồi từ bootstrap snapshot Forex & Commodities",
         },
       };
     },

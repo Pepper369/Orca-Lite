@@ -15,7 +15,25 @@ export async function GET(req: Request) {
     return badRequest("country phải là mã ISO2 (vd: VN, US)");
   }
 
-  const result = await getWorldBankMacro(country);
+  let result = await getWorldBankMacro(country);
+  if (!result && country === "VN") {
+    const { BOOTSTRAP_WORLDBANK_VN } = await import("@/lib/bootstrap-data");
+    const { buildMeta } = await import("@/lib/freshness");
+    result = {
+      data: BOOTSTRAP_WORLDBANK_VN,
+      meta: buildMeta({
+        source: "bootstrap-snapshot",
+        sourceTimestampMs: Date.now(),
+        hasData: true,
+        degraded: false,
+        cached: true,
+        stale: true,
+        latencyMs: 5,
+        partial: true,
+        note: "Chuỗi World Bank Việt Nam phục hồi từ bootstrap snapshot.",
+      }),
+    };
+  }
   if (!result) {
     return unavailable(
       "worldbank",

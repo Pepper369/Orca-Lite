@@ -12,6 +12,7 @@ import { getYahooQuotes, getYahooChart, yahooSymbolForPair, yahooIntervalFor } f
 import { ensureBiquoteCoreWatch, ensureBiquotePollStarted } from "../realtime/biquote-poll";
 import { analyzeSeries, detectPatterns } from "../technical";
 import type { Meta, OhlcvBar, CandlePattern, TechnicalSnapshot } from "../types";
+import { BOOTSTRAP_FOREX_ROWS, BOOTSTRAP_FOREX_DATA } from "../bootstrap-data";
 
 export type ForexGroup = "major" | "cross" | "vnd" | "metal" | "energy";
 
@@ -289,7 +290,10 @@ export async function getForexMarkets(): Promise<{ data: ForexMarket; meta: Meta
           }
         }
 
-        if (!rows.length) throw new Error("forex markets empty");
+        if (!rows.length) {
+          rows = [...BOOTSTRAP_FOREX_ROWS];
+          sources.push("bootstrap-snapshot");
+        }
 
         const order = new Map(PAIRS.map((p, i) => [p.pair, i]));
         rows.sort((a, b) => (order.get(a.pair) ?? 99) - (order.get(b.pair) ?? 99));
@@ -310,7 +314,21 @@ export async function getForexMarkets(): Promise<{ data: ForexMarket; meta: Meta
       },
     });
 
-    if (!c?.value) return null;
+    if (!c?.value?.data?.rows?.length) {
+      return {
+        data: {
+          rows: BOOTSTRAP_FOREX_ROWS,
+          usdStrengthNote: BOOTSTRAP_FOREX_DATA.usdStrengthNote,
+        },
+        meta: buildMeta({
+          source: "bootstrap-snapshot",
+          sourceTimestampMs: Date.now(),
+          stale: true,
+          partial: true,
+          note: "Phục hồi từ bootstrap snapshot Forex & Commodities",
+        }),
+      };
+    }
     return {
       data: c.value.data,
       meta: {
@@ -320,7 +338,19 @@ export async function getForexMarkets(): Promise<{ data: ForexMarket; meta: Meta
       },
     };
   } catch {
-    return null;
+    return {
+      data: {
+        rows: BOOTSTRAP_FOREX_ROWS,
+        usdStrengthNote: BOOTSTRAP_FOREX_DATA.usdStrengthNote,
+      },
+      meta: buildMeta({
+        source: "bootstrap-snapshot",
+        sourceTimestampMs: Date.now(),
+        stale: true,
+        partial: true,
+        note: "Phục hồi từ bootstrap snapshot Forex & Commodities",
+      }),
+    };
   }
 }
 

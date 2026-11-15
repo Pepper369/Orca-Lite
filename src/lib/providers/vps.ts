@@ -83,32 +83,40 @@ function mapRow(r: VpsRow): Quote | null {
 }
 
 async function fetchChunk(syms: string[]): Promise<Quote[]> {
-  const res = await httpJson<VpsRow[]>(`${BASE}/getliststockdata/${syms.join(",")}`, {
-    provider: "vps",
-    timeoutMs: 7_500,
-    retries: 1,
-    headers: {
-      Accept: "application/json",
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    },
-  });
-  if (!res.ok || !Array.isArray(res.data)) return [];
-  const out: Quote[] = [];
-  for (const r of res.data) {
-    const q = mapRow(r);
-    if (q) out.push(q);
+  try {
+    const res = await httpJson<VpsRow[]>(`${BASE}/getliststockdata/${syms.join(",")}`, {
+      provider: "vps",
+      timeoutMs: 7_500,
+      retries: 1,
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      },
+    });
+    if (!res.ok || !Array.isArray(res.data)) return [];
+    const out: Quote[] = [];
+    for (const r of res.data) {
+      const q = mapRow(r);
+      if (q) out.push(q);
+    }
+    return out;
+  } catch {
+    return [];
   }
-  return out;
 }
 
 export async function getVpsQuotes(symbols: string[]): Promise<Quote[]> {
-  const uniq = [...new Set(symbols.map((s) => s.toUpperCase()).filter(Boolean))];
-  if (!uniq.length) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < uniq.length; i += CHUNK) chunks.push(uniq.slice(i, i + CHUNK));
-  const batches = await Promise.all(chunks.map(fetchChunk));
-  return batches.flat();
+  try {
+    const uniq = [...new Set(symbols.map((s) => s.toUpperCase()).filter(Boolean))];
+    if (!uniq.length) return [];
+    const chunks: string[][] = [];
+    for (let i = 0; i < uniq.length; i += CHUNK) chunks.push(uniq.slice(i, i + CHUNK));
+    const batches = await Promise.all(chunks.map(fetchChunk));
+    return batches.flat();
+  } catch {
+    return [];
+  }
 }
 
 export interface VpsForeignFlow {
@@ -127,49 +135,53 @@ export interface VpsForeignFlow {
 
 /** Lấy dòng tiền khối ngoại trực tiếp từ datafeed realtime của VPS (công khai không API key). */
 export async function getVpsForeignFlow(symbol: string): Promise<VpsForeignFlow | null> {
-  const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!sym) return null;
-  const res = await httpJson<Array<VpsRow & { rightInfos?: Array<{ contentVi: string; contentEn?: string }> }>>(`${BASE}/getliststockdata/${sym}`, {
-    provider: "vps",
-    timeoutMs: 4_500,
-    retries: 1,
-    headers: {
-      Accept: "application/json",
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-    },
-  });
-  if (!res.ok || !Array.isArray(res.data) || !res.data[0]) return null;
-  const r = res.data[0];
-  const buyVol = num(r.fBVol);
-  const fBVal = num(r.fBValue);
-  const sellVol = num(r.fSVolume);
-  const fSVal = num(r.fSValue);
-  const room = num(r.fRoom);
+  try {
+    const sym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!sym) return null;
+    const res = await httpJson<Array<VpsRow & { rightInfos?: Array<{ contentVi: string; contentEn?: string }> }>>(`${BASE}/getliststockdata/${sym}`, {
+      provider: "vps",
+      timeoutMs: 4_500,
+      retries: 1,
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      },
+    });
+    if (!res.ok || !Array.isArray(res.data) || !res.data[0]) return null;
+    const r = res.data[0];
+    const buyVol = num(r.fBVol);
+    const fBVal = num(r.fBValue);
+    const sellVol = num(r.fSVolume);
+    const fSVal = num(r.fSValue);
+    const room = num(r.fRoom);
 
-  // fBValue / fSValue trong datafeed của VPS tính theo nghìn đồng -> quy đổi VND
-  const buyVal = fBVal != null ? fBVal * 1000 : null;
-  const sellVal = fSVal != null ? fSVal * 1000 : null;
-  const netVol = buyVol != null && sellVol != null ? buyVol - sellVol : null;
-  const netVal = buyVal != null && sellVal != null ? buyVal - sellVal : null;
+    // fBValue / fSValue trong datafeed của VPS tính theo nghìn đồng -> quy đổi VND
+    const buyVal = fBVal != null ? fBVal * 1000 : null;
+    const sellVal = fSVal != null ? fSVal * 1000 : null;
+    const netVol = buyVol != null && sellVol != null ? buyVol - sellVol : null;
+    const netVal = buyVal != null && sellVal != null ? buyVal - sellVal : null;
 
-  const totalVol = (buyVol ?? 0) + (sellVol ?? 0);
-  const buyRatioPct = totalVol > 0 ? Math.round(((buyVol ?? 0) / totalVol) * 10000) / 100 : 50;
-  const rightInfos = Array.isArray(r.rightInfos) ? r.rightInfos : [];
+    const totalVol = (buyVol ?? 0) + (sellVol ?? 0);
+    const buyRatioPct = totalVol > 0 ? Math.round(((buyVol ?? 0) / totalVol) * 10000) / 100 : 50;
+    const rightInfos = Array.isArray(r.rightInfos) ? r.rightInfos : [];
 
-  return {
-    symbol: sym,
-    buyVolume: buyVol,
-    buyValue: buyVal,
-    sellVolume: sellVol,
-    sellValue: sellVal,
-    netVolume: netVol,
-    netValue: netVal,
-    foreignRoom: room,
-    buyRatioPct,
-    rightInfos,
-    updatedAt: new Date().toISOString(),
-  };
+    return {
+      symbol: sym,
+      buyVolume: buyVol,
+      buyValue: buyVal,
+      sellVolume: sellVol,
+      sellValue: sellVal,
+      netVolume: netVol,
+      netValue: netVal,
+      foreignRoom: room,
+      buyRatioPct,
+      rightInfos,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -4,6 +4,7 @@ import { buildMeta } from "../freshness";
 import { fetchVietnambizEconomy } from "../providers/vietnambiz-economy";
 import type { EconomicDataset, EconomicSnapshot } from "../economic-data";
 import type { Meta } from "../types";
+import { BOOTSTRAP_MACRO_ECONOMIC, BOOTSTRAP_CURRENCY_INTEREST_RATE } from "../bootstrap-data";
 
 export const ECONOMIC_CACHE_KEYS: Record<EconomicDataset, string> = {
   "macro-economic": "economy:vietnambiz:macro-economic:v1",
@@ -66,7 +67,12 @@ export async function getEconomicData(
       meta: economicMeta(result.value.data, result, result.value.latencyMs),
     };
   } catch {
-    return null;
+    const fallbackData =
+      dataset === "macro-economic" ? BOOTSTRAP_MACRO_ECONOMIC : BOOTSTRAP_CURRENCY_INTEREST_RATE;
+    return {
+      data: fallbackData,
+      meta: economicMeta(fallbackData, { cached: true, stale: true }, 5),
+    };
   }
 }
 

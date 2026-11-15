@@ -14,7 +14,15 @@ const app = new Hono();
 
 // Global Middleware
 app.use("*", logger());
-app.use("*", compress());
+app.use("*", async (c, next) => {
+  // Never compress SSE streaming endpoints or agent endpoints
+  const accept = c.req.header("accept") || "";
+  const path = c.req.path;
+  if (path.startsWith("/api/v1/agent") || accept.includes("text/event-stream")) {
+    return next();
+  }
+  return compress()(c, next);
+});
 app.use(
   "*",
   cors({
@@ -152,6 +160,35 @@ app.get("/api/v1/watchlist", async (c) => {
 app.put("/api/v1/watchlist", async (c) => {
   const { PUT } = await import("@/app/api/v1/watchlist/route");
   return PUT(c.req.raw);
+});
+
+// Earnings statutory calendar direct bridge
+app.get("/api/v1/earnings/calendar", async (c) => {
+  const { GET } = await import("@/app/api/v1/earnings/calendar/route");
+  return GET(c.req.raw);
+});
+
+// Agent direct API bridges (SSE streaming & verify)
+app.post("/api/v1/agent", async (c) => {
+  const { POST } = await import("@/app/api/v1/agent/route");
+  return POST(c.req.raw);
+});
+
+app.get("/api/v1/agent", async (c) => {
+  const mod = await import("@/app/api/v1/agent/route");
+  if (typeof mod.GET === "function") {
+    return mod.GET();
+  }
+  return c.json({ success: true, service: "ORCA FA AI Agent", status: "ready" });
+});
+
+app.post("/api/v1/agent/verify", async (c) => {
+  const { POST } = await import("@/app/api/v1/agent/verify/route");
+  return POST(c.req.raw);
+});
+
+app.get("/api/v1/agent/verify", async (c) => {
+  return c.json({ success: true, service: "ORCA FA AI Agent Fact Verification", status: "ready" });
 });
 
 // Universal Next.js Route Resolver with Dynamic Parameter Support

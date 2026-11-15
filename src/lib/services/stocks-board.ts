@@ -17,6 +17,7 @@ import {
 } from "../providers/public-vn-feed";
 import { fetchVndDchartHistory } from "../providers/vndirect-dchart";
 import { loadVnMarketBoardCached } from "./vn-market-board-cache";
+import { BOOTSTRAP_INDICES, BOOTSTRAP_VN30_QUOTES } from "../bootstrap-data";
 
 const INDEX_PRIORITY = ["VNINDEX", "VN30", "HNX", "UPCOM", "HNX30", "VN100"];
 
@@ -98,6 +99,20 @@ export async function getVnQuotes(symbols: string[]): Promise<{ quotes: Quote[];
     /* */
   }
 
+  const matching = BOOTSTRAP_VN30_QUOTES.filter((q) => syms.includes(q.symbol));
+  if (matching.length) {
+    return {
+      quotes: matching,
+      meta: buildMeta({
+        source: "bootstrap-snapshot",
+        sourceTimestampMs: Date.now(),
+        partial: matching.length < syms.length,
+        stale: true,
+        note: "Dữ liệu phục hồi từ bootstrap snapshot",
+      }),
+    };
+  }
+
   return null;
 }
 
@@ -140,7 +155,16 @@ export async function getVnIndices(): Promise<{ items: IndexQuote[]; meta: Meta 
     /* */
   }
 
-  return null;
+  return {
+    items: sortIndices(BOOTSTRAP_INDICES),
+    meta: buildMeta({
+      source: "bootstrap-snapshot",
+      sourceTimestampMs: Date.now(),
+      stale: true,
+      partial: true,
+      note: "Chỉ số phục hồi từ bootstrap snapshot",
+    }),
+  };
 }
 
 export async function getVnOhlcv(
@@ -218,7 +242,21 @@ export async function getVn30Board(): Promise<{
     ]);
     const quotes = quotesPack?.quotes ?? [];
     const indices = idxPack?.items ?? [];
-    if (!quotes.length && !indices.length) return null;
+    if (!quotes.length && !indices.length) {
+      return {
+        indices: sortIndices(BOOTSTRAP_INDICES),
+        quotes: BOOTSTRAP_VN30_QUOTES,
+        universeSize: BOOTSTRAP_VN30_QUOTES.length,
+        sessionDate: new Date().toISOString().slice(0, 10),
+        meta: buildMeta({
+          source: "bootstrap-snapshot",
+          sourceTimestampMs: Date.now(),
+          partial: true,
+          stale: true,
+          note: `VN30 phục hồi từ bootstrap snapshot`,
+        }),
+      };
+    }
     return {
       indices,
       quotes,
@@ -284,7 +322,21 @@ export async function getVnMarketBoard(): Promise<{
     const { getPublicQuotes } = await import("../providers/public-vn-feed");
     const pubQ = await getPublicQuotes(LIQUID_BOARD.slice(0, 40)).catch(() => null);
     const quotes = pubQ?.quotes ?? [];
-    if (!quotes.length) return null;
+    if (!quotes.length) {
+      return {
+        indices: sortIndices(BOOTSTRAP_INDICES),
+        quotes: BOOTSTRAP_VN30_QUOTES,
+        universeSize: BOOTSTRAP_VN30_QUOTES.length,
+        sessionDate: new Date().toISOString().slice(0, 10),
+        meta: buildMeta({
+          source: "bootstrap-snapshot",
+          sourceTimestampMs: Date.now(),
+          partial: true,
+          stale: true,
+          note: "Bảng giá toàn sàn phục hồi từ bootstrap snapshot",
+        }),
+      };
+    }
     return {
       indices: [],
       quotes,
@@ -298,7 +350,19 @@ export async function getVnMarketBoard(): Promise<{
       }),
     };
   } catch {
-    return null;
+    return {
+      indices: sortIndices(BOOTSTRAP_INDICES),
+      quotes: BOOTSTRAP_VN30_QUOTES,
+      universeSize: BOOTSTRAP_VN30_QUOTES.length,
+      sessionDate: new Date().toISOString().slice(0, 10),
+      meta: buildMeta({
+        source: "bootstrap-snapshot",
+        sourceTimestampMs: Date.now(),
+        partial: true,
+        stale: true,
+        note: "Bảng giá toàn sàn phục hồi từ bootstrap snapshot",
+      }),
+    };
   }
 }
 

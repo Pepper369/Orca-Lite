@@ -6,6 +6,7 @@ import { LIQUID_BOARD } from "@/lib/providers/public-vn-feed";
 import { safeApi } from "@/lib/safe-api";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
 import { putHot, getHot } from "@/lib/hot-snapshot";
+import { BOOTSTRAP_INDICES, BOOTSTRAP_VN30_QUOTES } from "@/lib/bootstrap-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -90,15 +91,15 @@ export async function GET(req: Request) {
         }
         return {
           data: {
-            indices: [],
-            quotes: [],
-            universeSize: 0,
-            sessionDate: null,
+            indices: BOOTSTRAP_INDICES,
+            quotes: BOOTSTRAP_VN30_QUOTES,
+            universeSize: BOOTSTRAP_VN30_QUOTES.length,
+            sessionDate: new Date().toISOString().slice(0, 10),
             session,
-            count: 0,
-            boardTier: "vn30",
+            count: BOOTSTRAP_VN30_QUOTES.length,
+            boardTier: "vn30" as const,
           },
-          meta: { source: "vn30-shell", partial: true, stale: true, note: "shell" },
+          meta: { source: "bootstrap-snapshot", partial: true, stale: true, note: "Phục hồi từ bootstrap snapshot VN30" },
         };
       },
       unavailableSource: "vn30",
@@ -222,18 +223,18 @@ export async function GET(req: Request) {
         }
         return {
           data: {
-            indices: [],
-            quotes: [],
-            universeSize: 0,
-            sessionDate: null,
+            indices: BOOTSTRAP_INDICES,
+            quotes: BOOTSTRAP_VN30_QUOTES,
+            universeSize: BOOTSTRAP_VN30_QUOTES.length,
+            sessionDate: new Date().toISOString().slice(0, 10),
             session,
-            count: 0,
+            count: BOOTSTRAP_VN30_QUOTES.length,
           },
           meta: {
-            source: "board-shell",
+            source: "bootstrap-snapshot",
             partial: true,
             stale: true,
-            note: "shell — cron board-warm sẽ đổ đầy",
+            note: "Phục hồi từ bootstrap snapshot bảng giá toàn sàn",
           },
         };
       },
@@ -270,10 +271,14 @@ export async function GET(req: Request) {
         },
       };
     },
-    fallback: async () => ({
-      data: { indices: null, quotes: [], count: 0, session },
-      meta: { source: "quotes-shell", partial: true, stale: true, note: "shell" },
-    }),
+    fallback: async () => {
+      const matching = BOOTSTRAP_VN30_QUOTES.filter((q) => symbols.includes(q.symbol));
+      const fallbackQuotes = matching.length ? matching : BOOTSTRAP_VN30_QUOTES.slice(0, Math.min(symbols.length || 10, 30));
+      return {
+        data: { indices: null, quotes: fallbackQuotes, count: fallbackQuotes.length, session },
+        meta: { source: "bootstrap-snapshot", partial: true, stale: true, note: "Phục hồi từ bootstrap snapshot quotes" },
+      };
+    },
     unavailableSource: "vn-quotes",
     unavailableNote: "Quotes tạm không khả dụng",
   });

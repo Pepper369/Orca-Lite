@@ -8,6 +8,7 @@ import {
   type CommodityGroup,
 } from "../providers/commodities";
 import type { CommodityRow, Meta } from "../types";
+import { BOOTSTRAP_COMMODITIES_DATA } from "../bootstrap-data";
 
 /**
  * Commodity domain — public multi-source:
@@ -189,7 +190,36 @@ export async function getCommodityMarket(): Promise<{ data: CommodityMarket; met
     });
     return { data: res.value, meta };
   } catch {
-    return null;
+    const catalog = (BOOTSTRAP_COMMODITIES_DATA.catalog as any[]).map((c) => ({
+      ...c,
+      currency: "USD",
+      source: "bootstrap-snapshot",
+      sourceUrl: "https://data.vietnambiz.vn/goods",
+    }));
+    return {
+      data: {
+        rows: BOOTSTRAP_COMMODITIES_DATA.rows.map((r) => ({
+          ...r,
+          commodity: r.symbol.toLowerCase(),
+          assetClass: "commodity" as const,
+          high: null,
+          low: null,
+          updatedAt: new Date().toISOString(),
+          vnImpact: null,
+        })),
+        unavailable: [],
+        sourcesUsed: ["bootstrap-snapshot"],
+        errors: [],
+        catalog,
+      },
+      meta: buildMeta({
+        source: "bootstrap-snapshot",
+        sourceTimestampMs: Date.now(),
+        stale: true,
+        partial: true,
+        note: "Phục hồi từ bootstrap snapshot hàng hóa thế giới",
+      }),
+    };
   }
 }
 

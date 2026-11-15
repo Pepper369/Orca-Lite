@@ -2,6 +2,7 @@ import { safeApi } from "@/lib/safe-api";
 import { getCommodityMarket, GROUP_LABELS } from "@/lib/services/commodities";
 import { getHot, putHot } from "@/lib/hot-snapshot";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
+import { BOOTSTRAP_COMMODITIES_DATA } from "@/lib/bootstrap-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -81,18 +82,18 @@ export async function GET() {
       }
       return {
         data: {
-          rows: [],
+          rows: BOOTSTRAP_COMMODITIES_DATA.rows,
           unavailable: [],
-          sourcesUsed: [],
+          sourcesUsed: ["bootstrap-snapshot"],
           errors: [],
-          catalog: [],
+          catalog: BOOTSTRAP_COMMODITIES_DATA.catalog,
           groups: GROUP_LABELS,
         },
         meta: {
-          source: "commodities-shell",
+          source: "bootstrap-snapshot",
           partial: true,
           stale: true,
-          note: "Commodities shell — cron commodities-warm sẽ đổ đầy",
+          note: "Phục hồi từ bootstrap snapshot hàng hóa thế giới",
         },
       };
     },

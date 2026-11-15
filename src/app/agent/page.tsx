@@ -695,6 +695,11 @@ export default function AgentPage() {
       }
 
       // Fallback nếu server trả về JSON thông thường
+      if (!res.ok && !contentType.includes("application/json")) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
       const json = (await res.json()) as ApiResponse<AgentResult>;
       if (json.success) {
         setMessages((m) => [

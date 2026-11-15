@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, lazy } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { usePathname } from "@/lib/shims/next-navigation";
 import { StockKeepAliveWorkspace, type StockTabKey } from "@/components/stocks/stock-keep-alive-workspace";
 import { Loading } from "@/components/ui";
@@ -11,6 +11,7 @@ const VnMarketCenterPage = lazy(() => import("@/app/stocks/page"));
 const ScreenerPage = lazy(() => import("@/app/screener/page"));
 const WatchlistPage = lazy(() => import("@/app/watchlist/page"));
 const StockSymbolLayout = lazy(() => import("@/app/stocks/[symbol]/layout"));
+const SectorTrendPage = lazy(() => import("@/app/stocks/sectors/page"));
 const CryptoPage = lazy(() => import("@/app/crypto/page"));
 const CryptoDetailPage = lazy(() => import("@/components/crypto-detail").then((m) => ({ default: m.CryptoDetailPage })));
 const ForexPage = lazy(() => import("@/app/forex/page"));
@@ -19,14 +20,31 @@ const CommoditiesPage = lazy(() => import("@/app/commodities/page"));
 const DerivativesPage = lazy(() => import("@/app/derivatives/page"));
 const MacroEconomicPage = lazy(() => import("@/app/macro-economic/page"));
 const CurrencyInterestRatePage = lazy(() => import("@/app/currency-interest-rate/page"));
+const QuantPage = lazy(() => import("@/app/quant/page"));
+const EarningsPage = lazy(() => import("@/app/earnings/page"));
+const HeatmapPage = lazy(() => import("@/app/heatmap/page"));
+const PortfolioPage = lazy(() => import("@/app/portfolio/page"));
+const PersonalFinancePage = lazy(() => import("@/app/personal-finance/page"));
+const MarketPage = lazy(() => import("@/app/market/page"));
+const IndexDetailPage = lazy(() => import("@/app/market/index/[code]/page"));
+const JournalPage = lazy(() => import("@/app/journal/page"));
+const SystemPage = lazy(() => import("@/app/system/page"));
 const NewsPage = lazy(() => import("@/app/news/page"));
 const ReportsPage = lazy(() => import("@/app/reports/page"));
 const AgentPage = lazy(() => import("@/app/agent/page"));
 const SettingsPage = lazy(() => import("@/app/settings/page"));
+const LoginPage = lazy(() => import("@/app/login/page"));
+const RegisterPage = lazy(() => import("@/app/register/page"));
+
+function IndexDetailRoute({ code }: { code: string }) {
+  const params = useMemo(() => Promise.resolve({ code }), [code]);
+  return <IndexDetailPage params={params} />;
+}
 
 export function AppRouter() {
   const pathname = usePathname();
   const segments = pathname.split("/").filter(Boolean);
+  const root = segments[0] ?? "";
 
   // Fallback loader
   const fallback = (
@@ -40,13 +58,15 @@ export function AppRouter() {
 
   let content: React.ReactNode = null;
 
-  if (pathname === "/" || pathname === "") {
+  if (pathname === "/" || pathname === "" || root === "") {
     content = <DashboardView />;
-  } else if (pathname === "/terminal") {
+  } else if (root === "terminal") {
     content = <ProTerminalPage />;
-  } else if (segments[0] === "stocks") {
+  } else if (root === "stocks") {
     if (segments.length === 1) {
       content = <VnMarketCenterPage />;
+    } else if (segments[1] === "sectors") {
+      content = <SectorTrendPage />;
     } else {
       const symbol = segments[1].toUpperCase();
       let tab: StockTabKey = "overview";
@@ -61,40 +81,64 @@ export function AppRouter() {
         </StockSymbolLayout>
       );
     }
-  } else if (pathname === "/screener" || pathname.startsWith("/screener")) {
+  } else if (root === "market") {
+    if (segments[1] === "index" && segments[2]) {
+      content = <IndexDetailRoute code={segments[2]} />;
+    } else {
+      content = <MarketPage />;
+    }
+  } else if (root === "screener") {
     content = <ScreenerPage />;
-  } else if (pathname === "/watchlist") {
+  } else if (root === "watchlist") {
     content = <WatchlistPage />;
-  } else if (segments[0] === "crypto") {
+  } else if (root === "crypto") {
     if (segments.length === 1) {
       content = <CryptoPage />;
     } else {
       const symbol = segments[1].toUpperCase();
       content = <CryptoDetailPage symbol={symbol} />;
     }
-  } else if (segments[0] === "forex") {
+  } else if (root === "forex") {
     if (segments.length === 1) {
       content = <ForexPage />;
     } else {
       const pair = segments[1].toUpperCase().replace(/[^A-Z]/g, "");
       content = <ForexDetailPage pair={pair} />;
     }
-  } else if (pathname === "/commodities") {
+  } else if (root === "commodities") {
     content = <CommoditiesPage />;
-  } else if (pathname === "/derivatives") {
+  } else if (root === "derivatives") {
     content = <DerivativesPage />;
-  } else if (pathname === "/macro-economic") {
+  } else if (root === "macro-economic") {
     content = <MacroEconomicPage />;
-  } else if (pathname === "/currency-interest-rate") {
+  } else if (root === "currency-interest-rate") {
     content = <CurrencyInterestRatePage />;
-  } else if (pathname === "/news" || pathname.startsWith("/news")) {
+  } else if (root === "quant") {
+    content = <QuantPage />;
+  } else if (root === "earnings") {
+    content = <EarningsPage />;
+  } else if (root === "heatmap") {
+    content = <HeatmapPage />;
+  } else if (root === "portfolio") {
+    content = <PortfolioPage />;
+  } else if (root === "personal-finance") {
+    content = <PersonalFinancePage />;
+  } else if (root === "journal") {
+    content = <JournalPage />;
+  } else if (root === "system") {
+    content = <SystemPage />;
+  } else if (root === "news") {
     content = <NewsPage />;
-  } else if (pathname === "/reports" || pathname.startsWith("/reports")) {
+  } else if (root === "reports") {
     content = <ReportsPage />;
-  } else if (pathname === "/agent") {
+  } else if (root === "agent") {
     content = <AgentPage />;
-  } else if (pathname === "/settings") {
+  } else if (root === "settings") {
     content = <SettingsPage />;
+  } else if (root === "login") {
+    content = <LoginPage />;
+  } else if (root === "register") {
+    content = <RegisterPage />;
   } else {
     content = <DashboardView />;
   }
