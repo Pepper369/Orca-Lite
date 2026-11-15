@@ -8,6 +8,7 @@ import { compress } from "hono/compress";
 import * as dotenv from "dotenv";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 
 dotenv.config();
 
@@ -257,10 +258,8 @@ app.all("/api/*", async (c) => {
         }
       });
 
-      // Import handler from relative path
-      const importPath = path.relative(__dirname, matched.routeFile).replace(/\\/g, "/");
-      const finalImportPath = importPath.startsWith(".") ? importPath : `./${importPath}`;
-      const module = await import(finalImportPath);
+      // Import handler reliably across all operating systems using file URL
+      const module = await import(pathToFileURL(matched.routeFile).href);
 
       const method = c.req.method.toUpperCase();
       const handler = module[method];
