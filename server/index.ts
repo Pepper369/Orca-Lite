@@ -111,25 +111,86 @@ app.put("/api/v1/watchlist", async (c) => {
   return PUT(c.req.raw);
 });
 
-// Dynamic fallback for any other /api/* endpoints
+// Universal Next.js Route Resolver with Dynamic Parameter Support
+const apiBaseDir = path.resolve(process.cwd(), "src", "app", "api");
+const routeCache = new Map<string, { routeFile: string; paramNames: string[] }>();
+
+function findRoute(currentDir: string, segments: string[], paramNames: string[]): { routeFile: string; paramNames: string[] } | null {
+  if (segments.length === 0) {
+    const directFile = path.join(currentDir, "route.ts");
+    if (fs.existsSync(directFile)) return { routeFile: directFile, paramNames };
+    return null;
+  }
+
+  const [segment, ...rest] = segments;
+
+  // 1. Exact match folder
+  const exactDir = path.join(currentDir, segment);
+  if (fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
+    const res = findRoute(exactDir, rest, paramNames);
+    if (res) return res;
+  }
+
+  // 2. Bracket match folder: [param]
+  if (fs.existsSync(currentDir)) {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith("[") && entry.name.endsWith("]")) {
+        const pName = entry.name.slice(1, -1);
+        const res = findRoute(path.join(currentDir, entry.name), rest, [...paramNames, pName]);
+        if (res) return res;
+      }
+    }
+  }
+
+  return null;
+}
+
+// Universal API Router for all /api/* routes
 app.all("/api/*", async (c) => {
   const url = new URL(c.req.url);
   const pathname = url.pathname.replace(/^\/api\//, "");
   const segments = pathname.split("/").filter(Boolean);
 
   try {
-    const routePath = segments.join("/");
-    const module = await import(`@/app/api/${routePath}/route`).catch(() => null);
+    const cacheKey = segments.map((s, idx) => (s.startsWith("v1") || idx < 2 ? s : "*")).join("/");
+    let matched = routeCache.get(cacheKey);
 
-    if (module) {
-      const method = c.req.method.toUpperCase();
-      const handler = module[method];
-      if (typeof handler === "function") {
-        return handler(c.req.raw);
+    if (!matched) {
+      matched = findRoute(apiBaseDir, segments, []) ?? undefined;
+      if (matched) {
+        routeCache.set(cacheKey, matched);
       }
     }
-  } catch (err) {
+
+    if (matched) {
+      // Re-extract param values dynamically based on matching directories
+      const params: Record<string, string> = {};
+      const relPath = path.relative(apiBaseDir, path.dirname(matched.routeFile));
+      const routeSegments = relPath.split(path.sep).filter(Boolean);
+
+      routeSegments.forEach((rSeg, idx) => {
+        if (rSeg.startsWith("[") && rSeg.endsWith("]") && segments[idx]) {
+          const key = rSeg.slice(1, -1);
+          params[key] = segments[idx];
+        }
+      });
+
+      // Import handler from relative path
+      const importPath = path.relative(__dirname, matched.routeFile).replace(/\\/g, "/");
+      const finalImportPath = importPath.startsWith(".") ? importPath : `./${importPath}`;
+      const module = await import(finalImportPath);
+
+      const method = c.req.method.toUpperCase();
+      const handler = module[method];
+
+      if (typeof handler === "function") {
+        return handler(c.req.raw, { params: Promise.resolve(params) });
+      }
+    }
+  } catch (err: any) {
     console.error(`[Hono API] Error handling /api/${pathname}:`, err);
+    return c.json({ success: false, error: { code: "INTERNAL_ERROR", message: err?.message || "Route execution error" } }, 500);
   }
 
   return c.json({ success: false, error: { code: "NOT_FOUND", message: `Endpoint /api/${pathname} not found on Hono engine` } }, 404);

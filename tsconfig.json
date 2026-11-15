@@ -26,6 +26,9 @@
       "@/*": [
         "./src/*"
       ],
+      "server-only": [
+        "./src/lib/shims/server-only.ts"
+      ],
       "next": [
         "./src/lib/shims/next-types.ts"
       ],
