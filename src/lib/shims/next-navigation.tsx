@@ -44,10 +44,14 @@ export function useSearchParams(): URLSearchParams {
 export function useParams(): Record<string, string> {
   const p = typeof window !== "undefined" ? window.location.pathname : "";
   const segments = p.split("/").filter(Boolean);
+  const params: Record<string, string> = {};
   if (segments[0] === "stocks" && segments[1]) {
-    return { symbol: segments[1].toUpperCase() };
+    params.symbol = segments[1].toUpperCase();
   }
-  return {};
+  if (segments[0] === "market" && segments[1] === "index" && segments[2]) {
+    params.code = segments[2].toUpperCase();
+  }
+  return params;
 }
 
 export function redirect(url: string): never {

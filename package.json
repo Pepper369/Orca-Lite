@@ -7,12 +7,12 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "tsx scripts/dev.ts",
-    "dev:all": "tsx scripts/dev.ts",
+    "dev": "tsx server/index.ts",
+    "dev:all": "tsx server/index.ts",
     "server:hono": "tsx server/index.ts",
-    "dev:vite": "vite",
+    "dev:vite": "vite --port 3000",
     "build:vite": "vite build",
-    "preview:vite": "vite preview",
+    "preview:vite": "vite preview --port 3000",
     "build": "vite build",
     "start": "tsx server/index.ts",
     "prod": "vite build && tsx server/index.ts",

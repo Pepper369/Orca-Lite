@@ -13,18 +13,27 @@
 
 .stock-hero-panel { border-radius: 0.9rem; }
 .stock-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 0.9fr);
-  gap: 0.85rem 1.25rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   padding: 0.85rem 1rem 0.75rem;
+  min-width: 0;
 }
-.stock-hero-main { min-width: 0; }
+@media (min-width: 1024px) {
+  .stock-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.85rem 1.25rem;
+    align-items: center;
+  }
+}
+.stock-hero-main { min-width: 0; flex: 1 1 auto; }
 .stock-hero-title-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 0.65rem;
+  min-width: 0;
 }
 .stock-hero-symbol {
   margin: 0;
@@ -93,7 +102,7 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.28rem;
   width: auto;
-  min-width: 14rem;
+  min-width: 0;
   margin-top: 0;
 }
 .stock-band-cell {

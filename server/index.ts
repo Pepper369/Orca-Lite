@@ -1,4 +1,5 @@
-import { serve } from "@hono/node-server";
+import http from "node:http";
+import { serve, getRequestListener } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -276,28 +277,77 @@ app.all("/api/*", async (c) => {
   return c.json({ success: false, error: { code: "NOT_FOUND", message: `Endpoint /api/${pathname} not found on Hono engine` } }, 404);
 });
 
-// Production SPA Static File Serving
+const port = Number(process.env.PORT || 3000);
+const isProd = process.env.NODE_ENV === "production";
 const hasDist = fs.existsSync(path.resolve(process.cwd(), "dist", "index.html"));
-if (hasDist) {
-  // Serve static assets from dist/
-  app.use("/*", serveStatic({ root: "./dist" }));
 
-  // Fallback to index.html for client-side routing on any non-asset route
-  app.get("*", serveStatic({ path: "./dist/index.html" }));
+async function startUnifiedServer() {
+  const honoListener = getRequestListener(app.fetch);
+
+  if (isProd || (!process.env.NODE_ENV && hasDist && process.env.START_PROD === "true")) {
+    // Production SPA Static File Serving via Hono
+    if (hasDist) {
+      app.use("/*", serveStatic({ root: "./dist" }));
+      app.get("*", serveStatic({ path: "./dist/index.html" }));
+    }
+
+    serve(
+      {
+        fetch: app.fetch,
+        port,
+      },
+      (info) => {
+        console.log(`\n============================================================`);
+        console.log(`  ORCA FINANCIAL — ULTRA-FAST FULLSTACK TERMINAL`);
+        console.log(`============================================================`);
+        console.log(`  🚀 Production Server: http://localhost:${info.port}`);
+        console.log(`  📦 Static SPA Bundle: ./dist`);
+        console.log(`  ⚡ Fixed Single Port: ${info.port}\n`);
+      },
+    );
+  } else {
+    // Development Mode: In-Process Vite HMR + Hono API Bridge on ONE SINGLE PORT (3000)
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+      },
+      appType: "spa",
+    });
+
+    const server = http.createServer((req, res) => {
+      const url = req.url || "";
+      if (url.startsWith("/api") || url.startsWith("/health")) {
+        return honoListener(req, res);
+      }
+      vite.middlewares(req, res);
+    });
+
+    server.listen(port, "0.0.0.0", () => {
+      console.log(`\n============================================================`);
+      console.log(`  ORCA FINANCIAL — ULTRA-FAST FULLSTACK TERMINAL`);
+      console.log(`============================================================`);
+      console.log(`  ⚡ Unified Server:   http://localhost:${port}`);
+      console.log(`  ⚡ Mode:             Development (In-Process Vite HMR + Hono Engine)`);
+      console.log(`  ⚡ Fixed Single Port: ${port} (Zero Multi-Port Confusion, No Proxy)\n`);
+    });
+
+    const cleanup = async () => {
+      console.log("\n[ORCA] Gracefully shutting down unified server...");
+      server.close();
+      await vite.close();
+      process.exit(0);
+    };
+
+    process.on("SIGINT", cleanup);
+    process.on("SIGTERM", cleanup);
+  }
 }
 
-const port = Number(process.env.API_PORT || process.env.PORT || 8000);
-
-console.log(`[ORCA Hono Engine] Starting server on http://localhost:${port}...`);
-
-serve({
-  fetch: app.fetch,
-  port,
-}, (info) => {
-  console.log(`🚀 [ORCA Hono Engine] High-performance API running at http://localhost:${info.port}`);
-  if (hasDist) {
-    console.log(`📦 [ORCA Hono Engine] Serving production SPA bundle from ./dist`);
-  }
+// Start server
+startUnifiedServer().catch((err) => {
+  console.error("Failed to start unified ORCA server:", err);
+  process.exit(1);
 });
 
 export default app;
