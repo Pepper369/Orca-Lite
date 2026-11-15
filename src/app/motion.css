@@ -401,6 +401,30 @@ html {
   navigation: auto;
 }
 
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 140ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(root) {
+  animation-name: orca-view-out;
+}
+
+::view-transition-new(root) {
+  animation-name: orca-view-in;
+}
+
+@keyframes orca-view-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes orca-view-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes orca-page-in {
   from {
     opacity: 0;

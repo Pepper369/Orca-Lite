@@ -143,6 +143,48 @@ function WarmCriticalApis() {
   return null;
 }
 
+/**
+ * Prewarms heavy dynamic code chunks (charts, indicators, quant studio) during browser idle time.
+ * Runs only after initial view is stable, keeping cold load light while making subsequent tab clicks instant.
+ */
+function IdleChunkPreloader() {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const navAny = navigator as unknown as { connection?: { saveData?: boolean } };
+    if (navAny?.connection?.saveData) return;
+
+    const preloadHeavyChunks = () => {
+      void import("@/components/orca-chart");
+      void import("@/components/stocks/tech-reco-panel");
+      void import("@/components/stocks/pattern-analysis-hub");
+      void import("@/components/stocks/ai-financial-panel");
+      void import("@/components/rrg-chart");
+      void import("@/components/sector-flow-screener");
+      void import("@/components/oquant-quant-studio");
+    };
+
+    let idleId: number | null = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    if ("requestIdleCallback" in window) {
+      idleId = (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => number }).requestIdleCallback(
+        preloadHeavyChunks,
+        { timeout: 4_500 },
+      );
+    } else {
+      timerId = setTimeout(preloadHeavyChunks, 3_500);
+    }
+
+    return () => {
+      if (idleId !== null && "cancelIdleCallback" in window) {
+        (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(idleId);
+      }
+      if (timerId) clearTimeout(timerId);
+    };
+  }, []);
+  return null;
+}
+
 export function ClientProviders({ children }: { children: ReactNode }) {
   useEffect(() => {
     prefetchMarketSnapshot();
@@ -169,6 +211,7 @@ export function ClientProviders({ children }: { children: ReactNode }) {
           <PriceAlertMonitorHost />
           <PatternAlertMonitorHost />
           <WarmCriticalApis />
+          <IdleChunkPreloader />
           {children}
         </ErrorBoundary>
       </ConvexClientProvider>

@@ -280,7 +280,14 @@ export function ShellInner({ children }: { children: ReactNode }) {
       if (hashTab) window.dispatchEvent(new CustomEvent("orca:personal-finance-tab", { detail: hashTab }));
       markAppNavigating(60);
       signalNavStart();
-      startTransition(() => router.push(href));
+
+      if (typeof document !== "undefined" && "startViewTransition" in document) {
+        (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
+          startTransition(() => router.push(href));
+        });
+      } else {
+        startTransition(() => router.push(href));
+      }
     },
     [router],
   );
