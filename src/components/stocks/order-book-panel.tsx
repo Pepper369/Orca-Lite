@@ -48,10 +48,18 @@ function fmtTime(t: string | null, eventTime: number): string {
 }
 
 /** Terminal-style market depth + Big Order Tape — SSE primary, REST 10s fallback. */
-export function OrderBookPanel({ symbol, compact = false }: { symbol: string; compact?: boolean }) {
+export function OrderBookPanel({
+  symbol,
+  compact = false,
+  initialData,
+}: {
+  symbol: string;
+  compact?: boolean;
+  initialData?: VnOrderBook | null;
+}) {
   const { res, data: restData, meta: restMeta, isLoading, mutate } = useApi<VnOrderBook>(
     symbol ? `/api/v1/stocks/${symbol}/orderbook` : null,
-    { refreshInterval: 10_000, timeoutMs: 7_000 },
+    { refreshInterval: 10_000, timeoutMs: 7_000, initialData: initialData ?? undefined },
   );
 
   const [live, setLive] = useState<VnOrderBook | null>(null);

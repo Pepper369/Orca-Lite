@@ -1358,6 +1358,15 @@ export function VnScreener({
     }));
   }, [defaultPreset, defaultView, defaultSector]);
 
+  // Auto-debounce text query so user gets real-time search without spamming requests
+  useEffect(() => {
+    if (q === applied.q) return;
+    const timer = setTimeout(() => {
+      setApplied((prev) => ({ ...prev, q }));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [q, applied.q]);
+
   // Query string builder
   const queryString = useMemo(() => {
     const p = new URLSearchParams();

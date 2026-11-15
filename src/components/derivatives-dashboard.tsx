@@ -175,14 +175,16 @@ export function DerivativesDashboard() {
   const initialRegime = clientCacheGet<{ success?: boolean; data?: RegimeData }>("/api/v1/derivatives/regime?underlying=VN30");
 
   const [category, setCategory] = useState<DerivativeCategory>("VN_FUTURES");
-  const [contracts, setContracts] = useState<ContractRow[]>(initialSnap?.data?.contracts ?? []);
+  const [contracts, setContracts] = useState<ContractRow[]>(
+    initialSnap?.data?.contracts?.length ? initialSnap.data.contracts : DEFAULT_VN_CONTRACTS
+  );
   const [selectedSymbol, setSelectedSymbol] = useState<string>("VN30F1M");
   const [flow, setFlow] = useState<Flow[]>(initialSnap?.data?.flow ?? []);
   const [regime, setRegime] = useState<RegimeData | null>(initialRegime?.data ?? null);
   const [curve, setCurve] = useState<CurveData | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [meta, setMeta] = useState<Meta | null>(initialSnap?.meta ?? null);
-  const [loading, setLoading] = useState(!initialSnap?.data?.contracts?.length);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {

@@ -1,13 +1,37 @@
 "use client";
 
+import { useMemo } from "react";
 import { useApi } from "@/lib/hooks";
-import type { T2RiskAssessment } from "@/lib/services/t2-risk";
+import { computeT2OverextensionRisk, type T2RiskAssessment } from "@/lib/services/t2-risk";
+import type { OhlcvBar } from "@/lib/types";
 import { Panel, Loading, FreshnessDot } from "@/components/ui";
 
-export function T2RiskWidget({ symbol }: { symbol: string }) {
+export function T2RiskWidget({
+  symbol,
+  initialData,
+  bars,
+  price,
+}: {
+  symbol: string;
+  initialData?: T2RiskAssessment | null;
+  bars?: OhlcvBar[] | null;
+  price?: number | null;
+}) {
+  const localCalc = useMemo(() => {
+    if (initialData) return initialData;
+    if (bars && bars.length >= 5) {
+      try {
+        return computeT2OverextensionRisk(symbol, bars, price);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [initialData, symbol, bars, price]);
+
   const { data, isLoading } = useApi<T2RiskAssessment>(
     symbol ? `/api/v1/stocks/${symbol}/t2-risk` : null,
-    { refreshInterval: 60_000 }
+    { refreshInterval: 60_000, initialData: localCalc ?? undefined }
   );
 
   if (isLoading && !data) {

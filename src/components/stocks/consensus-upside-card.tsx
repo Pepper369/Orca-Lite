@@ -1,29 +1,24 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { useApi } from "@/lib/hooks";
 import type { StockConsensusUpside } from "@/lib/engines/consensus-upside-engine";
 
-export function ConsensusUpsideCard({ symbol }: { symbol: string }) {
-  const [data, setData] = useState<StockConsensusUpside | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!symbol) return;
-    void Promise.resolve().then(() => setLoading(true));
-    fetch(`/api/v1/stocks/${symbol}/consensus`)
-      .then((res) => {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
-      .then((json: StockConsensusUpside) => {
-        setData(json);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch consensus upside:", err);
-        setLoading(false);
-      });
-  }, [symbol]);
+export function ConsensusUpsideCard({
+  symbol,
+  initialData,
+}: {
+  symbol: string;
+  initialData?: StockConsensusUpside | null;
+}) {
+  const { data, isLoading: loading } = useApi<StockConsensusUpside>(
+    symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}/consensus` : null,
+    {
+      refreshInterval: 60_000,
+      keepPreviousData: true,
+      initialData: initialData ?? undefined,
+    },
+  );
 
   if (loading) {
     return (

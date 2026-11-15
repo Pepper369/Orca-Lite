@@ -80,10 +80,14 @@ export function clientCacheHas(key: string, maxAgeMs?: number): boolean {
   return clientCacheGet(key, maxAgeMs) !== undefined;
 }
 
+/** In-flight warm requests to prevent duplicate concurrent network fetches. */
+const inFlightWarm = new Set<string>();
+
 /** Warm cache without blocking UI — used on nav hover/intent. */
 export function clientCacheWarm(url: string, timeoutMs = 8_000): void {
   if (typeof window === "undefined") return;
-  if (clientCacheHas(url, 60_000)) return;
+  if (inFlightWarm.has(url) || clientCacheHas(url, 60_000)) return;
+  inFlightWarm.add(url);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   void fetch(url, {
@@ -98,5 +102,8 @@ export function clientCacheWarm(url: string, timeoutMs = 8_000): void {
       }
     })
     .catch(() => {})
-    .finally(() => clearTimeout(timer));
+    .finally(() => {
+      clearTimeout(timer);
+      inFlightWarm.delete(url);
+    });
 }

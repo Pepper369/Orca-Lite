@@ -55,14 +55,24 @@ export function GlobalSearch() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Debounce network live search to prevent query flooding on rapid typing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQ(q.trim());
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [q]);
+
   const { data } = useApi<MarketsData>(open ? "/api/v1/crypto/markets?limit=300" : null, { refreshInterval: 0 });
 
   // Live search — universe + IPO + lookup VNDirect
   const liveUrl =
-    open && q.trim().length >= 1
-      ? `/api/v1/search?q=${encodeURIComponent(q.trim())}&limit=12`
+    open && debouncedQ.length >= 1
+      ? `/api/v1/search?q=${encodeURIComponent(debouncedQ)}&limit=12`
       : null;
   const { data: live } = useApi<LiveSearchData>(liveUrl, { refreshInterval: 0 });
 

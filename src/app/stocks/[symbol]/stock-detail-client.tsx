@@ -684,7 +684,7 @@ export function StockDetailClient({
           <div className="flex-1 p-2 sm:p-2.5 overflow-y-auto max-h-[500px]">
             {microTab === "orderbook" && (
               <ErrorBoundary name="orderbook" resetKey={detail.symbol}>
-                <OrderBookPanel symbol={detail.symbol} compact />
+                <OrderBookPanel symbol={detail.symbol} compact initialData={detail.orderBook} />
               </ErrorBoundary>
             )}
             {microTab === "flow" && (
@@ -738,7 +738,7 @@ export function StockDetailClient({
           {activeTab === "overview" && (
             <div className="space-y-3.5">
               <ErrorBoundary name="t2-risk" resetKey={detail.symbol}>
-                <T2RiskWidget symbol={detail.symbol} />
+                <T2RiskWidget symbol={detail.symbol} bars={detail.bars} price={detail.quote?.price} />
               </ErrorBoundary>
               <ErrorBoundary name="star-ratings" resetKey={detail.symbol}>
                 <StarRatingsPanel ratings={detail.starRatings} symbol={detail.symbol} />
