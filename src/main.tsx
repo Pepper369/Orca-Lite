@@ -10,18 +10,21 @@ import { AppShell } from "@/components/shell";
 import { ClientProviders } from "@/components/client-providers";
 import { SettingsProvider } from "@/lib/settings";
 import { AppRouter } from "@/router";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const rootEl = document.getElementById("root");
 if (rootEl) {
   ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
-      <SettingsProvider>
-        <ClientProviders>
-          <AppShell>
-            <AppRouter />
-          </AppShell>
-        </ClientProviders>
-      </SettingsProvider>
+      <ErrorBoundary name="root-main">
+        <SettingsProvider>
+          <ClientProviders>
+            <AppShell>
+              <AppRouter />
+            </AppShell>
+          </ClientProviders>
+        </SettingsProvider>
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 }

@@ -23,7 +23,7 @@ export function useConvexStatus() {
  * ứng dụng vẫn hoạt động 100% trơn tru mà không bị throw exception.
  */
 export function ConvexClientProvider({ children }: { children: ReactNode }) {
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+  const convexUrl = typeof process !== "undefined" && process?.env ? process.env.NEXT_PUBLIC_CONVEX_URL : undefined;
 
   const client = useMemo(() => {
     if (

@@ -7,6 +7,10 @@
     <title>ORCA Financial — Ultra-Fast Financial Terminal</title>
     <meta name="description" content="Nền tảng phân tích tài chính thời gian thực với độ trễ tiệm cận 0ms — Cổ phiếu Việt Nam, Crypto, Forex, BCTC và Trí tuệ Nhân tạo." />
     <meta name="theme-color" content="#060d1d" />
+    <script>
+      window.global = window.global || window;
+      window.process = window.process || { env: { NODE_ENV: "production" } };
+    </script>
   </head>
   <body class="h-full overflow-hidden bg-background-primary text-text-primary antialiased">
     <div id="root" class="h-full"></div>
