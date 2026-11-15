@@ -9,10 +9,13 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $modelsDir = Join-Path $repoRoot "models"
 $binDir = Join-Path $modelsDir "bin"
-$ggufPath = Join-Path $modelsDir "orca-fa-qwen2.5-3b-q4_k_m.gguf"
+$preferredGguf = Join-Path $modelsDir "orca-financial-qwen2.5-3b-q4_k_m.gguf"
+$fallbackGguf = Join-Path $modelsDir "orca-fa-qwen2.5-3b-q4_k_m.gguf"
+$ggufPath = if (Test-Path $preferredGguf) { $preferredGguf } else { $fallbackGguf }
+$modelAlias = if ($ggufPath -match "orca-financial") { "orca-financial-qwen2.5-3b" } else { "orca-fa-qwen2.5-3b" }
 
 if (-not (Test-Path $ggufPath)) {
-  Write-Error "Khong tim thay $ggufPath. Hay chay src/scripts/model/install_local_gguf.ps1 truoc."
+  Write-Error "Khong tim thay $ggufPath. Hay copy file .gguf vao thu muc models/ truoc."
   exit 1
 }
 
@@ -56,7 +59,7 @@ Write-Host "  .env.local -> LOCAL_GGUF_BASE_URL=http://127.0.0.1:$Port/v1"
 
 & $llamaServer `
   -m $ggufPath `
-  --alias "orca-fa-qwen2.5-3b" `
+  --alias $modelAlias `
   --host "127.0.0.1" `
   --port $Port `
   -c $ContextSize `
