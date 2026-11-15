@@ -1,0 +1,1159 @@
+[
+  {
+    "id": "ORCA-SFT-MS-001",
+    "category": "macro_multi_scenario",
+    "topic": "Vĩ mô VN-Index dưới áp lực Tỷ giá USD/VND & SBV hút Tín phiếu T-bill",
+    "question": "VN-Index đang quanh 1,250 điểm trong bối cảnh tỷ giá USD/VND căng thẳng và NHNN (SBV) liên tục phát hành tín phiếu hút thanh khoản VND. Hãy lập mô hình 3 kịch bản Bull/Base/Bear kèm ma trận đa khung thời gian (T+2.5, 1-2 Quý, 1-3 Năm), công thức E[R] và kế hoạch phòng vệ Bear?",
+    "systemPrompt": "Bạn là Giám đốc Chiến lược Định lượng & Quản trị Rủi ro Vĩ mô (CRO) của Orca AI chuyên sâu thị trường chứng khoán Việt Nam.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (VNINDEX, tham chiếu 1,250 điểm, sàn HOSE, chính sách SBV: TIGHTENING_BILLS, áp lực USD/VND: HIGH).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.25, target 1,400 điểm, R=+12%), Base (p=0.5, target 1,275 điểm, R=+2%), Bear (p=0.25, target 1,100 điểm, R=-12%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.25 × 12%) + (0.5 × 2%) + (0.25 × -12%) = +1%; độ lệch chuẩn kịch bản sigma = 8.54%; RRR tổng hợp = 1.33x; Tỷ số bất đối xứng Bull/Bear = 1x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 1,215 điểm (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 1,195 điểm; Bear bị hủy khi BREAK_ABOVE 1,305 điểm.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BEARISH), Trung hạn 1-2 Quý (NEUTRAL), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn HIGH, slippage ước tính 6%, đưa E[R] sau haircut T+2.5 về -0.5%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 85/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `VNINDEX`\n**Thị giá / Mốc tham chiếu:** `1,250 điểm` | **Sàn:** `HOSE` | **SBV:** `TIGHTENING_BILLS` | **USD/VND:** `HIGH`\n\n> **Kết luận Điều hành (Verdict):** THẬN TRỌNG / HẠ TỶ TRỌNG (TRIM_RISK) — E[R] thô chỉ đạt +1.00% nhưng Bull/Bear Asymmetry = 1.00x (< 1.30x) và sau khi trừ rủi ro trượt giá T+2.5 (-6.0%) thì E[R] kỳ vọng chuyển âm (-0.50%).  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`85/100`) | **$E[R]$:** `+1%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `-0.5%` | **Composite RRR:** `1.33x` | **Bull/Bear Asymmetry:** `1x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (DXY hạ nhiệt nhanh, SBV dừng hút tín phiếu và khối ngoại đảo chiều mua ròng)** | **25%** | `1,400 điểm` | **+12%** | 16w | `BREAK_BELOW 1,215 điểm` (DAILY_CLOSE) | Tỷ trọng tối đa `65%`; SL `1,215 điểm` |\n| **🟡 Base (Tích lũy giằng co trong biên độ hẹp khi SBV điều tiết thanh khoản trung tính)** | **50%** | `1,275 điểm` | **+2%** | 12w | `BREAK_BELOW 1,195 điểm` (DAILY_CLOSE) | Tỷ trọng tối đa `40%`; SL `1,195 điểm` |\n| **🔴 Bear (Cú sốc tỷ giá buộc SBV nâng lãi suất điều hành, kích hoạt call margin chéo)** | **25%** | `1,100 điểm` | **-12%** | 8w | `BREAK_ABOVE 1,305 điểm` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `1,215 điểm` |\n\n- **Động lực Bull Case:** Áp lực DXY suy yếu giúp SBV ngừng hút ròng tín phiếu; Dòng vốn ETF ngoại quay lại mua ròng đón sóng nâng hạng FTSE. *Điều kiện vô hiệu hóa:* VN-Index đóng nến ngày thủng 1,215 điểm kèm thanh khoản bán chủ động > 25,000 tỷ VND..\n- **Động lực Base Case:** Thanh khoản duy trì mức trung bình 16,000-18,000 tỷ VND/phiên; Thị trường phân hóa mạnh theo kết quả kinh doanh từng ngành. *Điều kiện vô hiệu hóa:* Thủng vùng đáy trung hạn 1,195 điểm làm vỡ cấu trúc hộp tích lũy..\n- **Rủi ro Bear Case:** Tỷ giá vượt trần can thiệp buộc NHNN nâng lãi suất OMO/điều hành; Hiệu ứng bán giải chấp chéo (cross-margin call) trên nhóm BĐS và Chứng khoán. *Điều kiện vô hiệu hóa:* VN-Index đóng cửa vượt 1,305 điểm với độ rộng thị trường > 70% mã tăng..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.25 + 0.5 + 0.25 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.25 \\times 12\\%) + (0.5 \\times 2\\%) + (0.25 \\times -12\\%) = \\mathbf{+1\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{8.54\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{1.33x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{1x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 1\\% - (0.25 \\times 6\\%) = \\mathbf{-0.5\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `BEARISH` | Hỗ trợ: `1,215 điểm` | Cản: `1,275 điểm` | Cắt lỗ: `1,210 điểm` | Không mua đuổi phiên breakout giả; tuân thủ kỷ luật T+2.5 và chỉ giải ngân tối đa 30% NAV tại hỗ trợ cứng. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `NEUTRAL` | Mục tiêu quý: `1,310 điểm` | Theo dõi sát lượng tín phiếu đáo hạn ròng của SBV, lãi suất liên ngân hàng O/N và tăng trưởng EPS toàn thị trường. Xúc tác: Lộ trình hạ nhiệt tỷ giá sau kỳ điều hành Fed; Tăng trưởng tín dụng đạt 14-15% |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ vĩ mô))** | `BULLISH` | Fair Value / DCF: `1,480 điểm` | Chu kỳ nâng hạng FTSE Secondary Emerging & dòng vốn FDI sản xuất. Động lực: GDP tăng trưởng 6.5-7.0%/năm; P/E VN-Index vùng 13.5x hấp dẫn so với trung bình 10 năm |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `HIGH` (Ước tính độ trượt giá: `-6%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Nếu VN-Index thủng 1,215 điểm với khối lượng lớn, đặt lệnh bán hạ 50% cổ phiếu beta cao ngay phiên ATC và tiếp tục thoát phần còn lại bằng lệnh ATO sáng T+2 khi hàng về.\n- **Phòng vệ danh mục (Hedging Strategy):** Mở vị thế Short hợp đồng tương lai VN30F1M với tỷ lệ beta-hedge 0.5x - 0.7x giá trị danh mục cơ sở đang nắm giữ.\n- **Phân bổ vốn khuyến nghị:** 30% Cổ phiếu phòng thủ (Công nghệ/Ngân hàng đầu ngành) / 70% Tiền mặt & Tín phiếu thanh khoản cao; tuyệt đối không dùng Margin.",
+    "structuredScenarioPayload": {
+      "symbol": "VNINDEX",
+      "currentPrice": 1250,
+      "averageVolume20d": 850000000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "TIGHTENING_BILLS",
+        "usdVndPressure": "HIGH"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "DXY hạ nhiệt nhanh, SBV dừng hút tín phiếu và khối ngoại đảo chiều mua ròng",
+          "probability": 0.25,
+          "targetPrice": 1400,
+          "expectedReturnPct": 12,
+          "timeHorizonWeeks": 16,
+          "invalidation": {
+            "priceLevel": 1215,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "VN-Index đóng nến ngày thủng 1,215 điểm kèm thanh khoản bán chủ động > 25,000 tỷ VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 65,
+            "entryCondition": "Chỉ gia tăng khi chỉ số vượt 1,275 điểm và tỷ giá USD/VND lùi dưới 25,200.",
+            "stopLossPrice": 1215,
+            "takeProfitLevels": [
+              1340,
+              1400
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Tích lũy giằng co trong biên độ hẹp khi SBV điều tiết thanh khoản trung tính",
+          "probability": 0.5,
+          "targetPrice": 1275,
+          "expectedReturnPct": 2,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 1195,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng vùng đáy trung hạn 1,195 điểm làm vỡ cấu trúc hộp tích lũy."
+          },
+          "actionProtocol": {
+            "allocationPct": 40,
+            "entryCondition": "Giao dịch biên độ: gom chọn lọc quanh hỗ trợ 1,220 - 1,230 và chốt tại 1,280.",
+            "stopLossPrice": 1195,
+            "takeProfitLevels": [
+              1275
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Cú sốc tỷ giá buộc SBV nâng lãi suất điều hành, kích hoạt call margin chéo",
+          "probability": 0.25,
+          "targetPrice": 1100,
+          "expectedReturnPct": -12,
+          "timeHorizonWeeks": 8,
+          "invalidation": {
+            "priceLevel": 1305,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "VN-Index đóng cửa vượt 1,305 điểm với độ rộng thị trường > 70% mã tăng."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Đình chỉ giải ngân mới; ưu tiên giữ 70-80% tiền mặt hoặc trái phiếu ngắn hạn.",
+            "stopLossPrice": 1215,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "HIGH",
+            "estimatedSlippagePct": 6,
+            "liquidityDrainExitPlan": "Nếu VN-Index thủng 1,215 điểm với khối lượng lớn, đặt lệnh bán hạ 50% cổ phiếu beta cao ngay phiên ATC và tiếp tục thoát phần còn lại bằng lệnh ATO sáng T+2 khi hàng về.",
+            "hedgingStrategy": "Mở vị thế Short hợp đồng tương lai VN30F1M với tỷ lệ beta-hedge 0.5x - 0.7x giá trị danh mục cơ sở đang nắm giữ."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 1,
+      "scenarioVolatilityPct": 8.54,
+      "compositeRrr": 1.33,
+      "bullBearAsymmetryRatio": 1,
+      "t2LiquidityHaircutReturnPct": -0.5,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 85,
+      "croPassed": true,
+      "engineVerdict": "TRIM_RISK"
+    },
+    "references": [
+      "Báo cáo Thị trường Tiền tệ SBV & Giao dịch Tín phiếu OMO",
+      "Orca Multi-Scenario Critic Engine (Unitary Probability & T+2.5 Haircut)",
+      "Quy chế Giao dịch Phái sinh VN30F1M HNX"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-002",
+    "category": "equity_multi_scenario",
+    "topic": "Định giá Đa kịch bản & Hợp lưu Đa khung thời gian Cổ phiếu Tăng trưởng FPT",
+    "question": "Cổ phiếu FPT đang giao dịch ở vùng 135,000 VND với kỳ vọng AI Factory nhưng P/E không còn rẻ. Hãy phân tích 3 kịch bản Bull/Base/Bear, kiểm tra đồng thuận đa khung thời gian (T+2.5, 1-2 Quý, 1-3 Năm) và định lượng điểm vô hiệu hóa?",
+    "systemPrompt": "Bạn là Chuyên gia Định giá Cổ phiếu Tăng trưởng & Chiến lược Đa khung Thời gian của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (FPT, tham chiếu 135,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.3, target 168,750 VND, R=+25%), Base (p=0.5, target 151,200 VND, R=+12%), Bear (p=0.2, target 116,100 VND, R=-14%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.3 × 25%) + (0.5 × 12%) + (0.2 × -14%) = +10.7%; độ lệch chuẩn kịch bản sigma = 13.57%; RRR tổng hợp = 4.82x; Tỷ số bất đối xứng Bull/Bear = 2.68x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 127,000 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 123,000 VND; Bear bị hủy khi BREAK_ABOVE 142,000 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BULLISH), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn LOW, slippage ước tính 7%, đưa E[R] sau haircut T+2.5 về +9.3%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `FPT`\n**Thị giá / Mốc tham chiếu:** `135,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** TÍCH LŨY CHỦ ĐỘNG (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — Cả 3 khung thời gian đều đồng thuận BULLISH; E[R] = +10.70%, Composite RRR = 4.82x, Bull/Bear Asymmetry = 2.68x và E[R] sau haircut T+2.5 vẫn đạt +9.30%.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+10.7%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+9.3%` | **Composite RRR:** `4.82x` | **Bull/Bear Asymmetry:** `2.68x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (AI Factory full công suất & doanh thu chuyển đổi số toàn cầu tăng > 35%)** | **30%** | `168,750 VND` | **+25%** | 24w | `BREAK_BELOW 127,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `55%`; SL `127,000 VND` |\n| **🟡 Base (Tăng trưởng lõi CNTT nước ngoài & Viễn thông duy trì đều 22-24% YoY)** | **50%** | `151,200 VND` | **+12%** | 18w | `BREAK_BELOW 123,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `40%`; SL `123,000 VND` |\n| **🔴 Bear (Suy thoái ngân sách IT Mỹ-Nhật & đồng JPY mất giá bào mòn biên lợi nhuận)** | **20%** | `116,100 VND` | **-14%** | 10w | `BREAK_ABOVE 142,000 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `123,000 VND` |\n\n- **Động lực Bull Case:** Hợp đồng Mega-deal AI Factory tại Việt Nam và Nhật Bản vượt dự báo; Biên EBIT khối Công nghệ mở rộng lên > 19% nhờ dịch vụ Cloud/AI. *Điều kiện vô hiệu hóa:* Thủng MA50 ngày tại 127,000 VND kèm khối lượng bán chủ động > 1.5x trung bình 20 phiên..\n- **Động lực Base Case:** Mảng Xuất khẩu phần mềm giữ đà tăng 22-25% và Khối Giáo dục tăng 18%; P/E forward 22x hoàn toàn hợp lý với ROE > 26%. *Điều kiện vô hiệu hóa:* Đóng cửa tuần dưới MA100 (123,000 VND) hoặc tăng trưởng doanh thu ký mới < 15%..\n- **Rủi ro Bear Case:** Doanh nghiệp Mỹ/Nhật cắt giảm chi tiêu IT và biến động tỷ giá JPY/VND bất lợi; CAPEX hạ tầng AI tăng mạnh gây áp lực lên dòng tiền tự do FCF ngắn hạn. *Điều kiện vô hiệu hóa:* Giá vượt dứt khoát 142,000 VND phủ nhận kịch bản phân phối đỉnh..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.3 + 0.5 + 0.2 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.3 \\times 25\\%) + (0.5 \\times 12\\%) + (0.2 \\times -14\\%) = \\mathbf{+10.7\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{13.57\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{4.82x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{2.68x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 10.7\\% - (0.2 \\times 7\\%) = \\mathbf{+9.3\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `BULLISH` | Hỗ trợ: `131,500 VND` | Cản: `140,000 VND` | Cắt lỗ: `127,000 VND` | Canh nhịp test cung T+2.5 quanh 131,500 - 133,000 VND để giải ngân từng phần; không mua đuổi sát cản 140,000. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BULLISH` | Mục tiêu quý: `151,200 VND` | Doanh thu ký mới mảng xuất khẩu phần mềm, biên lợi nhuận AI Cloud và tiến độ giải ngân AI Factory. Xúc tác: BCTC Quý tăng trưởng LNST > 22% YoY; Tạm ứng cổ tức tiền mặt đều đặn |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ công nghệ))** | `BULLISH` | Fair Value / DCF: `165,000 VND` | Wide Moat: Chi phí kỹ sư CNTT cạnh tranh toàn cầu, ROE 26-28%, tiền mặt ròng > 30,000 tỷ VND. Động lực: Chuyển dịch sang dịch vụ AI, Automotive & Chip bán dẫn; Tăng trưởng kép EPS 20-23%/năm |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `LOW` (Ước tính độ trượt giá: `-7%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Với thanh khoản Bluechip VN30 dồi dào, cắt 50% vị thế ngay trong phiên nếu thủng 127,000 VND và đặt lệnh ATO bán phần còn lại vào phiên T+2.5 nếu thị trường chung hoảng loạn.\n- **Phòng vệ danh mục (Hedging Strategy):** Giữ 25-30% tiền mặt đối ứng và sử dụng Short VN30F1M nếu VN-Index thủng hỗ trợ vĩ mô.\n- **Phân bổ vốn khuyến nghị:** 70% Cổ phiếu (FPT làm trụ cột 35-40% NAV) / 30% Tiền mặt dự phòng; có thể nâng tỷ trọng khi test thành công hỗ trợ.",
+    "structuredScenarioPayload": {
+      "symbol": "FPT",
+      "currentPrice": 135000,
+      "averageVolume20d": 3500000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "AI Factory full công suất & doanh thu chuyển đổi số toàn cầu tăng > 35%",
+          "probability": 0.3,
+          "targetPrice": 168750,
+          "expectedReturnPct": 25,
+          "timeHorizonWeeks": 24,
+          "invalidation": {
+            "priceLevel": 127000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng MA50 ngày tại 127,000 VND kèm khối lượng bán chủ động > 1.5x trung bình 20 phiên."
+          },
+          "actionProtocol": {
+            "allocationPct": 55,
+            "entryCondition": "Bứt phá đỉnh ngắn hạn 140,000 VND với thanh khoản > 5 triệu cổ phiếu.",
+            "stopLossPrice": 127000,
+            "takeProfitLevels": [
+              155000,
+              168750
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Tăng trưởng lõi CNTT nước ngoài & Viễn thông duy trì đều 22-24% YoY",
+          "probability": 0.5,
+          "targetPrice": 151200,
+          "expectedReturnPct": 12,
+          "timeHorizonWeeks": 18,
+          "invalidation": {
+            "priceLevel": 123000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng cửa tuần dưới MA100 (123,000 VND) hoặc tăng trưởng doanh thu ký mới < 15%."
+          },
+          "actionProtocol": {
+            "allocationPct": 40,
+            "entryCondition": "Mua gom từng phần tại vùng tích lũy MA20 quanh 131,000 - 133,500 VND.",
+            "stopLossPrice": 123000,
+            "takeProfitLevels": [
+              148000,
+              151200
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Suy thoái ngân sách IT Mỹ-Nhật & đồng JPY mất giá bào mòn biên lợi nhuận",
+          "probability": 0.2,
+          "targetPrice": 116100,
+          "expectedReturnPct": -14,
+          "timeHorizonWeeks": 10,
+          "invalidation": {
+            "priceLevel": 142000,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá vượt dứt khoát 142,000 VND phủ nhận kịch bản phân phối đỉnh."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Ngừng mua mới nếu thủng 127,000 VND; bảo toàn vốn chờ vùng chiết khấu 116,000 VND.",
+            "stopLossPrice": 123000,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "LOW",
+            "estimatedSlippagePct": 7,
+            "liquidityDrainExitPlan": "Với thanh khoản Bluechip VN30 dồi dào, cắt 50% vị thế ngay trong phiên nếu thủng 127,000 VND và đặt lệnh ATO bán phần còn lại vào phiên T+2.5 nếu thị trường chung hoảng loạn.",
+            "hedgingStrategy": "Giữ 25-30% tiền mặt đối ứng và sử dụng Short VN30F1M nếu VN-Index thủng hỗ trợ vĩ mô."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 10.7,
+      "scenarioVolatilityPct": 13.57,
+      "compositeRrr": 4.82,
+      "bullBearAsymmetryRatio": 2.68,
+      "t2LiquidityHaircutReturnPct": 9.3,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Báo cáo Tài chính Hợp nhất FPT & Thuyết minh Doanh thu Ký mới",
+      "Damodaran - Growth Company Valuation & Wide Moat Framework",
+      "Orca Multi-Scenario Critic Engine"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-003",
+    "category": "cyclical_multi_scenario",
+    "topic": "Phân tích Cổ phiếu Chu kỳ Thép (HPG): Soi Đỉnh vs Đáy Chu kỳ & Dự án Dung Quất 2",
+    "question": "HPG đang ở giá 28,000 VND khi lò cao Dung Quất 2 chuẩn bị vận hành nhưng giá thép HRC Trung Quốc còn yếu. Hãy định lượng 3 kịch bản Bull/Base/Bear đa khung thời gian (T+2.5, 1-2 Quý, 1-3 Năm) để tránh bẫy P/E chu kỳ?",
+    "systemPrompt": "Bạn là Chuyên gia Định giá Hàng hóa Chu kỳ & Thẩm định Dự án Công nghiệp của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (HPG, tham chiếu 28,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.3, target 35,000 VND, R=+25%), Base (p=0.45, target 30,800 VND, R=+10%), Bear (p=0.25, target 23,240 VND, R=-17%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.3 × 25%) + (0.45 × 10%) + (0.25 × -17%) = +7.75%; độ lệch chuẩn kịch bản sigma = 15.64%; RRR tổng hợp = 2.82x; Tỷ số bất đối xứng Bull/Bear = 1.76x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 26,200 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 25,500 VND; Bear bị hủy khi BREAK_ABOVE 30,000 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (NEUTRAL), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn MEDIUM, slippage ước tính 7%, đưa E[R] sau haircut T+2.5 về +6%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `HPG`\n**Thị giá / Mốc tham chiếu:** `28,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** MUA THĂM DÒ TỪNG PHẦN (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — Khung dài hạn hưởng lợi từ đáy-sang-phục hồi chu kỳ, E[R] = +7.75%, RRR = 2.82x, Asymmetry = 1.76x, E[R] sau haircut T+2.5 đạt +6.00%.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+7.75%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+6%` | **Composite RRR:** `2.82x` | **Bull/Bear Asymmetry:** `1.76x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Dung Quất 2 chạy đạt công suất sớm & áp thuế chống bán phá giá HRC thành công)** | **30%** | `35,000 VND` | **+25%** | 26w | `BREAK_BELOW 26,200 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `50%`; SL `26,200 VND` |\n| **🟡 Base (Biên gộp thép hồi phục chậm, Dung Quất 2 đóng góp sản lượng từ nửa cuối năm)** | **45%** | `30,800 VND` | **+10%** | 18w | `BREAK_BELOW 25,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `35%`; SL `25,500 VND` |\n| **🔴 Bear (Trung Quốc đẩy mạnh xả tồn kho thép giá rẻ & chi phí khấu hao Dung Quất 2 đè nặng EPS)** | **25%** | `23,240 VND` | **-17%** | 12w | `BREAK_ABOVE 30,000 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `25,500 VND` |\n\n- **Động lực Bull Case:** Thuế phòng vệ thương mại giúp HPG chiếm lĩnh thị phần HRC nội địa; Biên lợi nhuận gộp hồi phục từ 13% lên 18% nhờ giá nguyên liệu đầu vào ổn định. *Điều kiện vô hiệu hóa:* Thủng đường MA50 ngày (26,200 VND) kèm dòng tiền ngoại bán ròng liên tiếp..\n- **Động lực Base Case:** Sản lượng tiêu thụ thép xây dựng giữ mức ổn định nhờ đầu tư công; Định giá P/B hiện tại ~1.5x nằm gần vùng trung bình lịch sử thay vì vùng đỉnh hưng phấn P/E thấp ảo. *Điều kiện vô hiệu hóa:* Gãy nền tích lũy 25,500 VND khi giá HRC thế giới rớt dưới 480 USD/tấn..\n- **Rủi ro Bear Case:** Áp lực thép xuất khẩu giá rẻ từ Trung Quốc kéo biên gộp xuống dưới 10%; Chi phí lãi vay và khấu hao Dung Quất 2 tăng vọt trong giai đoạn chưa chạy hết công suất. *Điều kiện vô hiệu hóa:* Đóng nến vượt 30,000 VND xác nhận đảo chiều tăng trung hạn..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.3 + 0.45 + 0.25 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.3 \\times 25\\%) + (0.45 \\times 10\\%) + (0.25 \\times -17\\%) = \\mathbf{+7.75\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{15.64\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{2.82x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{1.76x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 7.75\\% - (0.25 \\times 7\\%) = \\mathbf{+6\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `NEUTRAL` | Hỗ trợ: `26,800 VND` | Cản: `29,200 VND` | Cắt lỗ: `26,000 VND` | Cổ phiếu thanh khoản lớn, biên độ dao động hẹp; tránh mua đuổi tại cản 29,200 VND vì dễ bị kẹp T+2.5. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BULLISH` | Mục tiêu quý: `31,500 VND` | Theo dõi chênh lệch giá bán HRC - giá quặng sắt/than cốc và tiến độ chạy thử lò cao Dung Quất 2. Xúc tác: Quyết định áp thuế chống bán phá giá thép HRC nhập khẩu; Giải ngân đầu tư công quý cao điểm |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ hàng hóa))** | `BULLISH` | Fair Value / DCF: `36,000 VND` | Narrow-to-Wide Moat: Quy mô lò cao BOF chi phí sản xuất thấp nhất Đông Nam Á, P/B định giá chuẩn hóa. Động lực: Nâng gấp đôi công suất thép dẹt HRC nhờ Dung Quất 2; Chu kỳ phục hồi bất động sản nội địa giai đoạn 2026-2028 |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `MEDIUM` (Ước tính độ trượt giá: `-7%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Nếu thủng 26,200 VND với áp lực bán ròng khối ngoại > 500 tỷ/phiên, cắt 50% vị thế cuối phiên và bán nốt phần còn lại ở phiên ATO T+2.5.\n- **Phòng vệ danh mục (Hedging Strategy):** Cân bằng danh mục bằng nhóm phòng thủ (điện/CNTT) và hạ tỷ trọng nhóm Vật liệu xây dựng xuống dưới 15%.\n- **Phân bổ vốn khuyến nghị:** 55% Cổ phiếu (tích lũy dần ở các nhịp điều chỉnh) / 45% Tiền mặt; đánh giá theo P/B và Spread HRC thay vì P/E đơn lẻ.",
+    "structuredScenarioPayload": {
+      "symbol": "HPG",
+      "currentPrice": 28000,
+      "averageVolume20d": 25000000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Dung Quất 2 chạy đạt công suất sớm & áp thuế chống bán phá giá HRC thành công",
+          "probability": 0.3,
+          "targetPrice": 35000,
+          "expectedReturnPct": 25,
+          "timeHorizonWeeks": 26,
+          "invalidation": {
+            "priceLevel": 26200,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đường MA50 ngày (26,200 VND) kèm dòng tiền ngoại bán ròng liên tiếp."
+          },
+          "actionProtocol": {
+            "allocationPct": 50,
+            "entryCondition": "Vượt vùng kháng cự 29,500 VND kèm thanh khoản > 35 triệu cổ phiếu/phiên.",
+            "stopLossPrice": 26200,
+            "takeProfitLevels": [
+              32500,
+              35000
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Biên gộp thép hồi phục chậm, Dung Quất 2 đóng góp sản lượng từ nửa cuối năm",
+          "probability": 0.45,
+          "targetPrice": 30800,
+          "expectedReturnPct": 10,
+          "timeHorizonWeeks": 18,
+          "invalidation": {
+            "priceLevel": 25500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Gãy nền tích lũy 25,500 VND khi giá HRC thế giới rớt dưới 480 USD/tấn."
+          },
+          "actionProtocol": {
+            "allocationPct": 35,
+            "entryCondition": "Tích lũy theo P/B quanh vùng 26,800 - 27,800 VND.",
+            "stopLossPrice": 25500,
+            "takeProfitLevels": [
+              30800
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Trung Quốc đẩy mạnh xả tồn kho thép giá rẻ & chi phí khấu hao Dung Quất 2 đè nặng EPS",
+          "probability": 0.25,
+          "targetPrice": 23240,
+          "expectedReturnPct": -17,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 30000,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng nến vượt 30,000 VND xác nhận đảo chiều tăng trung hạn."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Dừng mua mới; chờ P/B chiết khấu về vùng đáy chu kỳ 1.2x - 1.3x.",
+            "stopLossPrice": 25500,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "MEDIUM",
+            "estimatedSlippagePct": 7,
+            "liquidityDrainExitPlan": "Nếu thủng 26,200 VND với áp lực bán ròng khối ngoại > 500 tỷ/phiên, cắt 50% vị thế cuối phiên và bán nốt phần còn lại ở phiên ATO T+2.5.",
+            "hedgingStrategy": "Cân bằng danh mục bằng nhóm phòng thủ (điện/CNTT) và hạ tỷ trọng nhóm Vật liệu xây dựng xuống dưới 15%."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 7.75,
+      "scenarioVolatilityPct": 15.64,
+      "compositeRrr": 2.82,
+      "bullBearAsymmetryRatio": 1.76,
+      "t2LiquidityHaircutReturnPct": 6,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Peter Lynch - Cyclical Valuation & P/E Paradox",
+      "Báo cáo Ngành Thép Việt Nam (VSA) & Giá HRC Châu Á",
+      "Thuyết minh Tài sản dở dang Dự án Dung Quất 2 - HPG"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-004",
+    "category": "sector_cycle_multi_scenario",
+    "topic": "Chu kỳ Thanh khoản & Dư nợ Margin Nhóm Chứng khoán Beta Cao (SSI đối chiếu VCB)",
+    "question": "Cổ phiếu chứng khoán SSI (32,000 VND) có hệ số Beta cao gắn chặt với thanh khoản HOSE và chu kỳ margin, khác hẳn ngân hàng phòng thủ như VCB. Hãy dựng 3 kịch bản Bull/Base/Bear kèm ma trận đa khung thời gian và điểm cắt lỗ T+2.5?",
+    "systemPrompt": "Bạn là Chuyên gia Phân tích Chu kỳ Thanh khoản Thị trường & Rủi ro Margin của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (SSI, tham chiếu 32,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.35, target 41,600 VND, R=+30%), Base (p=0.4, target 34,560 VND, R=+8%), Bear (p=0.25, target 25,600 VND, R=-20%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.35 × 30%) + (0.4 × 8%) + (0.25 × -20%) = +8.7%; độ lệch chuẩn kịch bản sigma = 19.1%; RRR tổng hợp = 2.74x; Tỷ số bất đối xứng Bull/Bear = 2.1x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 29,800 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 29,000 VND; Bear bị hủy khi BREAK_ABOVE 34,500 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BULLISH), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn HIGH, slippage ước tính 10.5%, đưa E[R] sau haircut T+2.5 về +6.07%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `SSI`\n**Thị giá / Mốc tham chiếu:** `32,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** MUA TỪNG PHẦN CÓ KỶ LUẬT BETA (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — E[R] = +8.70%, Composite RRR = 2.74x, Asymmetry = 2.10x, E[R] sau haircut T+2.5 (-10.5% slippage) đạt +6.08%. Cân bằng Beta bằng cách ghép cặp cùng VCB/tiền mặt.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+8.7%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+6.07%` | **Composite RRR:** `2.74x` | **Bull/Bear Asymmetry:** `2.1x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Thanh khoản HOSE bùng nổ > 28,000 tỷ/phiên, KRX & Non-Prefunding thúc đẩy dư nợ margin)** | **35%** | `41,600 VND` | **+30%** | 20w | `BREAK_BELOW 29,800 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `45%`; SL `29,800 VND` |\n| **🟡 Base (Thanh khoản duy trì 18,000 - 21,000 tỷ/phiên, lợi nhuận môi giới & cho vay margin tăng vừa phải)** | **40%** | `34,560 VND` | **+8%** | 14w | `BREAK_BELOW 29,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `30%`; SL `29,000 VND` |\n| **🔴 Bear (Thanh khoản thị trường sụt giảm dưới 12,000 tỷ & tự doanh chịu lỗ đánh giá lại tài sản)** | **25%** | `25,600 VND` | **-20%** | 8w | `BREAK_ABOVE 34,500 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `29,800 VND` |\n\n- **Động lực Bull Case:** Thanh khoản HOSE tăng vượt 28,000 tỷ/phiên giúp lãi từ margin và môi giới bùng nổ; Định giá P/B được tái định hạng lên 2.2x-2.4x trong sóng nâng hạng. *Điều kiện vô hiệu hóa:* Giá đóng cửa thủng 29,800 VND (MA50) và thanh khoản HOSE tụt dưới 15,000 tỷ/phiên trong 5 phiên..\n- **Động lực Base Case:** Dư nợ margin toàn hệ thống duy trì ổn định quanh vùng đỉnh lịch sử; Lợi nhuận tự doanh đóng góp đều từ mảng trái phiếu và chứng chỉ tiền gửi. *Điều kiện vô hiệu hóa:* Thủng đáy hộp tích lũy 29,000 VND kéo dài trên 2 phiên..\n- **Rủi ro Bear Case:** Thanh khoản thị trường teo tóp < 12,000 tỷ/phiên làm co hẹp biên lợi nhuận môi giới; Đảo chiều giảm giá cổ phiếu niêm yết gây lỗ đánh giá lại danh mục FVTPL và rủi ro call margin. *Điều kiện vô hiệu hóa:* Giá bứt phá vượt 34,500 VND kèm mở rộng dư nợ margin toàn ngành..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.35 + 0.4 + 0.25 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.35 \\times 30\\%) + (0.4 \\times 8\\%) + (0.25 \\times -20\\%) = \\mathbf{+8.7\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{19.1\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{2.74x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{2.1x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 8.7\\% - (0.25 \\times 10.5\\%) = \\mathbf{+6.07\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `BULLISH` | Hỗ trợ: `30,500 VND` | Cản: `33,800 VND` | Cắt lỗ: `29,800 VND` | Chỉ mua ở nhịp test hỗ trợ 30,500 - 31,200 VND; tuyệt đối không dùng đòn bẩy margin khi cổ phiếu tiệm cận cản 33,800. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BULLISH` | Mục tiêu quý: `36,500 VND` | Dư nợ cho vay margin cuối quý, phí giao dịch thuần và kết quả danh mục tự doanh FVTPL. Xúc tác: Triển khai cơ chế Non-Prefunding cho nhà đầu tư tổ chức nước ngoài; Tăng vốn điều lệ mở rộng hạn mức margin |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ vốn hóa))** | `BULLISH` | Fair Value / DCF: `39,000 VND` | Narrow Moat: Thị phần tổ chức & vốn chủ sở hữu dẫn đầu ngành Chứng khoán Việt Nam. Động lực: Nâng hạng thị trường FTSE Emerging Markets; Tỷ lệ tài khoản chứng khoán dân số tiếp tục mở rộng |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `HIGH` (Ước tính độ trượt giá: `-10.5%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Nhóm chứng khoán có độ nhạy Beta > 1.4x nên dễ giảm sàn dây chuyền khi call margin. Cắt 100% phần margin ngay khi thủng 29,800 VND và đặt lệnh ATO sáng T+2.5 nếu phiên trước bị dư bán sàn.\n- **Phòng vệ danh mục (Hedging Strategy):** Chuyển dịch vốn sang cổ phiếu phòng thủ Beta thấp (như VCB) hoặc Short VN30F1M để trung hòa rủi ro hệ thống.\n- **Phân bổ vốn khuyến nghị:** 50% Cổ phiếu (SSI tối đa 20% NAV, phần còn lại ưu tiên Bluechip ổn định như VCB/FPT) / 50% Tiền mặt.",
+    "structuredScenarioPayload": {
+      "symbol": "SSI",
+      "currentPrice": 32000,
+      "averageVolume20d": 18000000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Thanh khoản HOSE bùng nổ > 28,000 tỷ/phiên, KRX & Non-Prefunding thúc đẩy dư nợ margin",
+          "probability": 0.35,
+          "targetPrice": 41600,
+          "expectedReturnPct": 30,
+          "timeHorizonWeeks": 20,
+          "invalidation": {
+            "priceLevel": 29800,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá đóng cửa thủng 29,800 VND (MA50) và thanh khoản HOSE tụt dưới 15,000 tỷ/phiên trong 5 phiên."
+          },
+          "actionProtocol": {
+            "allocationPct": 45,
+            "entryCondition": "Vượt dứt khoát 33,500 VND kèm khối lượng khớp > 28 triệu cổ phiếu.",
+            "stopLossPrice": 29800,
+            "takeProfitLevels": [
+              37500,
+              41600
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Thanh khoản duy trì 18,000 - 21,000 tỷ/phiên, lợi nhuận môi giới & cho vay margin tăng vừa phải",
+          "probability": 0.4,
+          "targetPrice": 34560,
+          "expectedReturnPct": 8,
+          "timeHorizonWeeks": 14,
+          "invalidation": {
+            "priceLevel": 29000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đáy hộp tích lũy 29,000 VND kéo dài trên 2 phiên."
+          },
+          "actionProtocol": {
+            "allocationPct": 30,
+            "entryCondition": "Mua thăm dò vùng 30,500 - 31,500 VND với tỷ trọng vừa phải.",
+            "stopLossPrice": 29000,
+            "takeProfitLevels": [
+              34560
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Thanh khoản thị trường sụt giảm dưới 12,000 tỷ & tự doanh chịu lỗ đánh giá lại tài sản",
+          "probability": 0.25,
+          "targetPrice": 25600,
+          "expectedReturnPct": -20,
+          "timeHorizonWeeks": 8,
+          "invalidation": {
+            "priceLevel": 34500,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá bứt phá vượt 34,500 VND kèm mở rộng dư nợ margin toàn ngành."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Không nắm giữ cổ phiếu Beta cao khi thanh khoản HOSE tạo xu hướng giảm.",
+            "stopLossPrice": 29800,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "HIGH",
+            "estimatedSlippagePct": 10.5,
+            "liquidityDrainExitPlan": "Nhóm chứng khoán có độ nhạy Beta > 1.4x nên dễ giảm sàn dây chuyền khi call margin. Cắt 100% phần margin ngay khi thủng 29,800 VND và đặt lệnh ATO sáng T+2.5 nếu phiên trước bị dư bán sàn.",
+            "hedgingStrategy": "Chuyển dịch vốn sang cổ phiếu phòng thủ Beta thấp (như VCB) hoặc Short VN30F1M để trung hòa rủi ro hệ thống."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 8.7,
+      "scenarioVolatilityPct": 19.1,
+      "compositeRrr": 2.74,
+      "bullBearAsymmetryRatio": 2.1,
+      "t2LiquidityHaircutReturnPct": 6.07,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Báo cáo Tài chính Công ty Chứng khoán SSI (FVTPL & Dư nợ Margin)",
+      "Thông tư 68/2024/TT-BTC về Non-Prefunding cho Nhà đầu tư Tổ chức Nước ngoài",
+      "Orca Beta & Liquidity Cycle Stress Framework"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-005",
+    "category": "t2_liquidity_stress",
+    "topic": "Stress-Test Kẹt Sàn T+2.5 & Trượt Giá Cực Đoan Cổ phiếu BĐS Đòn bẩy Cao (NVL/DIG)",
+    "question": "Cổ phiếu BĐS đòn bẩy cao kiểu NVL/DIG (giá 12,000 VND) vừa có tin đồn chậm thanh toán trái phiếu, phiên nay có lúc kéo hồi nhưng nguy cơ trắng bảng bên mua 2-3 cây sàn rất lớn. Có nên bắt đáy T+2.5 để ăn nhịp hồi không?",
+    "systemPrompt": "Bạn là Giám đốc Quản trị Rủi ro Thanh khoản & Xử lý Khủng hoảng T+2.5 (CRO) của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (NVL, tham chiếu 12,000 VND, sàn HOSE, chính sách SBV: TIGHTENING_BILLS, áp lực USD/VND: HIGH).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.15, target 15,000 VND, R=+25%), Base (p=0.35, target 11,400 VND, R=-5%), Bear (p=0.5, target 8,400 VND, R=-30%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.15 × 25%) + (0.35 × -5%) + (0.5 × -30%) = -13%; độ lệch chuẩn kịch bản sigma = 19.58%; RRR tổng hợp = 0.22x; Tỷ số bất đối xứng Bull/Bear = 0.25x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 10,800 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 10,200 VND; Bear bị hủy khi BREAK_ABOVE 13,200 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BEARISH), Trung hạn 1-2 Quý (BEARISH), Dài hạn 1-3 Năm (NEUTRAL).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn EXTREME, slippage ước tính 21%, đưa E[R] sau haircut T+2.5 về -23.5%. Kết luận CRO: REJECTED_UNSAFE (Score: 50/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `NVL`\n**Thị giá / Mốc tham chiếu:** `12,000 VND` | **Sàn:** `HOSE` | **SBV:** `TIGHTENING_BILLS` | **USD/VND:** `HIGH`\n\n> **Kết luận Điều hành (Verdict):** PHÒNG THỦ TUYỆT ĐỐI / TỪ CHỐI GIẢI NGÂN (DEFENSIVE_CASH / CRO: REJECTED_UNSAFE) — E[R] = -13.00% (âm sâu), Bull/Bear Asymmetry = 0.25x, và E[R] sau khi cộng trượt giá kẹt sàn T+2.5 (-21%) rơi xuống -23.50%. Cấm bắt đáy!  \n> **Kiểm toán CRO:** `REJECTED_UNSAFE` (`50/100`) | **$E[R]$:** `-13%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `-23.5%` | **Composite RRR:** `0.22x` | **Bull/Bear Asymmetry:** `0.25x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Đàm phán gia hạn trái phiếu thành công & gỡ vướng pháp lý dự án trọng điểm)** | **15%** | `15,000 VND` | **+25%** | 12w | `BREAK_BELOW 10,800 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `10%`; SL `10,800 VND` |\n| **🟡 Base (Đi ngang thanh khoản yếu, liên tục pha loãng hoặc hoán đổi nợ áp lực lên giá)** | **35%** | `11,400 VND` | **-5%** | 10w | `BREAK_BELOW 10,200 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `0%`; SL `10,500 VND` |\n| **🔴 Bear (Chậm nghĩa vụ gốc/lãi trái phiếu, trắng bảng bên mua 3 phiên sàn liên tiếp (-21%))** | **50%** | `8,400 VND` | **-30%** | 6w | `BREAK_ABOVE 13,200 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `10,800 VND` |\n\n- **Động lực Bull Case:** Gia hạn thành công lô trái phiếu lớn và mở bán lại dự án chủ lực; Mặt bằng lãi suất cho vay mua nhà giảm mạnh hỗ trợ thanh khoản thứ cấp. *Điều kiện vô hiệu hóa:* Đóng cửa dưới 10,800 VND với dư bán sàn chất đống > 15 triệu cổ phiếu..\n- **Động lực Base Case:** Doanh nghiệp sống sót qua giai đoạn tái cơ cấu nhưng bị bào mòn vốn chủ sở hữu bởi chi phí lãi vay; Giá cổ phiếu giằng co dưới mệnh giá hoặc quanh 11,000 - 12,000 VND. *Điều kiện vô hiệu hóa:* Thủng mốc hỗ trợ tâm lý 10,200 VND kích hoạt bán giải chấp kho hàng..\n- **Rủi ro Bear Case:** Bị gọi nợ chéo hoặc phong tỏa tài sản đảm bảo làm tắc nghẽn dòng tiền; Kho bãi margin giải chấp dây chuyền gây hiện tượng trắng bảng bên mua 3 cây sàn liên tiếp (-21%). *Điều kiện vô hiệu hóa:* Giá vượt dứt khoát 13,200 VND kèm thanh khoản hấp thụ hết lượng hàng kẹt..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.15 + 0.35 + 0.5 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.15 \\times 25\\%) + (0.35 \\times -5\\%) + (0.5 \\times -30\\%) = \\mathbf{-13\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{19.58\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{0.22x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{0.25x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = -13\\% - (0.5 \\times 21\\%) = \\mathbf{-23.5\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `BEARISH` | Hỗ trợ: `10,200 VND` | Cản: `13,200 VND` | Cắt lỗ: `10,800 VND` | Rủi ro kẹt hàng T+2.5 ở mức EXTREME (có thể mất -21% trước khi hàng về tài khoản). Không bắt dao rơi. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BEARISH` | Mục tiêu quý: `9,800 VND` | Dòng tiền trả nợ trái phiếu đáo hạn, tỷ lệ Nợ vay / VCSH và tiến độ tháo gỡ pháp lý dự án. Xúc tác: Lịch đáo hạn trái phiếu doanh nghiệp quý tới; Khả năng phát hành riêng lẻ tăng vốn |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Tái cấu trúc))** | `NEUTRAL` | Fair Value / DCF: `11,500 VND` | No Moat / High Financial Distress Risk: Phụ thuộc hoàn toàn vào tái cơ cấu nợ ngân hàng & trái chủ. Động lực: Chu kỳ phục hồi thanh khoản BĐS nghỉ dưỡng/đô thị vệ tinh; Mức độ pha loãng cổ phiếu sau hoán đổi nợ |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `EXTREME` (Ước tính độ trượt giá: `-21%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Đặt lệnh bán ưu tiên ATO/MP ngay đầu phiên sáng T+2.5 khi hàng vừa về tài khoản; nếu cổ phiếu mất thanh khoản trắng bảng bên mua 3 phiên sàn liên tiếp (-21%), kiên quyết không bắt đáy bình quân giá và thoát dứt điểm ngay ở nhịp mở thanh khoản đầu tiên.\n- **Phòng vệ danh mục (Hedging Strategy):** Đưa tỷ trọng cổ phiếu BĐS đầu cơ đòn bẩy cao về 0%; nếu đang kẹt vị thế lớn chưa về, mở Short VN30F1M phòng vệ tương quan beta thị trường chung.\n- **Phân bổ vốn khuyến nghị:** 0% Cổ phiếu BĐS rủi ro trái phiếu / 90-100% Tiền mặt & Tài sản an toàn; tuyệt đối không dùng Margin.",
+    "structuredScenarioPayload": {
+      "symbol": "NVL",
+      "currentPrice": 12000,
+      "averageVolume20d": 12000000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "TIGHTENING_BILLS",
+        "usdVndPressure": "HIGH"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Đàm phán gia hạn trái phiếu thành công & gỡ vướng pháp lý dự án trọng điểm",
+          "probability": 0.15,
+          "targetPrice": 15000,
+          "expectedReturnPct": 25,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 10800,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng cửa dưới 10,800 VND với dư bán sàn chất đống > 15 triệu cổ phiếu."
+          },
+          "actionProtocol": {
+            "allocationPct": 10,
+            "entryCondition": "Chỉ xem xét thăm dò tối đa 5-10% NAV sau khi BCTC xác nhận giảm nợ ròng.",
+            "stopLossPrice": 10800,
+            "takeProfitLevels": [
+              13800,
+              15000
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Đi ngang thanh khoản yếu, liên tục pha loãng hoặc hoán đổi nợ áp lực lên giá",
+          "probability": 0.35,
+          "targetPrice": 11400,
+          "expectedReturnPct": -5,
+          "timeHorizonWeeks": 10,
+          "invalidation": {
+            "priceLevel": 10200,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng mốc hỗ trợ tâm lý 10,200 VND kích hoạt bán giải chấp kho hàng."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Đứng ngoài quan sát, không giao dịch T+ trong giai đoạn tái cơ cấu nợ.",
+            "stopLossPrice": 10500,
+            "takeProfitLevels": []
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Chậm nghĩa vụ gốc/lãi trái phiếu, trắng bảng bên mua 3 phiên sàn liên tiếp (-21%)",
+          "probability": 0.5,
+          "targetPrice": 8400,
+          "expectedReturnPct": -30,
+          "timeHorizonWeeks": 6,
+          "invalidation": {
+            "priceLevel": 13200,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá vượt dứt khoát 13,200 VND kèm thanh khoản hấp thụ hết lượng hàng kẹt."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "TUYỆT ĐỐI CẤM BẮT ĐÁY hoặc mua trung bình giá xuống.",
+            "stopLossPrice": 10800,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "EXTREME",
+            "estimatedSlippagePct": 21,
+            "liquidityDrainExitPlan": "Đặt lệnh bán ưu tiên ATO/MP ngay đầu phiên sáng T+2.5 khi hàng vừa về tài khoản; nếu cổ phiếu mất thanh khoản trắng bảng bên mua 3 phiên sàn liên tiếp (-21%), kiên quyết không bắt đáy bình quân giá và thoát dứt điểm ngay ở nhịp mở thanh khoản đầu tiên.",
+            "hedgingStrategy": "Đưa tỷ trọng cổ phiếu BĐS đầu cơ đòn bẩy cao về 0%; nếu đang kẹt vị thế lớn chưa về, mở Short VN30F1M phòng vệ tương quan beta thị trường chung."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": -13,
+      "scenarioVolatilityPct": 19.58,
+      "compositeRrr": 0.22,
+      "bullBearAsymmetryRatio": 0.25,
+      "t2LiquidityHaircutReturnPct": -23.5,
+      "croVerdict": "REJECTED_UNSAFE",
+      "croAuditScore": 50,
+      "croPassed": false,
+      "engineVerdict": "DEFENSIVE_CASH"
+    },
+    "references": [
+      "Quy chế Thanh toán Bù trừ T+2.5 VSD & Biên độ Sàn HOSE ±7%",
+      "Altman Z-Score & Mô hình Đo lường Rủi ro Vỡ nợ Trái phiếu Doanh nghiệp",
+      "Orca CRO T+2.5 Floor-Lock Stress Test Protocol"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-006",
+    "category": "portfolio_asset_allocation",
+    "topic": "Phân bổ Tài sản Danh mục Cá nhân (Cổ phiếu VN30 vs Tiền mặt vs Quỹ Khẩn cấp) dưới Stress Vĩ mô",
+    "question": "Tôi có 2 tỷ đồng vốn đầu tư và thu nhập 30 triệu/tháng, muốn phân bổ giữa ETF VN30 (E1VFVN30 giá 24,000 VND), tiền mặt chờ mua và quỹ dự phòng khẩn cấp trong bối cảnh vĩ mô còn nhiều biến số. Hãy lập mô hình 3 kịch bản và ma trận đa khung thời gian?",
+    "systemPrompt": "Bạn là Cố vấn Quản lý Gia sản (Wealth Manager) & Hoạch định Phân bổ Tài sản Đa kịch bản của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (E1VFVN30, tham chiếu 24,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.3, target 28,800 VND, R=+20%), Base (p=0.5, target 25,920 VND, R=+8%), Bear (p=0.2, target 20,400 VND, R=-15%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.3 × 20%) + (0.5 × 8%) + (0.2 × -15%) = +7%; độ lệch chuẩn kịch bản sigma = 12.17%; RRR tổng hợp = 3.33x; Tỷ số bất đối xứng Bull/Bear = 2x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 22,500 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 22,000 VND; Bear bị hủy khi BREAK_ABOVE 25,200 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (NEUTRAL), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn LOW, slippage ước tính 5%, đưa E[R] sau haircut T+2.5 về +6%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `E1VFVN30`\n**Thị giá / Mốc tham chiếu:** `24,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** PHÂN BỔ CÂN BẰNG CÓ KỶ LUẬT (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — E[R] phần vốn cổ phiếu đạt +7.00%, RRR = 3.33x, Asymmetry = 2.00x, E[R] sau haircut T+2.5 đạt +6.00%.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+7%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+6%` | **Composite RRR:** `3.33x` | **Bull/Bear Asymmetry:** `2x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Kinh tế tăng tốc, dòng vốn ETF ngoại quay lại nhóm trụ VN30)** | **30%** | `28,800 VND` | **+20%** | 36w | `BREAK_BELOW 22,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `70%`; SL `22,000 VND` |\n| **🟡 Base (VN30 tăng trưởng bám sát EPS danh mục ngân hàng & bán lẻ (+8%))** | **50%** | `25,920 VND` | **+8%** | 26w | `BREAK_BELOW 22,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `55%`; SL `22,000 VND` |\n| **🔴 Bear (Cú sốc vĩ mô kéo nhóm vốn hóa lớn VN30 điều chỉnh -15%)** | **20%** | `20,400 VND` | **-15%** | 12w | `BREAK_ABOVE 25,200 VND` (DAILY_CLOSE) | Tỷ trọng `25%`; SL `22,000 VND` |\n\n- **Động lực Bull Case:** Nhóm Ngân hàng và Bán lẻ VN30 bứt phá lợi nhuận, khối ngoại giải ngân ETF; Định giá P/E VN30 mở rộng từ 12.5x lên 14.5x. *Điều kiện vô hiệu hóa:* Chỉ số ETF thủng hỗ trợ MA100 tuần tại 22,500 VND..\n- **Động lực Base Case:** Lợi suất ETF đạt 8-10%/năm kết hợp phần tiền mặt gửi kỳ hạn linh hoạt sinh lời ~5%/năm; Dòng tiền lương 30 triệu/tháng tạo lớp đệm bổ sung vốn đều đặn. *Điều kiện vô hiệu hóa:* Thủng đáy tích lũy 22,000 VND kéo dài trên 1 tuần..\n- **Rủi ro Bear Case:** Suy giảm vĩ mô toàn cầu hoặc áp lực tỷ giá kéo chỉ số giảm 15%; Rủi ro tâm lý khiến nhà đầu tư bán tháo đúng đáy nếu không tách riêng quỹ khẩn cấp. *Điều kiện vô hiệu hóa:* ETF vượt 25,200 VND với dòng vốn tổ chức mua ròng liên tục..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.3 + 0.5 + 0.2 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.3 \\times 20\\%) + (0.5 \\times 8\\%) + (0.2 \\times -15\\%) = \\mathbf{+7\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{12.17\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{3.33x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{2x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 7\\% - (0.2 \\times 5\\%) = \\mathbf{+6\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `NEUTRAL` | Hỗ trợ: `23,200 VND` | Cản: `24,800 VND` | Cắt lỗ: `22,500 VND` | Không all-in một lần; chia 3-4 nhịp giải ngân cách nhau tối thiểu 3 phiên T+2.5 để tránh kẹp giá đỉnh ngắn hạn. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Tái cân bằng))** | `BULLISH` | Mục tiêu quý: `26,000 VND` | Tái cân bằng danh mục mỗi quý giữ tỷ lệ Cổ phiếu / Tiền mặt mục tiêu 60/40. Xúc tác: Tăng trưởng lợi nhuận ròng rổ VN30 > 15% YoY; Lãi suất tiền gửi duy trì vùng thấp kích thích dòng tiền |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Tích sản))** | `BULLISH` | Fair Value / DCF: `29,500 VND` | Đa dạng hóa 30 cổ phiếu đầu ngành VN30, loại bỏ rủi ro riêng lẻ của một doanh nghiệp. Động lực: Lãi kép tích sản DCA hàng tháng từ thu nhập chủ động; Hưởng trọn tăng trưởng kinh tế Việt Nam giai đoạn nâng hạng |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `LOW` (Ước tính độ trượt giá: `-5%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Quỹ ETF E1VFVN30 có nhà tạo lập thanh khoản (Market Maker) nên rủi ro mất thanh khoản thấp; nếu cần hạ rủi ro khẩn cấp khi thủng 22,000 VND, thực hiện bán cân bằng tỷ trọng trong phiên liên tục hoặc ATO T+2.5.\n- **Phòng vệ danh mục (Hedging Strategy):** Tách biệt hoàn toàn Quỹ khẩn cấp 6 tháng sinh hoạt (tối thiểu 150-180 triệu VND gửi tiết kiệm thanh khoản nhanh) khỏi danh mục 2 tỷ đầu tư để không bao giờ bị ép bán cổ phiếu ở đáy.\n- **Phân bổ vốn khuyến nghị:** Cấu trúc 2 tỷ + Quỹ khẩn cấp: (1) Khóa cứng 180 triệu Quỹ khẩn cấp (6 tháng chi tiêu) vào tiền gửi/MMF; (2) 1.1 tỷ (~55%) giải ngân từng phần vào E1VFVN30 & Bluechip; (3) 720 triệu (~36-40%) giữ Tiền mặt chờ nhịp chỉnh Bear; (4) Trích 8-10 triệu/tháng DCA từ lương.",
+    "structuredScenarioPayload": {
+      "symbol": "E1VFVN30",
+      "currentPrice": 24000,
+      "averageVolume20d": 1500000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Kinh tế tăng tốc, dòng vốn ETF ngoại quay lại nhóm trụ VN30",
+          "probability": 0.3,
+          "targetPrice": 28800,
+          "expectedReturnPct": 20,
+          "timeHorizonWeeks": 36,
+          "invalidation": {
+            "priceLevel": 22500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Chỉ số ETF thủng hỗ trợ MA100 tuần tại 22,500 VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 70,
+            "entryCondition": "Duy trì DCA hàng tháng từ thặng dư lương 30 triệu/tháng sau khi đủ quỹ khẩn cấp.",
+            "stopLossPrice": 22000,
+            "takeProfitLevels": [
+              27500,
+              28800
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "VN30 tăng trưởng bám sát EPS danh mục ngân hàng & bán lẻ (+8%)",
+          "probability": 0.5,
+          "targetPrice": 25920,
+          "expectedReturnPct": 8,
+          "timeHorizonWeeks": 26,
+          "invalidation": {
+            "priceLevel": 22000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đáy tích lũy 22,000 VND kéo dài trên 1 tuần."
+          },
+          "actionProtocol": {
+            "allocationPct": 55,
+            "entryCondition": "Giữ tỷ trọng lõi 55% cổ phiếu/ETF + 45% tiền mặt & gửi tiết kiệm ngắn hạn.",
+            "stopLossPrice": 22000,
+            "takeProfitLevels": [
+              25920
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Cú sốc vĩ mô kéo nhóm vốn hóa lớn VN30 điều chỉnh -15%",
+          "probability": 0.2,
+          "targetPrice": 20400,
+          "expectedReturnPct": -15,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 25200,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "ETF vượt 25,200 VND với dòng vốn tổ chức mua ròng liên tục."
+          },
+          "actionProtocol": {
+            "allocationPct": 25,
+            "entryCondition": "Kích hoạt giải ngân dần phần tiền mặt dự phòng khi ETF chiết khấu về vùng 20,400 - 21,000 VND.",
+            "stopLossPrice": 22000,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "LOW",
+            "estimatedSlippagePct": 5,
+            "liquidityDrainExitPlan": "Quỹ ETF E1VFVN30 có nhà tạo lập thanh khoản (Market Maker) nên rủi ro mất thanh khoản thấp; nếu cần hạ rủi ro khẩn cấp khi thủng 22,000 VND, thực hiện bán cân bằng tỷ trọng trong phiên liên tục hoặc ATO T+2.5.",
+            "hedgingStrategy": "Tách biệt hoàn toàn Quỹ khẩn cấp 6 tháng sinh hoạt (tối thiểu 150-180 triệu VND gửi tiết kiệm thanh khoản nhanh) khỏi danh mục 2 tỷ đầu tư để không bao giờ bị ép bán cổ phiếu ở đáy."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 7,
+      "scenarioVolatilityPct": 12.17,
+      "compositeRrr": 3.33,
+      "bullBearAsymmetryRatio": 2,
+      "t2LiquidityHaircutReturnPct": 6,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Nguyên tắc Hoạch định Quỹ Khẩn cấp & Tái cân bằng Danh mục CFA",
+      "Quy tắc Phân bổ Chuẩn Core-Satellite với ETF E1VFVN30",
+      "Orca Multi-Scenario Portfolio Allocation Engine"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-007",
+    "category": "monetary_policy_shock",
+    "topic": "Kịch bản Sốc Lạm phát / Tăng Lãi suất vs Nới lỏng Tiền tệ (Cổ phiếu Nhạy Lãi suất NLG)",
+    "question": "Nếu lạm phát quay lại buộc lãi suất cho vay mua nhà tăng +100 bps thay vì tiếp tục nới lỏng, cổ phiếu BĐS nhà ở có bảng cân đối sạch như NLG (38,000 VND) sẽ phản ứng thế nào? Hãy lập mô hình 3 kịch bản & ma trận đa khung thời gian?",
+    "systemPrompt": "Bạn là Chuyên gia Kinh tế Vĩ mô Tiền tệ & Phân tích Doanh nghiệp Nhạy Lãi suất của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (NLG, tham chiếu 38,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.3, target 47,500 VND, R=+25%), Base (p=0.45, target 41,040 VND, R=+8%), Bear (p=0.25, target 31,160 VND, R=-18%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.3 × 25%) + (0.45 × 8%) + (0.25 × -18%) = +6.6%; độ lệch chuẩn kịch bản sigma = 15.93%; RRR tổng hợp = 2.47x; Tỷ số bất đối xứng Bull/Bear = 1.67x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 35,500 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 34,500 VND; Bear bị hủy khi BREAK_ABOVE 41,500 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (NEUTRAL), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn MEDIUM, slippage ước tính 8.5%, đưa E[R] sau haircut T+2.5 về +4.47%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `NLG`\n**Thị giá / Mốc tham chiếu:** `38,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** GIẢI NGÂN CHỌN LỌC THEO VĨ MÔ LÃI SUẤT (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — E[R] = +6.60%, RRR = 2.47x, Asymmetry = 1.67x, E[R] sau haircut T+2.5 đạt +4.48%.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+6.6%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+4.47%` | **Composite RRR:** `2.47x` | **Bull/Bear Asymmetry:** `1.67x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Chính sách nới lỏng tiền tệ tiếp diễn, lãi suất vay mua nhà giảm sâu thúc đẩy presales)** | **30%** | `47,500 VND` | **+25%** | 24w | `BREAK_BELOW 35,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `45%`; SL `35,500 VND` |\n| **🟡 Base (Lãi suất đi ngang ổn định, doanh nghiệp bàn giao đều các dự án nhà ở vừa túi tiền)** | **45%** | `41,040 VND` | **+8%** | 18w | `BREAK_BELOW 34,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `30%`; SL `34,500 VND` |\n| **🔴 Bear (Sốc lạm phát buộc tăng lãi suất điều hành +100 bps, cầu mua nhà đóng băng ngắn hạn)** | **25%** | `31,160 VND` | **-18%** | 10w | `BREAK_ABOVE 41,500 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `35,000 VND` |\n\n- **Động lực Bull Case:** Môi trường nới lỏng giúp lãi suất vay mua nhà ổn định 6.5-7.5%/năm kích hoạt lực cầu thực; Presales tăng tốc mạnh tại các đại đô thị vệ tinh. *Điều kiện vô hiệu hóa:* Đóng nến ngày thủng 35,500 VND (MA50) khi lãi suất huy động bật tăng trở lại..\n- **Động lực Base Case:** Cơ cấu nợ vay thấp giúp NLG chống chịu tốt hơn hẳn các doanh nghiệp BĐS đòn bẩy cao; Lợi nhuận hạch toán đều theo tiến độ bàn giao. *Điều kiện vô hiệu hóa:* Thủng nền hỗ trợ trung hạn 34,500 VND..\n- **Rủi ro Bear Case:** Sốc lạm phát giá năng lượng/lương thực buộc NHNN nâng lãi suất +100 bps; Người mua nhà trì hoãn quyết định giải ngân làm chậm vòng quay hàng tồn kho. *Điều kiện vô hiệu hóa:* Giá vượt 41,500 VND xác nhận dòng tiền lớn hấp thụ xong rủi ro lãi suất..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.3 + 0.45 + 0.25 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.3 \\times 25\\%) + (0.45 \\times 8\\%) + (0.25 \\times -18\\%) = \\mathbf{+6.6\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{15.93\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{2.47x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{1.67x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 6.6\\% - (0.25 \\times 8.5\\%) = \\mathbf{+4.47\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `NEUTRAL` | Hỗ trợ: `36,500 VND` | Cản: `39,800 VND` | Cắt lỗ: `35,500 VND` | Theo dõi sát biến động lợi suất TPCP 10 năm và thanh khoản T+2.5; chỉ mua tại hỗ trợ 36,500 VND. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BULLISH` | Mục tiêu quý: `41,800 VND` | Tỷ lệ Nợ vay ròng/VCSH (~0.25x rất an toàn), doanh số presales Waterpoint/Akari và tiền người mua trả tiền trước. Xúc tác: Luật Đất đai & Nhà ở mới phát huy hiệu lực; Bàn giao sản phẩm đúng tiến độ ghi nhận doanh thu |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ BĐS thực))** | `BULLISH` | Fair Value / DCF: `48,500 VND` | Narrow Moat: Quỹ đất sạch pháp lý phân khúc nhà ở nhu cầu thực, đối tác Nhật Bản (Hankyu, Nishi Nippon). Động lực: Nhu cầu nhà ở vừa túi tiền tại TP.HCM & vệ tinh duy trì cao; Chi phí vốn rẻ hơn mặt bằng ngành nhờ uy tín tín dụng |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `MEDIUM` (Ước tính độ trượt giá: `-8.5%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Nếu tín hiệu tăng lãi suất xuất hiện và NLG thủng 35,500 VND, cắt ngay 50% vị thế cuối phiên và đặt lệnh ATO thoát phần còn lại vào sáng T+2.5 để tránh trượt giá dây chuyền theo nhóm BĐS.\n- **Phòng vệ danh mục (Hedging Strategy):** Chuyển tỷ trọng sang nhóm Ngân hàng vốn hóa lớn hưởng lợi NIM hoặc doanh nghiệp tiền mặt ròng dương.\n- **Phân bổ vốn khuyến nghị:** 50% Cổ phiếu (ưu tiên BĐS bảng cân đối sạch như NLG tối đa 15-20% NAV) / 50% Tiền mặt; kích hoạt kịch bản Bear ngay nếu lãi suất điều hành đảo chiều tăng.",
+    "structuredScenarioPayload": {
+      "symbol": "NLG",
+      "currentPrice": 38000,
+      "averageVolume20d": 3200000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Chính sách nới lỏng tiền tệ tiếp diễn, lãi suất vay mua nhà giảm sâu thúc đẩy presales",
+          "probability": 0.3,
+          "targetPrice": 47500,
+          "expectedReturnPct": 25,
+          "timeHorizonWeeks": 24,
+          "invalidation": {
+            "priceLevel": 35500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng nến ngày thủng 35,500 VND (MA50) khi lãi suất huy động bật tăng trở lại."
+          },
+          "actionProtocol": {
+            "allocationPct": 45,
+            "entryCondition": "Mua khi giá vượt 39,500 VND kèm doanh số bán hàng quý tăng > 30% YoY.",
+            "stopLossPrice": 35500,
+            "takeProfitLevels": [
+              44000,
+              47500
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Lãi suất đi ngang ổn định, doanh nghiệp bàn giao đều các dự án nhà ở vừa túi tiền",
+          "probability": 0.45,
+          "targetPrice": 41040,
+          "expectedReturnPct": 8,
+          "timeHorizonWeeks": 18,
+          "invalidation": {
+            "priceLevel": 34500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng nền hỗ trợ trung hạn 34,500 VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 30,
+            "entryCondition": "Giải ngân thăm dò quanh vùng hỗ trợ 36,500 - 37,500 VND.",
+            "stopLossPrice": 34500,
+            "takeProfitLevels": [
+              41040
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Sốc lạm phát buộc tăng lãi suất điều hành +100 bps, cầu mua nhà đóng băng ngắn hạn",
+          "probability": 0.25,
+          "targetPrice": 31160,
+          "expectedReturnPct": -18,
+          "timeHorizonWeeks": 10,
+          "invalidation": {
+            "priceLevel": 41500,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá vượt 41,500 VND xác nhận dòng tiền lớn hấp thụ xong rủi ro lãi suất."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Dừng mua mới nếu CPI vượt 4.5% và lãi suất OMO tăng liên tiếp.",
+            "stopLossPrice": 35000,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "MEDIUM",
+            "estimatedSlippagePct": 8.5,
+            "liquidityDrainExitPlan": "Nếu tín hiệu tăng lãi suất xuất hiện và NLG thủng 35,500 VND, cắt ngay 50% vị thế cuối phiên và đặt lệnh ATO thoát phần còn lại vào sáng T+2.5 để tránh trượt giá dây chuyền theo nhóm BĐS.",
+            "hedgingStrategy": "Chuyển tỷ trọng sang nhóm Ngân hàng vốn hóa lớn hưởng lợi NIM hoặc doanh nghiệp tiền mặt ròng dương."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 6.6,
+      "scenarioVolatilityPct": 15.93,
+      "compositeRrr": 2.47,
+      "bullBearAsymmetryRatio": 1.67,
+      "t2LiquidityHaircutReturnPct": 4.47,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "HOLD_OBSERVE"
+    },
+    "references": [
+      "Số liệu CPI Tổng cục Thống kê & Lãi suất Điều hành NHNN",
+      "BCTC Hợp nhất NLG (Mục Người mua trả tiền trước & Nợ vay ròng)",
+      "Orca Monetary Policy Shock & Equity Sensitivity Model"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-008",
+    "category": "earnings_bctc_divergence",
+    "topic": "Cây Quyết định Đa kịch bản Mùa BCTC: Phân kỳ LNST vs Dòng tiền CFO (MWG)",
+    "question": "Trước mùa công bố BCTC Quý của MWG (giá 62,000 VND), thị trường đang kỳ vọng LNST tăng trưởng mạnh nhờ chuỗi Bách Hóa Xanh. Hãy xây dựng cây quyết định 3 kịch bản (Beat chất lượng / In-line / Phân kỳ CFO giả) kèm ma trận đa khung thời gian?",
+    "systemPrompt": "Bạn là Chuyên gia Thẩm định Chất lượng Lợi nhuận BCTC (Forensic Earnings) & Chiến lược Giao dịch Mùa BCTC của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (MWG, tham chiếu 62,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.35, target 77,500 VND, R=+25%), Base (p=0.45, target 66,960 VND, R=+8%), Bear (p=0.2, target 50,840 VND, R=-18%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.35 × 25%) + (0.45 × 8%) + (0.2 × -18%) = +8.75%; độ lệch chuẩn kịch bản sigma = 15.36%; RRR tổng hợp = 3.43x; Tỷ số bất đối xứng Bull/Bear = 2.43x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 58,000 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 56,500 VND; Bear bị hủy khi BREAK_ABOVE 66,000 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BULLISH), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn MEDIUM, slippage ước tính 7%, đưa E[R] sau haircut T+2.5 về +7.35%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `MWG`\n**Thị giá / Mốc tham chiếu:** `62,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** HÀNH ĐỘNG THEO CÂY QUYẾT ĐỊNH BCTC (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — E[R] = +8.75%, Composite RRR = 3.43x, Asymmetry = 2.43x, E[R] sau haircut T+2.5 đạt +7.35%. Đọc CFO trước khi all-in!  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+8.75%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+7.35%` | **Composite RRR:** `3.43x` | **Bull/Bear Asymmetry:** `2.43x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Quality Earnings Beat: LNST tăng > 45% YoY kèm CFO/LNST > 1.1x & BHX lãi ròng bền vững)** | **35%** | `77,500 VND` | **+25%** | 20w | `BREAK_BELOW 58,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `50%`; SL `58,000 VND` |\n| **🟡 Base (In-line BCTC: LNST tăng ~20% đúng dự báo, CFO/LNST đạt 0.9x, thị phần ICT ổn định)** | **45%** | `66,960 VND` | **+8%** | 14w | `BREAK_BELOW 56,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `35%`; SL `56,500 VND` |\n| **🔴 Bear (BCTC Phân kỳ Độc hại: LNST tăng nhờ thu nhập tài chính/hoàn nhập nhưng CFO âm & tồn kho phình to)** | **20%** | `50,840 VND` | **-18%** | 8w | `BREAK_ABOVE 66,000 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `58,000 VND` |\n\n- **Động lực Bull Case:** Lợi nhuận cốt lõi tăng mạnh kèm dòng tiền CFO dồi dào (Accruals thấp); Bách Hóa Xanh mở mới hiệu quả tại các tỉnh với biên EBIT cải thiện rõ nét. *Điều kiện vô hiệu hóa:* Sau khi ra BCTC tốt nhưng giá quay đầu thủng 58,000 VND với vol bán lớn (Sell-the-news)..\n- **Động lực Base Case:** Mảng Thế Giới Di Động & Điện Máy Xanh giữ thị phần ổn định, tiết giảm chi phí vận hành; Chất lượng lợi nhuận đạt chuẩn trung bình khá (CFO ~ 0.9x LNST). *Điều kiện vô hiệu hóa:* Thủng đường xu hướng trung hạn MA100 tại 56,500 VND..\n- **Rủi ro Bear Case:** LNST đẹp trên giấy nhờ doanh thu tài chính hoặc giảm trích lập dự phòng trong khi CFO suy yếu; Áp lực cạnh tranh giá từ sàn TMĐT khiến tồn kho chậm luân chuyển. *Điều kiện vô hiệu hóa:* Giá đóng cửa vượt 66,000 VND kèm giải trình thuyết minh BCTC tích cực..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.35 + 0.45 + 0.2 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.35 \\times 25\\%) + (0.45 \\times 8\\%) + (0.2 \\times -18\\%) = \\mathbf{+8.75\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{15.36\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{3.43x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{2.43x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 8.75\\% - (0.2 \\times 7\\%) = \\mathbf{+7.35\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên quanh ngày ra BCTC))** | `BULLISH` | Hỗ trợ: `59,500 VND` | Cản: `65,000 VND` | Cắt lỗ: `58,000 VND` | Chỉ đặt 50% vị thế trước BCTC; 50% còn lại chờ đọc xong Lưu chuyển Tiền tệ (CFO) trong BCTC mới quyết định hành động để tránh bẫy T+2.5. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Hậu BCTC))** | `BULLISH` | Mục tiêu quý: `69,000 VND` | Doanh thu bình quân/cửa hàng Bách Hóa Xanh (> 2.1 tỷ/tháng) và vòng quay hàng tồn kho ICT. Xúc tác: BHX đóng góp lợi nhuận ròng dương thực chất; Sức mua tiêu dùng nội địa phục hồi mùa cao điểm |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Tái cấu trúc bán lẻ))** | `BULLISH` | Fair Value / DCF: `76,000 VND` | Narrow Moat: Quy mô chuỗi bán lẻ hiện đại lớn nhất Việt Nam, sức mạnh mặc cả nhà cung cấp. Động lực: Chuyển đổi từ mô hình đốt tiền mở rộng sang tối ưu biên lợi nhuận ròng; Mở rộng quy mô Bách Hóa Xanh có kiểm soát |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `MEDIUM` (Ước tính độ trượt giá: `-7%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Nếu BCTC lộ phân kỳ LNST-CFO gây hiệu ứng 'Tin ra là bán' và giá thủng 58,000 VND, dứt khoát bán hạ 100% vị thế lướt sóng ngay khi hàng về phiên chiều T+2.5 hoặc ATO sáng hôm sau.\n- **Phòng vệ danh mục (Hedging Strategy):** Hạ tỷ trọng bán lẻ xuống dưới 10% danh mục và giữ tiền mặt chờ định giá lại.\n- **Phân bổ vốn khuyến nghị:** 60% Cổ phiếu (chia 2 nhịp trước và sau khi thẩm định CFO trong BCTC) / 40% Tiền mặt.",
+    "structuredScenarioPayload": {
+      "symbol": "MWG",
+      "currentPrice": 62000,
+      "averageVolume20d": 7500000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Quality Earnings Beat: LNST tăng > 45% YoY kèm CFO/LNST > 1.1x & BHX lãi ròng bền vững",
+          "probability": 0.35,
+          "targetPrice": 77500,
+          "expectedReturnPct": 25,
+          "timeHorizonWeeks": 20,
+          "invalidation": {
+            "priceLevel": 58000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Sau khi ra BCTC tốt nhưng giá quay đầu thủng 58,000 VND với vol bán lớn (Sell-the-news)."
+          },
+          "actionProtocol": {
+            "allocationPct": 50,
+            "entryCondition": "Xác nhận BCTC có CFO > LNST và biên gộp BHX cải thiện -> mua gia tăng khi vượt 65,000 VND.",
+            "stopLossPrice": 58000,
+            "takeProfitLevels": [
+              71000,
+              77500
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "In-line BCTC: LNST tăng ~20% đúng dự báo, CFO/LNST đạt 0.9x, thị phần ICT ổn định",
+          "probability": 0.45,
+          "targetPrice": 66960,
+          "expectedReturnPct": 8,
+          "timeHorizonWeeks": 14,
+          "invalidation": {
+            "priceLevel": 56500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đường xu hướng trung hạn MA100 tại 56,500 VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 35,
+            "entryCondition": "Nắm giữ vị thế lõi và gom thêm ở nhịp rung lắc quanh 60,000 VND.",
+            "stopLossPrice": 56500,
+            "takeProfitLevels": [
+              66960
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "BCTC Phân kỳ Độc hại: LNST tăng nhờ thu nhập tài chính/hoàn nhập nhưng CFO âm & tồn kho phình to",
+          "probability": 0.2,
+          "targetPrice": 50840,
+          "expectedReturnPct": -18,
+          "timeHorizonWeeks": 8,
+          "invalidation": {
+            "priceLevel": 66000,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá đóng cửa vượt 66,000 VND kèm giải trình thuyết minh BCTC tích cực."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Kích hoạt quy tắc Forensic Red-Flag: KHÔNG mua đuổi bất kỳ cú kéo tin BCTC nào nếu CFO < 0.",
+            "stopLossPrice": 58000,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "MEDIUM",
+            "estimatedSlippagePct": 7,
+            "liquidityDrainExitPlan": "Nếu BCTC lộ phân kỳ LNST-CFO gây hiệu ứng 'Tin ra là bán' và giá thủng 58,000 VND, dứt khoát bán hạ 100% vị thế lướt sóng ngay khi hàng về phiên chiều T+2.5 hoặc ATO sáng hôm sau.",
+            "hedgingStrategy": "Hạ tỷ trọng bán lẻ xuống dưới 10% danh mục và giữ tiền mặt chờ định giá lại."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 8.75,
+      "scenarioVolatilityPct": 15.36,
+      "compositeRrr": 3.43,
+      "bullBearAsymmetryRatio": 2.43,
+      "t2LiquidityHaircutReturnPct": 7.35,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Chuẩn mực Kế toán VAS 24 & Chỉ số Chất lượng Lợi nhuận Sloan Accruals",
+      "Piotroski F-Score (CFO > 0 và CFO > Net Income)",
+      "Orca Earnings Divergence Decision Tree"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-009",
+    "category": "banking_defensive_cycle",
+    "topic": "Kịch bản Phòng thủ Ngân hàng Quốc doanh Đầu ngành (VCB): NIM, Nợ xấu & Bộ đệm Dự phòng",
+    "question": "Trong bối cảnh nợ xấu toàn hệ thống có xu hướng tăng và biên lãi ròng (NIM) chịu áp lực cạnh tranh, cổ phiếu trụ VCB (92,000 VND) nên được định lượng 3 kịch bản và phân bổ đa khung thời gian như thế nào để đóng vai trò mỏ neo phòng thủ?",
+    "systemPrompt": "Bạn là Chuyên gia Phân tích Ngân hàng Thể chế (CAMELS & Chất lượng Tài sản) của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (VCB, tham chiếu 92,000 VND, sàn HOSE, chính sách SBV: NEUTRAL, áp lực USD/VND: MODERATE).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.25, target 108,560 VND, R=+18%), Base (p=0.55, target 101,200 VND, R=+10%), Bear (p=0.2, target 80,960 VND, R=-12%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.25 × 18%) + (0.55 × 10%) + (0.2 × -12%) = +7.6%; độ lệch chuẩn kịch bản sigma = 10.35%; RRR tổng hợp = 4.17x; Tỷ số bất đối xứng Bull/Bear = 1.87x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 88,000 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 86,000 VND; Bear bị hủy khi BREAK_ABOVE 96,500 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (NEUTRAL), Trung hạn 1-2 Quý (BULLISH), Dài hạn 1-3 Năm (BULLISH).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn LOW, slippage ước tính 4.5%, đưa E[R] sau haircut T+2.5 về +6.7%. Kết luận CRO: APPROVED_FOR_EXECUTION (Score: 100/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `VCB`\n**Thị giá / Mốc tham chiếu:** `92,000 VND` | **Sàn:** `HOSE` | **SBV:** `NEUTRAL` | **USD/VND:** `MODERATE`\n\n> **Kết luận Điều hành (Verdict):** MỎ NEO PHÒNG THỦ CHẤT LƯỢNG CAO (SELECTIVE_BUY / APPROVED_FOR_EXECUTION) — E[R] = +7.60%, RRR = 4.17x, Asymmetry = 1.88x, E[R] sau haircut T+2.5 đạt +6.70%.  \n> **Kiểm toán CRO:** `APPROVED_FOR_EXECUTION` (`100/100`) | **$E[R]$:** `+7.6%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `+6.7%` | **Composite RRR:** `4.17x` | **Bull/Bear Asymmetry:** `1.87x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Tăng trưởng tín dụng > 15%, tỷ lệ bao phủ nợ xấu (LLR) > 250% cho phép hoàn nhập dự phòng)** | **25%** | `108,560 VND` | **+18%** | 28w | `BREAK_BELOW 88,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `50%`; SL `88,000 VND` |\n| **🟡 Base (Tăng trưởng lợi nhuận ổn định 10-12%/năm, giữ vững chất lượng tài sản tốt nhất ngành)** | **55%** | `101,200 VND` | **+10%** | 22w | `BREAK_BELOW 86,000 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `40%`; SL `86,000 VND` |\n| **🔴 Bear (Kinh tế giảm tốc sâu kéo nợ nhóm 2-5 tăng và NIM co hẹp về dưới 2.7%)** | **20%** | `80,960 VND` | **-12%** | 12w | `BREAK_ABOVE 96,500 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `86,000 VND` |\n\n- **Động lực Bull Case:** Tăng trưởng tín dụng bán lẻ và FDI phục hồi mạnh giúp mở rộng NIM; Đệm dự phòng khổng lồ cho phép điều tiết tăng trưởng lợi nhuận ổn định. *Điều kiện vô hiệu hóa:* Đóng nến ngày thủng hỗ trợ cứng 88,000 VND kèm khối ngoại bán ròng mạnh..\n- **Động lực Base Case:** Lợi thế chi phí vốn rẻ nhất hệ thống giúp giữ biên lợi nhuận vượt trội khi cạnh tranh lãi suất; Nợ xấu kiểm soát quanh ngưỡng 1.0-1.1% thấp hơn hẳn trung bình ngành. *Điều kiện vô hiệu hóa:* Thủng đáy 52 tuần tại 86,000 VND..\n- **Rủi ro Bear Case:** Áp lực giảm lãi suất hỗ trợ doanh nghiệp kéo NIM thu hẹp; Dòng vốn ngoại rút ròng khỏi các quỹ ETF nắm giữ tỷ trọng VCB lớn. *Điều kiện vô hiệu hóa:* Giá bứt phá vượt 96,500 VND với thanh khoản > 3 triệu cổ phiếu/phiên..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.25 + 0.55 + 0.2 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.25 \\times 18\\%) + (0.55 \\times 10\\%) + (0.2 \\times -12\\%) = \\mathbf{+7.6\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{10.35\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{4.17x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{1.87x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = 7.6\\% - (0.2 \\times 4.5\\%) = \\mathbf{+6.7\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `NEUTRAL` | Hỗ trợ: `89,500 VND` | Cản: `95,000 VND` | Cắt lỗ: `88,000 VND` | Phù hợp tích sản hơn lướt sóng T+2.5 vì biên độ dao động hẹp; mua gom tại hỗ trợ 89,500 VND. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BULLISH` | Mục tiêu quý: `101,200 VND` | Tỷ lệ CASA (~35%), chi phí vốn (COF) thấp nhất hệ thống và tỷ lệ bao phủ nợ xấu LLR > 200%. Xúc tác: Kế hoạch tăng vốn & phát hành riêng lẻ nâng hệ số CAR; Chi phí trích lập dự phòng giảm nhẹ |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ Tín dụng))** | `BULLISH` | Fair Value / DCF: `110,000 VND` | Wide Moat: Lợi thế nguồn vốn giá rẻ CASA, khách hàng FDI/doanh nghiệp lớn chất lượng cao, ROE ~20%. Động lực: Tăng trưởng quy mô tài sản an toàn kép 12-14%/năm; Vai trò đầu tàu khi thị trường chứng khoán nâng hạng |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `LOW` (Ước tính độ trượt giá: `-4.5%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** VCB có độ biến động Beta thấp (~0.75x) và hầu như không có rủi ro mất thanh khoản; nếu thủng 88,000 VND xác nhận gãy xu hướng trụ, bán giảm tỷ trọng trong phiên liên tục hoặc ATO T+2.5.\n- **Phòng vệ danh mục (Hedging Strategy):** Dùng VCB làm lõi phòng thủ thay thế cho các mã ngân hàng/BĐS rủi ro trái phiếu cao.\n- **Phân bổ vốn khuyến nghị:** 60% Cổ phiếu (VCB đóng vai trò mỏ neo phòng thủ 20-25% NAV) / 40% Tiền mặt.",
+    "structuredScenarioPayload": {
+      "symbol": "VCB",
+      "currentPrice": 92000,
+      "averageVolume20d": 1800000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "NEUTRAL",
+        "usdVndPressure": "MODERATE"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Tăng trưởng tín dụng > 15%, tỷ lệ bao phủ nợ xấu (LLR) > 250% cho phép hoàn nhập dự phòng",
+          "probability": 0.25,
+          "targetPrice": 108560,
+          "expectedReturnPct": 18,
+          "timeHorizonWeeks": 28,
+          "invalidation": {
+            "priceLevel": 88000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng nến ngày thủng hỗ trợ cứng 88,000 VND kèm khối ngoại bán ròng mạnh."
+          },
+          "actionProtocol": {
+            "allocationPct": 50,
+            "entryCondition": "Gia tăng tỷ trọng trụ khi vượt 95,500 VND và phát hành riêng lẻ thành công.",
+            "stopLossPrice": 88000,
+            "takeProfitLevels": [
+              102000,
+              108560
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Tăng trưởng lợi nhuận ổn định 10-12%/năm, giữ vững chất lượng tài sản tốt nhất ngành",
+          "probability": 0.55,
+          "targetPrice": 101200,
+          "expectedReturnPct": 10,
+          "timeHorizonWeeks": 22,
+          "invalidation": {
+            "priceLevel": 86000,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đáy 52 tuần tại 86,000 VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 40,
+            "entryCondition": "Tích lũy phòng thủ ở vùng nền 89,500 - 91,500 VND.",
+            "stopLossPrice": 86000,
+            "takeProfitLevels": [
+              101200
+            ]
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Kinh tế giảm tốc sâu kéo nợ nhóm 2-5 tăng và NIM co hẹp về dưới 2.7%",
+          "probability": 0.2,
+          "targetPrice": 80960,
+          "expectedReturnPct": -12,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 96500,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Giá bứt phá vượt 96,500 VND với thanh khoản > 3 triệu cổ phiếu/phiên."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Hạ tỷ trọng nếu nợ xấu NPL vượt 1.5% hoặc thủng 88,000 VND.",
+            "stopLossPrice": 86000,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "LOW",
+            "estimatedSlippagePct": 4.5,
+            "liquidityDrainExitPlan": "VCB có độ biến động Beta thấp (~0.75x) và hầu như không có rủi ro mất thanh khoản; nếu thủng 88,000 VND xác nhận gãy xu hướng trụ, bán giảm tỷ trọng trong phiên liên tục hoặc ATO T+2.5.",
+            "hedgingStrategy": "Dùng VCB làm lõi phòng thủ thay thế cho các mã ngân hàng/BĐS rủi ro trái phiếu cao."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": 7.6,
+      "scenarioVolatilityPct": 10.35,
+      "compositeRrr": 4.17,
+      "bullBearAsymmetryRatio": 1.87,
+      "t2LiquidityHaircutReturnPct": 6.7,
+      "croVerdict": "APPROVED_FOR_EXECUTION",
+      "croAuditScore": 100,
+      "croPassed": true,
+      "engineVerdict": "SELECTIVE_BUY"
+    },
+    "references": [
+      "Khung Thẩm định Ngân hàng CAMELS & Tỷ lệ Bao phủ Nợ xấu LLR",
+      "BCTC Hợp nhất Vietcombank (VCB) - Cơ cấu CASA & Chi phí Vốn",
+      "Orca Defensive Core Allocation Model"
+    ]
+  },
+  {
+    "id": "ORCA-SFT-MS-010",
+    "category": "cyclical_peak_trap_stress",
+    "topic": "Bẫy Đỉnh Chu kỳ Cổ phiếu Thép Xuất khẩu Beta Cao (NKG): P/E Rẻ Ảo & Áp lực Tồn kho HRC",
+    "question": "Cổ phiếu tôn mạ xuất khẩu NKG (22,000 VND) nhìn qua thấy P/E trailing chỉ ~5 lần nhưng giá HRC xuất khẩu sang Mỹ/EU đang đối mặt điều tra phòng vệ thương mại và tỷ giá biến động. Có nên tất tay theo P/E rẻ không? Hãy lập 3 kịch bản kiểm toán CRO?",
+    "systemPrompt": "Bạn là Chuyên gia Phản biện Định giá Chu kỳ & Quản trị Rủi ro T+2.5 (CRO) của Orca AI.",
+    "reasoningCoT": [
+      "1. Xác định bài toán & bối cảnh (NKG, tham chiếu 22,000 VND, sàn HOSE, chính sách SBV: TIGHTENING_BILLS, áp lực USD/VND: HIGH).",
+      "2. Thiết lập 3 kịch bản chuẩn tắc với tổng xác suất unitary: Bull (p=0.2, target 26,400 VND, R=+20%), Base (p=0.35, target 21,120 VND, R=-4%), Bear (p=0.45, target 16,280 VND, R=-26%). Kiểm tra sum(p_i) = 100% = 1.0.",
+      "3. Tính toán định lượng: E[R] = (0.2 × 20%) + (0.35 × -4%) + (0.45 × -26%) = -9.1%; độ lệch chuẩn kịch bản sigma = 17.52%; RRR tổng hợp = 0.31x; Tỷ số bất đối xứng Bull/Bear = 0.34x.",
+      "4. Gắn Điểm Vô Hiệu Hóa Xác Định (Deterministic Invalidation): Bull bị hủy khi BREAK_BELOW 20,200 VND (DAILY_CLOSE); Base bị hủy khi BREAK_BELOW 19,500 VND; Bear bị hủy khi BREAK_ABOVE 24,000 VND.",
+      "5. Tích hợp Ma trận Đa Khung Thời Gian (MTF): Ngắn hạn T+2.5 (BEARISH), Trung hạn 1-2 Quý (BEARISH), Dài hạn 1-3 Năm (NEUTRAL).",
+      "6. Kiểm định CRO & Stress Test Kẹt sàn T+2.5: Rủi ro kẹt sàn HIGH, slippage ước tính 14%, đưa E[R] sau haircut T+2.5 về -15.4%. Kết luận CRO: REJECTED_UNSAFE (Score: 50/100)."
+    ],
+    "goldAnswer": "### 🎯 PHÂN TÍCH ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN: `NKG`\n**Thị giá / Mốc tham chiếu:** `22,000 VND` | **Sàn:** `HOSE` | **SBV:** `TIGHTENING_BILLS` | **USD/VND:** `HIGH`\n\n> **Kết luận Điều hành (Verdict):** TỪ CHỐI TẤT TAY / PHÒNG THỦ (DEFENSIVE_CASH / CRO: REJECTED_UNSAFE) — E[R] = -9.10%, Asymmetry = 0.34x, E[R] sau haircut T+2.5 xuống -15.40%. Đây là bẫy P/E thấp điển hình của cổ phiếu chu kỳ!  \n> **Kiểm toán CRO:** `REJECTED_UNSAFE` (`50/100`) | **$E[R]$:** `-9.1%` | **$E[R]_{\\text{T+2.5 Haircut}}$:** `-15.4%` | **Composite RRR:** `0.31x` | **Bull/Bear Asymmetry:** `0.34x`\n\n---\n\n#### 1. Ma Trận 3 Kịch Bản Chuẩn Tắc ($\\sum p_i = 1.0$)\n\n| Kịch bản | Xác suất ($p_i$) | Mục tiêu | Tỷ suất ($R_i$) | Khung (Tuần) | Điểm Vô Hiệu Hóa (Deterministic Invalidation) | Hành động & Stop-Loss |\n| :--- | :---: | :---: | :---: | :---: | :--- | :--- |\n| **🟢 Bull (Thoát rào cản thuế chống bán phá giá & giá HRC thế giới đảo chiều tăng > 15%)** | **20%** | `26,400 VND` | **+20%** | 16w | `BREAK_BELOW 20,200 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `20%`; SL `20,200 VND` |\n| **🟡 Base (Biên lợi nhuận gộp thu hẹp khi giá bán hạ nhiệt, tồn kho giá cao cần trích lập dự phòng)** | **35%** | `21,120 VND` | **-4%** | 12w | `BREAK_BELOW 19,500 VND` (DAILY_CLOSE) | Tỷ trọng tối đa `0%`; SL `20,200 VND` |\n| **🔴 Bear (Suy giảm lợi nhuận đột ngột (E collapse) do thuế phòng vệ thương mại & đảo chiều giá HRC)** | **45%** | `16,280 VND` | **-26%** | 8w | `BREAK_ABOVE 24,000 VND` (DAILY_CLOSE) | Tỷ trọng `0%`; SL `20,200 VND` |\n\n- **Động lực Bull Case:** Thị trường xuất khẩu EU/Mỹ duy trì sản lượng và giá HRC phục hồi mạnh; Chi phí vận tải biển giảm giúp cải thiện biên lợi nhuận xuất khẩu. *Điều kiện vô hiệu hóa:* Đóng nến thủng 20,200 VND kèm vol bán > 15 triệu cổ phiếu..\n- **Động lực Base Case:** Lợi nhuận quý giảm tốc từ nền cao trước đó khiến P/E forward mở rộng lên 10-12x thay vì 5x; Cổ phiếu tích lũy hoặc giảm nhẹ về vùng P/B trung bình. *Điều kiện vô hiệu hóa:* Thủng đáy trung hạn 19,500 VND..\n- **Rủi ro Bear Case:** Bẫy P/E thấp ở đỉnh lợi nhuận: khi E giảm 60-70%, giá cổ phiếu chiết khấu mạnh theo chu kỳ tồn kho; Thuế phòng vệ thương mại làm co hẹp đầu ra xuất khẩu, kích hoạt bán tháo T+2.5 (-14% slippage). *Điều kiện vô hiệu hóa:* Đóng cửa vượt 24,000 VND với biên gộp quý tăng trở lại > 10%..\n\n---\n\n#### 2. Mô Hình Toán Học Xác Suất Định Lượng (KaTeX)\n\n$$\\sum_{i \\in \\{\\text{Bull}, \\text{Base}, \\text{Bear}\\}} p_i = 0.2 + 0.35 + 0.45 = \\mathbf{1.00}$$\n\n$$E[R] = \\sum_{i} p_i \\times R_i = (0.2 \\times 20\\%) + (0.35 \\times -4\\%) + (0.45 \\times -26\\%) = \\mathbf{-9.1\\%}$$\n\n$$\\sigma = \\sqrt{\\sum_{i} p_i \\times (R_i - E[R])^2} = \\mathbf{17.52\\%}$$\n\n$$RRR_{\\text{Composite}} = \\frac{p_{\\text{bull}} R_{\\text{bull}}^+ + p_{\\text{base}} R_{\\text{base}}^+}{p_{\\text{bear}} |R_{\\text{bear}}^-| + p_{\\text{base}} |R_{\\text{base}}^-|} = \\mathbf{0.31x}, \\quad \\text{Asymmetry} = \\frac{p_{\\text{bull}} R_{\\text{bull}}}{p_{\\text{bear}} |R_{\\text{bear}}|} = \\mathbf{0.34x}$$\n\n$$E[R]_{\\text{T+2.5 Haircut}} = E[R] - (p_{\\text{bear}} \\times \\text{Slippage}_{\\text{T+2.5}}) = -9.1\\% - (0.45 \\times 14\\%) = \\mathbf{-15.4\\%}$$\n\n---\n\n#### 3. Ma Trận Đa Khung Thời Gian (Multi-Timeframe Integration)\n\n| Khung thời gian | Xu hướng (Bias) | Mốc kỹ thuật / Định giá | Trọng tâm & Kế hoạch thực thi |\n| :--- | :---: | :--- | :--- |\n| **Ngắn hạn (Ngắn hạn T+2.5 (1 - 10 phiên))** | `BEARISH` | Hỗ trợ: `20,200 VND` | Cản: `23,500 VND` | Cắt lỗ: `20,200 VND` | Áp lực phân phối ngắn hạn cao; không mở vị thế mới khi rủi ro kẹt sàn T+2.5 lên tới -14%. |\n| **Trung hạn (Trung hạn (1 - 2 Quý / Mùa BCTC))** | `BEARISH` | Mục tiêu quý: `18,500 VND` | Vòng quay hàng tồn kho HRC, dự phòng giảm giá hàng tồn kho và kết quả điều tra thuế chống bán phá giá EU/Mỹ. Xúc tác: Biến động giá HRC thế giới; Kết quả sơ bộ vụ kiện phòng vệ thương mại xuất khẩu |\n| **Dài hạn (Dài hạn (1 - 3 Năm / Chu kỳ Tôn mạ))** | `NEUTRAL` | Fair Value / DCF: `22,500 VND` | No-to-Narrow Moat: Phụ thuộc mạnh vào chênh lệch giá nguyên liệu HRC đầu vào và chu kỳ xuất khẩu. Động lực: Năng lực mở rộng nhà máy mới giai đoạn 2027+; Định giá chuẩn xác nhất qua P/B chu kỳ (< 1.0x mới hấp dẫn) |\n\n---\n\n#### 4. Kế Hoạch Phòng Vệ Bear Case & Kẹt Sàn T+2.5 (CRO Contingency)\n- **Mức độ rủi ro kẹt thanh khoản T+2.5:** `HIGH` (Ước tính độ trượt giá: `-14%`).\n- **Kế hoạch thoát hàng khẩn cấp (Liquidity Drain Exit Plan):** Khi doanh nghiệp tôn mạ công bố lỗ/trích lập tồn kho bất ngờ, cổ phiếu Beta cao dễ rơi 2 phiên sàn liên tiếp (-14%). Đặt lệnh ATO thoát toàn bộ vị thế ngay đầu phiên sáng T+2.5 nếu mất mốc 20,200 VND.\n- **Phòng vệ danh mục (Hedging Strategy):** Loại bỏ cổ phiếu hàng hóa chu kỳ có tồn kho lớn khỏi danh mục mua mới và chuyển vốn sang tiền mặt/VN30F Short hedge khi thị trường xấu.\n- **Phân bổ vốn khuyến nghị:** 0% Cổ phiếu Tôn mạ ở vùng rủi ro chu kỳ / 85-90% Tiền mặt & tài sản phòng thủ; chỉ giải ngân lại khi P/B chạm vùng đáy chu kỳ.",
+    "structuredScenarioPayload": {
+      "symbol": "NKG",
+      "currentPrice": 22000,
+      "averageVolume20d": 9500000,
+      "marketContext": {
+        "exchange": "HOSE",
+        "sbvMonetaryStance": "TIGHTENING_BILLS",
+        "usdVndPressure": "HIGH"
+      },
+      "scenarios": [
+        {
+          "label": "BULL",
+          "name": "Thoát rào cản thuế chống bán phá giá & giá HRC thế giới đảo chiều tăng > 15%",
+          "probability": 0.2,
+          "targetPrice": 26400,
+          "expectedReturnPct": 20,
+          "timeHorizonWeeks": 16,
+          "invalidation": {
+            "priceLevel": 20200,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng nến thủng 20,200 VND kèm vol bán > 15 triệu cổ phiếu."
+          },
+          "actionProtocol": {
+            "allocationPct": 20,
+            "entryCondition": "Chỉ thăm dò tối đa 15-20% nếu vượt 23,500 VND và có kết luận thuế tích cực.",
+            "stopLossPrice": 20200,
+            "takeProfitLevels": [
+              25000,
+              26400
+            ]
+          }
+        },
+        {
+          "label": "BASE",
+          "name": "Biên lợi nhuận gộp thu hẹp khi giá bán hạ nhiệt, tồn kho giá cao cần trích lập dự phòng",
+          "probability": 0.35,
+          "targetPrice": 21120,
+          "expectedReturnPct": -4,
+          "timeHorizonWeeks": 12,
+          "invalidation": {
+            "priceLevel": 19500,
+            "condition": "BREAK_BELOW",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Thủng đáy trung hạn 19,500 VND."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "Đứng ngoài quan sát cho đến khi giá hàng tồn kho trích lập xong.",
+            "stopLossPrice": 20200,
+            "takeProfitLevels": []
+          }
+        },
+        {
+          "label": "BEAR",
+          "name": "Suy giảm lợi nhuận đột ngột (E collapse) do thuế phòng vệ thương mại & đảo chiều giá HRC",
+          "probability": 0.45,
+          "targetPrice": 16280,
+          "expectedReturnPct": -26,
+          "timeHorizonWeeks": 8,
+          "invalidation": {
+            "priceLevel": 24000,
+            "condition": "BREAK_ABOVE",
+            "timeframe": "DAILY_CLOSE",
+            "rationale": "Đóng cửa vượt 24,000 VND với biên gộp quý tăng trở lại > 10%."
+          },
+          "actionProtocol": {
+            "allocationPct": 0,
+            "entryCondition": "TUYỆT ĐỐI KHÔNG tất tay theo P/E trailing thấp; đứng ngoài bảo vệ vốn.",
+            "stopLossPrice": 20200,
+            "takeProfitLevels": []
+          },
+          "bearContingency": {
+            "t2FloorLockRisk": "HIGH",
+            "estimatedSlippagePct": 14,
+            "liquidityDrainExitPlan": "Khi doanh nghiệp tôn mạ công bố lỗ/trích lập tồn kho bất ngờ, cổ phiếu Beta cao dễ rơi 2 phiên sàn liên tiếp (-14%). Đặt lệnh ATO thoát toàn bộ vị thế ngay đầu phiên sáng T+2.5 nếu mất mốc 20,200 VND.",
+            "hedgingStrategy": "Loại bỏ cổ phiếu hàng hóa chu kỳ có tồn kho lớn khỏi danh mục mua mới và chuyển vốn sang tiền mặt/VN30F Short hedge khi thị trường xấu."
+          }
+        }
+      ]
+    },
+    "expectedMetrics": {
+      "totalProbability": 1,
+      "expectedReturnPct": -9.1,
+      "scenarioVolatilityPct": 17.52,
+      "compositeRrr": 0.31,
+      "bullBearAsymmetryRatio": 0.34,
+      "t2LiquidityHaircutReturnPct": -15.4,
+      "croVerdict": "REJECTED_UNSAFE",
+      "croAuditScore": 50,
+      "croPassed": false,
+      "engineVerdict": "DEFENSIVE_CASH"
+    },
+    "references": [
+      "Nghịch lý P/E Cổ phiếu Chu kỳ & Trích lập Dự phòng Hàng tồn kho (VAS 02)",
+      "Dữ liệu Giá HRC Thế giới & Điều tra Phòng vệ Thương mại EU/Mỹ",
+      "Orca Multi-Scenario Critic Engine"
+    ]
+  }
+]

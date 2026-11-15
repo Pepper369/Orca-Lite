@@ -30,6 +30,7 @@ import {
   getCommodityMacroCases,
   getForensicRiskCases,
 } from "./sft_v2_extension_cases";
+import { getOrcaFinancialDomainCases } from "./orca_financial_domain_cases";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -47,7 +48,8 @@ interface UnifiedSftRecord {
     | "pipeline_multi_scenario"
     | "pipeline_screener_filter"
     | "pipeline_commodity_macro"
-    | "pipeline_forensic_risk";
+    | "pipeline_forensic_risk"
+    | "pipeline_orca_financial_domain";
   category: string;
   split: "train" | "eval";
   symbol?: string;
@@ -93,6 +95,12 @@ const SYSTEM_PROMPTS = {
     "Bạn là Chuyên gia Phân tích Vĩ mô & Hàng hóa Toàn cầu (Global Macro & Commodities) của Orca AI. Hãy bóc tách cơ chế truyền dẫn của giá hàng hóa thế giới vào doanh nghiệp niêm yết tại Việt Nam, đo lường độ trễ vòng quay tồn kho (1-2 quý) và phân hóa nhóm hưởng lợi/chịu áp lực chi phí.",
   forensicRisk:
     "Bạn là Chuyên gia Pháp y Kế toán & Kiểm toán Thẩm định Rủi ro (Forensic CPA) của Orca AI. Hãy bóc tách các cờ đỏ BCTC, bẫy lợi nhuận giấy, tỷ lệ dồn tích Accruals, áp lực nợ trái phiếu và nguyên tắc phòng vệ kẹt sàn T+2.5.",
+  macroCentralBank:
+    "Bạn là Chuyên gia Hoạch định Vĩ mô & Chính sách Tiền tệ Cấp cao của Orca AI (Central Banking & Macro Strategy), am hiểu sâu sắc cơ chế điều hành OMO, tín phiếu, tỷ giá USD/VND của NHNN (SBV), chu kỳ Fed và cân bằng lạm phát M2.",
+  derivativesHedging:
+    "Bạn là Giám đốc Chiến lược Phái sinh & Phòng hộ Định lượng (Derivatives & Quantitative Hedging) của Orca AI, chuyên sâu hợp đồng VN30F1M, độ lệch Basis, vi cấu trúc đáo hạn phái sinh và quản trị rủi ro danh mục cơ sở.",
+  cryptoRisk:
+    "Bạn là Chuyên gia Định lượng On-Chain & Quản trị Rủi ro Tài sản Số (Crypto & Digital Asset Quant) của Orca AI. Hãy phân tích khách quan dựa trên chỉ số on-chain MVRV, chu kỳ Halving, bóc tách rủi ro Depeg stablecoin và thác thanh lý.",
 };
 
 function normalizeQuestion(q: string): string {
@@ -969,6 +977,25 @@ async function main() {
     });
   }
 
+  // --- SFT DATASET V3: Orca-Financial Omni Institutional Domain Cases ---
+  const orcaDomainCases = getOrcaFinancialDomainCases();
+  for (const odc of orcaDomainCases) {
+    const sysPrompt =
+      SYSTEM_PROMPTS[odc.systemRole as keyof typeof SYSTEM_PROMPTS] ??
+      SYSTEM_PROMPTS.quantMath;
+    addRecord({
+      id: odc.id,
+      source: "pipeline_orca_financial_domain",
+      category: odc.category,
+      split: "train",
+      messages: [
+        { role: "system", content: sysPrompt },
+        { role: "user", content: odc.q },
+        { role: "assistant", content: odc.a.trim() },
+      ],
+    });
+  }
+
   // Deterministic stratified train/eval split (~16.7% eval across sources)
   const categoryBucketCounts = new Map<string, number>();
   for (const rec of records) {
@@ -1071,6 +1098,35 @@ async function main() {
   console.log(`Multi-scenario records with Bull/Base/Bear + 100% + E[R] + T+2.5: ${multiScenarioWithCoreTokens}/${multiScenarioCount}`);
   console.log("Source breakdown:", JSON.stringify(bySource, null, 2));
   console.log("Category breakdown:", JSON.stringify(byCategory, null, 2));
+
+  const SUMMARY_PATH = path.resolve(
+    ROOT,
+    "src/data/training/orca_financial_dataset_summary.json"
+  );
+  const summaryPayload = {
+    title: "Orca-Financial Unified SFT Dataset Summary",
+    generatedAt: new Date().toISOString(),
+    totalRecords: unifiedParsed.length,
+    trainCount,
+    evalCount,
+    trainPct: Number(((trainCount / unifiedParsed.length) * 100).toFixed(1)),
+    evalPct: Number(((evalCount / unifiedParsed.length) * 100).toFixed(1)),
+    unifiedBytes,
+    pureChatMlBytes: pureBytes,
+    assistantCharMetrics: {
+      min: minAssistantLen,
+      avg: Math.round(sumAssistantLen / unifiedParsed.length),
+      max: maxAssistantLen,
+    },
+    multiScenarioMetrics: {
+      totalMultiScenario: multiScenarioCount,
+      withCoreTokens: multiScenarioWithCoreTokens,
+    },
+    sources: bySource,
+    categories: byCategory,
+  };
+  fs.writeFileSync(SUMMARY_PATH, JSON.stringify(summaryPayload, null, 2), "utf-8");
+  console.log(`Summary JSON written to: ${SUMMARY_PATH}`);
 }
 
 main().catch((err) => {
