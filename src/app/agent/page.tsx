@@ -443,42 +443,67 @@ export default function AgentPage() {
     messagesRef.current = messages;
   }, [messages]);
 
-  const userScrolledUpRef = useRef(false);
-  const isAutoScrollingRef = useRef(false);
+  const autoScrollEnabledRef = useRef(true);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
 
-    const onScroll = () => {
-      if (isAutoScrollingRef.current) return;
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const isUp = dist > 60;
-      userScrolledUpRef.current = isUp;
-      setShowScrollBottom(isUp);
+    // Bắt sự kiện người dùng chủ động lăn chuột lên: Ngừng bám đuôi ngay lập tức
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        autoScrollEnabledRef.current = false;
+        setShowScrollBottom(true);
+      }
     };
 
+    // Bắt thao tác chạm/vuốt trên màn hình cảm ứng điện thoại
+    const onTouchMove = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (dist > 25) {
+        autoScrollEnabledRef.current = false;
+        setShowScrollBottom(true);
+      }
+    };
+
+    // Khi người dùng cuộn hoặc kéo chuột trên thanh cuộn
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (dist <= 15) {
+        // Người dùng đã quay lại đáy: cho phép tiếp tục bám đáy
+        autoScrollEnabledRef.current = true;
+        setShowScrollBottom(false);
+      } else if (dist > 35) {
+        // Người dùng đang dừng ở đoạn trên để đọc: giữ nguyên vị trí, không kéo xuống
+        autoScrollEnabledRef.current = false;
+        setShowScrollBottom(true);
+      }
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("scroll", onScroll);
+    };
   }, []);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    // Đang có người dùng chủ động cuộn lên đọc: tuyệt đối không giật màn hình xuống
-    if (userScrolledUpRef.current) return;
+    // Nếu người dùng đang dừng để đọc hoặc kéo thanh cuộn lên: tuyệt đối không can thiệp vị trí cuộn
+    if (!autoScrollEnabledRef.current) return;
 
-    isAutoScrollingRef.current = true;
     el.scrollTop = el.scrollHeight;
-    requestAnimationFrame(() => {
-      isAutoScrollingRef.current = false;
-    });
   }, [messages, busy]);
 
   function scrollToBottom(smooth = true) {
     const el = listRef.current;
     if (!el) return;
-    userScrolledUpRef.current = false;
+    autoScrollEnabledRef.current = true;
     setShowScrollBottom(false);
     el.scrollTo({
       top: el.scrollHeight,
@@ -489,6 +514,10 @@ export default function AgentPage() {
   const handleOuterWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const el = listRef.current;
     if (!el) return;
+    if (e.deltaY < 0) {
+      autoScrollEnabledRef.current = false;
+      setShowScrollBottom(true);
+    }
     if (e.target !== el && !el.contains(e.target as Node)) {
       el.scrollTop += e.deltaY;
     }
@@ -517,7 +546,7 @@ export default function AgentPage() {
   async function ask(q: string) {
     const question = q.trim();
     if (!question || busy) return;
-    userScrolledUpRef.current = false;
+    autoScrollEnabledRef.current = true;
     setShowScrollBottom(false);
     setBusy(true);
 
