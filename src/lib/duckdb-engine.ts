@@ -65,15 +65,21 @@ export async function getDuckDB(): Promise<duckdb.AsyncDuckDB | null> {
  */
 export async function ingestJSONTable(tableName: string, data: Record<string, unknown>[]): Promise<boolean> {
   if (!data || data.length === 0) return false;
+  const safeTableName = tableName.trim().replace(/[^a-zA-Z0-9_]/g, "_");
+  if (!safeTableName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(safeTableName)) {
+    console.warn(`[DuckDB-Engine] Invalid table name rejected: ${tableName}`);
+    return false;
+  }
+
   try {
     const db = await getDuckDB();
     if (!db || !connInstance) return false;
 
     const jsonStr = JSON.stringify(data);
-    await db.registerFileText(`${tableName}.json`, jsonStr);
+    await db.registerFileText(`${safeTableName}.json`, jsonStr);
     await connInstance.query(`
-      CREATE OR REPLACE TABLE ${tableName} AS 
-      SELECT * FROM read_json_auto('${tableName}.json');
+      CREATE OR REPLACE TABLE ${safeTableName} AS 
+      SELECT * FROM read_json_auto('${safeTableName}.json');
     `);
     return true;
   } catch (err) {

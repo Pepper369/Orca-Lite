@@ -36,6 +36,15 @@ async function fetchWithCache<T>(url: string, ttlSeconds = 60): Promise<T | null
     }
 
     const json = await res.json();
+    if (memoryCache.size >= 300) {
+      for (const [k, v] of memoryCache) {
+        if (v.expiresAt <= now) memoryCache.delete(k);
+      }
+      if (memoryCache.size >= 300) {
+        const oldestKey = memoryCache.keys().next().value;
+        if (oldestKey) memoryCache.delete(oldestKey);
+      }
+    }
     memoryCache.set(url, { data: json, expiresAt: now + ttlSeconds * 1000 });
     return json as T;
   } catch (err) {

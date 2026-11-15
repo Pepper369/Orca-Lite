@@ -196,19 +196,30 @@ app.get("/api/v1/agent/verify", async (c) => {
 // Universal Next.js Route Resolver with Dynamic Parameter Support
 const apiBaseDir = path.resolve(process.cwd(), "src", "app", "api");
 const routeCache = new Map<string, { routeFile: string; paramNames: string[] }>();
+const MAX_ROUTE_CACHE_ENTRIES = 500;
 
 function findRoute(currentDir: string, segments: string[], paramNames: string[]): { routeFile: string; paramNames: string[] } | null {
+  const resolvedCurrent = path.resolve(currentDir);
+  if (!resolvedCurrent.startsWith(apiBaseDir)) {
+    return null;
+  }
+
   if (segments.length === 0) {
     const directFile = path.join(currentDir, "route.ts");
-    if (fs.existsSync(directFile)) return { routeFile: directFile, paramNames };
+    if (fs.existsSync(directFile) && path.resolve(directFile).startsWith(apiBaseDir)) {
+      return { routeFile: directFile, paramNames };
+    }
     return null;
   }
 
   const [segment, ...rest] = segments;
+  if (!segment || segment.includes("..") || segment.includes("/") || segment.includes("\\") || segment.includes("\0")) {
+    return null;
+  }
 
   // 1. Exact match folder
   const exactDir = path.join(currentDir, segment);
-  if (fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
+  if (path.resolve(exactDir).startsWith(apiBaseDir) && fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
     const res = findRoute(exactDir, rest, paramNames);
     if (res) return res;
   }
@@ -219,8 +230,11 @@ function findRoute(currentDir: string, segments: string[], paramNames: string[])
     for (const entry of entries) {
       if (entry.isDirectory() && entry.name.startsWith("[") && entry.name.endsWith("]")) {
         const pName = entry.name.slice(1, -1);
-        const res = findRoute(path.join(currentDir, entry.name), rest, [...paramNames, pName]);
-        if (res) return res;
+        const bracketDir = path.join(currentDir, entry.name);
+        if (path.resolve(bracketDir).startsWith(apiBaseDir)) {
+          const res = findRoute(bracketDir, rest, [...paramNames, pName]);
+          if (res) return res;
+        }
       }
     }
   }
@@ -234,6 +248,11 @@ app.all("/api/*", async (c) => {
   const pathname = url.pathname.replace(/^\/api\//, "");
   const segments = pathname.split("/").filter(Boolean);
 
+  // Security guard: Reject path traversal attempts immediately
+  if (segments.some((s) => s === ".." || s === "." || s.includes("..") || s.includes("\\") || s.includes("\0"))) {
+    return c.json({ success: false, error: { code: "FORBIDDEN", message: "Invalid path segments" } }, 403);
+  }
+
   try {
     const cacheKey = segments.join("/");
     let matched = routeCache.get(cacheKey);
@@ -241,6 +260,9 @@ app.all("/api/*", async (c) => {
     if (!matched) {
       matched = findRoute(apiBaseDir, segments, []) ?? undefined;
       if (matched) {
+        if (routeCache.size >= MAX_ROUTE_CACHE_ENTRIES) {
+          routeCache.clear();
+        }
         routeCache.set(cacheKey, matched);
       }
     }

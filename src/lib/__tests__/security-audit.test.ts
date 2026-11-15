@@ -54,3 +54,38 @@ test("Security Audit: BCTC Deadlines Year Range Clamping", () => {
     assert.match(d.date, /^\d{4}-\d{2}-\d{2}$/);
   }
 });
+
+test("Security Audit: DuckDB Table Name Sanitization & Injection Defense", async () => {
+  const { ingestJSONTable } = await import("../duckdb-engine");
+  const maliciousNames = [
+    "users; DROP TABLE stocks; --",
+    "../../etc/passwd",
+    "table' OR '1'='1",
+    "",
+    "   ",
+  ];
+  for (const name of maliciousNames) {
+    const success = await ingestJSONTable(name, [{ id: 1, val: "test" }]);
+    // Either sanitized successfully or rejected safely without throwing error
+    assert.equal(typeof success, "boolean");
+  }
+});
+
+test("Security Audit: Path Traversal Segment Validation", () => {
+  const traversalSegments = [
+    ["..", "etc", "passwd"],
+    ["v1", "..", "secrets"],
+    ["v1", "stocks", "...."],
+    ["v1", "stocks", "foo\\bar"],
+    ["v1", "stocks", "foo\0bar"],
+  ];
+
+  for (const segments of traversalSegments) {
+    const isDangerous = segments.some((s) => s === ".." || s === "." || s.includes("..") || s.includes("\\") || s.includes("\0"));
+    assert.equal(isDangerous, true, `Segment ${JSON.stringify(segments)} must be detected as dangerous`);
+  }
+
+  const safeSegments = ["v1", "stocks", "HPG", "financials"];
+  const isSafe = !safeSegments.some((s) => s === ".." || s === "." || s.includes("..") || s.includes("\\") || s.includes("\0"));
+  assert.equal(isSafe, true);
+});

@@ -405,6 +405,10 @@ export async function getFastStockLiveInsight(symbol: string): Promise<FastStock
       screenerSync,
     };
 
+    if (stockInsightCache.size >= 250) {
+      const oldestKey = stockInsightCache.keys().next().value;
+      if (oldestKey) stockInsightCache.delete(oldestKey);
+    }
     stockInsightCache.set(sym, { ts: now, data: insight });
     return insight;
   } catch (err) {

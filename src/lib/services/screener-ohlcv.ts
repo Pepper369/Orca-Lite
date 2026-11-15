@@ -116,6 +116,10 @@ export async function fetchOhlcvResilient(
   }
 
   // Cache fresh valid bars
+  if (screenerOhlcvL1.size >= 250) {
+    const oldestKey = screenerOhlcvL1.keys().next().value;
+    if (oldestKey) screenerOhlcvL1.delete(oldestKey);
+  }
   screenerOhlcvL1.set(cKey, { data: result, exp: Date.now() + OHLCV_L1_TTL_MS });
   return result;
 }

@@ -27,6 +27,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
       `Chưa đủ chuỗi giá để phân tích cấu trúc ${key}.`,
     );
   }
+  if (structureCache.size >= 200) {
+    const oldestKey = structureCache.keys().next().value;
+    if (oldestKey) structureCache.delete(oldestKey);
+  }
   structureCache.set(key, { at: Date.now(), data: r.data, meta: r.meta });
   return ok(r.data, r.meta);
 }

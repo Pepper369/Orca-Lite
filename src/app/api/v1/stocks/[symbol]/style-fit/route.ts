@@ -40,6 +40,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
       partial: result.notes.length > 0,
       note: "Điều kiện nghiên cứu, không phải tín hiệu giao dịch.",
     } satisfies Meta;
+    if (styleCache.size >= 200) {
+      const oldestKey = styleCache.keys().next().value;
+      if (oldestKey) styleCache.delete(oldestKey);
+    }
     styleCache.set(normalized, { at: Date.now(), payload: result, meta });
     return ok(result, meta);
   } catch {

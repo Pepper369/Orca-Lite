@@ -108,7 +108,13 @@ async function fetchCachedVpsForeign(sym: string) {
   const e = vpsForeignL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
   const res = await withTimeout(getVpsForeignFlow(sym), 2_000).catch(() => null);
-  if (res) vpsForeignL1.set(sym, { val: res, exp: Date.now() + 2 * 60_000 });
+  if (res) {
+    if (vpsForeignL1.size >= 250) {
+      const oldestKey = vpsForeignL1.keys().next().value;
+      if (oldestKey) vpsForeignL1.delete(oldestKey);
+    }
+    vpsForeignL1.set(sym, { val: res, exp: Date.now() + 2 * 60_000 });
+  }
   return res;
 }
 
@@ -116,7 +122,13 @@ async function fetchCachedVndReports(sym: string) {
   const e = vndReportsL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
   const res = await withTimeout(getStockAnalyticReports(sym, 5), 2_500).catch(() => null);
-  if (res) vndReportsL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  if (res) {
+    if (vndReportsL1.size >= 250) {
+      const oldestKey = vndReportsL1.keys().next().value;
+      if (oldestKey) vndReportsL1.delete(oldestKey);
+    }
+    vndReportsL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  }
   return res;
 }
 
@@ -124,7 +136,13 @@ async function fetchCachedVietcapShareholders(sym: string) {
   const e = vietcapShareholdersL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
   const res = await withTimeout(getStockShareholders(sym), 2_500).catch(() => null);
-  if (res) vietcapShareholdersL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  if (res) {
+    if (vietcapShareholdersL1.size >= 250) {
+      const oldestKey = vietcapShareholdersL1.keys().next().value;
+      if (oldestKey) vietcapShareholdersL1.delete(oldestKey);
+    }
+    vietcapShareholdersL1.set(sym, { val: res, exp: Date.now() + 10 * 60_000 });
+  }
   return res;
 }
 
