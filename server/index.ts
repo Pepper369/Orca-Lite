@@ -302,6 +302,11 @@ async function startUnifiedServer() {
         console.log(`  🚀 Production Server: http://localhost:${info.port}`);
         console.log(`  📦 Static SPA Bundle: ./dist`);
         console.log(`  ⚡ Fixed Single Port: ${info.port}\n`);
+
+        // Start Fast Datafeed background worker & prewarm
+        import("@/lib/services/fast-datafeed-hub")
+          .then((m) => m.initFastDatafeedWorker())
+          .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
       },
     );
   } else {
@@ -329,6 +334,11 @@ async function startUnifiedServer() {
       console.log(`  ⚡ Unified Server:   http://localhost:${port}`);
       console.log(`  ⚡ Mode:             Development (In-Process Vite HMR + Hono Engine)`);
       console.log(`  ⚡ Fixed Single Port: ${port} (Zero Multi-Port Confusion, No Proxy)\n`);
+
+      // Start Fast Datafeed background worker & prewarm
+      import("@/lib/services/fast-datafeed-hub")
+        .then((m) => m.initFastDatafeedWorker())
+        .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
     });
 
     const cleanup = async () => {
