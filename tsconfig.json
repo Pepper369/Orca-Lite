@@ -25,20 +25,39 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "next": [
+        "./src/lib/shims/next-types.ts"
+      ],
+      "next/server": [
+        "./src/lib/shims/next-server.ts"
+      ],
+      "next/headers": [
+        "./src/lib/shims/next-headers.ts"
+      ],
+      "next/og": [
+        "./src/lib/shims/next-og.ts"
+      ],
+      "next/link": [
+        "./src/lib/shims/next-link.tsx"
+      ],
+      "next/navigation": [
+        "./src/lib/shims/next-navigation.tsx"
+      ],
+      "next/dynamic": [
+        "./src/lib/shims/next-dynamic.tsx"
+      ],
+      "next/image": [
+        "./src/lib/shims/next-image.tsx"
       ]
-    },
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+    }
   },
   "include": [
-    "next-env.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    "server/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.config.ts"
   ],
   "exclude": [
     "node_modules",

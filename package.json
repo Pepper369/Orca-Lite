@@ -9,15 +9,11 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "dev:all": "tsx scripts/dev.ts",
-    "dev:gguf": "powershell -ExecutionPolicy Bypass -File src/scripts/model/dev_with_gguf.ps1",
-    "dev:next": "next dev --webpack -p 3000 -H 0.0.0.0",
-    "dev:turbo": "next dev -p 3000 -H 0.0.0.0",
     "server:hono": "tsx server/index.ts",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "preview:vite": "vite preview",
     "build": "vite build",
-    "build:next": "next build",
     "start": "tsx server/index.ts",
     "prod": "vite build && tsx server/index.ts",
     "lint": "eslint .",
@@ -50,7 +46,6 @@
     "lightweight-charts": "^5.2.1",
     "lucide-react": "^0.545.0",
     "mammoth": "^1.13.0",
-    "next": "16.4.3",
     "pg": "8.20.0",
     "postcss": "8.5.29",
     "react": "19.2.6",
@@ -64,8 +59,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "0.31.10",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.4.3"
+    "eslint": "9.39.4"
   },
   "overrides": {
     "@grpc/grpc-js": "^1.14.6",

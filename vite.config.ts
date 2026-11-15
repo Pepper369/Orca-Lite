@@ -16,6 +16,10 @@ export default defineConfig({
       "next/navigation": path.resolve(__dirname, "./src/lib/shims/next-navigation.tsx"),
       "next/dynamic": path.resolve(__dirname, "./src/lib/shims/next-dynamic.tsx"),
       "next/image": path.resolve(__dirname, "./src/lib/shims/next-image.tsx"),
+      "next/server": path.resolve(__dirname, "./src/lib/shims/next-server.ts"),
+      "next/headers": path.resolve(__dirname, "./src/lib/shims/next-headers.ts"),
+      "next/og": path.resolve(__dirname, "./src/lib/shims/next-og.ts"),
+      "next": path.resolve(__dirname, "./src/lib/shims/next-types.ts"),
     },
   },
   server: {

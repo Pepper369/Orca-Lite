@@ -12,11 +12,11 @@ export function usePathname(): string {
 
 export function useRouter() {
   return {
-    push: (href: string) => {
+    push: (href: string, _options?: { scroll?: boolean }) => {
       window.history.pushState(null, "", href);
       window.dispatchEvent(new PopStateEvent("popstate"));
     },
-    replace: (href: string) => {
+    replace: (href: string, _options?: { scroll?: boolean }) => {
       window.history.replaceState(null, "", href);
       window.dispatchEvent(new PopStateEvent("popstate"));
     },
@@ -48,4 +48,11 @@ export function useParams(): Record<string, string> {
     return { symbol: segments[1].toUpperCase() };
   }
   return {};
+}
+
+export function redirect(url: string): never {
+  if (typeof window !== "undefined") {
+    window.location.href = url;
+  }
+  throw new Error(`NEXT_REDIRECT: ${url}`);
 }

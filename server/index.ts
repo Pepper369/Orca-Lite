@@ -88,12 +88,12 @@ app.get("/api/v1/crypto/markets", async (c) => {
 
 app.get("/api/v1/forex/markets", async (c) => {
   const { GET } = await import("@/app/api/v1/forex/markets/route");
-  return GET(c.req.raw);
+  return GET();
 });
 
 app.get("/api/v1/commodities", async (c) => {
   const { GET } = await import("@/app/api/v1/commodities/route");
-  return GET(c.req.raw);
+  return GET();
 });
 
 app.get("/api/v1/news", async (c) => {
@@ -106,9 +106,9 @@ app.get("/api/v1/watchlist", async (c) => {
   return GET(c.req.raw);
 });
 
-app.post("/api/v1/watchlist", async (c) => {
-  const { POST } = await import("@/app/api/v1/watchlist/route");
-  return POST(c.req.raw);
+app.put("/api/v1/watchlist", async (c) => {
+  const { PUT } = await import("@/app/api/v1/watchlist/route");
+  return PUT(c.req.raw);
 });
 
 // Dynamic fallback for any other /api/* endpoints
