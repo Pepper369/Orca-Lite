@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { SWRConfig } from "swr";
 import { PriceAlertMonitorHost } from "@/components/price-alert-monitor-host";
 import { PatternAlertMonitorHost } from "@/components/pattern-alert-monitor-host";
@@ -148,10 +149,37 @@ function WarmCriticalApis() {
  * Runs only after initial view is stable, keeping cold load light while making subsequent tab clicks instant.
  */
 function IdleChunkPreloader() {
+  const router = useRouter();
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const navAny = navigator as unknown as { connection?: { saveData?: boolean } };
     if (navAny?.connection?.saveData) return;
+
+    // 1. Prewarm core route bundles in idle intervals so first-visit jumps instantly
+    const coreRoutes = [
+      "/stocks",
+      "/screener",
+      "/agent",
+      "/crypto",
+      "/forex",
+      "/commodities",
+      "/derivatives",
+      "/quant",
+      "/watchlist",
+      "/news",
+    ];
+    const routeTimers: ReturnType<typeof setTimeout>[] = [];
+    coreRoutes.forEach((route, idx) => {
+      const t = setTimeout(() => {
+        try {
+          router.prefetch(route);
+        } catch {
+          /* ignore */
+        }
+      }, 1_200 + idx * 300);
+      routeTimers.push(t);
+    });
 
     const preloadHeavyChunks = () => {
       void import("@/components/orca-chart");
@@ -176,12 +204,13 @@ function IdleChunkPreloader() {
     }
 
     return () => {
+      for (const t of routeTimers) clearTimeout(t);
       if (idleId !== null && "cancelIdleCallback" in window) {
         (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(idleId);
       }
       if (timerId) clearTimeout(timerId);
     };
-  }, []);
+  }, [router]);
   return null;
 }
 
