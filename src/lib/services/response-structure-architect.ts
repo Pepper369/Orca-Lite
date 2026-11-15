@@ -1,6 +1,7 @@
 import "server-only";
 import { type FastDatafeedContext } from "./fast-datafeed-hub";
 import { isVnSymbol } from "../vn/master";
+import type { ScreenerPreset } from "./screener-snapshot-service";
 
 export type DetectedQueryIntent =
   | "MULTI_SCENARIO"       // Phân tích đa kịch bản Bull/Base/Bear, điểm vô hiệu hóa, RRR
@@ -27,6 +28,7 @@ export interface IntentDetectionResult {
 }
 
 export interface ParsedScreeningCriteria {
+  preset?: ScreenerPreset;
   peMax?: number;
   peMin?: number;
   pbMax?: number;
@@ -35,10 +37,16 @@ export interface ParsedScreeningCriteria {
   divYieldMin?: number;
   debtEquityMax?: number;
   fScoreMin?: number;
+  rsMin?: number;
+  minRiskReward?: number;
+  quantEdgeMin?: number;
   sweetZoneOnly?: boolean;
+  smartMoneyOnly?: boolean;
+  vsaOnly?: boolean;
+  squeezeOnly?: boolean;
   sectors?: string[];
   minTradingValue?: number;
-  sort?: "marketCap" | "roe" | "divYield" | "pe" | "compositeScore" | "quantEdgeScore";
+  sort?: "marketCap" | "roe" | "divYield" | "pe" | "compositeScore" | "quantEdgeScore" | "orcaMasterScore" | "rsRating";
   order?: "asc" | "desc";
   humanSummary: string[];
 }
@@ -47,6 +55,7 @@ export function isScreenerQuery(query: string): boolean {
   const q = query.toLowerCase();
   return (
     /lọc|bộ lọc|sàng lọc|screener|tìm mã|tìm cổ phiếu|tìm cho tôi|tìm những|tìm các mã|cho tôi danh sách|những mã nào|cổ phiếu nào|top cổ phiếu|tiêu chí|thỏa mãn tiêu chí/i.test(q) ||
+    /canslim|vcp|squeeze|smart money|cá mập|rs rating|mean reversion|low beta|asymmetric|piotroski|magic formula|chân sóng/i.test(q) ||
     (/(?:roe|p\/e|pe|p\/b|pb|cổ tức|dividend|d\/e|f-?score)\s*(?:>|>=|<|<=|trên|dưới|cao|thấp)/i.test(q) && !/thị trường|vn-?index/i.test(q))
   );
 }
@@ -149,7 +158,64 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
   // 8. Chân Sóng Apex / Vùng Vàng (Sweet Launch Zone)
   if (/(?:chân sóng|vùng vàng|apex|sweet zone|sweet launch|đảo chiều wyckoff|spring)/i.test(q)) {
     res.sweetZoneOnly = true;
+    res.preset = "apex_buy_now";
     humanSummary.push("👑 Vùng Vàng Chân Sóng Apex (cách đáy 0.8% - 7.5%, R:R ≥ 2.2x)");
+  }
+
+  // 8.1. Quant Trading Presets & Alpha Strategies
+  if (/canslim|siêu cổ phiếu tăng trưởng/i.test(q)) {
+    res.preset = "canslim";
+    humanSummary.push("Phương pháp CANSLIM William O'Neil (EPS & Doanh thu tăng trưởng mạnh)");
+  } else if (/vcp|thu hẹp độ biến động|thu hẹp biến động/i.test(q)) {
+    res.preset = "vcp";
+    humanSummary.push("Mô hình VCP Mark Minervini (Thu hẹp biến động & Cạn cung)");
+  } else if (/squeeze|thắt nút|nén bollinger/i.test(q)) {
+    res.preset = "ttm_squeeze";
+    res.squeezeOnly = true;
+    humanSummary.push("TTM Squeeze (Bollinger Bands thắt chặt trong Keltner Channel)");
+  } else if (/smart money|cá mập|dòng tiền lớn|dòng tiền thông minh|tay to gom|tổ chức tích lũy/i.test(q)) {
+    res.preset = "smart_money_inflow";
+    res.smartMoneyOnly = true;
+    humanSummary.push("Dấu chân Dòng Tiền Lớn (Smart Money Footprint & Lực gom chủ động)");
+  } else if (/asymmetric|bất đối xứng|r:r|risk\s*\/?\s*reward/i.test(q)) {
+    res.preset = "quant_asymmetric";
+    res.minRiskReward = 2.2;
+    humanSummary.push("Quant Asymmetric Payoff (Tỷ lệ Lợi nhuận/Rủi ro R:R ≥ 2.2x)");
+  } else if (/mean reversion|hồi quy trung bình|bật đáy định lượng/i.test(q)) {
+    res.preset = "quant_mean_revert";
+    humanSummary.push("Quant Mean Reversion (Mô hình Ornstein-Uhlenbeck Z ≤ -1.3)");
+  } else if (/low beta|beta thấp|phòng thủ/i.test(q)) {
+    res.preset = "quant_low_beta";
+    humanSummary.push("Low-Beta Anomaly (Beta ≤ 0.85, ROE cao - Phòng thủ an toàn)");
+  } else if (/vsa|no supply|cạn cung|test cung/i.test(q)) {
+    res.preset = "vsa_no_supply";
+    res.vsaOnly = true;
+    humanSummary.push("VSA No Supply Bar (Cạn kiệt khối lượng kiểm định cung)");
+  } else if (/magic formula|công thức kỳ diệu|greenblatt/i.test(q)) {
+    res.preset = "magic_formula";
+    humanSummary.push("Magic Formula Joel Greenblatt (ROIC vượt trội + P/E rẻ)");
+  } else if (/piotroski|f-score\s*[89]|fscore\s*[89]/i.test(q)) {
+    res.preset = "piotroski_diamonds";
+    res.fScoreMin = 8;
+    humanSummary.push("Piotroski Diamonds (F-Score ≥ 8/9 - BCTC sạch)");
+  } else if (/breakout|vượt đỉnh|bứt phá cản/i.test(q)) {
+    res.preset = "breakout";
+    humanSummary.push("Breakout Vượt Đỉnh (Thanh khoản bùng nổ vượt kháng cự)");
+  }
+
+  // 8.2 Sức mạnh giá Relative Strength (RS Rating)
+  const rsMatch = q.match(/rs(?:\s+rating)?\s*(?:>|>=|trên|tối thiểu|đạt)?\s*(\d+)/i);
+  if (rsMatch) {
+    const val = parseInt(rsMatch[1], 10);
+    if (!isNaN(val) && val >= 1 && val <= 99) {
+      res.rsMin = val;
+      if (!res.preset) res.preset = "rs_leaders";
+      humanSummary.push(`Sức mạnh giá RS Rating ≥ ${val}/99`);
+    }
+  } else if (/rs cao|sức mạnh giá tốt|dẫn dắt thị trường|siêu cổ phiếu o'neil/i.test(q)) {
+    res.rsMin = 80;
+    if (!res.preset) res.preset = "rs_leaders";
+    humanSummary.push("Sức mạnh giá RS Rating ≥ 80/99 (Top 20% cổ phiếu mạnh nhất sàn)");
   }
 
   // 9. Ngành / Sector
@@ -193,7 +259,10 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
   } else if (/(?:p\/e|pe|rẻ|định giá thấp)/i.test(q)) {
     res.sort = "pe";
     res.order = "asc";
-  } else if (/(?:apex|chân sóng|vùng vàng)/i.test(q)) {
+  } else if (/(?:rs|sức mạnh giá)/i.test(q) || res.preset === "rs_leaders") {
+    res.sort = "rsRating";
+    res.order = "desc";
+  } else if (/(?:apex|chân sóng|vùng vàng|quant|định lượng|asymmetric)/i.test(q)) {
     res.sort = "quantEdgeScore";
     res.order = "desc";
   } else {

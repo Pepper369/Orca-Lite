@@ -36,6 +36,29 @@ describe("Quantitative Stock Screener & Datafeed Hub", () => {
     assert.equal(res3.sweetZoneOnly, true);
     assert.equal(res3.fScoreMin, 7);
     assert.equal(isScreenerQuery(q3), true);
+
+    const qCanslim = "Tìm các siêu cổ phiếu theo mô hình CANSLIM tăng trưởng cao";
+    const resCanslim = parseScreeningCriteria(qCanslim);
+    assert.equal(resCanslim.preset, "canslim");
+    assert.equal(isScreenerQuery(qCanslim), true);
+
+    const qVcp = "Lọc cổ phiếu mô hình VCP thu hẹp độ biến động nén chặt";
+    const resVcp = parseScreeningCriteria(qVcp);
+    assert.equal(resVcp.preset, "vcp");
+
+    const qSmartMoney = "Tìm cổ phiếu có Smart Money cá mập gom mạnh";
+    const resSmartMoney = parseScreeningCriteria(qSmartMoney);
+    assert.equal(resSmartMoney.preset, "smart_money_inflow");
+    assert.equal(resSmartMoney.smartMoneyOnly, true);
+
+    const qRs = "Lọc cổ phiếu dẫn dắt RS Rating > 85";
+    const resRs = parseScreeningCriteria(qRs);
+    assert.equal(resRs.rsMin, 85);
+    assert.equal(resRs.preset, "rs_leaders");
+
+    const qLowBeta = "Lọc cổ phiếu Low-Beta Anomaly phòng thủ thị trường";
+    const resLowBeta = parseScreeningCriteria(qLowBeta);
+    assert.equal(resLowBeta.preset, "quant_low_beta");
   });
 
   it("Nhận diện Intent SCREENER_FILTER chuẩn mực cho câu hỏi sàng lọc", () => {
@@ -53,6 +76,19 @@ describe("Quantitative Stock Screener & Datafeed Hub", () => {
     assert.ok(screenerRes.topStocks.length > 0);
     assert.ok(screenerRes.markdownTable.includes("| Hạng | Mã CP |"));
     assert.ok(screenerRes.filterCaveats.length >= 3);
+  });
+
+  it("Xử lý truy vấn Quant Trading với preset CANSLIM & Smart Money chính xác", async () => {
+    const q = "Tìm cổ phiếu CANSLIM dẫn dắt thị trường";
+    const screenerRes = await getFastScreenerFeed(q);
+
+    assert.ok(screenerRes != null);
+    assert.ok(screenerRes.topStocks.length > 0);
+    assert.equal(screenerRes.criteria.preset, "canslim");
+    assert.ok(screenerRes.criteriaSummary.some((s) => s.includes("CANSLIM")));
+    assert.ok(screenerRes.filterCaveats.some((c) => c.includes("CANSLIM")));
+    assert.ok(screenerRes.markdownTable.includes("| Hạng | Mã CP |"));
+    assert.ok(screenerRes.topStocks.some((s) => s.tripleBarrierSummary != null || (s.multiFactorScore ?? 0) > 0));
   });
 
   it("Tích hợp bảng sàng lọc định lượng vào buildFastDatafeedContext mượt mà", async () => {

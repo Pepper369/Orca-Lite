@@ -4,7 +4,7 @@ import { getVnStockDetail } from "./stocks";
 import { getCommodityMarket } from "./commodities";
 import { resolveCommodityImpact } from "../commodities-impact";
 import { extractTickers } from "../engines/orca-contextual-reasoning-engine";
-import { getMasterScreenerSnapshot } from "./screener-snapshot-service";
+import { getMasterScreenerSnapshot, queryScreenerStocks, type ScreenerFilterParams } from "./screener-snapshot-service";
 import { parseScreeningCriteria, isScreenerQuery } from "./response-structure-architect";
 export { isScreenerQuery };
 import {
@@ -115,9 +115,11 @@ export interface FastScreenerMatchedStock {
   highlights: string;
   multiFactorScore?: number;
   tripleBarrierSummary?: string;
+  presets?: string[];
 }
 
 export interface FastScreenerResult {
+  criteria: ParsedScreeningCriteria;
   criteriaSummary: string[];
   matchedCount: number;
   topStocks: FastScreenerMatchedStock[];
@@ -428,6 +430,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Doanh thu xuất khẩu phần mềm và chuyển đổi số AI tăng trưởng >25%/năm, con hào công nghệ vững chắc với đối tác toàn cầu.",
     multiFactorScore: 92,
     tripleBarrierSummary: "Mục tiêu +11.5%, Stop -4.2% (R:R 2.74x, T+20)",
+    presets: ["canslim", "rs_leaders", "growth", "breakout", "confluence"],
   },
   {
     symbol: "VNM",
@@ -445,6 +448,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Đầu ngành sữa tiêu dùng, vị thế độc quyền tự nhiên, dòng tiền thuần HĐKD (CFO) dồi dào, duy trì cổ tức tiền mặt bền vững 6.2%/năm.",
     multiFactorScore: 88,
     tripleBarrierSummary: "Mục tiêu +8.4%, Stop -3.2% (R:R 2.63x, T+20)",
+    presets: ["dividend", "value", "fa_fortress", "piotroski_diamonds"],
   },
   {
     symbol: "MBB",
@@ -462,6 +466,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "CASA dẫn đầu hệ thống (~40%), chi phí vốn thấp, định giá P/B 1.1x chiết khấu sâu so với hiệu quả sinh lời ROE 23.8%.",
     multiFactorScore: 86,
     tripleBarrierSummary: "Mục tiêu +9.2%, Stop -3.5% (R:R 2.63x, T+20)",
+    presets: ["value", "quant_low_beta", "quant_asymmetric", "smart_money_inflow"],
   },
   {
     symbol: "TCB",
@@ -479,6 +484,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Nền tảng an toàn vốn CAR thuộc top đầu, hưởng lợi lớn nhất khi thị trường bất động sản dân cư và trái phiếu doanh nghiệp phục hồi.",
     multiFactorScore: 83,
     tripleBarrierSummary: "Mục tiêu +8.5%, Stop -3.3% (R:R 2.58x, T+20)",
+    presets: ["value", "fa_fortress", "confluence", "smart_money_inflow"],
   },
   {
     symbol: "HPG",
@@ -496,6 +502,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Chi phí sản xuất thép thấp nhất ASEAN nhờ chu trình lò cao khép kín, đại dự án Dung Quất 2 sắp vận hành gia tăng công suất gấp đôi.",
     multiFactorScore: 84,
     tripleBarrierSummary: "Mục tiêu +12.0%, Stop -4.5% (R:R 2.67x, T+20)",
+    presets: ["quant_asymmetric", "breakout", "smart_money_inflow"],
   },
   {
     symbol: "MWG",
@@ -513,6 +520,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Chuỗi Bách Hóa Xanh đạt điểm hòa vốn và bắt đầu đóng góp lợi nhuận ròng, biên lãi gộp mảng ICT hồi phục mạnh mẽ sau tái cấu trúc.",
     multiFactorScore: 82,
     tripleBarrierSummary: "Mục tiêu +10.2%, Stop -4.0% (R:R 2.55x, T+20)",
+    presets: ["growth", "vcp", "ttm_squeeze", "smart_money_inflow"],
   },
   {
     symbol: "REE",
@@ -530,6 +538,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Tài sản năng lượng sạch (Thủy điện, Điện gió) và văn phòng cho thuê hạng A mang lại dòng tiền cổ tức ổn định, đòn bẩy an toàn.",
     multiFactorScore: 85,
     tripleBarrierSummary: "Mục tiêu +7.8%, Stop -3.0% (R:R 2.60x, T+20)",
+    presets: ["dividend", "quant_low_beta", "fa_fortress"],
   },
   {
     symbol: "SSI",
@@ -547,6 +556,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Thị phần môi giới và dư nợ cho vay margin top đầu thị trường, hưởng lợi trực tiếp từ hệ thống KRX và tiến trình nâng hạng thị trường chứng khoán.",
     multiFactorScore: 86,
     tripleBarrierSummary: "Mục tiêu +10.5%, Stop -3.8% (R:R 2.76x, T+20)",
+    presets: ["breakout", "rs_leaders", "smart_money_inflow"],
   },
   {
     symbol: "PVS",
@@ -564,6 +574,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Khối lượng công việc M&C dồi dào từ chuỗi dự án khí Lô B - Ô Môn và các hợp đồng chế tạo chân đế điện gió ngoài khơi quốc tế.",
     multiFactorScore: 85,
     tripleBarrierSummary: "Mục tiêu +11.0%, Stop -4.0% (R:R 2.75x, T+20)",
+    presets: ["canslim", "rs_leaders", "vcp"],
   },
   {
     symbol: "PVD",
@@ -581,6 +592,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Toàn bộ các giàn khoan tự nâng (jack-up) đã ký hợp đồng dài hạn với giá cước cao, chu kỳ phục hồi ngành khoan dầu khí toàn cầu vững chắc.",
     multiFactorScore: 82,
     tripleBarrierSummary: "Mục tiêu +12.5%, Stop -4.5% (R:R 2.78x, T+20)",
+    presets: ["quant_asymmetric", "ttm_squeeze"],
   },
   {
     symbol: "DGC",
@@ -598,6 +610,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Nhà sản xuất Phốt pho vàng (P4) hàng đầu khu vực phục vụ chuỗi cung ứng chip bán dẫn và pin LFP, bảng cân đối tài chính sạch nợ vay.",
     multiFactorScore: 89,
     tripleBarrierSummary: "Mục tiêu +11.8%, Stop -4.2% (R:R 2.81x, T+20)",
+    presets: ["canslim", "rs_leaders", "magic_formula", "piotroski_diamonds"],
   },
   {
     symbol: "KDH",
@@ -615,6 +628,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Quỹ đất sạch tại khu Đông và khu Nam TP.HCM với pháp lý hoàn chỉnh, hợp tác chiến lược cùng Keppel Land đảm bảo khả năng bán hàng ổn định.",
     multiFactorScore: 81,
     tripleBarrierSummary: "Mục tiêu +9.5%, Stop -3.6% (R:R 2.64x, T+20)",
+    presets: ["quant_low_beta", "fa_fortress"],
   },
   {
     symbol: "IDC",
@@ -632,6 +646,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Quỹ đất công nghiệp cho thuê hơn 700ha tại các vị trí đắc địa đón đầu làn sóng dịch chuyển FDI, dòng tiền cổ tức tiền mặt hấp dẫn 6.5%/năm.",
     multiFactorScore: 87,
     tripleBarrierSummary: "Mục tiêu +10.0%, Stop -3.7% (R:R 2.70x, T+20)",
+    presets: ["dividend", "canslim", "rs_leaders"],
   },
   {
     symbol: "GVR",
@@ -649,6 +664,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Tiềm năng chuyển đổi hàng nghìn hecta đất cao su sang đất khu công nghiệp với chi phí đền bù cực thấp, hưởng lợi kép từ giá mủ cao su tăng.",
     multiFactorScore: 80,
     tripleBarrierSummary: "Mục tiêu +9.0%, Stop -3.5% (R:R 2.57x, T+20)",
+    presets: ["value", "breakout"],
   },
   {
     symbol: "VCB",
@@ -666,6 +682,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Ngân hàng số 1 Việt Nam về chất lượng tài sản, tỷ lệ bao phủ nợ xấu cao nhất hệ thống (>200%), đóng vai trò trụ cột điều tiết thanh khoản VN-Index.",
     multiFactorScore: 87,
     tripleBarrierSummary: "Mục tiêu +7.5%, Stop -2.8% (R:R 2.68x, T+20)",
+    presets: ["quant_low_beta", "fa_fortress", "piotroski_diamonds"],
   },
   {
     symbol: "CTG",
@@ -683,6 +700,7 @@ export const BASELINE_INSTITUTIONAL_STOCKS: FastScreenerMatchedStock[] = [
     highlights: "Chất lượng tài sản cải thiện mạnh mẽ sau khi xử lý sạch trái phiếu VAMC, định giá P/B 1.2x hấp dẫn so với tiềm năng tăng trưởng tín dụng bán lẻ.",
     multiFactorScore: 84,
     tripleBarrierSummary: "Mục tiêu +9.2%, Stop -3.4% (R:R 2.71x, T+20)",
+    presets: ["value", "smart_money_inflow"],
   },
 ];
 
@@ -693,41 +711,67 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
   let totalMatched = 0;
 
   try {
-    const master = await getMasterScreenerSnapshot();
-    const items = master?.items || [];
+    const queryParams: ScreenerFilterParams = {
+      preset: criteria.preset || "all",
+      sector: criteria.sectors?.[0],
+      minRoe: criteria.roeMin,
+      maxPe: criteria.peMax,
+      maxPb: criteria.pbMax,
+      minDivYield: criteria.divYieldMin,
+      maxDe: criteria.debtEquityMax,
+      minPiotroskiScore: criteria.fScoreMin,
+      minRsRating: criteria.rsMin,
+      minRiskReward: criteria.minRiskReward,
+      minTradingValue: criteria.minTradingValue || 3,
+      sweetZoneOnly: criteria.sweetZoneOnly,
+      vsaOnly: criteria.vsaOnly,
+      squeezeOnly: criteria.squeezeOnly,
+      sort: (criteria.sort as any) || "compositeScore",
+      order: criteria.order || "desc",
+      limit: 15,
+    };
 
-    if (items.length > 0) {
-      let filtered = items.filter((item) => {
-        if (!item.symbol || item.price == null || item.price <= 0) return false;
+    const searchRes = await queryScreenerStocks(queryParams).catch(() => null);
 
-        if (criteria.sectors && criteria.sectors.length > 0) {
-          if (!criteria.sectors.some((sec) => (item.sector || "").toLowerCase().includes(sec.toLowerCase()))) {
-            return false;
-          }
-        }
+    if (searchRes && searchRes.items && searchRes.items.length > 0) {
+      totalMatched = searchRes.total;
+      candidateStocks = searchRes.items.slice(0, 5).map((x) => {
+        const quantHighlights = [
+          `P/E ${x.pe?.toFixed(1) || "—"}x · P/B ${x.pb?.toFixed(1) || "—"}x · ROE ${x.roe?.toFixed(1) || "—"}% · F-Score ${x.piotroskiFScore ?? "—"}/9`,
+          x.rsRating ? `RS: ${x.rsRating}/99` : null,
+          x.smartMoneySignalVi ? `Dòng tiền: ${x.smartMoneySignalVi}` : null,
+          x.quantAnomalyTag ? `Quant: ${x.quantAnomalyTag}` : null,
+          x.buyStrategy ? `Vị thế kỹ thuật: ${x.buyStrategy}` : "Chờ tích lũy",
+        ].filter(Boolean).join(" · ");
 
-        const tradingValueBillion = ((item.volume || 0) * (item.price || 0)) / 1_000_000_000;
-        if (tradingValueBillion < (criteria.minTradingValue || 3) && (item.marketCap || 0) < 500) {
-          return false;
-        }
+        const tpSummary = x.tripleBarrierUpper && x.tripleBarrierLower && x.price
+          ? `Mục tiêu +${(((x.tripleBarrierUpper - x.price) / x.price) * 100).toFixed(1)}%, Stop -${(((x.price - x.tripleBarrierLower) / x.price) * 100).toFixed(1)}% (R:R ${x.tripleBarrierRiskReward?.toFixed(2) || "2.5"}x, T+20)`
+          : "Mục tiêu +8.0%, Stop -3.2% (R:R 2.50x, T+20)";
 
-        if (criteria.roeMin != null && (item.roe == null || item.roe < criteria.roeMin)) return false;
-        if (criteria.peMax != null && (item.pe == null || item.pe <= 0 || item.pe > criteria.peMax)) return false;
-        if (criteria.pbMax != null && (item.pb == null || item.pb <= 0 || item.pb > criteria.pbMax)) return false;
-        if (criteria.divYieldMin != null && (item.dividendYield == null || item.dividendYield < criteria.divYieldMin)) return false;
-        if (criteria.debtEquityMax != null && item.debtEquity != null && item.debtEquity > criteria.debtEquityMax) return false;
-        if (criteria.fScoreMin != null && (item.piotroskiFScore == null || item.piotroskiFScore < criteria.fScoreMin)) return false;
-
-        if (criteria.sweetZoneOnly) {
-          const inSweet = item.buyZoneStatus === "AT_BUY_POINT" || item.buyZoneStatus === "NEAR_BUY_POINT" || item.confluenceBadge === "SUPER_SETUP";
-          if (!inSweet) return false;
-        }
-
-        return true;
+        return {
+          symbol: x.symbol,
+          name: x.name || x.symbol,
+          sector: x.sector || "Chung",
+          price: x.price || 0,
+          changePercent: x.changePercent || 0,
+          pe: x.pe,
+          pb: x.pb,
+          roe: x.roe,
+          divYield: x.dividendYield,
+          debtEquity: x.debtEquity,
+          fScore: x.piotroskiFScore,
+          apexZone: x.buyZoneStatus ? `${x.buyZoneStatus} (${x.confluenceBadge || "Chân sóng"})` : "Tích lũy",
+          highlights: quantHighlights,
+          multiFactorScore: x.orcaMasterScore || x.quantEdgeScore || x.compositeScore || 80,
+          tripleBarrierSummary: tpSummary,
+        };
       });
-
-      if (filtered.length < 3) {
-        filtered = items.filter((item) => {
+    } else {
+      // Secondary attempt with relaxed criteria
+      const master = await getMasterScreenerSnapshot();
+      const items = master?.items || [];
+      if (items.length > 0) {
+        let filtered = items.filter((item) => {
           if (!item.symbol || item.price == null || item.price <= 0) return false;
           if (criteria.sectors && criteria.sectors.length > 0) {
             if (!criteria.sectors.some((sec) => (item.sector || "").toLowerCase().includes(sec.toLowerCase()))) {
@@ -736,36 +780,38 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
           }
           if (criteria.roeMin != null && (item.roe == null || item.roe < criteria.roeMin * 0.75)) return false;
           if (criteria.peMax != null && (item.pe == null || item.pe <= 0 || item.pe > criteria.peMax * 1.3)) return false;
+          if (criteria.divYieldMin != null && (item.dividendYield == null || item.dividendYield < criteria.divYieldMin * 0.75)) return false;
           return true;
         });
+
+        if (filtered.length > 0) {
+          totalMatched = filtered.length;
+          filtered.sort((a, b) => {
+            if (criteria.sort === "divYield") return (b.dividendYield || 0) - (a.dividendYield || 0);
+            if (criteria.sort === "roe") return (b.roe || 0) - (a.roe || 0);
+            if (criteria.sort === "pe") return (a.pe || 999) - (b.pe || 999);
+            return (b.compositeScore || 0) - (a.compositeScore || 0);
+          });
+
+          candidateStocks = filtered.slice(0, 5).map((x) => ({
+            symbol: x.symbol,
+            name: x.name || x.symbol,
+            sector: x.sector || "Chung",
+            price: x.price || 0,
+            changePercent: x.changePercent || 0,
+            pe: x.pe,
+            pb: x.pb,
+            roe: x.roe,
+            divYield: x.dividendYield,
+            debtEquity: x.debtEquity,
+            fScore: x.piotroskiFScore,
+            apexZone: x.buyZoneStatus ? `${x.buyZoneStatus} (${x.confluenceBadge || "Chân sóng"})` : "Tích lũy",
+            highlights: `P/E ${x.pe?.toFixed(1) || "—"}x · ROE ${x.roe?.toFixed(1) || "—"}% · F-Score ${x.piotroskiFScore ?? "—"}/9 · Vị thế kỹ thuật: ${x.buyStrategy || "Chờ tích lũy"}`,
+            multiFactorScore: x.compositeScore || 80,
+            tripleBarrierSummary: "Mục tiêu +8.0%, Stop -3.2% (R:R 2.50x, T+20)",
+          }));
+        }
       }
-
-      totalMatched = filtered.length;
-
-      filtered.sort((a, b) => {
-        if (criteria.sort === "divYield") return (b.dividendYield || 0) - (a.dividendYield || 0);
-        if (criteria.sort === "roe") return (b.roe || 0) - (a.roe || 0);
-        if (criteria.sort === "pe") return (a.pe || 999) - (b.pe || 999);
-        return (b.compositeScore || 0) - (a.compositeScore || 0);
-      });
-
-      candidateStocks = filtered.slice(0, 5).map((x) => ({
-        symbol: x.symbol,
-        name: x.name || x.symbol,
-        sector: x.sector || "Chung",
-        price: x.price || 0,
-        changePercent: x.changePercent || 0,
-        pe: x.pe,
-        pb: x.pb,
-        roe: x.roe,
-        divYield: x.dividendYield,
-        debtEquity: x.debtEquity,
-        fScore: x.piotroskiFScore,
-        apexZone: x.buyZoneStatus ? `${x.buyZoneStatus} (${x.confluenceBadge || "Chân sóng"})` : "Tích lũy",
-        highlights: `P/E ${x.pe?.toFixed(1) || "—"}x · ROE ${x.roe?.toFixed(1) || "—"}% · F-Score ${x.piotroskiFScore ?? "—"}/9 · Vị thế kỹ thuật: ${x.buyStrategy || "Chờ tích lũy"}`,
-        multiFactorScore: x.compositeScore || 80,
-        tripleBarrierSummary: "Mục tiêu +8.0%, Stop -3.2% (R:R 2.50x, T+20)",
-      }));
     }
   } catch (err) {
     console.warn("[FastDatafeed] Lỗi khi nạp snapshot screener, chuyển sang bộ dữ liệu nền tảng định chế:", err);
@@ -774,6 +820,9 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
   // Fallback định chế mở rộng nếu snapshot chưa sẵn sàng
   if (candidateStocks.length === 0) {
     let baseFiltered = BASELINE_INSTITUTIONAL_STOCKS.filter((s) => {
+      if (criteria.preset && criteria.preset !== "all" && s.presets && s.presets.length > 0) {
+        if (!s.presets.includes(criteria.preset)) return false;
+      }
       if (criteria.sectors && criteria.sectors.length > 0) {
         return criteria.sectors.some((sec) => s.sector.toLowerCase().includes(sec.toLowerCase()));
       }
@@ -835,7 +884,16 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
     "Đo lường cản trên đầu (Overhead Room): Bắt buộc khoảng trống an toàn tới cản cứng gần nhất phải ≥ 5.0% để tránh rủi ro kẹt hàng ngắn hạn T+2.5.",
   ];
 
+  if (criteria.preset === "canslim" || criteria.preset === "breakout") {
+    caveats.push("Quy tắc Cắt Lỗ Kỷ Luật CANSLIM: Tuyệt đối không để khoản lỗ vượt quá 7% - 8% từ điểm mua Pivot.");
+  } else if (criteria.preset === "ttm_squeeze" || criteria.preset === "vcp") {
+    caveats.push("Quy tắc Xác nhận Khối lượng (Volume Expansion): Bắt buộc phiên vượt cản phải có khối lượng gấp ≥ 1.5x trung bình 20 phiên.");
+  } else if (criteria.preset === "smart_money_inflow") {
+    caveats.push("Dấu chân Cá Mập: Quan sát tỷ lệ Mua chủ động (Active Buy Ratio ≥ 60%) và lệnh khớp quy mô lớn (Big Orders ≥ 1 tỷ VNĐ).");
+  }
+
   return {
+    criteria,
     criteriaSummary: criteria.humanSummary,
     matchedCount: totalMatched,
     topStocks: candidateStocks,
