@@ -264,11 +264,8 @@ export function ShellInner({ children }: { children: ReactNode }) {
 
   const onNav = useCallback(
     (href: string, e?: MouseEvent<HTMLElement>) => {
-      if (e) {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        e.preventDefault();
-      }
       if (href === "#ask_orca") {
+        if (e) e.preventDefault();
         window.dispatchEvent(
           new CustomEvent("orca:open-ai-widget", {
             detail: { mode: "finance" },
@@ -277,19 +274,14 @@ export function ShellInner({ children }: { children: ReactNode }) {
         return;
       }
       const hashTab = href.split("#")[1];
-      if (hashTab) window.dispatchEvent(new CustomEvent("orca:personal-finance-tab", { detail: hashTab }));
-      markAppNavigating(60);
-      signalNavStart();
-
-      if (typeof document !== "undefined" && "startViewTransition" in document) {
-        (document as unknown as { startViewTransition: (cb: () => void) => void }).startViewTransition(() => {
-          startTransition(() => router.push(href));
-        });
-      } else {
-        startTransition(() => router.push(href));
+      if (hashTab) {
+        if (e) e.preventDefault();
+        window.dispatchEvent(new CustomEvent("orca:personal-finance-tab", { detail: hashTab }));
+        return;
       }
+      signalNavStart();
     },
-    [router],
+    [],
   );
 
   const onHover = useCallback(

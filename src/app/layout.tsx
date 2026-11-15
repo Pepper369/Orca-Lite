@@ -63,34 +63,6 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi" data-theme="navy" suppressHydrationWarning className="h-full">
-      <head>
-        <script
-          type="speculationrules"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              prerender: [
-                {
-                  source: "list",
-                  urls: [
-                    "/",
-                    "/stocks",
-                    "/screener",
-                    "/agent",
-                    "/crypto",
-                    "/forex",
-                    "/commodities",
-                    "/derivatives",
-                    "/quant",
-                    "/watchlist",
-                    "/news",
-                  ],
-                  eagerness: "moderate",
-                },
-              ],
-            }),
-          }}
-        />
-      </head>
       <body suppressHydrationWarning className="h-full overflow-hidden">
         <SettingsProvider>
           <ClientProviders>
