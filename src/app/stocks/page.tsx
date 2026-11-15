@@ -33,6 +33,7 @@ export default function VnMarketCenterPage() {
     refreshInterval: 4_000,
     timeoutMs: 4_000,
     keepPreviousData: true,
+    initialData: (BOOTSTRAP_STOCKS_DATA as StocksData),
   });
 
   const {

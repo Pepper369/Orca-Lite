@@ -101,7 +101,13 @@ function usePageVisible(): boolean {
 
 export function useApi<T>(
   url: string | null,
-  opts?: { refreshInterval?: number; timeoutMs?: number; keepPreviousData?: boolean },
+  opts?: {
+    refreshInterval?: number;
+    timeoutMs?: number;
+    keepPreviousData?: boolean;
+    initialData?: T;
+    fallbackData?: ApiResponse<T>;
+  },
 ) {
   const rt = getSettingsSnapshot().realtime;
   const visible = usePageVisible();
@@ -109,9 +115,23 @@ export function useApi<T>(
   const baseRefresh = resolveRefresh(opts?.refreshInterval);
   const keepPrev = opts?.keepPreviousData !== false;
   const fallbackData = useMemo(() => {
+    if (opts?.fallbackData) return opts.fallbackData;
+    if (opts?.initialData !== undefined && opts.initialData !== null) {
+      const snap: ApiResponse<T> = {
+        success: true,
+        data: opts.initialData,
+        meta: {
+          source: "server-prefetch",
+          freshness: "LIVE",
+          ageMs: 0,
+        },
+      };
+      if (url && typeof window !== "undefined") clientCacheSet(url, snap);
+      return snap;
+    }
     if (!url || !keepPrev) return undefined;
     return clientCacheGet<ApiResponse<T>>(url);
-  }, [url, keepPrev]);
+  }, [url, keepPrev, opts?.fallbackData, opts?.initialData]);
 
   const currentFreshness = fallbackData?.meta?.freshness;
 

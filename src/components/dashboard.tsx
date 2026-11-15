@@ -10,13 +10,13 @@ import { PageSkeleton } from "@/components/page-skeleton";
 import { CommandCenter } from "@/components/command-center/command-center";
 import { getVnSession } from "@/lib/vn/sessions";
 
-type StocksBoard = {
+export type StocksBoard = {
   indices: IndexQuote[] | null;
   quotes: Quote[] | null;
   count?: number;
 };
 
-type GlobalMarket = {
+export type GlobalMarket = {
   us: { symbol: string; price: number; changePercent: number | null }[];
   crypto: { symbol: string; baseAsset: string; price: number; changePercent: number | null }[];
   asia?: { symbol: string; label: string; price: number; changePercent: number | null }[];
@@ -27,6 +27,12 @@ type GlobalMarket = {
     symbol?: string;
   } | null;
   sources?: string[];
+};
+
+export type DashboardInitialData = {
+  board?: StocksBoard | null;
+  global?: GlobalMarket | null;
+  intel?: MarketIntel | null;
 };
 
 function synthesizeIntel(board: StocksBoard | undefined): MarketIntel | null {
@@ -157,7 +163,7 @@ function createBootstrapIntel(board?: StocksBoard): MarketIntel {
   };
 }
 
-export function Dashboard() {
+export function Dashboard({ initialData }: { initialData?: DashboardInitialData } = {}) {
   const {
     data: intel,
     meta,
@@ -169,6 +175,7 @@ export function Dashboard() {
     refreshInterval: 20_000,
     timeoutMs: 6_000,
     keepPreviousData: true,
+    initialData: initialData?.intel ?? undefined,
   });
 
   const {
@@ -178,6 +185,7 @@ export function Dashboard() {
     refreshInterval: 20_000,
     timeoutMs: 4_000,
     keepPreviousData: true,
+    initialData: initialData?.board ?? undefined,
   });
 
   // Tải trang tổng quan trước: bảng đầy đủ (hàng nghìn mã) chỉ kích hoạt tải ngầm khi máy rảnh
@@ -213,12 +221,13 @@ export function Dashboard() {
     keepPreviousData: true,
   });
 
-  const board = boardFull?.quotes?.length ? boardFull : boardCore;
+  const board = boardFull?.quotes?.length ? boardFull : (boardCore ?? initialData?.board ?? undefined);
 
   const { data: globalMkt } = useApi<GlobalMarket>("/api/v1/market/global", {
     refreshInterval: 45_000,
     timeoutMs: 5_000,
     keepPreviousData: true,
+    initialData: initialData?.global ?? undefined,
   });
 
   // Tối ưu giải pháp 1: Nếu chưa có dữ liệu mạng về, nạp ngay dữ liệu bootstrap để người dùng có thể test tức thì
