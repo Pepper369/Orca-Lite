@@ -2,11 +2,12 @@ import type { NextConfig } from "next";
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net",
+  "worker-src 'self' blob: https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https: wss:",
+  "connect-src 'self' https: wss: blob: data: https://cdn.jsdelivr.net",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -15,13 +16,13 @@ const CSP = [
 const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: false },
   output: "standalone",
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "@duckdb/duckdb-wasm"],
   transpilePackages: ["lucide-react"],
   experimental: {
     optimizePackageImports: ["lucide-react", "lightweight-charts"],
     staleTimes: {
-      dynamic: 180,
-      static: 600,
+      dynamic: 300,
+      static: 1200,
     },
   },
   poweredByHeader: false,

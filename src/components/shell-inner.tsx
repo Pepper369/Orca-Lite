@@ -70,6 +70,7 @@ const NAV_SECTIONS: {
     title: "THỊ TRƯỜNG",
     items: [
       { href: "/", label: "Tổng quan", icon: Home, core: true },
+      { href: "/terminal", label: "Pro Terminal (0ms)", icon: CandlestickChart, core: true },
       { href: "/stocks", label: "Cổ phiếu VN", icon: CandlestickChart, core: true },
       { href: "/crypto", label: "Tiền mã hóa", icon: Coins, core: true },
       { href: "/forex", label: "Ngoại hối", icon: DollarSign },
@@ -207,7 +208,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPersonalFinanceMode = pathname.startsWith("/personal-finance");
-  const isFullViewport = pathname === "/agent" || pathname === "/stocks";
+  const isFullViewport = pathname === "/agent" || pathname === "/stocks" || pathname === "/terminal";
   const activeNavSections = isPersonalFinanceMode ? PERSONAL_FINANCE_NAV : NAV_SECTIONS;
   const [activePersonalTab, setActivePersonalTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
