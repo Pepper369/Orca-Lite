@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import url("tailwindcss");
 
 @theme {
   --font-sans: Arial, "Helvetica Neue", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
