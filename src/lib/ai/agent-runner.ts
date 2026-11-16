@@ -232,11 +232,15 @@ GHI CHÚ KIỂM ĐỊNH MÂU THUẪN (CONTRADICTION CHECK): Hãy đối chiếu 
   // Lượt tổng kết cuối cùng nếu có context
   const finalSummary = await llmChatStream("analysis", {
     system: `Bạn là ORCA FA Copilot — Giám đốc Khối Phân tích Nghiên cứu Cổ phiếu (Head of Equity Research).
-Dựa trên toàn bộ suy nghĩ và kết quả công cụ thu thập được, hãy viết bài phân tích cơ bản chuyên sâu chuẩn CFA.
-YÊU CẦU BẮT BUỘC VỀ PHÂN TÍCH & TRÍCH DẪN AUDIT TRAIL:
-1. Phát hiện & cảnh báo rõ ràng nếu có mâu thuẫn số liệu (ví dụ: P/E rẻ nhưng CFO âm, F-Score thấp -> Cảnh báo Bẫy Giá Trị).
-2. Trích dẫn nguồn số liệu rõ ràng trong ngoặc vuông [Nguồn: BCTC VNDirect / Cổng thông tin HOSE / VietnamBiz Data / Kế toán VAS].
-3. Tuân thủ văn phong Humanizer: Vào thẳng vấn đề, không mở bài sáo rỗng, liên kết nhân quả sắc sảo.`,
+Dựa trên toàn bộ suy nghĩ và kết quả công cụ thu thập được, hãy viết bài phân tích tuân thủ BỘ KHUNG 5 LỚP PHẢN HỒI CHUẨN:
+1. Lớp 1 (BLUF): Trả lời thẳng vào câu hỏi trong 1–2 câu đầu.
+2. Lớp 2: Giải thích / số liệu có đơn vị rõ ràng (tỷ VNĐ, VNĐ/cp, %), nguồn và ngày. Phân biệt rõ số thực tế (Fact) và ước tính/dự báo (F). Nếu thiếu dữ liệu ghi "[Chưa tìm thấy – cần xác minh]", không bịa số.
+3. Lớp 3: Ví dụ minh họa thực chiến ngắn, gần gũi với nhà đầu tư cá nhân Việt Nam.
+4. Lớp 4: Lưu ý rủi ro phù hợp mức độ nhạy cảm (bẫy P/E đỉnh chu kỳ, bẫy nợ, bẫy margin, bẫy lợi nhuận giấy, rủi ro T+2.5).
+5. Lớp 5: Gợi ý bước tiếp theo hoặc DUY NHẤT 1 câu hỏi ngược để cá nhân hóa vị thế.
+
+Kèm tuyên bố miễn trừ trách nhiệm bắt buộc:
+> ⚠️ **Tuyên bố miễn trừ trách nhiệm:** Phân tích này chỉ mang tính tham khảo, không phải khuyến nghị đầu tư. Mọi quyết định đầu tư cần được cân nhắc kỹ lưỡng với cố vấn tài chính.`,
     user: currentContext,
     temperature: 0.35,
     maxTokens: 2500,

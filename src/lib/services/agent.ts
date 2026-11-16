@@ -2,6 +2,7 @@ import "server-only";
 import { buildMeta, worstFreshness } from "../freshness";
 import { computeConfidence, type Confidence } from "./intelligence";
 import { VN_TICKERS } from "../providers/news";
+import { isVnSymbol } from "../vn/master";
 import type { FreshnessStatus, Meta } from "../types";
 import type { HistoryTurn } from "./agent-memory";
 import { llmConfigured } from "../ai/gateway";
@@ -83,6 +84,14 @@ const KNOWN_CRYPTO = new Set([
   "WLD", "JUP", "ENA", "ONDO", "POL", "XLM", "HBAR", "KAS", "TAO", "STRK", "PAXG",
 ]);
 
+const SKIP_TOKENS = new Set([
+  "USD", "VND", "EUR", "GBP", "JPY", "ALL", "THE", "AND", "FOR", "NOT",
+  "PHI", "TUC", "TIEN", "BAN", "MUA", "VAY", "NEN", "SAO", "XEM", "CHO",
+  "DOC", "HAI", "MOT", "BAA", "BON", "NAM", "DAY", "HAY", "LAI", "THI",
+  "KHI", "VOI", "NHA", "NHO", "LON", "HET", "CON", "DAN", "EPS", "ROE",
+  "ROA", "PEE", "PBB", "NAV", "DCF", "TTM", "GDP", "CPI", "FDI", "FED",
+]);
+
 type Intent =
   | { kind: "vn-market"; requestedDate: string | null }
   | { kind: "crypto"; symbol: string }
@@ -144,30 +153,31 @@ function detectIntent(q: string): Intent {
     if (KNOWN_CRYPTO.has(t)) return { kind: "crypto", symbol: `${t}USDT` };
   }
 
-  const tickers = upper.match(/\b[A-Z]{3}\b/g) ?? [];
-  for (const t of tickers) {
-    if (VN_TICKERS.includes(t) || /^[A-Z]{3}$/.test(t)) {
-      if (!KNOWN_CRYPTO.has(t) && t !== "USD" && t !== "EUR" && t !== "GBP" && t !== "JPY") {
-        if (VN_TICKERS.includes(t) || /cổ phiếu|mã|phân tích|định giá|pe|pb/i.test(q) || tickers.length === 1) {
-          if (VN_TICKERS.includes(t) || /\b(fpt|vcb|tcb|hpg|mwg|ssi|vnindex)\b/i.test(lower)) {
-            return { kind: "vn-stock", symbol: t === "VNINDEX" ? "VNINDEX" : t };
-          }
-          if (VN_TICKERS.includes(t)) return { kind: "vn-stock", symbol: t };
-        }
-      }
+  const explicitNear = q.match(/(?:cổ\s*phiếu|mã|ticker|symbol)\s+([A-Za-z]{3})\b/i);
+  if (explicitNear) {
+    const sym = explicitNear[1].toUpperCase();
+    if (isVnSymbol(sym) && !KNOWN_CRYPTO.has(sym) && !SKIP_TOKENS.has(sym)) {
+      return { kind: "vn-stock", symbol: sym };
     }
   }
-  const mStock = upper.match(/\b([A-Z]{3})\b/);
-  if (mStock && !KNOWN_CRYPTO.has(mStock[1]) && /cổ phiếu|mã|phân tích|định giá|ck |chứng khoán/i.test(q)) {
-    return { kind: "vn-stock", symbol: mStock[1] };
+
+  const tickers = (upper.match(/\b[A-Z]{3}\b/g) ?? []).filter(
+    (t) => !SKIP_TOKENS.has(t) && !KNOWN_CRYPTO.has(t) && isVnSymbol(t)
+  );
+
+  if (tickers.length >= 2 && /so sánh|vs\b|đối chiếu/i.test(q)) {
+    return { kind: "compare", a: tickers[0], b: tickers[1] };
   }
-  const near = q.match(/(?:cổ\s*phiếu|mã|ticker|symbol)\s+([A-Za-z]{3})\b/i);
-  if (near) {
-    const sym = near[1].toUpperCase();
-    if (!KNOWN_CRYPTO.has(sym)) return { kind: "vn-stock", symbol: sym };
-  }
-  for (const t of tickers) {
-    if (VN_TICKERS.includes(t)) return { kind: "vn-stock", symbol: t };
+
+  if (tickers.length === 1) {
+    const t = tickers[0];
+    if (
+      VN_TICKERS.includes(t) ||
+      /\b(fpt|vcb|tcb|hpg|mwg|ssi|baf|dgc|vnm)\b/i.test(lower) ||
+      /cổ phiếu\s+[A-Z]{3}|mã\s+[A-Z]{3}|phân tích|định giá|kỹ thuật/i.test(q)
+    ) {
+      return { kind: "vn-stock", symbol: t };
+    }
   }
 
   if (/so sánh|vs\b|đối chiếu/i.test(q)) {
@@ -190,7 +200,10 @@ async function buildRoutedContext(route: AgentRoute, question: string, deep: boo
     if (domain === "market") return { domain, built: await withTimeout(buildVnMarketBriefing(), 22_000, EMPTY_BUILT) };
     if (domain === "industry") return { domain, built: await withTimeout(buildIndustryContext(question), 22_000, EMPTY_BUILT) };
     if (domain === "commodity") return { domain, built: await withTimeout(buildCommodityContext(question), 22_000, EMPTY_BUILT) };
-    const symbols = route.entities.symbols.length > 1 ? route.entities.symbols.slice(0, 4) : [route.entities.symbols[0] ?? "FPT"];
+    if (route.entities.symbols.length === 0) {
+      return { domain, built: await withTimeout(buildUniverseOverview(), 12_000, EMPTY_BUILT) };
+    }
+    const symbols = route.entities.symbols.length > 1 ? route.entities.symbols.slice(0, 4) : [route.entities.symbols[0]!];
     if (symbols.length > 1 && route.task === "compare") {
       const stocks = await Promise.all(
         symbols.map(async (symbol) => {

@@ -49,6 +49,7 @@ const NON_STOCK_TOKENS = new Set([
   "SMC", "VSA", "ICT", "EPS", "ROE", "ROA", "NAV", "DCF",
   "TTM", "GDP", "CPI", "FDI", "FED", "SBV", "NDT", "RSI", "ATR",
   "HOSE", "HNX", "UPCOM", "VNI", "ALL", "THE", "AND", "FOR",
+  "PHI", "TUC", "TIEN", "BAN", "MUA", "VAY", "NEN", "SAO", "XEM", "CHO",
 ]);
 const uniq = (xs: string[]) => [...new Set(xs)];
 
@@ -76,7 +77,7 @@ export function routeQuestion(question: string): AgentRoute {
   const domains: AgentDomain[] = [];
   if (/(thị trường|vn-?index|vn30|hose|hnx|toàn cảnh|chỉ số|market|thanh khoản|khối ngoại)/i.test(q) || indices.length) domains.push("market");
   if (/(ngành|sector|banking|ngân hàng|dầu khí|thép|công nghệ|bất động sản|bán lẻ)/i.test(q) || industries.length) domains.push("industry");
-  if (symbols.length || /cổ phiếu|mã cổ phiếu|ticker|định giá|phân tích\s+[A-Z]{3}/i.test(q)) domains.push("stock");
+  if (symbols.length || (/phân tích|định giá/i.test(q) && symbols.length) || /phân tích\s+[A-Z]{3}/i.test(q)) domains.push("stock");
   if (/(vàng|gold|bạc|silver|dầu|oil|wti|brent|hrc|đồng|cà phê|hàng hóa|commodity)/i.test(q) || commodities.length) domains.push("commodity");
   const orderedDomains: AgentDomain[] = commodities.length && !domains.includes("market") && /ảnh hưởng|tác động|giá\s+(hrc|dầu|vàng|oil)/i.test(q)
     ? ["commodity", ...domains.filter((d) => d !== "commodity")]

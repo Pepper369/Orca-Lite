@@ -133,24 +133,29 @@ Mẫu 2 - Đánh giá Đòn bẩy & Rủi ro Lãi suất Vĩ mô:
 "Trong bối cảnh Ngân hàng Nhà nước duy trì mặt bằng lãi suất liên ngân hàng thấp kỷ lục, cơ cấu vốn của doanh nghiệp lại đang bộc lộ điểm yếu ở các khoản nợ vay ngắn hạn sát ngày đáo hạn. Với tỷ lệ Nợ vay/VCSH ở mức 1.45x (cao hơn đáng kể so với mức bình quân ngành 0.8x), tỷ lệ bảo đảm nợ gốc và lãi bằng tiền (EBITDA/Lãi vay) đã tụt từ 4.2x xuống còn 1.6x. Mặc dù thời gian trang trải chi phí (Defensive Interval) vẫn cầm cự được khoảng 75 ngày, nhưng nếu tiến độ bán hàng dự án tiếp tục đình trệ trong 2 quý tới, áp lực tái cấp vốn sẽ trở thành rủi ro lớn nhất đe dọa trực tiếp đến thị giá cổ phiếu."`;
 
     const executiveStructureRule = `
-BẮT BUỘC TRÌNH BÀY THEO BỐ CỤC TRỰC QUAN 4 PHẦN (EXECUTIVE FORMAT), GIÚP NGƯỜI ĐỌC THẤY NGAY ĐÁP ÁN TRỌNG TÂM:
+BẮT BUỘC TRÌNH BÀY THEO BỘ KHUNG 5 LỚP PHẢN HỒI CHUẨN (CHUẨN 100 KỊCH BẢN TÀI CHÍNH VIỆT NAM):
 
-> 🎯 **ĐÁP ÁN TRỌNG TÂM (BOTTOM LINE / EXECUTIVE SUMMARY):**
-> [Trả lời dứt khoát 2-3 câu trực diện vào câu hỏi của người dùng. Nêu rõ kết luận cốt lõi (Tốt / Xấu / Thận trọng), bản chất vấn đề và 2-3 con số định lượng quan trọng nhất. Đặt toàn bộ trong blockquote callout '> '].
+> 🎯 **LỚP 1 - TRẢ LỜI TRỌNG TÂM (BLUF):**
+> [Trả lời dứt khoát 1-2 câu trực diện vào câu hỏi của người dùng. Nêu rõ kết luận cốt lõi, bản chất vấn đề và đáp số chính. Đặt toàn bộ trong blockquote callout '> '].
 
-### 📊 BẢNG TỔNG HỢP CHỈ SỐ THEN CHỐT (KEY METRICS SCORECARD)
-| Chỉ tiêu tài chính | Giá trị thực tế | Đánh giá / Benchmark | Ý nghĩa định lượng thực chiến |
-| :--- | :---: | :---: | :--- |
-(Bắt buộc vẽ bảng Markdown 4-6 hàng đối soát chỉ số liên quan trực tiếp đến câu hỏi: F-Score, Altman-Z, ROE, P/E, P/B, CFO/LNST, D/E).
+### 📊 LỚP 2 - GIẢI THÍCH & SỐ LIỆU MINH BẠCH (FACTS & BENCHMARKS)
+- Trình bày số liệu bắt buộc có đơn vị rõ ràng (tỷ VNĐ, VNĐ/cp, %), kèm nguồn và ngày cập nhật.
+- Phân biệt rõ ràng giữa số thực tế đã diễn ra (Fact) và số ước tính/dự báo (F).
+- Nếu thiếu dữ liệu: ghi rõ "[Chưa tìm thấy – cần xác minh]", TUYỆT ĐỐI KHÔNG BỊA SỐ.
+- Sử dụng bảng Markdown đối soát chỉ số: F-Score, Altman-Z, ROE, P/E, P/B, CFO/LNST, D/E hoặc ma trận so sánh.
+- Khi người dùng hỏi phân tích toàn diện một mã cổ phiếu: Bắt buộc trình bày bảng tóm tắt chuẩn Phụ lục B (Nhận diện, Doanh nghiệp, Kết quả kinh doanh, Sức khỏe tài chính, Định giá, Kỹ thuật, Dự phóng, Rủi ro & mốc theo dõi).
 
-### 1. BÓC TÁCH CHI TIẾT THEO LUẬN ĐIỂM (DEEP DIVE)
-(Phân tích bóc tách các khía cạnh doanh thu, lợi nhuận cốt lõi Core EBIT, Dòng tiền CFO vs dồn tích Accruals, đòn bẩy nợ vay, chu kỳ tiền mặt CCC).
+### 💡 LỚP 3 - VÍ DỤ MINH HỌA THỰC CHIẾN (GẦN GŨI VỚI NĐT CÁ NHÂN)
+(Đưa ra 1 ví dụ số cụ thể, gần gũi với nhà đầu tư cá nhân Việt Nam: ví dụ vốn 50-100 triệu, lệnh mua 1.000 cp, tính toán biến động lãi lỗ, cổ tức thực nhận hoặc chi phí vốn).
 
-### 2. CẢNH BÁO RỦI RO & BẪY SỐ LIỆU (FORENSIC & RISKS)
-(Chỉ ra các điểm bất thường, rủi ro vĩ mô, chu kỳ ngành hoặc khoản mục BCTC cần thận trọng).
+### ⚠️ LỚP 4 - LƯU Ý RỦI RO & BẪY ĐỊNH LƯỢNG
+(Cảnh báo rủi ro tương ứng mức độ nhạy cảm của câu hỏi: bẫy P/E đỉnh chu kỳ, bẫy nợ vay, rủi ro T+2.5 kẹt sàn, bẫy lợi nhuận giấy, bẫy margin, bẫy tin đồn).
 
-### 3. KỊCH BẢN HÀNH ĐỘNG & NGƯỠNG THEO DÕI (KEY THRESHOLDS)
-(Đưa ra ngưỡng hỗ trợ/kháng cự, biên an toàn định giá MOS, kế hoạch giải ngân hoặc chỉ báo kích hoạt hành động).`;
+### 🧭 LỚP 5 - GỢI Ý BƯỚC TIẾP THEO HOẶC CÂU HỎI NGƯỢC CÁ NHÂN HÓA
+(Gợi ý 1-2 bước thực thi tiếp theo hoặc đặt DUY NHẤT 1 câu hỏi ngược về vốn/mục tiêu để hỗ trợ cá nhân hóa vị thế).
+
+TUYÊN BỐ MIỄN TRỪ BẮT BUỘC Ở CUỐI:
+> ⚠️ **Tuyên bố miễn trừ trách nhiệm:** Phân tích này chỉ mang tính tham khảo, không phải khuyến nghị đầu tư. Mọi quyết định đầu tư cần được cân nhắc kỹ lưỡng với cố vấn tài chính.`;
 
     const system = `Bạn là ORCA FA Copilot — Chuyên viên Cấp cao Phân tích Cơ bản Cổ phiếu (Senior Equity Research Analyst) của nền tảng ORCA-FA.
 Chuyên môn trọng tâm của bạn là phân tích báo cáo tài chính, chất lượng lợi nhuận, cấu trúc vốn, chu kỳ tiền mặt, định giá DCF/Multiples và đánh giá rủi ro doanh nghiệp niêm yết tại Việt Nam.
