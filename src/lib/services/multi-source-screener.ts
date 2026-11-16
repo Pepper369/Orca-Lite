@@ -107,7 +107,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 async function fetchCachedVpsForeign(sym: string) {
   const e = vpsForeignL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
-  const res = await withTimeout(getVpsForeignFlow(sym), 2_000).catch(() => null);
+  const res = await withTimeout(getVpsForeignFlow(sym), 1_200).catch(() => null);
   if (res) {
     if (vpsForeignL1.size >= 250) {
       const oldestKey = vpsForeignL1.keys().next().value;
@@ -121,7 +121,7 @@ async function fetchCachedVpsForeign(sym: string) {
 async function fetchCachedVndReports(sym: string) {
   const e = vndReportsL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
-  const res = await withTimeout(getStockAnalyticReports(sym, 5), 2_500).catch(() => null);
+  const res = await withTimeout(getStockAnalyticReports(sym, 5), 1_200).catch(() => null);
   if (res) {
     if (vndReportsL1.size >= 250) {
       const oldestKey = vndReportsL1.keys().next().value;
@@ -135,7 +135,7 @@ async function fetchCachedVndReports(sym: string) {
 async function fetchCachedVietcapShareholders(sym: string) {
   const e = vietcapShareholdersL1.get(sym);
   if (e && Date.now() < e.exp) return e.val;
-  const res = await withTimeout(getStockShareholders(sym), 2_500).catch(() => null);
+  const res = await withTimeout(getStockShareholders(sym), 1_200).catch(() => null);
   if (res) {
     if (vietcapShareholdersL1.size >= 250) {
       const oldestKey = vietcapShareholdersL1.keys().next().value;
@@ -185,7 +185,7 @@ export async function getMultiSourceScreenerData(opts?: MultiSourceFilterOpts): 
           if (aVn30 !== bVn30) return bVn30 - aVn30;
           return (b.volume ?? 0) - (a.volume ?? 0);
         })
-        .slice(0, 120)
+        .slice(0, 50)
         .map((it) => it.symbol);
 
       const targetSymbols: string[] = prioritySymbols.length > 0 ? prioritySymbols : [...VN30_BOARD];

@@ -598,7 +598,20 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-subtle/50">
-                {filtered.map((item) => {
+                {isLoading && items.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-text-muted">
+                      <Loading rows={5} />
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-text-muted text-xs">
+                      Không có mã cổ phiếu nào thỏa mãn toàn bộ tiêu chí lọc hiện tại. Thử chọn &quot;Mọi khuyến nghị&quot; hoặc điều chỉnh tiêu chí.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((item) => {
                   const isUp = item.changePercent > 0;
                   const isDown = item.changePercent < 0;
                   const isNetBuy = (item.foreignNetVolume ?? 0) > 0;
@@ -874,7 +887,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                       </td>
                     </tr>
                   );
-                })}
+                }))}
               </tbody>
             </table>
           </div>

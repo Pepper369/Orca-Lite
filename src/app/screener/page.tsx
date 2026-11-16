@@ -117,7 +117,7 @@ const UNIVERSE_TABS: { id: Universe; label: string }[] = SCREENER_GROUPS.flatMap
 function parseUniverse(raw: string | null): Universe {
   const allowed = new Set(UNIVERSE_TABS.map((t) => t.id));
   if (raw && allowed.has(raw as Universe)) return raw as Universe;
-  return "multi-source";
+  return "apex-buy-now";
 }
 
 const PanelFallback = () => <Loading rows={6} />;
@@ -256,7 +256,7 @@ function ScreenerInner() {
   const initialGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id ?? "quant_alpha";
   const [selectedGroup, setSelectedGroup] = useState<ScreenerGroupId>(initialGroup);
   const [studioModeMap, setStudioModeMap] = useState<Partial<Record<Universe, "studio" | "matrix">>>({});
-  const currentViewMode = studioModeMap[universe] ?? "studio";
+  const currentViewMode = studioModeMap[universe] ?? "matrix";
 
   useEffect(() => {
     setVisited((prev) => {
@@ -277,7 +277,7 @@ function ScreenerInner() {
   const currentGroupItems = SCREENER_GROUPS.find((g) => g.id === selectedGroup)?.items ?? SCREENER_GROUPS[0].items;
 
   const renderPanel = (u: Universe) => {
-    const isStudio = (studioModeMap[u] ?? "studio") === "studio";
+    const isStudio = (studioModeMap[u] ?? "matrix") === "studio";
     switch (u) {
       case "apex-buy-now":
         return (
