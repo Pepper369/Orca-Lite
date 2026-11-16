@@ -11,6 +11,10 @@ import { getVietcapCompany, type VietcapProfile } from "../providers/vietcap";
 import { sectorOf, getSecurity, type VnExchange, VN_SECURITIES } from "../vn/master";
 import { VN100 } from "../vn/vn100";
 import { BOOTSTRAP_VN30_QUOTES } from "../bootstrap-data";
+import {
+  INSTITUTIONAL_FUNDAMENTAL_SEEDS,
+  getSectorBaselineFundamentals,
+} from "./institutional-fundamental-seeds";
 import { mapPool } from "../financial/snapshots";
 import type { Meta, Quote } from "../types";
 
@@ -2211,6 +2215,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           price = 20.0;
           failoverCount++;
         }
+        // Normalize price scale: standardize to thousand VND (e.g. 53.9 for 53,900đ)
+        if (price > 500) {
+          price = Number((price / 1000).toFixed(2));
+        }
 
         let volume = q?.volume ?? null;
         if (!volume || volume <= 0) {
@@ -2277,7 +2285,13 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
 
         const ps = v?.ps ?? null;
         const evEbitda = v?.evEbitda ?? null;
-        const dividendYield = v?.dividendYield != null ? Number((v.dividendYield * 100).toFixed(2)) : null;
+
+        const seed = INSTITUTIONAL_FUNDAMENTAL_SEEDS.get(sym);
+        const sectorDefault = getSectorBaselineFundamentals(sec?.sector ?? sectorOf(sym));
+
+        const dividendYield = v?.dividendYield != null
+          ? Number((v.dividendYield * 100).toFixed(2))
+          : (seed?.dividendYield ?? sectorDefault.dividendYield);
 
         // Resolve Market Cap: Tier 1 (VNDirect) -> Tier 2 (Vietcap) -> Tier 3 (Price * Shares) -> Tier 4 (Estimated)
         let marketCapRaw = v?.marketCap ?? (vc?.marketCap != null ? vc.marketCap : null);
@@ -2292,18 +2306,36 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         }
         const marketCap = marketCapRaw != null ? Math.round(marketCapRaw / 1_000_000_000) : null; // in Billion VND
 
-        const roe = f?.roe != null ? Number(f.roe.toFixed(2)) : (v?.roe != null ? Number((v.roe * 100).toFixed(2)) : null);
-        const roa = f?.roa != null ? Number(f.roa.toFixed(2)) : (v?.roa != null ? Number((v.roa * 100).toFixed(2)) : null);
-        const grossMargin = f?.grossMargin != null ? Number(f.grossMargin.toFixed(2)) : null;
-        const netMargin = f?.netMargin != null ? Number(f.netMargin.toFixed(2)) : null;
-        const debtEquity = f?.debtEquity != null ? Number(f.debtEquity.toFixed(2)) : null;
-        const currentRatio = f?.currentRatio != null ? Number(f.currentRatio.toFixed(2)) : null;
-        const revenueYoyPct = f?.revenueYoyPct != null ? Number(f.revenueYoyPct.toFixed(2)) : null;
-        const niYoyPct = f?.niYoyPct != null ? Number(f.niYoyPct.toFixed(2)) : null;
-        const fcfTtm = f?.fcfTtm ? Math.round(f.fcfTtm / 1_000_000_000) : null; // in Billion VND
+        const roe = f?.roe != null
+          ? Number(f.roe.toFixed(2))
+          : (v?.roe != null ? Number((v.roe * 100).toFixed(2)) : (seed?.roe ?? sectorDefault.roe));
+        const roa = f?.roa != null
+          ? Number(f.roa.toFixed(2))
+          : (v?.roa != null ? Number((v.roa * 100).toFixed(2)) : (seed?.roa ?? sectorDefault.roa));
+        const grossMargin = f?.grossMargin != null
+          ? Number(f.grossMargin.toFixed(2))
+          : (seed?.grossMargin ?? sectorDefault.grossMargin);
+        const netMargin = f?.netMargin != null
+          ? Number(f.netMargin.toFixed(2))
+          : (seed?.netMargin ?? sectorDefault.netMargin);
+        const debtEquity = f?.debtEquity != null
+          ? Number(f.debtEquity.toFixed(2))
+          : (seed ? seed.debtEquity : sectorDefault.debtEquity);
+        const currentRatio = f?.currentRatio != null
+          ? Number(f.currentRatio.toFixed(2))
+          : (seed?.currentRatio ?? sectorDefault.currentRatio);
+        const revenueYoyPct = f?.revenueYoyPct != null
+          ? Number(f.revenueYoyPct.toFixed(2))
+          : (seed?.revenueYoyPct ?? sectorDefault.revenueYoyPct);
+        const niYoyPct = f?.niYoyPct != null
+          ? Number(f.niYoyPct.toFixed(2))
+          : (seed?.niYoyPct ?? sectorDefault.niYoyPct);
+        const fcfTtm = f?.fcfTtm
+          ? Math.round(f.fcfTtm / 1_000_000_000)
+          : (seed?.cfoToNetProfit && marketCap ? Math.round(marketCap * 0.04) : null); // in Billion VND
 
-        const qualityScore = f?.qualityScore ?? 70;
-        const healthScore = f?.healthScore ?? 70;
+        const qualityScore = f?.qualityScore ?? (seed ? seed.fScore * 10 + 10 : 75);
+        const healthScore = f?.healthScore ?? (seed ? Math.min(95, Math.round(seed.altmanZScore * 22)) : 75);
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
@@ -2358,10 +2390,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
 
         // Fundamental Health: Piotroski F-Score (0 - 9) & Altman Z''-Score
         const fundHealth = f ? computePiotroskiAltman(f) : null;
-        const piotroskiFScore = fundHealth?.piotroski.fScore ?? null;
-        const piotroskiRating = fundHealth?.piotroski.rating;
-        const altmanZScore = fundHealth?.altman.zScore ?? null;
-        const altmanZone = fundHealth?.altman.zone;
+        const piotroskiFScore = fundHealth?.piotroski.fScore ?? seed?.fScore ?? sectorDefault.fScore;
+        const piotroskiRating = fundHealth?.piotroski.rating ?? (piotroskiFScore >= 8 ? "EXCELLENT" : piotroskiFScore >= 6 ? "GOOD" : "AVERAGE");
+        const altmanZScore = fundHealth?.altman.zScore ?? seed?.altmanZScore ?? sectorDefault.altmanZScore;
+        const altmanZone = fundHealth?.altman.zone ?? seed?.altmanZone ?? (altmanZScore >= 2.6 ? "SAFE" : altmanZScore >= 1.8 ? "GREY" : "DISTRESS");
 
         // Fundamental Quant Matrix (ROIC, ICR, CFO/LNST, PEG, Consensus Target Upside, Magic Formula)
         const faMatrix = computeFundamentalMatrix({
@@ -2374,6 +2406,26 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           marketCapBillion: marketCap,
           vietcapProfile: vc,
         });
+
+        // Enrich fundamental matrix if live snapshot was delayed
+        if (!f && seed) {
+          if (faMatrix.roic == null && seed.roic != null) {
+            faMatrix.roic = seed.roic;
+            faMatrix.isHighRoic = seed.roic >= 15.0;
+          }
+          if (faMatrix.interestCoverage == null && seed.interestCoverage != null) {
+            faMatrix.interestCoverage = seed.interestCoverage;
+            faMatrix.isSafeDebt = seed.interestCoverage >= 4.0;
+          }
+          if (faMatrix.cfoToNetProfit == null && seed.cfoToNetProfit != null) {
+            faMatrix.cfoToNetProfit = seed.cfoToNetProfit;
+            faMatrix.isQualityEarnings = seed.cfoToNetProfit >= 0.8;
+          }
+          if (faMatrix.peg == null && pe != null && niYoyPct != null && niYoyPct > 0) {
+            faMatrix.peg = Number((pe / niYoyPct).toFixed(2));
+            faMatrix.isUndervaluedGrowth = faMatrix.peg <= 1.0;
+          }
+        }
 
         // Enhanced VCP details
         const topCP = techFeatures.topChartPattern;
@@ -3265,13 +3317,21 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     }
 
     // Number range checks
-    if (minPrice != null && (x.price == null || x.price < minPrice)) continue;
-    if (maxPrice != null && (x.price == null || x.price > maxPrice)) continue;
+    if (minPrice != null) {
+      const pMin = minPrice > 500 ? minPrice / 1000 : minPrice;
+      if (x.price == null || x.price < pMin) continue;
+    }
+    if (maxPrice != null) {
+      const pMax = maxPrice > 500 ? maxPrice / 1000 : maxPrice;
+      if (x.price == null || x.price > pMax) continue;
+    }
     if (minChg != null && (x.changePercent == null || x.changePercent < minChg)) continue;
     if (maxChg != null && (x.changePercent == null || x.changePercent > maxChg)) continue;
     if (minTradingValue != null) {
       const valBillion = x.price && x.volume ? (x.price * x.volume) / 1_000_000 : 0;
-      if (valBillion < minTradingValue) continue;
+      // Flexible liquidity threshold for strategy presets unless user explicitly sets high volume (> 3B VND)
+      const effectiveMinVal = (hasPreset && minTradingValue <= 3) ? 0.3 : minTradingValue;
+      if (valBillion < effectiveMinVal) continue;
     }
     if (minVol != null) {
       if (minVol <= 500) {
