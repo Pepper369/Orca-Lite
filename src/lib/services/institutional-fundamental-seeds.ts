@@ -187,3 +187,4 @@ export function getSectorBaselineFundamentals(sector: string): SeedFundamentalDa
     cfoToNetProfit: 1.15,
   };
 }
+

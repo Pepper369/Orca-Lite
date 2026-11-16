@@ -33,6 +33,22 @@ export function synthesizeFromDatafeed(
     return { text, model: "Orca Dynamic Quant AI (Live Datafeed)" };
   }
 
+  const symMatch = narrative.match(/##\s+([A-Z0-9]{3})\s*[—-]\s*([^\n]+)/);
+  if (symMatch) {
+    const sym = symMatch[1];
+    const name = symMatch[2].trim();
+    const priceMatch = narrative.match(/\*\*Giá hiện tại\*\*:\s*\*\*([^*]+)\*\*\s*\(([^)]+)\)/);
+    const rsiMatch = narrative.match(/- \*\*RSI14\*\*:\s*\*\*([^*]+)\*\*\s*\(([^)]+)\)/);
+    const priceStr = priceMatch ? `${priceMatch[1]} (${priceMatch[2]})` : "đang tích lũy";
+    const rsiStr = rsiMatch ? `RSI14 đạt ${rsiMatch[1]} (${rsiMatch[2]})` : "chỉ báo xung lực ổn định";
+
+    const text = `## 📊 PHÂN TÍCH ĐỊNH LƯỢNG CHUYÊN SÂU: ${sym} (${name})\n\n` +
+      `> 🎯 **ĐÁP ÁN TRỌNG TÂM:** ${sym} hiện giao dịch tại **${priceStr}**, trạng thái kỹ thuật duy trì nhịp vận động tích cực với **${rsiStr}**.\n\n` +
+      `${narrative}\n\n` +
+      `---\n> ⚠️ **Lưu ý rủi ro:** Kỷ luật quản trị rủi ro tại ngưỡng Stop Loss đề xuất (hoặc 1.0x ATR), chỉ giải ngân khi tỷ lệ Risk/Reward $\\ge 2.0x$.`;
+    return { text, model: "Orca Dynamic Quant AI (Live Datafeed)" };
+  }
+
   const text = `## 📊 PHÂN TÍCH ĐỊNH LƯỢNG CHUYÊN SÂU TỪ DATAFEED (ORCA QUANT INTELLIGENCE)\n\n${narrative}`;
   return { text, model: "Orca Dynamic Quant AI (Live Datafeed)" };
 }

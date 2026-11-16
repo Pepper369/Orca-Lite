@@ -16,6 +16,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
   const sym = (symbol ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!sym) return unavailable("vn-market", "Thiếu mã cổ phiếu");
 
+  if (sym === "SCREENER") {
+    const { GET: screenerGet } = await import("../screener/route");
+    return screenerGet(_req);
+  }
+
   return safeApi({
     label: `vn-detail:${sym}`,
     guard: {

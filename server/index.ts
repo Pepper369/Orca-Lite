@@ -66,8 +66,18 @@ app.get("/api/v1/stocks", async (c) => {
   return GET(c.req.raw);
 });
 
+// Explicit screener route MUST precede dynamic :symbol to prevent route shadowing
+app.get("/api/v1/stocks/screener", async (c) => {
+  const { GET } = await import("@/app/api/v1/stocks/screener/route");
+  return GET(c.req.raw);
+});
+
 app.get("/api/v1/stocks/:symbol", async (c) => {
   const symbol = c.req.param("symbol");
+  if (symbol && symbol.toLowerCase() === "screener") {
+    const { GET } = await import("@/app/api/v1/stocks/screener/route");
+    return GET(c.req.raw);
+  }
   const { GET } = await import("@/app/api/v1/stocks/[symbol]/route");
   return GET(c.req.raw, { params: Promise.resolve({ symbol }) });
 });
@@ -148,11 +158,6 @@ app.get("/api/v1/forex/:symbol", async (c) => {
   }
   const { GET } = await import("@/app/api/v1/forex/[symbol]/route");
   return GET(c.req.raw, { params: Promise.resolve({ symbol }) });
-});
-
-app.get("/api/v1/stocks/screener", async (c) => {
-  const { GET } = await import("@/app/api/v1/stocks/screener/route");
-  return GET(c.req.raw);
 });
 
 app.get("/api/v1/crypto/markets", async (c) => {

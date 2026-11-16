@@ -66,9 +66,8 @@ async function buildVn(symbol: string, deep: boolean): Promise<Built> {
     asset: { symbol: sym, asset_type: "stock" },
   };
 
-  const analysis = await buildStockAnalysis(sym).catch(() => null);
-
-  const [quotePack, bars, fs, ratios, equity, profile, idxBars, news, marketPack, sectorPack] = await Promise.all([
+  const [analysis, quotePack, bars, fs, ratios, equity, profile, idxBars, news, marketPack, sectorPack] = await Promise.all([
+    buildStockAnalysis(sym).catch(() => null),
     hubVnQuotes([sym]).catch(() => null),
     loadBars(sym),
     hubFinancialPackage(sym)
