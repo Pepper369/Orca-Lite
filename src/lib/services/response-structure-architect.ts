@@ -14,6 +14,9 @@ export type DetectedQueryIntent =
   | "MARKET_OVERVIEW"      // Diễn biến VN-Index, chế độ thị trường, thanh khoản
   | "FORENSIC_OR_RISK"     // Soi BCTC, dòng tiền CFO, bẫy nợ, bẫy P/E đỉnh, rủi ro T+2.5
   | "PERSONAL_FINANCE"     // Quản lý tài chính cá nhân, thuế TNCN, trả nợ, quỹ khẩn cấp
+  | "DERIVATIVES"          // Giao dịch phái sinh VN30F1M, độ lệch Basis, vị thế Long/Short, OI
+  | "CRYPTO"               // Tiền mã hóa (Bitcoin, Ethereum, Altcoins), biến động 24h, funding rate
+  | "FOREX_MACRO"          // Tỷ giá USD/VND, DXY, thị trường ngoại hối và chính sách tỷ giá SBV
   | "GENERAL_CONSULTATION"; // Tư vấn chung
 
 export interface IntentDetectionResult {
@@ -310,6 +313,33 @@ export function detectQueryIntent(query: string, feed?: FastDatafeedContext): In
   const hasCommodityKw = commodities.length > 0 || /dầu|dầu thô|brent|wti|thép|hrc|quặng|vàng|xăng|phân bón|ure|urê|cao su|gạo|cà phê/i.test(q);
   const hasEarningsKw = /bctc|báo cáo tài chính|kết quả kinh doanh|kqkd|lợi nhuận|doanh thu|quý [1-4]|quý này|quý trước|lũy kế|cả năm|niên độ/i.test(q);
   const hasTechnicalKw = /kỹ thuật|chart|đồ thị|rsi|macd|bollinger|ma20|ma50|ma200|kháng cự|hỗ trợ|điểm mua|điểm bán|cản|vượt cản|test đáy|volume|thanh khoản|momentum|động lượng|thắt nút/i.test(q);
+  const hasDerivKw = /phái sinh|vn30f|f1m|f2m|basis|long\s*short|hợp đồng tương lai|hđtl|\boi\b|open interest/i.test(q);
+  const hasCryptoKw = /crypto|tiền mã hóa|tiền ảo|tiền điện tử|bitcoin|btc|ethereum|eth|solana|sol|binance|altcoin|tether|usdt|bnb|xrp|doge/i.test(q);
+  const hasForexKw = /forex|ngoại tệ|ngoại hối|tỷ giá|usd\/vnd|usdvnd|dxy|đô la|eur\/usd|eurusd|usd\/jpy|usdjpy/i.test(q);
+
+  if (hasDerivKw) {
+    return {
+      intent: "DERIVATIVES",
+      confidence: 0.95,
+      detectedEntities: { tickers, commodities, hasMacroKeyword: hasMacroKw, hasRiskKeyword: hasRiskKw },
+    };
+  }
+
+  if (hasCryptoKw) {
+    return {
+      intent: "CRYPTO",
+      confidence: 0.95,
+      detectedEntities: { tickers, commodities, hasMacroKeyword: hasMacroKw, hasRiskKeyword: hasRiskKw },
+    };
+  }
+
+  if (hasForexKw && !hasCompareKw) {
+    return {
+      intent: "FOREX_MACRO",
+      confidence: 0.93,
+      detectedEntities: { tickers, commodities, hasMacroKeyword: true, hasRiskKeyword: hasRiskKw },
+    };
+  }
 
   if (hasScenarioKw) {
     return {
@@ -566,6 +596,50 @@ Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
    - Đệm dự phòng khẩn cấp (3-6 tháng chi phí).
 3. 🚀 **LỘ TRÌNH HÀNH ĐỘNG CỤ THỂ**:
    - 2 - 3 bước thực hiện ngay khi nhận lương hoặc cách giảm trừ gia cảnh hợp pháp.`;
+      break;
+
+    case "DERIVATIVES":
+      templateGuidance = `
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU PHÁI SINH VN30F & BASIS SPREAD) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **CHIẾN LƯỢC PHÁI SINH TỨC THÌ (VERDICT CARD)**:
+   - 1 câu chốt vị thế: [ƯU TIÊN LONG | ƯU TIÊN SHORT | ĐỨNG NGOÀI QUAN SÁT] kèm mốc Basis và điểm chặn lỗ.
+2. 📊 **BẢNG THÔNG SỐ PHÁI SINH TRỌNG YẾU (HNX / TCBS FEED)**:
+   - Hợp đồng gần nhất (VN30F1M): Điểm số, độ lệch Basis so với VN30 cơ sở.
+   - Trạng thái Curve (Contango vs Backwardation) và khối lượng mở (OI).
+   - Dòng tiền Khối ngoại & Tự doanh (Net Long/Short).
+3. 🚀 **KỊCH BẢN ĐI LỆNH TRONG PHIÊN (INTRADAY TRADE SETUP)**:
+   - Vùng kích hoạt lệnh Long/Short.
+   - Ngưỡng cắt lỗ kỷ luật tuyệt đối (Stop-Loss 2.5 - 3.5 điểm).`;
+      break;
+
+    case "CRYPTO":
+      templateGuidance = `
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TIỀN MÃ HÓA & CRYPTO ASSETS) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **XU HƯỚNG THỊ TRƯỜNG CRYPTO (VERDICT CARD)**:
+   - 1 câu chốt: Trạng thái thị trường [TĂNG TRƯỞNG MẠNH / ĐIỀU CHỈNH / TÍCH LŨY BIÊN ĐỘ] và nhận định Bitcoin (BTC).
+2. 📊 **BẢNG GIÁ CRYPTO TRỰC TIẾP (BINANCE SPOT FEED)**:
+   - Giá USD hiện tại, Biến động 24h (%), Khối lượng giao dịch 24h của BTC, ETH và các Altcoin được hỏi.
+   - Vùng cản trên và Hỗ trợ cứng gần nhất.
+3. 🚀 **KẾ HOẠCH GIAO DỊCH & QUẢN TRỊ RỦI RO**:
+   - Vùng gom hàng Spot hoặc chiến lược Futures (Đòn bẩy an toàn $\\le 2-3\\text{x}$).
+   - Điểm cắt lỗ cứng bảo vệ vốn.`;
+      break;
+
+    case "FOREX_MACRO":
+      templateGuidance = `
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TỶ GIÁ NGOẠI HỐI & VĨ MÔ TIỀN TỆ) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **CHẨN ĐOÁN TỶ GIÁ TỨC THÌ (VERDICT CARD)**:
+   - 1 câu chốt: Xu hướng áp lực tỷ giá [CĂNG THẲNG / ỔN ĐỊNH / HẠ NHIỆT] và tỷ giá USD/VND hiện tại.
+2. 📊 **BẢNG TỶ GIÁ NGOẠI TỆ & DXY**:
+   - Tỷ giá USD/VND (Ngân hàng VCB & Thị trường tự do).
+   - Chỉ số DXY (US Dollar Index) và diễn biến các cặp tiền tệ chính (EUR/USD, USD/JPY).
+3. 🚀 **TÁC ĐỘNG TỚI THỊ TRƯỜNG CHỨNG KHOÁN & DOANH NGHIỆP**:
+   - Nhóm doanh nghiệp hưởng lợi (Xuất khẩu: Thủy sản, Dệt may, Cảng biển).
+   - Nhóm doanh nghiệp chịu áp lực nợ vay USD hoặc nhập khẩu nguyên liệu.
+   - Định hướng chính sách tiền tệ của Ngân hàng Nhà nước (SBV).`;
       break;
 
     default:

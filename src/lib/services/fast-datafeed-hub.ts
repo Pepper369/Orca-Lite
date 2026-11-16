@@ -18,6 +18,9 @@ import { getVnSession, type VnSessionInfo } from "../vn/sessions";
 import { peekHot } from "../hot-snapshot";
 import type { MarketIntel } from "./market-intel";
 import { hubVnQuotes, hubFinancialPackagePeek, hubFinancialPackage } from "../data-engine";
+import { getDerivativesBriefBlock, getDerivativesSnapshotWithFlow } from "./derivatives";
+import { getCryptoMarkets } from "./crypto";
+import { getForexMarkets } from "./forex";
 
 export interface FastMarketSnapshot {
   timestamp: number;
@@ -127,10 +130,41 @@ export interface FastScreenerResult {
   filterCaveats: string[];
 }
 
+export interface FastDerivativesItem {
+  symbol: string;
+  price: number;
+  change: number | null;
+  changePercent: number | null;
+  basis: number | null;
+  openInterest: number | null;
+  regimeText?: string;
+  flowText?: string;
+}
+
+export interface FastCryptoItem {
+  symbol: string;
+  baseAsset: string;
+  priceUsd: number;
+  change24hPct: number | null;
+  volume24hUsd: number | null;
+}
+
+export interface FastForexItem {
+  pair: string;
+  symbol: string;
+  price: number;
+  changePercent: number | null;
+  group: string;
+  note?: string;
+}
+
 export interface FastDatafeedContext {
   market?: FastMarketSnapshot;
   matchedCommodities: FastCommodityItem[];
   matchedStocks: FastStockLiveInsight[];
+  matchedDerivatives?: FastDerivativesItem[];
+  matchedCrypto?: FastCryptoItem[];
+  matchedForex?: FastForexItem[];
   screenerResult?: FastScreenerResult;
   summary?: string;
   assembledPromptContext: string;
@@ -296,6 +330,155 @@ export async function getFastCommoditiesData(query: string): Promise<FastCommodi
     return results.slice(0, 5);
   } catch (err) {
     console.warn("[FastDatafeed] Error fetching commodity feed:", err);
+    return [];
+  }
+}
+
+export async function getFastDerivativesData(query: string): Promise<FastDerivativesItem[]> {
+  const q = query.toLowerCase();
+  const isDerivQuery = /phái sinh|vn30f|f1m|f2m|basis|hợp đồng tương lai|hđtl|\boi\b|open interest/i.test(q);
+  if (!isDerivQuery) return [];
+
+  try {
+    const [brief, snapRes] = await Promise.all([
+      getDerivativesBriefBlock().catch(() => null),
+      getDerivativesSnapshotWithFlow({ force: false }).catch(() => null),
+    ]);
+
+    const results: FastDerivativesItem[] = [];
+    const contracts = snapRes?.data?.contracts || [];
+
+    for (const c of contracts.slice(0, 2)) {
+      results.push({
+        symbol: c.symbol,
+        price: c.quote?.matchPrice || c.referencePrice || 0,
+        change: c.quote?.priceChange ?? null,
+        changePercent: c.quote?.percentChange ?? null,
+        basis: c.basis?.pointDifference ?? null,
+        openInterest: c.quote?.openInterest ?? null,
+        regimeText: brief?.regime?.titleVi || undefined,
+        flowText: brief?.lines?.join(" · ") || undefined,
+      });
+    }
+
+    if (results.length === 0 && brief?.available) {
+      results.push({
+        symbol: "VN30F1M",
+        price: 0,
+        change: null,
+        changePercent: null,
+        basis: null,
+        openInterest: null,
+        regimeText: brief.regime?.titleVi,
+        flowText: brief.lines.join(" · "),
+      });
+    }
+
+    return results;
+  } catch (err) {
+    console.warn("[FastDatafeed] Error fetching derivatives data:", err);
+    return [];
+  }
+}
+
+const COMMON_CRYPTO_SYMBOLS: Record<string, string> = {
+  btc: "BTCUSDT",
+  bitcoin: "BTCUSDT",
+  eth: "ETHUSDT",
+  ethereum: "ETHUSDT",
+  sol: "SOLUSDT",
+  solana: "SOLUSDT",
+  bnb: "BNBUSDT",
+  binance: "BNBUSDT",
+  xrp: "XRPUSDT",
+  ripple: "XRPUSDT",
+  doge: "DOGEUSDT",
+  dogecoin: "DOGEUSDT",
+  ada: "ADAUSDT",
+  cardano: "ADAUSDT",
+};
+
+export async function getFastCryptoData(query: string): Promise<FastCryptoItem[]> {
+  const q = query.toLowerCase();
+  const isCryptoQuery = /crypto|tiền mã hóa|tiền ảo|tiền điện tử|bitcoin|btc|ethereum|eth|solana|sol|binance|altcoin|tether|usdt|bnb|xrp|doge/i.test(q);
+  if (!isCryptoQuery) return [];
+
+  try {
+    const raw = await getCryptoMarkets().catch(() => null);
+    if (!raw?.rows || raw.rows.length === 0) return [];
+
+    const requestedSymbols = new Set<string>();
+    for (const [kw, sym] of Object.entries(COMMON_CRYPTO_SYMBOLS)) {
+      if (new RegExp(`\\b${kw}\\b`, "i").test(q) || q.includes(kw)) {
+        requestedSymbols.add(sym);
+      }
+    }
+
+    const results: FastCryptoItem[] = [];
+    if (requestedSymbols.size > 0) {
+      for (const r of raw.rows) {
+        if (requestedSymbols.has(r.symbol)) {
+          results.push({
+            symbol: r.symbol,
+            baseAsset: r.baseAsset,
+            priceUsd: r.price,
+            change24hPct: r.changePercent,
+            volume24hUsd: r.quoteVolume,
+          });
+        }
+      }
+    }
+
+    if (results.length === 0) {
+      const topRows = raw.rows
+        .filter((r) => ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"].includes(r.symbol))
+        .slice(0, 5);
+      for (const r of topRows) {
+        results.push({
+          symbol: r.symbol,
+          baseAsset: r.baseAsset,
+          priceUsd: r.price,
+          change24hPct: r.changePercent,
+          volume24hUsd: r.quoteVolume,
+        });
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.warn("[FastDatafeed] Error fetching crypto data:", err);
+    return [];
+  }
+}
+
+export async function getFastForexData(query: string): Promise<FastForexItem[]> {
+  const q = query.toLowerCase();
+  const isFxQuery = /forex|ngoại tệ|ngoại hối|tỷ giá|usd\/vnd|usdvnd|dxy|đô la|eur\/usd|eurusd|usd\/jpy|usdjpy|tỷ giá trung tâm|sbv/i.test(q);
+  if (!isFxQuery) return [];
+
+  try {
+    const raw = await getForexMarkets().catch(() => null);
+    if (!raw?.data?.rows || raw.data.rows.length === 0) return [];
+
+    const results: FastForexItem[] = [];
+    const targetPairs = ["USDVND", "EURUSD", "USDJPY", "GBPUSD", "AUDUSD"];
+
+    for (const r of raw.data.rows) {
+      if (targetPairs.includes(r.pair) || q.includes(r.pair.toLowerCase()) || q.includes(r.symbol.toLowerCase())) {
+        results.push({
+          pair: r.pair,
+          symbol: r.symbol,
+          price: r.price,
+          changePercent: r.changePercent,
+          group: r.group,
+          note: raw.data.usdStrengthNote,
+        });
+      }
+    }
+
+    return results.slice(0, 5);
+  } catch (err) {
+    console.warn("[FastDatafeed] Error fetching forex data:", err);
     return [];
   }
 }
@@ -910,10 +1093,13 @@ export async function buildFastDatafeedContext(question: string): Promise<FastDa
   const tickers = extractTickers(question).slice(0, 3);
   const isScreener = isScreenerQuery(question);
 
-  const [marketSnap, commodities, screenerFeed, ...stocks] = await Promise.all([
+  const [marketSnap, commodities, screenerFeed, derivativesData, cryptoData, forexData, ...stocks] = await Promise.all([
     getFastMarketSnapshot(),
     getFastCommoditiesData(question),
     isScreener ? getFastScreenerFeed(question) : Promise.resolve(null),
+    getFastDerivativesData(question),
+    getFastCryptoData(question),
+    getFastForexData(question),
     ...tickers.map((t) => getFastStockLiveInsight(t)),
   ]);
 
@@ -974,7 +1160,42 @@ export async function buildFastDatafeedContext(question: string): Promise<FastDa
     contextBlocks.push(`📈 DỮ LIỆU CỔ PHIẾU REALTIME & MA TRẬN ĐA NHÂN TỐ:\n${stockLines.join("\n")}`);
   }
 
-  // 4. Commodities
+  // 4. Derivatives Feed (VN30F1M & Basis)
+  if (derivativesData.length > 0) {
+    const derivLines = derivativesData.map((d) => {
+      const p = d.price ? `${d.price.toFixed(1)} điểm` : "—";
+      const chg = d.changePercent != null ? `${d.changePercent >= 0 ? "+" : ""}${d.changePercent.toFixed(2)}%` : "";
+      const basis = d.basis != null ? `Basis: ${d.basis >= 0 ? "+" : ""}${d.basis.toFixed(1)} điểm` : "";
+      const oi = d.openInterest ? `OI: ${d.openInterest.toLocaleString("vi-VN")} HĐ` : "";
+      const regime = d.regimeText ? `[Regime: ${d.regimeText}]` : "";
+      return `• [${d.symbol}] Giá: ${p} (${chg}) | ${[basis, oi, regime].filter(Boolean).join(" · ")}${d.flowText ? `\n    └─ Cấu trúc & Dòng tiền: ${d.flowText}` : ""}`;
+    });
+    contextBlocks.push(`⚡ THỊ TRƯỜNG PHÁI SINH VIỆT NAM (DERIVATIVES LIVE FEED - HNX/TCBS):\n${derivLines.join("\n")}`);
+  }
+
+  // 5. Crypto Feed (Binance Spot)
+  if (cryptoData.length > 0) {
+    const cryptoLines = cryptoData.map((c) => {
+      const p = c.priceUsd ? `$${c.priceUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—";
+      const chg = c.change24hPct != null ? `${c.change24hPct >= 0 ? "+" : ""}${c.change24hPct.toFixed(2)}%` : "";
+      const vol = c.volume24hUsd ? `Vol 24h: $${(c.volume24hUsd / 1_000_000).toFixed(1)}M` : "";
+      return `• [${c.baseAsset} - ${c.symbol}] Giá: ${p} (24h: ${chg}) | ${vol}`;
+    });
+    contextBlocks.push(`🪙 THỊ TRƯỜNG TIỀN MÃ HÓA (CRYPTO LIVE FEED - BINANCE SPOT/COINGECKO):\n${cryptoLines.join("\n")}`);
+  }
+
+  // 6. Forex & Tỷ giá (USD/VND, DXY)
+  if (forexData.length > 0) {
+    const fxLines = forexData.map((f) => {
+      const p = f.pair === "USDVND" ? `${f.price.toLocaleString("vi-VN")} VND` : f.price.toFixed(4);
+      const chg = f.changePercent != null ? `${f.changePercent >= 0 ? "+" : ""}${f.changePercent.toFixed(2)}%` : "";
+      return `• [${f.symbol}] Tỷ giá: ${p} (${chg})`;
+    });
+    const dxyNote = forexData[0]?.note ? `\n    └─ Vĩ mô tiền tệ & DXY: ${forexData[0].note}` : "";
+    contextBlocks.push(`💱 THỊ TRƯỜNG NGOẠI HỐI & TỶ GIÁ (FOREX & MACRO CURRENCY FEED):\n${fxLines.join("\n")}${dxyNote}`);
+  }
+
+  // 7. Commodities
   if (commodities.length > 0) {
     const commLines = commodities.map((c) => {
       const bene = c.beneficiaryStocks && c.beneficiaryStocks.length ? `(Mã hưởng lợi: ${c.beneficiaryStocks.join(", ")})` : "";
@@ -992,6 +1213,9 @@ export async function buildFastDatafeedContext(question: string): Promise<FastDa
     market: marketSnap ?? undefined,
     matchedCommodities: commodities,
     matchedStocks,
+    matchedDerivatives: derivativesData.length > 0 ? derivativesData : undefined,
+    matchedCrypto: cryptoData.length > 0 ? cryptoData : undefined,
+    matchedForex: forexData.length > 0 ? forexData : undefined,
     screenerResult: screenerFeed ?? undefined,
     summary,
     assembledPromptContext: contextBlocks.join("\n\n"),
