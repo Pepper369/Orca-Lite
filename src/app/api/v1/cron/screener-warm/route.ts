@@ -6,7 +6,7 @@ import { putHot } from "@/lib/hot-snapshot";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 18;
+export const maxDuration = 30;
 
 /**
  * P8a: focused screener warm (fundamental + valuation default scans).
@@ -113,6 +113,26 @@ export async function GET(req: Request) {
       }
     } catch (e) {
       results.master = { ok: false, ms: Date.now() - s, note: e instanceof Error ? e.message : "err" };
+    }
+  }
+
+  // screener-alert monitor (T vs T-1 detection & Telegram/Discord webhook dispatch)
+  {
+    const s = Date.now();
+    try {
+      const { runScreenerAlertMonitor } = await import("@/lib/services/screener-alert-service");
+      const alertResult = await runScreenerAlertMonitor();
+      results.alerts = {
+        ok: alertResult.ok,
+        ms: Date.now() - s,
+        note: `${alertResult.newlyTriggeredCount} new triggers (Discord: ${alertResult.discordDispatched}, TG: ${alertResult.telegramDispatched})`,
+      };
+    } catch (e) {
+      results.alerts = {
+        ok: false,
+        ms: Date.now() - s,
+        note: e instanceof Error ? e.message : "err",
+      };
     }
   }
 

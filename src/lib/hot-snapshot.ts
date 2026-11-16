@@ -22,7 +22,8 @@ export type HotSlot =
   | "screener-fundamental"
   | "screener-valuation"
   | "screener-minervini"
-  | "screener-master";
+  | "screener-master"
+  | "screener-alerts-prev";
 
 type SlotEntry = {
   data: unknown;

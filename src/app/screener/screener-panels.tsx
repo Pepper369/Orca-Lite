@@ -36,10 +36,12 @@ import {
   Trash2,
   Layers,
   Sparkles,
+  Bell,
 } from "lucide-react";
 import { ScreenerMiniChart } from "@/components/screener-mini-chart";
 import { ScreenerMatrixToolbar } from "@/components/screener-matrix-toolbar";
 import { ScreenerAiSynthesisModal } from "@/components/screener-ai-synthesis-modal";
+import { ScreenerWebhookAlertModal } from "@/components/screener-webhook-alert-modal";
 import {
   CustomScreenerBuilder,
   loadCustomPresets,
@@ -1133,6 +1135,7 @@ export function VnScreener({
   const [displayMode, setDisplayMode] = useState<"table" | "grid">("table");
   const [showCustomBuilder, setShowCustomBuilder] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [customPresets, setCustomPresets] = useState<CustomScreenerPreset[]>([]);
   const [activeCustomPresetName, setActiveCustomPresetName] = useState<string | null>(null);
 
@@ -2674,6 +2677,17 @@ export function VnScreener({
               <Sparkles className="size-3.5 text-purple-400 animate-pulse" />
               <span className="hidden md:inline">Orca AI Copilot</span>
               <span className="md:hidden">AI</span>
+            </button>
+
+            {/* Screener Webhook Alert Bot Button */}
+            <button
+              type="button"
+              onClick={() => setIsAlertModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/35 hover:border-emerald-500/50 transition-all shadow-xs shrink-0"
+              title="Cảnh báo & Bot Webhook Screener (Telegram / Discord)"
+            >
+              <Bell className="size-3.5 text-emerald-400" />
+              <span className="hidden lg:inline">Alert Bot</span>
             </button>
             <div className="flex items-center gap-0.5 rounded-lg bg-panel-2 p-0.5 border border-border-subtle shrink-0">
               <button
@@ -4441,6 +4455,12 @@ export function VnScreener({
         preset={preset}
         stocks={rows}
         totalMatched={data?.total ?? rows.length}
+      />
+
+      {/* Screener Webhook Alert Bot Modal */}
+      <ScreenerWebhookAlertModal
+        isOpen={isAlertModalOpen}
+        onClose={() => setIsAlertModalOpen(false)}
       />
     </div>
   );
