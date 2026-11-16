@@ -28,6 +28,8 @@ export interface MultiSourceStockItem {
   pe: number | null;
   pb: number | null;
   pe3yAvg: number | null;
+  marketCap?: number | null;
+  exchange?: string | null;
   beta: number | null;
   high52w: number | null;
   low52w: number | null;
@@ -262,6 +264,8 @@ export async function getMultiSourceScreenerData(opts?: MultiSourceFilterOpts): 
           pe: snap?.pe ?? null,
           pb: snap?.pb ?? null,
           pe3yAvg: null,
+          marketCap: snap?.marketCap ?? null,
+          exchange: snap?.exchange ?? null,
           beta: snap?.beta ?? null,
           high52w: null,
           low52w: null,

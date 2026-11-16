@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useMemo } from "react";
+import { memo, useState, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
   Layers,
@@ -17,8 +17,12 @@ import {
   Zap,
 } from "lucide-react";
 import { useApi } from "@/lib/hooks";
+import { useMarketStream } from "@/lib/hooks/use-market-stream";
+import { VN_SECURITIES } from "@/lib/vn/master";
 import type { MultiSourceStockItem } from "@/lib/services/multi-source-screener";
 import { Loading, Panel } from "@/components/ui";
+
+const VN30_SYMBOLS = new Set(VN_SECURITIES.filter((s) => s.bluechip).map((s) => s.symbol));
 
 const fmtVol = (v: number | null) => {
   if (v == null || !Number.isFinite(v)) return "0 cp";
@@ -31,7 +35,7 @@ const fmtVol = (v: number | null) => {
 export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const { data, isLoading } = useApi<MultiSourceStockItem[]>(
     "/api/v1/screener/multi-source",
-    { refreshInterval: 15_000 }
+    { refreshInterval: 15_000, keepPreviousData: true }
   );
 
   const [query, setQuery] = useState("");
@@ -40,7 +44,12 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const [instFilter, setInstFilter] = useState<"ALL" | "HIGH_INST">("ALL");
   const [quantFilter, setQuantFilter] = useState<"ALL" | "QUANT_EDGE" | "OU_OVERSOLD">("ALL");
   const [buyZoneFilter, setBuyZoneFilter] = useState<"ALL" | "NEAR_BUY" | "AT_BUY">("ALL");
-  const [smartMoneyFilter, setSmartMoneyFilter] = useState<"ALL" | "INFLOW" | "ABSORPTION">("ALL");
+  const [smartMoneyFilter, setSmartMoneyFilter] = useState<
+    "ALL" | "INFLOW" | "ABSORPTION" | "POCKET_PIVOT" | "SUPER_FLOW"
+  >("ALL");
+  const [sectorFilter, setSectorFilter] = useState<string>("ALL");
+  const [capFilter, setCapFilter] = useState<"ALL" | "VN30" | "MIDCAP" | "SMALLCAP">("ALL");
+  const [valuationFilter, setValuationFilter] = useState<"ALL" | "UNDERVALUED" | "DEEP_VALUE">("ALL");
   const [rsFilter, setRsFilter] = useState<"ALL" | "RS_70" | "RS_80">("ALL");
   const [techGuardFilter, setTechGuardFilter] = useState<"ALL" | "APPROVED_ONLY">("ALL");
   const [sortBy, setSortBy] = useState<
@@ -50,6 +59,58 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
 
   const items = useMemo(() => data ?? [], [data]);
 
+  // Danh mục ngành trích xuất tự động từ dữ liệu thực tế
+  const availableSectors = useMemo(() => {
+    const s = new Set<string>();
+    items.forEach((it) => {
+      if (it.sector) s.add(it.sector);
+    });
+    return Array.from(s).sort();
+  }, [items]);
+
+  // Real-time SSE Stream Overlay (Item C)
+  const [realtimeEnabled, setRealtimeEnabled] = useState(true);
+  const streamSymbols = useMemo(() => {
+    return items.slice(0, 50).map((it) => it.symbol);
+  }, [items]);
+
+  const { quotes: streamQuotes, status: streamStatus } = useMarketStream(streamSymbols, {
+    enabled: realtimeEnabled && streamSymbols.length > 0,
+    asset: "stock",
+  });
+
+  const [flashMap, setFlashMap] = useState<Record<string, "up" | "down">>({});
+  const prevPricesRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!realtimeEnabled) return;
+    const updates: Record<string, "up" | "down"> = {};
+    let hasUpdates = false;
+
+    for (const [sym, sq] of Object.entries(streamQuotes)) {
+      if (!sq?.price) continue;
+      const normalized = sq.price > 500 ? Number((sq.price / 1000).toFixed(2)) : sq.price;
+      const prev = prevPricesRef.current[sym];
+      if (prev != null && prev !== normalized) {
+        updates[sym] = normalized > prev ? "up" : "down";
+        hasUpdates = true;
+      }
+      prevPricesRef.current[sym] = normalized;
+    }
+
+    if (hasUpdates) {
+      setFlashMap((prev) => ({ ...prev, ...updates }));
+      const timer = setTimeout(() => {
+        setFlashMap((prev) => {
+          const next = { ...prev };
+          for (const k of Object.keys(updates)) delete next[k];
+          return next;
+        });
+      }, 900);
+      return () => clearTimeout(timer);
+    }
+  }, [streamQuotes, realtimeEnabled]);
+
   const filtered = useMemo(() => {
     return items.filter((item) => {
       // Query filter
@@ -58,6 +119,34 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         if (!item.symbol.includes(q) && !item.name.toUpperCase().includes(q)) {
           return false;
         }
+      }
+
+      // Sector filter (Item B)
+      if (sectorFilter !== "ALL" && item.sector !== sectorFilter) {
+        return false;
+      }
+
+      // Market Cap filter (Item B)
+      if (capFilter === "VN30" && !VN30_SYMBOLS.has(item.symbol)) {
+        return false;
+      }
+      if (capFilter === "MIDCAP" && ((item.marketCap ?? 0) < 3_000 || VN30_SYMBOLS.has(item.symbol))) {
+        return false;
+      }
+      if (capFilter === "SMALLCAP" && (item.marketCap ?? 0) >= 3_000) {
+        return false;
+      }
+
+      // Valuation filter (Item B)
+      if (valuationFilter === "UNDERVALUED") {
+        const peValid = item.pe != null && item.pe > 0 && item.pe <= 15;
+        const pbValid = item.pb != null && item.pb > 0 && item.pb <= 2.2;
+        if (!peValid && !pbValid) return false;
+      }
+      if (valuationFilter === "DEEP_VALUE") {
+        const peDeep = item.pe != null && item.pe > 0 && item.pe <= 10;
+        const pbDeep = item.pb != null && item.pb > 0 && item.pb <= 1.2;
+        if (!peDeep && !pbDeep) return false;
       }
 
       // Foreign filter
@@ -91,16 +180,27 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         return false;
       }
 
-      // Smart Money filter
-      if (smartMoneyFilter === "INFLOW" && (item.smartMoneyScore == null || item.smartMoneyScore < 60)) {
-        return false;
+      // Smart Money filter (Item A - Enhanced)
+      if (smartMoneyFilter === "INFLOW") {
+        const hasScore = (item.smartMoneyScore ?? 0) >= 60;
+        const hasSig = item.smartMoneySignal === "HEAVY_ACCUMULATION" || item.smartMoneySignal === "POCKET_PIVOT";
+        if (!hasScore && !hasSig) return false;
       }
-      if (
-        smartMoneyFilter === "ABSORPTION" &&
-        item.smartMoneySignal !== "SPRING_ABSORPTION" &&
-        item.smartMoneySignal !== "HEAVY_ACCUMULATION"
-      ) {
-        return false;
+      if (smartMoneyFilter === "ABSORPTION") {
+        const isAbs =
+          item.smartMoneySignal === "SPRING_ABSORPTION" ||
+          item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+          item.vsaSignal === "ABSORPTION_SPIKE" ||
+          item.vsaSignal === "VSA_NO_SUPPLY";
+        if (!isAbs) return false;
+      }
+      if (smartMoneyFilter === "POCKET_PIVOT") {
+        if (item.smartMoneySignal !== "POCKET_PIVOT") return false;
+      }
+      if (smartMoneyFilter === "SUPER_FLOW") {
+        const isSmart = (item.smartMoneyScore ?? 0) >= 65 || item.smartMoneySignal === "HEAVY_ACCUMULATION";
+        const isForeign = item.foreignBuyRatioPct >= 55;
+        if (!isSmart || !isForeign) return false;
       }
 
       // RS Rating filter (O'Neil)
@@ -140,7 +240,23 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
       }
       return sortDir === "desc" ? -diff : diff;
     });
-  }, [items, query, foreignFilter, researchFilter, instFilter, quantFilter, buyZoneFilter, smartMoneyFilter, rsFilter, techGuardFilter, sortBy, sortDir]);
+  }, [
+    items,
+    query,
+    foreignFilter,
+    researchFilter,
+    instFilter,
+    quantFilter,
+    buyZoneFilter,
+    smartMoneyFilter,
+    rsFilter,
+    techGuardFilter,
+    sectorFilter,
+    capFilter,
+    valuationFilter,
+    sortBy,
+    sortDir,
+  ]);
 
   if (isLoading && !data) {
     return (
@@ -253,6 +369,31 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
               </span>
             </div>
             <div className="text-[10px] text-text-muted flex items-center gap-2">
+              <span
+                className={`rounded px-1.5 py-0.5 font-medium border flex items-center gap-1 ${
+                  streamStatus === "open"
+                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                    : "bg-surface-base text-text-muted border-border-subtle"
+                }`}
+              >
+                <span
+                  className={`size-1.5 rounded-full ${
+                    streamStatus === "open" ? "bg-emerald-400 animate-pulse" : "bg-text-muted"
+                  }`}
+                />
+                <span>SSE Stream: {streamStatus === "open" ? "Live Realtime" : "Kết nối…"}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setRealtimeEnabled((prev) => !prev)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium border transition-colors ${
+                  realtimeEnabled
+                    ? "bg-cyan-500/15 text-cyan-300 border-cyan-400/30"
+                    : "bg-surface-base text-text-muted border-border-subtle"
+                }`}
+              >
+                {realtimeEnabled ? "⚡ Stream Bật" : "⏸ Stream Tắt"}
+              </button>
               <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 font-medium border border-emerald-500/20">
                 HA Failover: Tự động
               </span>
@@ -413,7 +554,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                 </button>
               </div>
 
-              {/* Smart Money Filter */}
+              {/* Smart Money Filter (Item A) */}
               <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
                 <button
                   type="button"
@@ -441,6 +582,24 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   }`}
                 >
                   Hấp thụ cung
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmartMoneyFilter("POCKET_PIVOT")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    smartMoneyFilter === "POCKET_PIVOT" ? "bg-purple-500/20 text-purple-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Pocket Pivot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmartMoneyFilter("SUPER_FLOW")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    smartMoneyFilter === "SUPER_FLOW" ? "bg-cyan-500/20 text-cyan-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Siêu dòng tiền 🔥
                 </button>
               </div>
 
@@ -489,6 +648,130 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                 <span>Bảo Vệ Kỹ Thuật (Loại Death Cross/Gãy nền)</span>
               </button>
             </div>
+          </div>
+
+          {/* Secondary Controls Bar: Ngành, Vốn hóa & Định giá (Item B) */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-border-subtle text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Lọc theo Ngành */}
+              <div className="flex items-center gap-1.5 bg-surface-base px-2.5 py-1 rounded-lg border border-border-subtle">
+                <span className="text-[11px] text-text-muted whitespace-nowrap">Ngành:</span>
+                <select
+                  value={sectorFilter}
+                  onChange={(e) => setSectorFilter(e.target.value)}
+                  className="bg-transparent text-[11px] text-text-primary focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="ALL">Tất cả ngành ({availableSectors.length})</option>
+                  {availableSectors.map((sec) => (
+                    <option key={sec} value={sec} className="bg-surface-elevated text-text-primary">
+                      {sec}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Lọc theo Vốn hóa */}
+              <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCapFilter("ALL")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    capFilter === "ALL" ? "bg-surface-elevated text-text-primary" : "text-text-muted"
+                  }`}
+                >
+                  Tất cả quy mô
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCapFilter("VN30")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    capFilter === "VN30" ? "bg-blue-500/20 text-blue-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  VN30 Trụ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCapFilter("MIDCAP")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    capFilter === "MIDCAP" ? "bg-cyan-500/20 text-cyan-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Midcap (&ge;3K tỷ)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCapFilter("SMALLCAP")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    capFilter === "SMALLCAP" ? "bg-surface-elevated text-text-muted font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Smallcap
+                </button>
+              </div>
+
+              {/* Lọc theo Định giá P/E & P/B */}
+              <div className="flex items-center rounded-lg border border-border-subtle bg-surface-base p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setValuationFilter("ALL")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    valuationFilter === "ALL" ? "bg-surface-elevated text-text-primary" : "text-text-muted"
+                  }`}
+                >
+                  Mọi định giá
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuationFilter("UNDERVALUED")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    valuationFilter === "UNDERVALUED" ? "bg-emerald-500/20 text-emerald-400 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  P/E &le; 15 hoặc P/B &le; 2.2
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuationFilter("DEEP_VALUE")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    valuationFilter === "DEEP_VALUE" ? "bg-purple-500/20 text-purple-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Deep Value (P/E &le; 10)
+                </button>
+              </div>
+            </div>
+
+            {/* Reset Filters Shortcut */}
+            {(sectorFilter !== "ALL" ||
+              capFilter !== "ALL" ||
+              valuationFilter !== "ALL" ||
+              smartMoneyFilter !== "ALL" ||
+              foreignFilter !== "ALL" ||
+              researchFilter !== "ALL" ||
+              buyZoneFilter !== "ALL" ||
+              rsFilter !== "ALL" ||
+              techGuardFilter !== "ALL" ||
+              query.trim() !== "") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSectorFilter("ALL");
+                  setCapFilter("ALL");
+                  setValuationFilter("ALL");
+                  setSmartMoneyFilter("ALL");
+                  setForeignFilter("ALL");
+                  setResearchFilter("ALL");
+                  setBuyZoneFilter("ALL");
+                  setRsFilter("ALL");
+                  setTechGuardFilter("ALL");
+                  setQuery("");
+                }}
+                className="text-[11px] text-rose-400 hover:text-rose-300 underline font-medium px-1"
+              >
+                Đặt lại bộ lọc
+              </button>
+            )}
           </div>
 
           {/* Table */}
@@ -612,46 +895,72 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   </tr>
                 ) : (
                   filtered.map((item) => {
-                  const isUp = item.changePercent > 0;
-                  const isDown = item.changePercent < 0;
-                  const isNetBuy = (item.foreignNetVolume ?? 0) > 0;
+                    const sq = streamQuotes[item.symbol];
+                    const livePrice = sq?.price != null ? (sq.price > 500 ? sq.price / 1000 : sq.price) : item.price;
+                    const liveChg = sq?.changePercent != null ? sq.changePercent : item.changePercent;
+                    const isUp = liveChg > 0;
+                    const isDown = liveChg < 0;
+                    const isNetBuy = (item.foreignNetVolume ?? 0) > 0;
+                    const flash = flashMap[item.symbol];
+                    const flashClass =
+                      flash === "up"
+                        ? "bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/80 rounded"
+                        : flash === "down"
+                        ? "bg-rose-500/25 text-rose-300 ring-1 ring-rose-400/80 rounded"
+                        : "";
 
-                  return (
-                    <tr
-                      key={item.symbol}
-                      className="group transition-colors hover:bg-surface-elevated/40"
-                    >
-                      {/* Cột 1: Mã */}
-                      <td className="py-3 pr-4">
-                        <Link
-                          href={`/stocks/${item.symbol}`}
-                          className="flex flex-col group-hover:text-accent-primary"
-                        >
-                          <span className="font-bold text-text-primary group-hover:text-accent-primary">
-                            {item.symbol}
-                          </span>
-                          <span className="text-[10px] text-text-muted truncate max-w-[140px]">
-                            {item.name}
-                          </span>
-                        </Link>
-                      </td>
-
-                      {/* Cột 2: Giá */}
-                      <td className="py-3 px-3">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-text-primary">
-                            {item.price > 0 ? item.price.toFixed(2) : "—"}
-                          </span>
-                          <span
-                            className={`text-[11px] font-medium ${
-                              isUp ? "text-emerald-400" : isDown ? "text-rose-400" : "text-text-muted"
-                            }`}
+                    return (
+                      <tr
+                        key={item.symbol}
+                        className="group transition-colors hover:bg-surface-elevated/40"
+                      >
+                        {/* Cột 1: Mã */}
+                        <td className="py-3 pr-4">
+                          <Link
+                            href={`/stocks/${item.symbol}`}
+                            className="flex flex-col group-hover:text-accent-primary"
                           >
-                            {isUp ? "+" : ""}
-                            {item.changePercent.toFixed(2)}%
-                          </span>
-                        </div>
-                      </td>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-text-primary group-hover:text-accent-primary">
+                                {item.symbol}
+                              </span>
+                              {item.sector && (
+                                <span className="rounded bg-panel-3 px-1 py-0.2 text-[9px] text-text-muted border border-border-subtle truncate max-w-[80px]">
+                                  {item.sector}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-text-muted truncate max-w-[140px]">
+                              {item.name}
+                            </span>
+                          </Link>
+                        </td>
+
+                        {/* Cột 2: Giá (Real-time SSE Flash) */}
+                        <td className="py-3 px-3">
+                          <div className={`flex flex-col transition-all duration-300 px-1 py-0.5 rounded ${flashClass}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-text-primary num">
+                                {livePrice > 0 ? livePrice.toFixed(2) : "—"}
+                              </span>
+                              {flash && (
+                                <span
+                                  className={`size-1.5 rounded-full animate-ping ${
+                                    flash === "up" ? "bg-emerald-400" : "bg-rose-400"
+                                  }`}
+                                />
+                              )}
+                            </div>
+                            <span
+                              className={`text-[11px] font-medium num ${
+                                isUp ? "text-emerald-400" : isDown ? "text-rose-400" : "text-text-muted"
+                              }`}
+                            >
+                              {isUp ? "+" : ""}
+                              {liveChg.toFixed(2)}%
+                            </span>
+                          </div>
+                        </td>
 
                       {/* Cột Điểm Mua & Kế Hoạch */}
                       <td className="py-3 px-3">
