@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$BaseUrl = "http://127.0.0.1:8080/v1",
   [string]$Model = "orca-financial-qwen2.5-3b",
   [int]$Runs = 3

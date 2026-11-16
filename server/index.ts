@@ -9,6 +9,12 @@ import * as dotenv from "dotenv";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  ensureLlamaServerRunning,
+  proxyToLlamaServer,
+  isLlamaServerHealthy,
+  cleanupAiRuntime,
+} from "./ai-runtime";
 
 dotenv.config();
 
@@ -38,6 +44,21 @@ app.use(
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 app.get("/api/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
+
+// Unified AI Gateway & OpenAI-Compatible Endpoints on Single Port
+app.all("/v1/*", proxyToLlamaServer);
+app.get("/model-health", async (c) => {
+  const healthy = await isLlamaServerHealthy();
+  return c.json({
+    status: healthy ? "ok" : "degraded",
+    model: process.env.LOCAL_GGUF_MODEL || "orca-financial-qwen2.5-3b",
+    backend: "llama-server C++ (loopback)",
+    gatewayPort: Number(process.env.PORT || 3000),
+    healthy,
+    timestamp: Date.now(),
+  });
+});
+app.get("/api/model-health", (c) => c.redirect("/model-health"));
 
 // High-performance direct API bridges
 app.get("/api/v1/stocks", async (c) => {
@@ -305,6 +326,9 @@ const hasDist = fs.existsSync(path.resolve(process.cwd(), "dist", "index.html"))
 async function startUnifiedServer() {
   const honoListener = getRequestListener(app.fetch);
 
+  // Auto-boot background local C++ AI Inference Engine if GGUF model is present
+  await ensureLlamaServerRunning();
+
   if (isProd || (!process.env.NODE_ENV && hasDist && process.env.START_PROD === "true")) {
     // Production SPA Static File Serving via Hono
     if (hasDist) {
@@ -343,7 +367,12 @@ async function startUnifiedServer() {
 
     const server = http.createServer((req, res) => {
       const url = req.url || "";
-      if (url.startsWith("/api") || url.startsWith("/health")) {
+      if (
+        url.startsWith("/api") ||
+        url.startsWith("/health") ||
+        url.startsWith("/v1") ||
+        url.startsWith("/model-health")
+      ) {
         return honoListener(req, res);
       }
       vite.middlewares(req, res);
@@ -365,6 +394,7 @@ async function startUnifiedServer() {
 
     const cleanup = async () => {
       console.log("\n[ORCA] Gracefully shutting down unified server...");
+      cleanupAiRuntime();
       server.close();
       await vite.close();
       process.exit(0);
