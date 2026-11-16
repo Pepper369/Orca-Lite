@@ -425,7 +425,7 @@ function ScreenerInner() {
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="bottom_confluence"
+            defaultPreset="triple_confluence"
             defaultView="confluence"
             onOpenBacktest={() => setShowBacktest(true)}
           />
@@ -436,7 +436,7 @@ function ScreenerInner() {
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="vsa_no_supply"
+            defaultPreset="wyckoff_spring"
             defaultView="technical"
             onOpenBacktest={() => setShowBacktest(true)}
           />
@@ -447,7 +447,7 @@ function ScreenerInner() {
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="canslim"
+            defaultPreset="canslim_accel"
             defaultView="profitability"
             onOpenBacktest={() => setShowBacktest(true)}
           />
@@ -476,7 +476,7 @@ function ScreenerInner() {
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="tight_closes_vdu"
+            defaultPreset="vcp_vdu"
             defaultView="technical"
             onOpenBacktest={() => setShowBacktest(true)}
           />

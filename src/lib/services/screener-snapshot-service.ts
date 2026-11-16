@@ -122,7 +122,11 @@ export type ScreenerPreset =
   | "earnings_quality"
   | "magic_formula"
   | "consensus_upside"
-  | "tight_closes_vdu";
+  | "tight_closes_vdu"
+  | "wyckoff_spring"
+  | "vcp_vdu"
+  | "canslim_accel"
+  | "triple_confluence";
 
 export const SCREENER_BIT = {
   SWEET_ZONE: 1 << 0,
@@ -144,6 +148,10 @@ export const SCREENER_BIT = {
   FLIP_ZONE: 1 << 16,
   SMC_ORDER_BLOCK: 1 << 17,
   MTF_ALIGNED: 1 << 18,
+  WYCKOFF_SPRING_TEST: 1 << 19,
+  VCP_VDU_PIVOT: 1 << 20,
+  CANSLIM_ACCEL: 1 << 21,
+  TRIPLE_CONFLUENCE_GOLD: 1 << 22,
 } as const;
 
 export type ScreenerStockItem = {
@@ -437,6 +445,11 @@ export type ScreenerFilterParams = {
   smcOrderBlockOnly?: boolean;
   sniperTriggerSubtype?: "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM" | "all";
   minSniperRR?: number;
+  // Enhanced Specialized Screeners (Hạng mục 1 & 2)
+  wyckoffSpringOnly?: boolean;
+  vcpVduOnly?: boolean;
+  canslimAccelOnly?: boolean;
+  tripleConfluenceOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -1324,6 +1337,7 @@ function detectPresets(item: {
   ma20?: number | null;
   chartPattern?: string | null;
   candlePattern?: string | null;
+  vcpDepths?: number[] | null;
   hasBullishDivergence?: boolean;
   squeezeState?: "squeeze_on" | "squeeze_off" | "fired_bull" | "fired_bear" | null;
   confluenceScore: number;
@@ -1780,6 +1794,60 @@ function detectPresets(item: {
       item.isWyckoffLps === true)
   ) {
     passes.push("tight_closes_vdu");
+  }
+
+  // 18. Wyckoff Spring Type 2/3 & Test Cạn Cung (Enhanced Wyckoff)
+  const isSpringCondition = Boolean(
+    item.isWyckoffSpring === true ||
+    (item.isMaReclaimSpring === true && (item.isVolumeDryUp === true || item.smartMoneySignal === "SPRING_ABSORPTION" || item.vsaSignal === "ABSORPTION" || item.vsaSignal === "NO_SUPPLY")) ||
+    ((item.smartMoneySignal === "SPRING_ABSORPTION" || item.vsaSignal === "ABSORPTION") && !isBrokenSupport)
+  );
+  if (!isBrokenSupport && isSpringCondition) {
+    passes.push("wyckoff_spring");
+  }
+
+  // 19. Minervini VCP 2.0 & Volume Dry-Up (VDU) Pivot Cheat
+  const isVcpPattern = Boolean(
+    (item.chartPattern && item.chartPattern.includes("VCP")) ||
+    (item.vcpDepths && item.vcpDepths.length >= 2) ||
+    item.chartPattern?.includes("Pocket")
+  );
+  const isVduOrTight = Boolean(
+    item.isVolumeDryUp === true ||
+    item.isTightCloses === true ||
+    (item.volRatio20 != null && item.volRatio20 <= 0.68)
+  );
+  const isStage2Trend = Boolean(
+    item.maSignal === "GOLDEN_CROSS" ||
+    item.maSignal === "BULLISH_ALIGN" ||
+    (item.rsRating != null && item.rsRating >= 68)
+  );
+  if (!isTechnicalSell && isVcpPattern && (isVduOrTight || isStage2Trend)) {
+    passes.push("vcp_vdu");
+  }
+
+  // 20. CANSLIM Acceleration 2.0 (Gia Tốc Doanh Thu/LNST & RS 75+)
+  const isCanslimGrowthAccel = Boolean(
+    ((item.niYoyPct != null && item.niYoyPct >= 18) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15)) &&
+    (item.roe != null && item.roe >= 13)
+  );
+  const isONeilLeader = Boolean(item.rsRating != null && item.rsRating >= 75);
+  if (!isTechnicalSell && isCanslimGrowthAccel && (isONeilLeader || (item.orcaMasterScore != null && item.orcaMasterScore >= 70))) {
+    passes.push("canslim_accel");
+  }
+
+  // 21. Tam Hợp Lưu Vàng (Triple Confluence: MA Support + Nến Đảo Chiều + Phân Kỳ Dương)
+  const isLayer1Support = Boolean(hasMaSupport || item.isGoldenPocket || item.isFlipZoneSupport);
+  const isLayer2Action = Boolean(hasCandleReversal || item.isTightCloses || item.isMaRibbonSqueeze);
+  const isLayer3Momentum = Boolean(
+    item.hasBullishDivergence ||
+    item.isDualDivergence ||
+    (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 52) ||
+    item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+    item.smartMoneySignal === "POCKET_PIVOT"
+  );
+  if (!isBrokenSupport && isLayer1Support && isLayer2Action && isLayer3Momentum && item.confluenceScore >= 50) {
+    passes.push("triple_confluence");
   }
 
   return passes;
@@ -3037,6 +3105,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             if (Boolean((entry.techFeatures as Record<string, unknown>)?.isFlipZoneSupport)) b |= SCREENER_BIT.FLIP_ZONE;
             if (Boolean((entry.techFeatures as Record<string, unknown>)?.isSmcOrderBlock)) b |= SCREENER_BIT.SMC_ORDER_BLOCK;
             if (entry.techFeatures.isMtfAligned) b |= SCREENER_BIT.MTF_ALIGNED;
+            if (presetsPassed.includes("wyckoff_spring")) b |= SCREENER_BIT.WYCKOFF_SPRING_TEST;
+            if (presetsPassed.includes("vcp_vdu")) b |= SCREENER_BIT.VCP_VDU_PIVOT;
+            if (presetsPassed.includes("canslim_accel")) b |= SCREENER_BIT.CANSLIM_ACCEL;
+            if (presetsPassed.includes("triple_confluence")) b |= SCREENER_BIT.TRIPLE_CONFLUENCE_GOLD;
             return b;
           })(),
           presetsPassed,
@@ -3083,6 +3155,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         magic_formula: 0,
         consensus_upside: 0,
         tight_closes_vdu: 0,
+        wyckoff_spring: 0,
+        vcp_vdu: 0,
+        canslim_accel: 0,
+        triple_confluence: 0,
       };
 
       const sectorSet = new Set<string>();
@@ -3161,6 +3237,10 @@ function buildSnapshotOutput(
     magic_formula: 0,
     consensus_upside: 0,
     tight_closes_vdu: 0,
+    wyckoff_spring: 0,
+    vcp_vdu: 0,
+    canslim_accel: 0,
+    triple_confluence: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -3271,6 +3351,10 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.flipZoneOnly) requiredBitMask |= SCREENER_BIT.FLIP_ZONE;
   if (params.smcOrderBlockOnly) requiredBitMask |= SCREENER_BIT.SMC_ORDER_BLOCK;
   if (params.mtfOnly) requiredBitMask |= SCREENER_BIT.MTF_ALIGNED;
+  if (params.preset === "wyckoff_spring" || params.wyckoffSpringOnly) requiredBitMask |= SCREENER_BIT.WYCKOFF_SPRING_TEST;
+  if (params.preset === "vcp_vdu" || params.vcpVduOnly) requiredBitMask |= SCREENER_BIT.VCP_VDU_PIVOT;
+  if (params.preset === "canslim_accel" || params.canslimAccelOnly) requiredBitMask |= SCREENER_BIT.CANSLIM_ACCEL;
+  if (params.preset === "triple_confluence" || params.tripleConfluenceOnly) requiredBitMask |= SCREENER_BIT.TRIPLE_CONFLUENCE_GOLD;
 
   const filtered: ScreenerStockItem[] = [];
   const n = allItems.length;

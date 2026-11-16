@@ -112,6 +112,10 @@ export async function GET(req: Request) {
     absorptionSpikeOnly: url.searchParams.get("absorptionSpikeOnly") === "true" ? true : undefined,
     vsaNoSupplyOnly: url.searchParams.get("vsaNoSupplyOnly") === "true" ? true : undefined,
     precisionMtfOnly: url.searchParams.get("precisionMtfOnly") === "true" ? true : undefined,
+    wyckoffSpringOnly: url.searchParams.get("wyckoffSpringOnly") === "true" ? true : undefined,
+    vcpVduOnly: url.searchParams.get("vcpVduOnly") === "true" ? true : undefined,
+    canslimAccelOnly: url.searchParams.get("canslimAccelOnly") === "true" ? true : undefined,
+    tripleConfluenceOnly: url.searchParams.get("tripleConfluenceOnly") === "true" ? true : undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order")
@@ -195,6 +199,10 @@ export async function GET(req: Request) {
             value: 0,
             breakout: 0,
             ma_cross: 0,
+            wyckoff_spring: 0,
+            vcp_vdu: 0,
+            canslim_accel: 0,
+            triple_confluence: 0,
           },
           sectorsAvailable: [],
           meta: buildMeta({

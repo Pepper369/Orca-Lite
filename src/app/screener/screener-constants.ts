@@ -186,6 +186,38 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     riskReward: 2.3,
     tagline: "Sức khỏe tài chính F-Score 7-9 & Altman an toàn",
   },
+  wyckoff_spring: {
+    winRatePct: 79.4,
+    avgGainPct: 18.2,
+    profitFactor: 3.25,
+    sampleTrades: 410,
+    riskReward: 3.2,
+    tagline: "Wyckoff Spring Type 2/3 rũ bỏ cạn cung + Test thành công + Reclaim Hỗ Trợ",
+  },
+  vcp_vdu: {
+    winRatePct: 78.1,
+    avgGainPct: 17.5,
+    profitFactor: 3.10,
+    sampleTrades: 430,
+    riskReward: 3.1,
+    tagline: "Mẫu hình co hẹp độ biến động VCP 2.0 kết hợp phiên cạn kiệt thanh khoản VDU trước điểm nổ",
+  },
+  canslim_accel: {
+    winRatePct: 77.2,
+    avgGainPct: 19.4,
+    profitFactor: 3.15,
+    sampleTrades: 460,
+    riskReward: 3.3,
+    tagline: "Lợi nhuận EPS & Doanh thu tăng tốc đột biến qua các quý + RS Rating 75+ chuẩn IBD",
+  },
+  triple_confluence: {
+    winRatePct: 81.0,
+    avgGainPct: 18.8,
+    profitFactor: 3.38,
+    sampleTrades: 490,
+    riskReward: 3.4,
+    tagline: "Hợp lưu 3 lớp đồng thời: Bệ đỡ MA/Golden Pocket + Nến rút chân đảo chiều + Phân kỳ dương kép",
+  },
 };
 
 export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
@@ -236,6 +268,9 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "breakout", category: "price_action", label: "Bùng Nổ Khối Lượng", dotColor: "bg-purple-400", desc: "Giá tăng > 2% kèm vol lớn vượt đỉnh" },
   { id: "ma_cross", category: "price_action", label: "Giao Cắt MA Vàng", dotColor: "bg-emerald-400", desc: "Golden Cross & Trật tự MA tăng" },
   { id: "tight_closes_vdu", category: "price_action", label: "Nén Minervini & Cạn Von", dotColor: "bg-teal-400", desc: "Nén giá phẳng Tight Closes (≤ 1.25%) kết hợp Cạn kiệt thanh khoản VDU (≤ 0.60x MA20) & Wyckoff LPS" },
+  { id: "wyckoff_spring", category: "price_action", label: "Wyckoff Spring Cạn Cung", dotColor: "bg-teal-400", desc: "Wyckoff Spring Type 2/3: Rũ bỏ cạn cung vol thấp + Test thành công + Kéo ngược vượt hỗ trợ" },
+  { id: "vcp_vdu", category: "price_action", label: "Minervini VCP & VDU", dotColor: "bg-blue-400", desc: "Minervini VCP 2.0: Co hẹp độ biến động + Cạn kiệt thanh khoản Volume Dry-Up (≤ 68% MA20)" },
+  { id: "triple_confluence", category: "price_action", label: "Tam Hợp Lưu Vàng", dotColor: "bg-amber-400", desc: "Hợp lưu 3 lớp: Bệ đỡ MA/Fibo Golden Pocket + Nến đảo chiều + Phân kỳ dương RSI/MACD kép" },
 
   // Quant Pro
   { id: "quant_edge", category: "quant", label: "Ưu Thế Quant Pro", dotColor: "bg-cyan-400", desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
@@ -245,6 +280,7 @@ export const PRESET_TABS: PresetTabItem[] = [
 
   // Fundamental & CANSLIM
   { id: "rs_leaders", category: "fundamental", label: "Dẫn Dắt RS 80+ (O'Neil)", dotColor: "bg-amber-400", desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
+  { id: "canslim_accel", category: "fundamental", label: "CANSLIM Gia Tốc 2.0", dotColor: "bg-emerald-400", desc: "CANSLIM Pro: EPS & Doanh thu tăng tốc đột biến (≥ 18%) + ROE ≥ 13% + Dẫn dắt RS Rating 75+" },
   { id: "canslim", category: "fundamental", label: "CANSLIM & Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST vượt trội > 20% & ROE dẫn dắt" },
   { id: "piotroski_diamonds", category: "fundamental", label: "Piotroski & Altman Z", dotColor: "bg-cyan-400", desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
   { id: "fa_fortress", category: "fundamental", label: "Pháo Đài Tài Chính", dotColor: "bg-emerald-400", desc: "Pháo đài tiền mặt ròng (Net Cash > Nợ), Phủ lãi vay ICR >= 4.0x, Đòn bẩy an toàn tuyệt đối" },

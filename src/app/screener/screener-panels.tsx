@@ -1266,9 +1266,11 @@ export function VnScreener({
       ? "historicalEdgeScore"
       : defaultPreset === "orca_master_elite" || defaultView === "orca_master"
       ? "orcaMasterScore"
-      : defaultPreset === "smart_money_inflow" || defaultView === "smart_money"
+      : defaultPreset === "smart_money_inflow" || defaultView === "smart_money" || defaultPreset === "wyckoff_spring"
       ? "smartMoneyScore"
-      : defaultPreset === "confluence" || defaultView === "confluence"
+      : defaultPreset === "canslim_accel"
+      ? "rsRating"
+      : defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu"
       ? "confluenceScore"
       : "marketCap";
   const [sortKey, setSortKey] = useState<string>(initialSortKey);
@@ -1351,10 +1353,13 @@ export function VnScreener({
     } else if (defaultPreset === "orca_master_elite" || defaultView === "orca_master") {
       setSortKey("orcaMasterScore");
       setSortOrder("desc");
-    } else if (defaultPreset === "smart_money_inflow" || defaultView === "smart_money") {
+    } else if (defaultPreset === "smart_money_inflow" || defaultView === "smart_money" || defaultPreset === "wyckoff_spring") {
       setSortKey("smartMoneyScore");
       setSortOrder("desc");
-    } else if (defaultPreset === "confluence" || defaultView === "confluence") {
+    } else if (defaultPreset === "canslim_accel") {
+      setSortKey("rsRating");
+      setSortOrder("desc");
+    } else if (defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu") {
       setSortKey("confluenceScore");
       setSortOrder("desc");
     }
