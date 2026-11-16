@@ -35,9 +35,11 @@ import {
   Plus,
   Trash2,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { ScreenerMiniChart } from "@/components/screener-mini-chart";
 import { ScreenerMatrixToolbar } from "@/components/screener-matrix-toolbar";
+import { ScreenerAiSynthesisModal } from "@/components/screener-ai-synthesis-modal";
 import {
   CustomScreenerBuilder,
   loadCustomPresets,
@@ -1130,6 +1132,7 @@ export function VnScreener({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [displayMode, setDisplayMode] = useState<"table" | "grid">("table");
   const [showCustomBuilder, setShowCustomBuilder] = useState(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [customPresets, setCustomPresets] = useState<CustomScreenerPreset[]>([]);
   const [activeCustomPresetName, setActiveCustomPresetName] = useState<string | null>(null);
 
@@ -2658,6 +2661,19 @@ export function VnScreener({
                   <span className="md:hidden">Off</span>
                 </>
               )}
+            </button>
+
+            {/* Orca AI Screener Copilot Button */}
+            <button
+              type="button"
+              onClick={() => setIsAiModalOpen(true)}
+              disabled={rows.length === 0}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold bg-gradient-to-r from-purple-500/20 via-accent-primary/20 to-indigo-500/20 hover:from-purple-500/30 hover:to-indigo-500/30 text-purple-300 border border-purple-500/40 hover:border-purple-500/60 transition-all shadow-xs disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              title="Orca AI Copilot: Phân tích tương quan ngành & lập kế hoạch giải ngân định lượng"
+            >
+              <Sparkles className="size-3.5 text-purple-400 animate-pulse" />
+              <span className="hidden md:inline">Orca AI Copilot</span>
+              <span className="md:hidden">AI</span>
             </button>
             <div className="flex items-center gap-0.5 rounded-lg bg-panel-2 p-0.5 border border-border-subtle shrink-0">
               <button
@@ -4416,6 +4432,15 @@ export function VnScreener({
         isOpen={showCustomBuilder}
         onClose={() => setShowCustomBuilder(false)}
         onApplyPreset={handleApplyCustomPreset}
+      />
+
+      {/* Orca AI Screener Copilot Modal */}
+      <ScreenerAiSynthesisModal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        preset={preset}
+        stocks={rows}
+        totalMatched={data?.total ?? rows.length}
       />
     </div>
   );
