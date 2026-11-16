@@ -285,7 +285,9 @@ export function detectQueryIntent(query: string, feed?: FastDatafeedContext): In
     "TOP", "DAT", "VAY", "NOI", "CAN", "XEM", "CHO", "TOI", "COI", "HOI",
     "LAM", "SAO", "NEN", "QUA", "CAC", "MOT", "HAI", "BAA", "BON", "NAM",
     "DAY", "HAY", "LAI", "THI", "KHI", "VOI", "DOC", "NHA", "TRA", "NET", "CON",
-    "RSI", "MAC", "MA1", "MA2", "CAP", "SAN", "TAP", "HOP", "BCT", "BCTC", "THU"
+    "RSI", "MAC", "MA1", "MA2", "CAP", "SAN", "TAP", "HOP", "BCT", "BCTC", "THU",
+    "PE", "PER", "PB", "PBR", "DE", "EPS", "ROE", "ROA", "WACC", "DCF", "NAV",
+    "CFO", "FCF", "MACD", "VSA", "VCP", "CANSLIM", "MOS"
   ]);
 
   const tickerSet = new Set<string>(feed?.matchedStocks?.map((s) => s.symbol.toUpperCase()) ?? []);
@@ -414,211 +416,165 @@ export function buildStructuredSystemPrompt(
     case "MULTI_SCENARIO":
       templateGuidance = `
 === CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU ĐA KỊCH BẢN & ĐA KHUNG THỜI GIAN) ===
-1. **TIÊU ĐỀ & MỐC THAM CHIẾU**: Tên mã/chỉ số, giá hiện tại, bối cảnh vĩ mô/ngành.
-2. **KẾT LUẬN ĐIỀU HÀNH (EXECUTIVE VERDICT)**: 
-   - Khuyến nghị hành động rõ ràng: [TÍCH LŨY MẠNH (STRONG_ACCUMULATE) | MUA THĂM DÒ (SELECTIVE_BUY) | QUAN SÁT (HOLD_OBSERVE) | HẠ TỶ TRỌNG (TRIM_RISK) | PHÒNG THỦ (DEFENSIVE_CASH)].
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **KẾT LUẬN ĐIỀU HÀNH (EXECUTIVE VERDICT)**: 
+   - 1 câu chốt hành động rõ ràng: [TÍCH LŨY MẠNH | MUA THĂM DÒ | QUAN SÁT | HẠ TỶ TRỌNG | PHÒNG THỦ].
    - Tỷ số Lợi nhuận/Rủi ro tổng hợp RRR, Lợi suất kỳ vọng $E[R] = \\sum (p_i \\times R_i)$.
-3. **BẢNG MA TRẬN 3 KỊCH BẢN (BULL / BASE / BEAR)**:
+2. 📊 **BẢNG MA TRẬN 3 KỊCH BẢN (BULL / BASE / BEAR)**:
    - Bắt buộc tuân thủ tiên đề xác suất: $p_{bull} + p_{base} + p_{bear} = 1.0$ (100%).
    - Cột: Kịch bản | Xác suất (%) | Giá mục tiêu (VND) | Lợi suất (%) | Điểm vô hiệu hóa (Invalidation Point) | Xúc tác chính.
-4. **MA TRẬN ĐA KHUNG THỜI GIAN**:
+3. ⏱️ **MA TRẬN ĐA KHUNG THỜI GIAN**:
    - Ngắn hạn (T+2.5 / 1-10 phiên): Xu hướng kỹ thuật, hỗ trợ/kháng cự, cung cầu micro.
    - Trung hạn (1-2 Quý / BCTC): Doanh thu, EPS forward, P/E chu kỳ, biên lợi nhuận.
    - Dài hạn (1-3 Năm / Chu kỳ ngành): Con hào kinh tế (Economic Moat), định giá DCF.
-5. **KẾ HOẠCH PHÒNG VỆ BEAR CASE & KẸT SÀN T+2.5**: Ngưỡng cắt lỗ cứng, độ trượt giá dự kiến, kịch bản thoát hàng ATO/ATC khi thị trường biến động cực đoan.`;
+4. 🚀 **KẾ HOẠCH PHÒNG VỆ BEAR CASE & KẸT SÀN T+2.5**: Ngưỡng cắt lỗ cứng, độ trượt giá dự kiến, kịch bản thoát hàng ATO/ATC khi thị trường biến động cực đoan.`;
       break;
 
     case "STOCK_TECHNICAL":
       templateGuidance = `
 === CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU PHÂN TÍCH KỸ THUẬT & DÒNG TIỀN NÂNG CAO) ===
-1. **TỔNG QUAN XU HƯỚNG & KHUNG THỜI GIAN (TREND & BIAS)**:
-   - Xu hướng ngắn hạn (Daily T+2.5): [Tăng / Giảm / Đi ngang tích lũy / Breakout].
-   - Xu hướng trung - dài hạn (Weekly): [Tăng / Giảm / Tích lũy].
-   - Đánh giá dòng tiền lớn: [Hấp thụ cung Wyckoff / Đột biến Volume / Phân phối / Cạn kiệt].
-2. **HÀNH VI GIÁ & CHỈ BÁO ĐỘNG LƯỢNG (MOMENTUM & VOLATILITY)**:
-   - Vị thế giá so với MA20 (+/-%), MA50, MA200.
-   - RSI(14): Giá trị hiện tại, trạng thái Quá mua/Quá bán và phân kỳ âm/dương.
-   - MACD: Giao cắt đường tín hiệu Signal và Histogram.
-   - Bollinger Bands: Thắt nút cổ chai (Squeeze) hay Mở band hướng lên/xuống.
-   - Khối lượng giao dịch: So sánh với trung bình 20 phiên ($V/V_{20}$).
-3. **ĐO LƯỜNG DƯ ĐỊA CẢN TRÊN ĐẦU & NÉ BẪY KẸP HÀNG T+2.5**:
-   - Kháng cự gần nhất và kháng cự mạnh (vùng kẹp hàng lớn).
-   - Đo lường Overhead Room: Khoảng trống an toàn tới cản trên đầu phải $\\ge 5.0\\%$ để không dính cản T+.
-   - Hỗ trợ ngắn hạn và Hỗ trợ chặn lỗ cứng.
-4. **THIẾT LẬP KỊCH BẢN HÀNH ĐỘNG (ACTIONABLE TRIPLE-BARRIER SETUPS)**:
-   - Kịch bản Mua: Vùng giải ngân an toàn (Vùng Vàng Sweet Launch Zone $0.8\\% - 7.5\\%$ từ đáy).
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **TÍN HIỆU KỸ THUẬT & KẾT LUẬN CHỐT (TREND & BIAS)**:
+   - 1 câu chốt vị thế: [ĐÃ CÓ ĐIỂM MUA VÙNG VÀNG / CHỜ TEST CUNG / QUAN SÁT / CẢNH BÁO PHÂN PHỐI].
+   - Đánh giá dòng tiền lớn: Hấp thụ cung Wyckoff hay Cạn kiệt volume.
+2. 📊 **BẢNG THÔNG SỐ KỸ THUẬT & MOMENTUM**:
+   - Vị thế giá so với MA20, MA50, MA200.
+   - RSI(14) và MACD động lượng.
+   - Đo lường Overhead Room: Khoảng trống an toàn tới cản trên đầu phải $\\ge 5.0\\%$ để không dính cản T+2.5.
+   - Đảm bảo tỷ số $R:R \\ge 2.2\\text{x}$.
+3. 🚀 **THIẾT LẬP LỆNH GIAO DỊCH (ĐO LƯỜNG DƯ ĐỊA CẢN TRÊN ĐẦU & NÉ BẪY KẸP HÀNG T+2.5)**:
+   - Vùng mua an toàn (Vùng Vàng Sweet Launch Zone $0.8\\% - 7.5\\%$ từ đáy).
    - Điểm cắt lỗ cứng (Hard Stop-Loss theo ATR $1.0\\text{x}$).
-   - Mục tiêu chốt lời (Target 1 & 2) đảm bảo tỷ số Lợi nhuận/Rủi ro $R:R \\ge 2.2\\text{x}$.
-   - Khuyến nghị trạng thái: [TÍCH LŨY MẠNH / MUA THĂM DÒ / NẮM GIỮ / QUAN SÁT / HẠ TỶ TRỌNG].`;
+   - Giá mục tiêu chốt lời (Target 1 & 2).`;
       break;
 
     case "EARNINGS_REVIEW":
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU BÓC TÁCH KẾT QUẢ KINH DOANH & BCTC) ===
-1. **TỔNG HỢP KẾT QUẢ KINH DOANH CHÍNH**:
-   - Doanh thu thuần và Tốc độ tăng trưởng YoY / QoQ.
-   - Lợi nhuận sau thuế (LNST) cổ đông công ty mẹ và Tăng trưởng YoY / QoQ.
-   - Tiến độ thực hiện kế hoạch kinh doanh năm (% kế hoạch DT & LN).
-2. **BÓC TÁCH CƠ CẤU DOANH THU & BIÊN LỢI NHUẬN (CORE BUSINESS DRIVERS)**:
-   - Đóng góp từ các mảng kinh doanh chính (Segment Breakdown).
-   - Biến động Biên lãi gộp (Gross Margin) và Biên lãi ròng (Net Margin) giải trình nguyên nhân.
-   - Tỷ trọng lợi nhuận cốt lõi vs Bất thường: Lợi nhuận từ HĐKD cốt lõi (Core EBIT) chiếm bao nhiêu %, thu nhập tài chính/bán tài sản 1 lần chiếm bao nhiêu %.
-3. **CHẤT LƯỢNG TÀI SẢN & DÒNG TIỀN HOẠT ĐỘNG (FORENSIC CFO & ACCRUALS)**:
-   - Dòng tiền thuần từ HĐKD (CFO) so với LNST (cảnh báo rủi ro nếu CFO âm sâu dù báo lãi).
-   - Biến động Phải thu khách hàng và Hàng tồn kho (Chu kỳ chuyển hóa tiền mặt Cash Conversion Cycle).
-   - Đòn bẩy nợ (D/E) và Khả năng thanh toán lãi vay (ICR).
-4. **TÁC ĐỘNG LÊN ĐỊNH GIÁ & QUAN ĐIỂM ĐẦU TƯ**:
-   - EPS trượt 4 quý gần nhất (Trailing EPS) và P/E điều chỉnh mới sau BCTC.
-   - Đánh giá thị giá hiện tại: Đã phản ánh hết KQKD hay mở ra dư địa tái định giá mới (Re-rating catalyst).
-   - Xếp hạng KQKD: [XUẤT SẮC VƯỢT TRỘI / ĐẠT KỲ VỌNG / DƯỚI KỲ VỌNG].`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU BÓC TÁCH KẾT QUẢ KINH DOANH & BCTC QUÝ / NIÊN ĐỘ) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **KẾT QUẢ KINH DOANH CHỐT (EARNINGS VERDICT)**:
+   - 1 câu chốt: [XUẤT SẮC VƯỢT TRỘI / ĐẠT KỲ VỌNG / DƯỚI KỲ VỌNG / CẢNH BÁO LỢI NHUẬN GIẤY].
+   - Tốc độ tăng trưởng Doanh thu & LNST YoY/QoQ.
+2. 📊 **BẢNG ĐIỀU TRA CHẤT LƯỢNG LỢI NHUẬN (CORE EBIT VS THU NHẬP BẤT THƯỜNG)**:
+   - Tỷ trọng lợi nhuận từ CORE EBIT cốt lõi vs Thu nhập tài chính bất thường 1 lần.
+   - Dòng tiền thuần HĐKD (FORENSIC CFO & ACCRUALS): Cảnh báo rủi ro nếu CFO âm sâu dù báo lãi kế toán.
+   - Đòn bẩy nợ (D/E) và khả năng thanh toán lãi vay (ICR).
+3. 🚀 **TÁC ĐỘNG LÊN ĐỊNH GIÁ & HÀNH ĐỘNG**:
+   - Trailing P/E sau BCTC và dư địa tái định giá (Re-rating catalyst).
+   - Khuyến nghị hành động cụ thể cho nhà đầu tư.`;
       break;
 
     case "SCREENER_FILTER":
       templateGuidance = `
 === CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU LỌC & SÀNG LỌC CỔ PHIẾU ĐỊNH LƯỢNG) ===
-1. **BỘ TIÊU CHÍ SÀNG LỌC ĐÃ CHUẨN HÓA (SCREENING CRITERIA)**:
-   - Liệt kê chính xác các tiêu chí người dùng yêu cầu kèm giải thích ý nghĩa kinh tế & kiểm toán (ROE/ROA, Định giá P/E, P/B, Cổ tức tiền mặt, Đòn bẩy nợ D/E, Piotroski F-Score).
-   - Bộ lọc an toàn: Thanh khoản tối thiểu $\\ge 5$ tỷ VNĐ/phiên, loại trừ các mã rác, diện cảnh báo/kiểm soát.
-2. **BẢNG XẾP HẠNG TOP CỔ PHIẾU ĐẠT TIÊU CHÍ (MA TRẬN DATAFEED & ORCA QUANT SCORE)**:
-   - Dùng chính xác BẢNG DỮ LIỆU SÀNG LỌC TRỰC TIẾP được cung cấp bên dưới làm căn cứ số liệu tuyệt đối (Grounding).
-   - Bắt buộc lập bảng Markdown: Hạng | Mã CP | Doanh Nghiệp | Ngành | Thị giá (VNĐ) | P/E (x) | P/B (x) | ROE (%) | Cổ tức (%) | D/E | F-Score | Vị thế Vùng Vàng Apex | Orca Quant Score.
-3. **ĐIỂM SÁNG ĐỘNG LỰC CỦA TOP 3 CỔ PHIẾU NỔI BẬT NHẤT**:
-   - 🥇 **[Mã 1]**: Luận điểm định lượng cốt lõi, con hào kinh tế (Moat), sức mạnh bảng cân đối kế toán và dòng tiền FCF.
-   - 🥈 **[Mã 2]**: Động lực tăng trưởng doanh thu/lợi nhuận, biên lãi ròng mở rộng và chất lượng tài sản sạch.
-   - 🥉 **[Mã 3]**: Đặc điểm định giá hấp dẫn kèm biên an toàn (MOS $\\ge 15-20\\%$).
-4. **CẢNH BÁO BẪY SỐ LIỆU ĐỊNH LƯỢNG (FILTER CAVEATS)**:
-   - Bẫy P/E thấp ở đỉnh chu kỳ (đặc biệt nhóm Thép, Hóa chất, Cảng biển, Vận tải biển).
-   - Kiểm tra khoản mục lợi nhuận bất thường (bán tài sản 1 lần, hoàn nhập dự phòng làm méo mó ROE/PE).
-   - Đo lường cản trên đầu (Overhead Room $\\ge 5\\%$) và khả năng thanh khoản trước khi giải ngân.
-5. **CHIẾN LƯỢC GIẢI NGÂN & KẾ HOẠCH TRIPLE-BARRIER (T+20)**:
-   - Vùng tích lũy giải ngân an toàn (Vùng Vàng Sweet Launch Zone cách đáy $0.8\\% - 7.5\\%$).
-   - Ngưỡng cắt lỗ cứng bảo vệ vốn (Hard Stop-Loss theo ATR $1.0\\text{x}$).
-   - Mục tiêu chốt lời 1 & 2 đảm bảo tỷ số Lợi nhuận/Rủi ro $R:R \\ge 2.2\\text{x}$.`;
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **KẾT QUẢ SÀNG LỌC TỨC THÌ**:
+   - 1 dòng chốt số lượng mã đạt chuẩn và nhóm ngành nổi bật nhất.
+2. 📊 **BẢNG XẾP HẠNG TOP CỔ PHIẾU ĐẠT TIÊU CHÍ (MA TRẬN DATAFEED & ORCA QUANT SCORE)**:
+   - Lập bảng Markdown: Hạng | Mã CP | Ngành | Thị giá (VNĐ) | P/E (x) | ROE (%) | Cổ tức (%) | F-Score | Vị thế Vùng Vàng Apex | Khuyến nghị.
+   - Điểm sáng động lực của Top 1, Top 2, Top 3.
+3. 🚀 **HÀNH ĐỘNG & BẪY SỐ LIỆU ĐỊNH LƯỢNG**:
+   - Cảnh báo Bẫy P/E thấp ở đỉnh chu kỳ (Thép, Hóa chất, Cảng biển).
+   - Vùng giải ngân an toàn (Vùng Vàng Sweet Launch Zone cách đáy $0.8\\% - 7.5\\%$).
+   - Ngưỡng cắt lỗ bảo vệ vốn (Stop-Loss $1.0\\text{x}$ ATR, $R:R \\ge 2.2\\text{x}$).`;
       break;
 
     case "STOCK_COMPARE":
       templateGuidance = `
 === CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU SO SÁNH ĐỐI ĐẦU CỔ PHIẾU - HEAD TO HEAD) ===
-1. **BẢNG MA TRẬN ĐỐI ĐẦU ĐỊNH LƯỢNG (HEAD-TO-HEAD MATRIX)**:
-   - Cột so sánh trực diện: Tiêu chí | ${detectedEntities.tickers.join(" | ") || "Mã A | Mã B"}
-   - Các dòng bắt buộc:
-     * Thị giá hiện tại & P/E, P/B, Vốn hóa.
-     * Tăng trưởng Doanh thu & LNST quý gần nhất.
-     * Tỷ suất sinh lời: ROE, ROA, Biên lợi nhuận gộp/ròng.
-     * Sức khỏe tài chính: Nợ/Vốn CSH (D/E), Khả năng thanh toán lãi vay (ICR), Piotroski F-Score.
-     * Dòng tiền CFO/LNST và Cổ tức tiền mặt (%/năm).
-     * Chỉ báo kỹ thuật: RSI(14), Xu hướng giá vs MA50/MA200, Điểm vị thế Vùng Vàng Apex.
-     * Điểm số Orca Composite Master (1-99).
-2. **SO SÁNH LỢI THẾ CẠNH TRANH & CON HÀO KINH TẾ (ECONOMIC MOAT)**:
-   - Phân tích sự vượt trội về quy mô, thị phần, rào cản gia nhập ngành, quyền định giá.
-3. **ĐÁNH GIÁ ĐỊNH GIÁ & DƯ ĐỊA TĂNG TRƯỞNG**:
-   - Mã nào đang có định giá chiết khấu hơn so với tốc độ tăng trưởng (PEG).
-4. **KẾT LUẬN LỰA CHỌN & CHIẾN LƯỢC PHÂN BỔ**:
-   - Chọn mã tối ưu hơn cho từng khẩu vị: Mã nào phù hợp phòng thủ cổ tức, mã nào phù hợp tăng trưởng bứt phá (Growth).
-   - Tỷ lệ phân bổ danh mục đề xuất (Ví dụ: 60/40 hoặc 70/30).`;
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **KẾT LUẬN CHỌN MÃ TỐI ƯU**:
+   - 1 câu chốt mã nào vượt trội hơn cho mục tiêu tăng trưởng hay phòng thủ kèm tỷ lệ vốn đề xuất (Ví dụ: 60/40).
+2. 📊 **BẢNG MA TRẬN ĐỐI ĐẦU ĐỊNH LƯỢNG (HEAD-TO-HEAD MATRIX)**:
+   - Cột so sánh trực diện: Tiêu chí | ${detectedEntities.tickers.join(" | ") || "Mã A | Mã B"} | Mã vượt trội.
+   - So sánh: Thị giá, P/E, P/B, ROE, D/E, Dòng tiền CFO, Dòng tiền Cá mập, Điểm số Orca Composite Master.
+3. 🚀 **VỊ THẾ CẠNH TRANH & CON HÀO KINH TẾ (ECONOMIC MOAT)**:
+   - Phân tích ngắn gọn lợi thế quy mô, thị phần và định giá chiết khấu (PEG).
+   - Kế hoạch giải ngân cụ thể cho từng mã.`;
       break;
 
     case "STOCK_DEEP_DIVE":
       templateGuidance = `
 === CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU PHÂN TÍCH CỔ PHIẾU CHUYÊN SÂU & ĐA NHÂN TỐ) ===
-1. **TỔNG QUAN TẬN DỤNG DATAFEED TRỰC TIẾP**: Trích xuất giá hiện tại, % biến động, P/E, P/B, RSI, và điểm số kỹ thuật từ dữ liệu realtime được cung cấp bên dưới.
-2. **MA TRẬN ĐỊNH LƯỢNG ĐA NHÂN TỐ (ORCA MULTI-FACTOR QUANTITATIVE MATRIX)**:
-   - Lập bảng tổng hợp 3 trục nhân tố:
-     * Trục Kỹ thuật ($Z_{\\text{Tech}}$): Điểm RS O'Neil, Tỷ lệ Lực cầu chủ động (Active Buy), Vị thế Vùng Vàng Apex Launch ($0.8\\% - 7.5\\%$), Dư địa cản trên Overhead Room ($\\ge 5\\%$).
-     * Trục Cơ bản ($Z_{\\text{Fund}}$): ROIC, ROE, Sloan Accrual Ratio ($\\le 5\\%$), Tỷ lệ CFO/LNST ($\\ge 0.8$), Piotroski F-Score (0-9), Altman $Z''$-Score.
-     * Trục Định giá ($Z_{\\text{Val}}$): P/E 5 năm Median, Gordon Growth P/B vs ROE, FCF Yield, Biên an toàn định giá (MOS $\\ge 15-20\\%$).
-   - Điểm Orca Master Composite Score (1 - 99 Percentile) & Phân loại định chế (SUPER_ELITE / LEADER / WATCH / AVOID) theo Chế độ Thị trường.
-3. **SỨC KHỎE TÀI CHÍNH & CHẤT LƯỢNG LỢI NHUẬN (BCTC)**:
-   - Tăng trưởng doanh thu & LNST cốt lõi (Core EBIT).
-   - Chất lượng dòng tiền hoạt động kinh doanh (CFO) so với LNST (cảnh báo nếu lợi nhuận giấy/Accruals cao).
-   - Đòn bẩy nợ vay (D/E), khả năng thanh toán lãi vay (ICR) và sức khỏe theo Piotroski F-Score / Altman Z-Score.
-4. **ĐỊNH GIÁ & BIÊN ĐỘ AN TOÀN (MARGIN OF SAFETY)**:
-   - So sánh định giá P/E, P/B với trung bình 3-5 năm và trung bình ngành.
-   - Ước lượng vùng giá trị hợp lý (Fair Value) và biên an toàn $\\ge 15-20\\%$.
-5. **KẾ HOẠCH HÀNH ĐỘNG TRIPLE-BARRIER (T+20)**:
-   - Vùng giá tích lũy giải ngân an toàn.
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **KẾT LUẬN ĐẦU TƯ TỨC THÌ (VERDICT CARD)**:
+   - 1 câu chốt vị thế: [TÍCH LŨY MẠNH / MUA THĂM DÒ / QUAN SÁT / HẠ TỶ TRỌNG] kèm tỷ trọng NAV đề xuất.
+2. 📊 **BẢNG THÔNG SỐ ĐA NHÂN TỐ (ORCA MULTI-FACTOR QUANTITATIVE MATRIX)**:
+   - Bảng 3 trục:
+     * Kỹ thuật: Thị giá, RS Rating, Vị thế Vùng Vàng Apex ($0.8\\% - 7.5\\%$), Dư địa cản trên Overhead Room ($\\ge 5\\%$).
+     * SỨC KHỎE TÀI CHÍNH & CHẤT LƯỢNG LỢI NHUẬN (BCTC): ROE, Tăng trưởng LNST Core EBIT, CFO/LNST, Nợ D/E, F-Score.
+     * ĐỊNH GIÁ & BIÊN ĐỘ AN TOÀN (MARGIN OF SAFETY): P/E hiện tại vs Median 5 năm, Vùng Fair Value (MOS $\\ge 15-20\\%$).
+3. 🚀 **KẾ HOẠCH HÀNH ĐỘNG TRIPLE-BARRIER (T+20)**:
+   - Vùng giá tích lũy giải ngân.
    - Ngưỡng cắt lỗ cứng bảo vệ vốn (Stop-loss $1.0\\text{x}$ ATR).
-   - Giá mục tiêu chốt lời đảm bảo tỷ số Lợi nhuận/Rủi ro $R:R \\ge 2.2\\text{x}$.
-   - Khuyến nghị trạng thái: [TÍCH LŨY MẠNH / MUA THĂM DÒ / QUAN SÁT / HẠ TỶ TRỌNG].`;
+   - Giá mục tiêu chốt lời đảm bảo tỷ số $R:R \\ge 2.2\\text{x}$.`;
       break;
 
     case "COMMODITY_MACRO":
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TÁC ĐỘNG HÀNG HÓA VĨ MÔ & TRUYỀN DẪN CỔ PHIẾU) ===
-1. **DIỄN BIẾN GIÁ HÀNG HÓA TOÀN CẦU (COMMODITY BENCHMARK)**:
-   - Trích xuất số liệu trực tiếp từ bảng giá hàng hóa bên dưới: Giá hiện tại, đơn vị, biến động % gần nhất.
-   - Xu hướng chính (Tăng mạnh / Giảm / Đi ngang) và nguyên nhân vĩ mô (Cung-cầu OPEC+, chiến tranh, tồn kho, chính sách xuất nhập khẩu Trung Quốc/Mỹ).
-2. **CƠ CHẾ TRUYỀN DẪN KINH TẾ (TRANSMISSION MECHANISM)**:
-   - Giải thích chuỗi giá trị: Biến động giá hàng hóa đầu vào tác động tới Doanh thu, Biên lợi nhuận gộp hay Chi phí vốn lưu động như thế nào.
-   - Độ trễ phản ánh vào BCTC các doanh nghiệp niêm yết (thường trễ 1-2 quý do tồn kho giá rẻ/đắt).
-3. **DANH MỤC CỔ PHIẾU HƯỞNG LỢI TRỰC TIẾP (BENEFICIARY STOCKS)**:
-   - Danh sách mã cổ phiếu hưởng lợi và giải thích cụ thể lợi thế (sở hữu tồn kho giá thấp, tự chủ nguyên liệu, biên lãi gộp nới rộng).
-4. **DANH MỤC CỔ PHIẾU CHỊU RỦI RO / ÁP LỰC CHI PHÍ (HEADWIND STOCKS)**:
-   - Danh sách mã cổ phiếu chịu áp lực chi phí đầu vào và mức độ rủi ro xói mòn biên lợi nhuận.
-5. **CHIẾN LƯỢC GIAO DỊCH & PHÒNG VỆ CHU KỲ (COMMODITY CYCLE TRADING)**:
-   - Đánh giá giai đoạn chu kỳ: Đầu sóng, Giữa chu kỳ hay Vùng phân phối đỉnh chu kỳ.
-   - Cảnh báo bẫy P/E thấp ở đỉnh chu kỳ hàng hóa và kế hoạch dừng lỗ/chốt lời.`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TÁC ĐỘNG HÀNG HÓA & NGUYÊN VẬT LIỆU) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **CỔ PHIẾU HƯỞNG LỢI TRỰC TIẾP NHẤT**:
+   - 1 câu chốt tên mã hưởng lợi số 1 và xu hướng giá hàng hóa thế giới.
+2. 📊 **CƠ CHẾ TRUYỀN DẪN VÀO NỀN KINH TẾ VIỆT NAM (BẢNG PHÂN HÓA)**:
+   - Diễn biến giá hàng hóa (giá, biến động %).
+   - Nhóm hưởng lợi: Danh sách mã, tỷ lệ hưởng lợi biên lãi gộp và độ trễ tồn kho (1-2 quý).
+   - Nhóm chịu áp lực chi phí: Danh sách mã bị ảnh hưởng chi phí đầu vào.
+3. 🚀 **CHIẾN LƯỢC GIAO DỊCH CHU KỲ**:
+   - Vùng giá gom cổ phiếu hưởng lợi và điểm chặn cắt lỗ theo giá hàng hóa.`;
       break;
 
     case "FORENSIC_OR_RISK":
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU PHÁP Y BCTC & KIỂM SOÁT BẪY RỦI RO) ===
-1. **CHẨN ĐOÁN CỜ ĐỎ TÀI CHÍNH (FORENSIC AUDIT RED FLAGS)**:
-   - Khoản phải thu khác / Tổng tài sản (nguy cơ rút ruột hoặc ủy thác đầu tư mờ ám).
-   - Hàng tồn kho ứ đọng hoặc dự phòng giảm giá chưa trích lập đủ.
-   - Dòng tiền thuần từ HĐKD (CFO) âm liên tục dù báo lãi (bẫy lợi nhuận giấy).
-   - Tỷ lệ đòn bẩy nợ vay và cấu trúc kỳ hạn nợ (áp lực trả nợ trái phiếu/ngân hàng đến hạn).
-2. **BẪY ĐỊNH GIÁ & CHU KỲ (VALUATION & CYCLE TRAPS)**:
-   - Bẫy P/E ảo do bán tài sản 1 lần hoặc ở đỉnh chu kỳ kinh doanh.
-3. **RỦI RO THANH KHOẢN & KẸT SÀN T+2.5**:
-   - Đánh giá thanh khoản bình quân phiên, hiện tượng dư bán sàn trắng bảng bên mua (mất thanh khoản).
-   - Rủi ro bán giải chấp (Force Sell / Call Margin) dây chuyền từ ban lãnh đạo.
-4. **KỊCH BẢN PHÒNG VỆ & HƯỚNG XỬ LÝ KHẨN CẤP**:
-   - Kịch bản hạ tỷ trọng từng bước hoặc lệnh MP/ATO/ATC khi vi phạm ngưỡng cắt lỗ.
-   - Quy tắc bất di bất dịch: Tuyệt đối không trung bình giá xuống đối với cổ phiếu có vấn đề kiểm toán hoặc gian lận BCTC.`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU KIỂM TOÁN THẨM ĐỊNH & PHÒNG VỆ RỦI RO - MẪU PHÁP Y BCTC) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **CHẨN ĐOÁN RỦI RO KHẨN CẤP (FORENSIC AUDIT)**:
+   - 1 câu chốt mức độ rủi ro: [RỦI RO CAO - BÁO ĐỘNG ĐỎ | RỦI RO TRUNG BÌNH | AN TOÀN].
+   - Hành động khẩn cấp: [HẠ NGAY 50% VỊ THẾ / KHÔNG TRUNG BÌNH GIÁ / QUAN SÁT].
+2. 📊 **BÓC TÁCH BẰNG CHỨNG SỐ LIỆU ĐỊNH LƯỢNG (NHẬN DIỆN BẢN CHẤT CỜ ĐỎ)**:
+   - Cờ đỏ BCTC: Dòng tiền thuần HĐKD (CFO) âm dù báo lãi, Khoản phải thu/Tổng tài sản bất thường, áp lực nợ trái phiếu.
+   - Bẫy định giá & thanh khoản: Rủi ro kẹt sàn T+2.5 mất thanh khoản, bẫy P/E ảo.
+3. 🚀 **KỊCH BẢN THOÁT HIỂM & BẢO VỆ VỐN**:
+   - Kế hoạch thoát hàng ATO/ATC, tuyệt đối không trung bình giá xuống cổ phiếu gian lận.`;
       break;
 
     case "MARKET_OVERVIEW":
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TOÀN CẢNH THỊ TRƯỜNG VN-INDEX & CHẾ ĐỘ REGIME) ===
-1. **TRẠNG THÁI CHỈ SỐ VN-INDEX & VN30**:
-   - Điểm số hiện tại, % tăng giảm, giá trị thanh khoản toàn thị trường (so với bình quân 20 phiên).
-   - Độ rộng thị trường (Số mã tăng / giảm / trần / sàn) và độ nghiêng dòng tiền.
-2. **CHẾ ĐỘ THỊ TRƯỜNG (MARKET REGIME CLASSIFICATION)**:
-   - Xác định rõ chế độ: [BULL_EXPANSION (Thị trường giá lên mạnh) | SIDEWAY_CONSOLIDATION (Tích lũy biên hẹp) | BEAR_CAPITULATION (Thị trường giá xuống) | HIGH_VOLATILITY (Biến động cực đoan)].
-   - Vị thế chỉ số so với MA20, MA50, MA200 ngày.
-3. **DÒNG TIỀN PHÂN HÓA THEO NHÓM NGÀNH**:
-   - Nhóm ngành dẫn dắt (Leading sectors) và Nhóm ngành chịu áp lực rút tiền (Lagging sectors).
-   - Hành vi khối ngoại & tự doanh (Mua ròng / Bán ròng tập trung ở đâu).
-4. **CHIẾN LƯỢC QUẢN TRỊ DANH MỤC & TỶ TRỌNG TIỀN/CỔ**:
-   - Tỷ trọng tiền mặt / cổ phiếu đề xuất cho chế độ hiện tại (ví dụ: Bull 70-80% cổ, Sideway 50/50, Bear 20-30% cổ).
-   - Vùng hỗ trợ cứng và vùng cản cản trở đà tăng.`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TỔNG QUAN THỊ TRƯỜNG & CHẾ ĐỘ REGIME) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **CHẨN ĐOÁN THỊ TRƯỜNG TỨC THÌ**:
+   - 1 câu chốt: Điểm số VN-Index, CHẾ ĐỘ THỊ TRƯỜNG (MARKET REGIME): [BULL_EXPANSION | SIDEWAY_CONSOLIDATION | BEAR_CAPITULATION | HIGH_VOLATILITY].
+   - Tỷ trọng tiền mặt / cổ phiếu khuyến nghị (Ví dụ: 60% Cổ / 40% Tiền).
+2. 📊 **BẢNG XUNG LỰC THỊ TRƯỜNG**:
+   - Điểm số, thanh khoản so với bình quân 20 phiên, độ rộng tăng/giảm.
+   - Dòng tiền Khối ngoại & Tự doanh.
+   - Vùng hỗ trợ cứng và vùng cản cản trở đà tăng.
+3. 🚀 **CHIẾN LƯỢC QUẢN TRỊ DANH MỤC & PHÒNG VỆ T+2.5**:
+   - Nhóm ngành dẫn dắt dòng tiền vs nhóm bị rút tiền.
+   - Hành động đề xuất cho danh mục.`;
       break;
 
     case "PERSONAL_FINANCE":
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TÀI CHÍNH CÁ NHÂN & TỐI ƯU DÒNG TIỀN) ===
-1. **BẢNG CHẨN ĐOÁN DÒNG TIỀN CÁ NHÂN**:
-   - Thu nhập hàng tháng (Gross vs Net), các khoản giảm trừ gia cảnh người phụ thuộc.
-   - Phân bổ chi tiêu chuẩn (Ví dụ mô hình 50/30/20 hoặc 60/20/20).
-2. **TÍNH TOÁN BẬC THUẾ TNCN & TỐI ƯU NGHĨA VỤ THUẾ**:
-   - Bảng lũy tiến từng phần theo luật thuế TNCN Việt Nam (từ 5% đến 35%).
-   - Các khoản đóng góp bảo hiểm bắt buộc (BHXH 8%, BHYT 1.5%, BHTN 1%) và mẹo tối ưu chi phí hợp pháp.
-3. **CHIẾN LƯỢC TRẢ NỢ & TỐI ƯU LÃI SUẤT**:
-   - So sánh nợ theo dư nợ ban đầu vs dư nợ giảm dần.
-   - Chiến lược quả cầu tuyết (Snowball) vs Tuyết lở (Avalanche) đối với nợ vay thẻ tín dụng / vay tiêu dùng.
-4. **QUỸ KHẨN CẤP & BẢO VỆ TÀI CHÍNH**:
-   - Quy mô quỹ khẩn cấp khuyến nghị (3 - 6 tháng chi phí thiết yếu).
-   - Nơi cất giữ tối ưu (tiền gửi có kỳ hạn linh hoạt, chứng chỉ tiền gửi).`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (MẪU TÀI CHÍNH CÁ NHÂN & DÒNG TIỀN) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **ĐÁP SỐ CHỐT TỨC THÌ (VERDICT CARD)**:
+   - 1 câu chốt số tiền cần tích lũy hoặc số thuế thực đóng / số tiền nợ cần dập ngay tháng này.
+2. 📊 **CHẨN ĐOÁN DÒNG TIỀN & BẢNG TÍNH ĐỊNH LƯỢNG**:
+   - Bảng phân bổ 3 hũ 50/30/20 (Thiết yếu - Linh hoạt - Tích lũy).
+   - Bảng tính Thuế TNCN (THUẾ TNCN lũy tiến từ 5% đến 35%), bảo hiểm 10.5% hoặc bóc tách chi phí lãi vay thẻ tín dụng vs ngân hàng.
+   - Đệm dự phòng khẩn cấp (3-6 tháng chi phí).
+3. 🚀 **LỘ TRÌNH HÀNH ĐỘNG CỤ THỂ**:
+   - 2 - 3 bước thực hiện ngay khi nhận lương hoặc cách giảm trừ gia cảnh hợp pháp.`;
       break;
 
     default:
       templateGuidance = `
-=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (TƯ VẤN TÀI CHÍNH CHUẨN ĐỊNH CHẾ) ===
-1. **TRỰC DIỆN VÀO CÂU HỎI**: Trả lời rõ ràng luận điểm chính với dữ liệu kiểm chứng.
-2. **LUẬN CỨ ĐỊNH LƯỢNG & SỐ LIỆU MINH BẠCH**: Dùng số liệu từ thị trường, BCTC hoặc dữ liệu realtime để hỗ trợ lập luận.
-3. **ĐÁNH GIÁ RỦI RO & BẢO VỆ VỐN**: Luôn phân tích 2 mặt cơ hội và rủi ro.
-4. **KHUYẾN NGHỊ HÀNH ĐỘNG**: Các bước thực thi rõ ràng, thực tế.`;
+=== CẤU TRÚC TRẢ LỜI BẮT BUỘC (TƯ VẤN TÀI CHÍNH CHUẨN ĐỊNH CHẾ - BLUF) ===
+Tuân thủ nguyên tắc BLUF (3 giây thấy ngay kết quả):
+1. 🎯 **ĐÁP SỐ / KẾT LUẬN CỐT LÕI (VERDICT CARD)**: Ngay dòng đầu tiên, đưa ra kết luận hoặc định nghĩa cốt lõi trong 1-2 câu trực diện. Tuyệt đối không chào hỏi dài dòng.
+2. 📊 **BẢNG THÔNG SỐ TRỌNG YẾU (KEY METRICS DASHBOARD)**: 3-5 con số, tiêu chí định lượng hoặc công thức & ngưỡng tham chiếu chuẩn dạng bảng hoặc bullet point.
+3. 🚀 **KẾ HOẠCH HÀNH ĐỘNG & BẢO VỆ VỐN (ACTION PLAYBOOK)**: 1-3 bước thực thi ngắn gọn, bẫy rủi ro cần tránh và điểm chặn rủi ro.`;
       break;
   }
 
@@ -630,11 +586,14 @@ ${datafeedText ? datafeedText : "Hiện không có dữ liệu live bổ sung. S
 
 ${templateGuidance}
 
-NGUYÊN TẮC BẮT BUỘC KHI TRẢ LỜI:
-- Luôn giữ thái độ khách quan, khoa học định lượng (Quantitative rigor), không phỏng đoán cảm tính.
+NGUYÊN TẮC BẮT BUỘC "3 GIÂY THẤY NGAY KẾT QUẢ" (BLUF - BOTTOM LINE UP FRONT):
+- Mở đầu ngay lập tức bằng 🎯 **KẾT LUẬN / ĐÁP SỐ CỐT LÕI**: Người dùng bận rộn phải nắm được ngay đáp số hoặc hành động chỉ trong 3 giây.
+- Tiếp theo là 📊 **BẢNG THÔNG SỐ TRỌNG YẾU**: Dùng bảng Markdown hoặc gạch đầu dòng ngắn chứa số liệu cụ thể.
+- Kết thúc bằng 🚀 **KẾ HOẠCH HÀNH ĐỘNG CỤ THỂ**: Các bước thực thi rõ ràng kèm ngưỡng cắt lỗ / chặn rủi ro.
+- Tuyệt đối không viết lan man, không mở bài dông dài, không dùng từ ngữ sáo rỗng.
 - Ưu tiên sử dụng số liệu từ DATAFEED trực tiếp (giá, P/E, P/B, ROE, RSI, hàng hóa, chế độ thị trường) làm căn cứ số liệu.
 - Công thức toán học, tài chính và phân vị điểm số bắt buộc viết theo cú pháp KaTeX rõ ràng (ví dụ: $R:R \\ge 2.2\\text{x}$, $E[R]$, $MOS \\ge 15\\%$, $Z_{\\text{Tech}}$).
-- Luôn kết thúc bằng một khối miễn trừ trách nhiệm chuẩn định chế:
-  > **Tuyên bố miễn trừ trách nhiệm**: Phân tích được tạo tự động bởi hệ thống mô hình định lượng Orca AI dựa trên dữ liệu công khai và dữ liệu thị trường trực tiếp. Nội dung mang tính chất tham khảo cho mục đích nghiên cứu, không cấu thành lời mời chào mua bán chứng khoán hay cam kết lợi nhuận đầu tư. Nhà đầu tư tự chịu trách nhiệm về quyết định tài chính của mình.
+- Kết thúc ngắn gọn bằng một dòng miễn trừ trách nhiệm chuẩn:
+  > **Tuyên bố miễn trừ trách nhiệm**: Phân tích tự động bởi hệ thống định lượng Orca AI dựa trên dữ liệu công khai và dữ liệu trực tiếp, mang tính tham khảo nghiên cứu và không cấu thành lời mời mua bán chứng khoán.
 `.trim();
 }

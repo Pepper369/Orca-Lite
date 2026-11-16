@@ -502,9 +502,11 @@ export async function POST(req: Request) {
         const intentResult = detectQueryIntent(question, fastFeed);
 
         // Nạp thêm tính toán định lượng chuyên sâu làm grounding nếu có
+        // CÔ LẬP NGỮ CẢNH: Chỉ nạp facts sổ tài chính cá nhân khi người dùng thực sự hỏi về PERSONAL_FINANCE
         let contextualGrounding = "";
         try {
-          const contextualDraft = await executeContextualAiPipeline(question, facts);
+          const cleanFacts = intentResult.intent === "PERSONAL_FINANCE" ? facts : {};
+          const contextualDraft = await executeContextualAiPipeline(question, cleanFacts);
           if (contextualDraft?.answer) {
             contextualGrounding = `\n\nTHAM KHẢO TÍNH TOÁN ĐỊNH LƯỢNG NỘI BỘ (GROUNDING REFERENCE):\n${contextualDraft.answer.slice(0, 1500)}\n`;
           }
@@ -524,8 +526,8 @@ export async function POST(req: Request) {
           system: systemPrompt,
           user: question,
           history: chatHistory,
-          temperature: 0.72,
-          maxTokens: 550,
+          temperature: 0.25,
+          maxTokens: 500,
           timeoutMs: 14_000,
         });
 

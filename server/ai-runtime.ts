@@ -170,3 +170,4 @@ export function cleanupAiRuntime() {
 process.on("exit", cleanupAiRuntime);
 process.on("SIGINT", cleanupAiRuntime);
 process.on("SIGTERM", cleanupAiRuntime);
+
