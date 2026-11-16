@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { LayoutGrid, Sparkles } from "lucide-react";
 import { Loading, Panel } from "@/components/ui";
 import { FlatsIcon } from "@/components/screener-icons";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -163,6 +164,61 @@ const FireAntScreenerPanel = dynamic(
   { ssr: false, loading: PanelFallback }
 );
 
+/* Specialized Domain Studios */
+const CanslimScreener = dynamic(
+  () => import("@/components/canslim-screener").then((m) => m.CanslimScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const WyckoffScreener = dynamic(
+  () => import("@/components/wyckoff-screener").then((m) => m.WyckoffScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const CandlestickScreener = dynamic(
+  () => import("@/components/candlestick-screener").then((m) => m.CandlestickScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const DivergenceScreener = dynamic(
+  () => import("@/components/divergence-screener").then((m) => m.DivergenceScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const ElliottScreener = dynamic(
+  () => import("@/components/elliott-screener").then((m) => m.ElliottScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const MinerviniScreener = dynamic(
+  () => import("@/components/minervini-screener").then((m) => m.MinerviniScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const AlphaBetaScreener = dynamic(
+  () => import("@/components/alpha-beta-screener").then((m) => m.AlphaBetaScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const FundamentalScreener = dynamic(
+  () => import("@/components/fundamental-screener").then((m) => m.FundamentalScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const ValuationScreener = dynamic(
+  () => import("@/components/valuation-screener").then((m) => m.ValuationScreener),
+  { ssr: false, loading: PanelFallback },
+);
+const MaCandleConfluenceScreener = dynamic(
+  () => import("@/components/ma-candle-confluence-screener").then((m) => m.MaCandleConfluenceScreener),
+  { ssr: false, loading: PanelFallback },
+);
+
+export const HAS_STUDIO_VIEW = new Set<Universe>([
+  "canslim",
+  "wyckoff",
+  "candlestick",
+  "divergence",
+  "elliott",
+  "minervini",
+  "alpha-beta",
+  "fundamental",
+  "valuation",
+  "ma-confluence",
+]);
+
 function SoftPanel({
   name,
   resetKey,
@@ -199,6 +255,8 @@ function ScreenerInner() {
 
   const initialGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id ?? "quant_alpha";
   const [selectedGroup, setSelectedGroup] = useState<ScreenerGroupId>(initialGroup);
+  const [studioModeMap, setStudioModeMap] = useState<Partial<Record<Universe, "studio" | "matrix">>>({});
+  const currentViewMode = studioModeMap[universe] ?? "studio";
 
   useEffect(() => {
     setVisited((prev) => {
@@ -219,6 +277,7 @@ function ScreenerInner() {
   const currentGroupItems = SCREENER_GROUPS.find((g) => g.id === selectedGroup)?.items ?? SCREENER_GROUPS[0].items;
 
   const renderPanel = (u: Universe) => {
+    const isStudio = (studioModeMap[u] ?? "studio") === "studio";
     switch (u) {
       case "apex-buy-now":
         return (
@@ -328,7 +387,9 @@ function ScreenerInner() {
       case "crypto":
         return <CryptoScreener />;
       case "alpha-beta":
-        return (
+        return isStudio ? (
+          <AlphaBetaScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="quant_low_beta"
@@ -337,7 +398,9 @@ function ScreenerInner() {
           />
         );
       case "divergence":
-        return (
+        return isStudio ? (
+          <DivergenceScreener />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="bottom_confluence"
@@ -346,7 +409,9 @@ function ScreenerInner() {
           />
         );
       case "candlestick":
-        return (
+        return isStudio ? (
+          <CandlestickScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="mtf_candle_cluster"
@@ -355,7 +420,9 @@ function ScreenerInner() {
           />
         );
       case "ma-confluence":
-        return (
+        return isStudio ? (
+          <MaCandleConfluenceScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="bottom_confluence"
@@ -364,7 +431,9 @@ function ScreenerInner() {
           />
         );
       case "wyckoff":
-        return (
+        return isStudio ? (
+          <WyckoffScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="vsa_no_supply"
@@ -373,7 +442,9 @@ function ScreenerInner() {
           />
         );
       case "canslim":
-        return (
+        return isStudio ? (
+          <CanslimScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="canslim"
@@ -400,7 +471,9 @@ function ScreenerInner() {
           />
         );
       case "minervini":
-        return (
+        return isStudio ? (
+          <MinerviniScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="tight_closes_vdu"
@@ -409,7 +482,9 @@ function ScreenerInner() {
           />
         );
       case "elliott":
-        return (
+        return isStudio ? (
+          <ElliottScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="bottom_confluence"
@@ -418,7 +493,9 @@ function ScreenerInner() {
           />
         );
       case "valuation":
-        return (
+        return isStudio ? (
+          <ValuationScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="value"
@@ -427,7 +504,9 @@ function ScreenerInner() {
           />
         );
       case "fundamental":
-        return (
+        return isStudio ? (
+          <FundamentalScreener defaultSector={sector} />
+        ) : (
           <VnScreener
             defaultSector={sector}
             defaultPreset="fa_fortress"
@@ -506,6 +585,8 @@ function ScreenerInner() {
                     if (tab.id === "ma-cross") prefetchApi("/api/v1/screener/ma-cross", 10_000);
                     else if (tab.id === "fundamental") prefetchApi("/api/v1/screener/fundamental", 12_000);
                     else if (tab.id === "valuation") prefetchApi("/api/v1/screener/valuation", 12_000);
+                    else if (tab.id === "canslim") prefetchApi("/api/v1/screener/canslim?minScore=50&minPass=3&limit=40", 12_000);
+                    else if (tab.id === "wyckoff") prefetchApi("/api/v1/screener/wyckoff?phase=all&setup=all&limit=40", 12_000);
                     else if (tab.id === "crypto") prefetchApi("/api/v1/crypto/markets?limit=120", 8_000);
                   }}
                 >
@@ -518,6 +599,44 @@ function ScreenerInner() {
             Vuốt ngang để xem thêm bộ lọc (Định giá P, Chỉ số cơ bản…)
           </p>
           <p className="mt-1.5 text-[10px] text-text-muted sm:hidden">← Vuốt ngang để chọn thêm bộ lọc →</p>
+
+          {/* Studio vs Matrix Dual View Switcher for Specialized Universes */}
+          {HAS_STUDIO_VIEW.has(universe) && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-3 pt-3 border-t border-border-subtle/80 text-xs">
+              <div className="flex items-center gap-2 text-text-secondary text-xs">
+                <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                <span>
+                  Chế độ xem: <strong>Studio Chuyên Sâu</strong> (Giao diện trường phái đặc thù) hoặc <strong>Bảng Ma Trận</strong> (Toàn diện đa chỉ số).
+                </span>
+              </div>
+              <div className="inline-flex self-start sm:self-auto rounded-lg border border-border-subtle bg-surface-elevated/90 p-0.5 text-xs font-medium shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [universe]: "studio" }))}
+                  className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                    currentViewMode === "studio"
+                      ? "bg-accent-primary text-black font-semibold shadow-xs"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-base/50"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Studio Chuyên Sâu</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [universe]: "matrix" }))}
+                  className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                    currentViewMode === "matrix"
+                      ? "bg-accent-primary text-black font-semibold shadow-xs"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-base/50"
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Bảng Ma Trận</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </Panel>
       <div className="screener-keep-alive-views">
@@ -527,7 +646,7 @@ function ScreenerInner() {
             style={{ display: u === universe ? "block" : "none" }}
             aria-hidden={u !== universe}
           >
-            <SoftPanel name={u} resetKey={u}>
+            <SoftPanel name={u} resetKey={`${u}:${studioModeMap[u] ?? "studio"}`}>
               {renderPanel(u)}
             </SoftPanel>
           </div>
