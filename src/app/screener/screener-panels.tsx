@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/hooks";
+import { useMarketStream } from "@/lib/hooks/use-market-stream";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import type { CryptoMarketRow, IndexQuote } from "@/lib/types";
 import {
@@ -1830,6 +1831,92 @@ export function VnScreener({
   const rows = data?.items ?? [];
   const presetsCount = data?.presetsCount;
 
+  // Real-time WebSocket / SSE Stream Overlay
+  const [realtimeEnabled, setRealtimeEnabled] = useState(true);
+  const streamSymbols = useMemo(() => {
+    return rows.slice(0, 50).map((r) => r.symbol);
+  }, [rows]);
+
+  const { quotes: streamQuotes, status: streamStatus } = useMarketStream(streamSymbols, {
+    enabled: realtimeEnabled && streamSymbols.length > 0,
+    asset: "stock",
+  });
+
+  const [flashMap, setFlashMap] = useState<Record<string, "up" | "down">>({});
+  const prevPricesRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!realtimeEnabled) return;
+    const updates: Record<string, "up" | "down"> = {};
+    let hasUpdates = false;
+
+    for (const [sym, sq] of Object.entries(streamQuotes)) {
+      if (!sq?.price) continue;
+      const normalized = sq.price > 500 ? Number((sq.price / 1000).toFixed(2)) : sq.price;
+      const prev = prevPricesRef.current[sym];
+      if (prev != null && prev !== normalized) {
+        updates[sym] = normalized > prev ? "up" : "down";
+        hasUpdates = true;
+      }
+      prevPricesRef.current[sym] = normalized;
+    }
+
+    if (hasUpdates) {
+      setFlashMap((prev) => ({ ...prev, ...updates }));
+      const timer = setTimeout(() => {
+        setFlashMap((prev) => {
+          const next = { ...prev };
+          for (const k of Object.keys(updates)) delete next[k];
+          return next;
+        });
+      }, 900);
+      return () => clearTimeout(timer);
+    }
+  }, [streamQuotes, realtimeEnabled]);
+
+  const getLiveItem = useCallback(
+    (row: ScreenerStockItem) => {
+      const sq = streamQuotes[row.symbol];
+      if (!sq || !sq.price || !realtimeEnabled) {
+        return {
+          row,
+          isLive: false,
+          flash: flashMap[row.symbol] ?? null,
+        };
+      }
+      const livePrice = sq.price > 500 ? Number((sq.price / 1000).toFixed(2)) : sq.price;
+      const liveChg = sq.changePercent ?? row.changePercent;
+      const liveVol = sq.volume != null && sq.volume > (row.volume ?? 0) ? sq.volume : row.volume;
+      const liveBuyDiff =
+        row.buyPoint && livePrice
+          ? Number((((livePrice - row.buyPoint) / row.buyPoint) * 100).toFixed(1))
+          : row.buyPointDiffPct;
+
+      return {
+        row: {
+          ...row,
+          price: livePrice,
+          changePercent: liveChg,
+          volume: liveVol,
+          buyPointDiffPct: liveBuyDiff,
+          absBuyDiff: liveBuyDiff != null ? Math.abs(liveBuyDiff) : row.absBuyDiff,
+        },
+        isLive: true,
+        flash: flashMap[row.symbol] ?? null,
+      };
+    },
+    [streamQuotes, realtimeEnabled, flashMap],
+  );
+
+  const getPriceCellClass = (flashDir: "up" | "down" | null, extra = "") =>
+    `num py-2.5 text-right font-semibold transition-all duration-300 ${
+      flashDir === "up"
+        ? "bg-emerald-500/25 text-emerald-300 font-bold"
+        : flashDir === "down"
+        ? "bg-rose-500/25 text-rose-300 font-bold"
+        : ""
+    } ${extra}`;
+
   // Export CSV with Formula Injection Neutralization
   const handleExportCsv = () => {
     if (!rows.length) return;
@@ -2545,6 +2632,33 @@ export function VnScreener({
             <span className="text-[10px] text-text-muted hidden lg:inline">
               Sắp xếp: {sortKey} ({sortOrder === "desc" ? "giảm dần" : "tăng dần"})
             </span>
+            {/* Real-time WebSocket / SSE Live Stream Status Badge & Switch */}
+            <button
+              type="button"
+              onClick={() => setRealtimeEnabled((prev) => !prev)}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium border transition-all ${
+                realtimeEnabled
+                  ? streamStatus === "open"
+                    ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-400 font-semibold"
+                    : "bg-cyan-500/15 border-cyan-500/35 text-cyan-300 font-medium"
+                  : "bg-panel-2 border-border-subtle text-text-muted hover:text-text-primary"
+              }`}
+              title={realtimeEnabled ? "Đang đồng bộ giá và khối lượng trực tiếp (Click để tạm dừng)" : "Đang tạm dừng live ticks (Click để bật)"}
+            >
+              {realtimeEnabled ? (
+                <>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${streamStatus === "open" ? "bg-emerald-400 animate-ping" : "bg-cyan-400"}`} />
+                  <span className="hidden md:inline">{streamStatus === "open" ? "Live Stream (Tick)" : "Kết nối Stream..."}</span>
+                  <span className="md:hidden">Live</span>
+                </>
+              ) : (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-text-muted" />
+                  <span className="hidden md:inline">Stream: Tắt</span>
+                  <span className="md:hidden">Off</span>
+                </>
+              )}
+            </button>
             <div className="flex items-center gap-0.5 rounded-lg bg-panel-2 p-0.5 border border-border-subtle shrink-0">
               <button
                 type="button"
@@ -2581,7 +2695,8 @@ export function VnScreener({
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                {rows.map((row) => {
+                {rows.map((rawRow) => {
+                  const { row, isLive, flash } = getLiveItem(rawRow);
                   const buyDiff =
                     row.buyPointDiffPct ??
                     (row.buyPoint && row.price
@@ -2639,8 +2754,17 @@ export function VnScreener({
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <div className="text-[13px] font-bold font-mono">
-                              {row.price != null ? fmtNum(row.price, 2) : "—"}
+                            <div className={`text-[13px] font-bold font-mono transition-all duration-300 ${
+                              flash === "up"
+                                ? "bg-emerald-500/25 text-emerald-300 rounded px-1"
+                                : flash === "down"
+                                ? "bg-rose-500/25 text-rose-300 rounded px-1"
+                                : ""
+                            }`}>
+                              <span className="inline-flex items-center gap-1">
+                                {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                                {row.price != null ? fmtNum(row.price, 2) : "—"}
+                              </span>
                             </div>
                             <Chg value={row.changePercent} arrow={false} className="text-[11px] font-semibold" />
                           </div>
@@ -3364,7 +3488,9 @@ export function VnScreener({
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
+                rows.map((rawRow) => {
+                  const { row, isLive, flash } = getLiveItem(rawRow);
+                  return (
                   <tr key={row.symbol} className="row-hover border-b border-line/40 transition-colors">
                     <td className="px-3.5 py-2.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -3433,8 +3559,11 @@ export function VnScreener({
 
                     {viewTab === "overview" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="py-2.5 text-right">
                           <Chg value={row.changePercent} arrow={false} />
@@ -3490,8 +3619,11 @@ export function VnScreener({
 
                     {viewTab === "orca_master" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="num py-2.5 text-right font-semibold">
                           <Chg value={row.changePercent} arrow={false} />
@@ -3563,8 +3695,11 @@ export function VnScreener({
 
                     {viewTab === "smart_money" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="num py-2.5 text-right font-semibold">
                           <Chg value={row.changePercent} arrow={false} />
@@ -3616,8 +3751,11 @@ export function VnScreener({
 
                     {viewTab === "buy_point" && (
                       <>
-                        <td className="num py-2.5 text-right font-bold text-text-primary">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash, "font-bold text-text-primary")}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="num py-2.5 text-right font-black text-accent-primary font-mono">
                           {row.buyPoint != null ? fmtNum(row.buyPoint, 2) : "—"}
@@ -3722,8 +3860,11 @@ export function VnScreener({
 
                     {viewTab === "quant" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "-"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "-"}
+                          </span>
                         </td>
                         <td className="py-2.5 text-right">
                           <Chg value={row.changePercent} arrow={false} />
@@ -3806,8 +3947,11 @@ export function VnScreener({
 
                 {viewTab === "confluence" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="py-2.5 text-right">
                           <Chg value={row.changePercent} arrow={false} />
@@ -3934,8 +4078,11 @@ export function VnScreener({
 
                     {viewTab === "technical" && (
                       <>
-                        <td className="num py-2.5 text-right font-semibold">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="py-2.5 text-right">
                           <Chg value={row.changePercent} arrow={false} />
@@ -4006,8 +4153,11 @@ export function VnScreener({
 
                     {viewTab === "valuation" && (
                       <>
-                        <td className="num py-2.5 text-right font-medium">
-                          {row.price != null ? fmtNum(row.price, 2) : "—"}
+                        <td className={getPriceCellClass(flash, "font-medium")}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
                         </td>
                         <td className="num py-2.5 text-right font-semibold text-text-primary">
                           {row.pe != null ? fmtNum(row.pe, 1) : "—"}
@@ -4145,7 +4295,8 @@ export function VnScreener({
                       </>
                     )}
                   </tr>
-                ))
+                );
+              })
               )}
             </tbody>
           </table>
@@ -4153,7 +4304,9 @@ export function VnScreener({
 
         {/* Mobile Feed View */}
         <div className="divide-y divide-line/50 md:hidden">
-          {rows.map((row) => (
+          {rows.map((rawRow) => {
+            const { row, isLive, flash } = getLiveItem(rawRow);
+            return (
             <Link
               key={row.symbol}
               href={`/stocks/${row.symbol}`}
@@ -4236,13 +4389,19 @@ export function VnScreener({
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <span className="num block text-[13px] font-semibold">
-                  {row.price != null ? fmtNum(row.price, 2) : "—"}
+                <span className={`num block text-[13px] font-semibold transition-all duration-300 ${
+                  flash === "up" ? "bg-emerald-500/25 text-emerald-300 rounded px-1" : flash === "down" ? "bg-rose-500/25 text-rose-300 rounded px-1" : ""
+                }`}>
+                  <span className="inline-flex items-center gap-1">
+                    {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                    {row.price != null ? fmtNum(row.price, 2) : "—"}
+                  </span>
                 </span>
                 <Chg value={row.changePercent} arrow={false} className="text-[11px]" />
               </div>
             </Link>
-          ))}
+          );
+        })}
         </div>
         </>
         )}
