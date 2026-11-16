@@ -112,8 +112,8 @@ describe("Phase 3: Orca AI Answering System Comprehensive E2E Verification", () 
 
   // 5. Scenario 5: Xác thực mô hình Local GGUF trên đĩa cứng & Cơ chế Gateway Fallback
   it("Scenario 5: Local GGUF Runtime Verification - Kiểm tra tệp trọng số 1.92 GB và Magic Header", () => {
-    const ggufRelativePath = "models/orca-fa-qwen2.5-3b-q4_k_m.gguf";
-    const ggufAbsolutePath = path.resolve(process.cwd(), "..", "Orca-Lite", ggufRelativePath);
+    const ggufRelativePath = "models/orca-financial-qwen2.5-3b-q4_k_m.gguf";
+    const ggufAbsolutePath = path.resolve(process.cwd(), ggufRelativePath);
 
     const artifactStatus = inspectLocalGgufArtifact(ggufAbsolutePath);
     assert.equal(artifactStatus.exists, true, "Tệp trọng số .gguf phải tồn tại trên đĩa");
@@ -122,6 +122,7 @@ describe("Phase 3: Orca AI Answering System Comprehensive E2E Verification", () 
     assert.ok(artifactStatus.sizeMb > 1800, "Kích thước tệp phải > 1.8 GB (~1.92 GB)");
 
     // Xác nhận định danh mô hình
+    assert.equal(isLocalGgufModelId("orca-financial-qwen2.5-3b"), true);
     assert.equal(isLocalGgufModelId("orca-fa-qwen2.5-3b"), true);
     assert.equal(isLocalGgufModelId("local-gguf"), true);
 
@@ -132,7 +133,7 @@ describe("Phase 3: Orca AI Answering System Comprehensive E2E Verification", () 
       const config = resolveLocalGgufConfig(ggufAbsolutePath);
       assert.equal(config.enabled, true);
       assert.equal(config.baseUrl, "http://127.0.0.1:8080/v1");
-      assert.equal(config.model, "orca-fa-qwen2.5-3b");
+      assert.equal(config.model, "orca-financial-qwen2.5-3b");
     } finally {
       if (prevUrl === undefined) delete process.env.LOCAL_GGUF_BASE_URL;
       else process.env.LOCAL_GGUF_BASE_URL = prevUrl;

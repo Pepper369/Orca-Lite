@@ -119,8 +119,8 @@ export const env = {
   aiLlmCascadeMode: opt(process.env.AI_LLM_CASCADE_MODE) ?? "race",
 
   localGgufBaseUrl: opt(process.env.LOCAL_GGUF_BASE_URL),
-  localGgufModel: opt(process.env.LOCAL_GGUF_MODEL) ?? "orca-fa-qwen2.5-3b",
-  localGgufPath: opt(process.env.LOCAL_GGUF_PATH) ?? "models/orca-fa-qwen2.5-3b-q4_k_m.gguf",
+  localGgufModel: opt(process.env.LOCAL_GGUF_MODEL) ?? "orca-financial-qwen2.5-3b",
+  localGgufPath: opt(process.env.LOCAL_GGUF_PATH) ?? "models/orca-financial-qwen2.5-3b-q4_k_m.gguf",
   localGgufApiKey: opt(process.env.LOCAL_GGUF_API_KEY) ?? "local-gguf",
   localGgufPriority: (opt(process.env.LOCAL_GGUF_PRIORITY)?.toLowerCase() ?? "fallback") as
     | "primary"

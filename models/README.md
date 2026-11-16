@@ -1,6 +1,6 @@
 # Orca Financial Fine-Tuned GGUF Model (`Qwen2.5-3B-Instruct` QLoRA — Không cần Ollama)
 
-Thư mục này chứa tệp trọng số `.gguf` đã train từ Google Colab ([orca_fa_colab_training.ipynb](../notebooks/orca_fa_colab_training.ipynb)) trên bộ dữ liệu [orca_fin_data.jsonl](../src/data/training/orca_fin_data.jsonl).
+Thư mục này chứa tệp trọng số `orca-financial-qwen2.5-3b-q4_k_m.gguf` đã train độc lập dành riêng cho Orca-Financial từ Google Colab ([orca_financial_colab_training.ipynb](../notebooks/orca_financial_colab_training.ipynb)) trên bộ dữ liệu tài chính toàn diện 7 trụ cột [orca_fin_data.jsonl](../src/data/training/orca_fin_data.jsonl).
 
 ## Cách 1: Chạy trên máy bằng `llama-server` đơn lẻ (Không cần Ollama)
 
@@ -14,10 +14,11 @@ Sau đó thêm vào `.env.local`:
 
 ```env
 LOCAL_GGUF_BASE_URL=http://127.0.0.1:8080/v1
-LOCAL_GGUF_MODEL=orca-fa-qwen2.5-3b
+LOCAL_GGUF_MODEL=orca-financial-qwen2.5-3b
 LOCAL_GGUF_PRIORITY=primary
+LOCAL_GGUF_PATH=models/orca-financial-qwen2.5-3b-q4_k_m.gguf
 ```
 
 ## Cách 2: Chạy trên Google Colab T4 GPU (0% CPU/RAM máy cá nhân)
 
-Nếu máy không muốn gánh suy luận cục bộ, mở [orca_fa_colab_serve.ipynb](../notebooks/orca_fa_colab_serve.ipynb) trên Google Colab (T4 GPU), upload `orca-fa-qwen2.5-3b-q4_k_m.gguf` rồi dán URL tunnel vào `LOCAL_GGUF_BASE_URL` trong `.env.local`.
+Nếu máy không muốn gánh suy luận cục bộ, mở [orca_fa_colab_serve.ipynb](../notebooks/orca_fa_colab_serve.ipynb) trên Google Colab (T4 GPU), upload `orca-financial-qwen2.5-3b-q4_k_m.gguf` rồi dán URL tunnel vào `LOCAL_GGUF_BASE_URL` trong `.env.local`.

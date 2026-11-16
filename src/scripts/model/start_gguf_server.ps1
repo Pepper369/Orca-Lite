@@ -64,4 +64,4 @@ Write-Host "  .env.local -> LOCAL_GGUF_BASE_URL=http://127.0.0.1:$Port/v1"
   --port $Port `
   -c $ContextSize `
   -t $Threads `
-  --no-mmap
+  -lm auto

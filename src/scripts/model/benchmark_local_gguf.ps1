@@ -1,13 +1,13 @@
 ﻿param(
   [string]$BaseUrl = "http://127.0.0.1:8080/v1",
-  [string]$Model = "orca-fa-qwen2.5-3b",
+  [string]$Model = "orca-financial-qwen2.5-3b",
   [int]$Runs = 3
 )
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "   ORCA-FA GGUF LOCAL C++ INFERENCE BENCHMARK (CPU x64)   " -ForegroundColor Cyan
+Write-Host " ORCA-FINANCIAL GGUF INFERENCE BENCHMARK (CPU x64) " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "Target Endpoint: $BaseUrl/chat/completions"
 Write-Host "Target Model   : $Model"

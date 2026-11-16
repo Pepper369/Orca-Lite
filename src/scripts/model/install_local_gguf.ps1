@@ -11,13 +11,13 @@ if (-not (Test-Path $modelsDir)) {
   New-Item -ItemType Directory -Path $modelsDir -Force | Out-Null
 }
 
-$targetGguf = Join-Path $modelsDir "orca-fa-qwen2.5-3b-q4_k_m.gguf"
+$targetGguf = Join-Path $modelsDir "orca-financial-qwen2.5-3b-q4_k_m.gguf"
 
 if (-not $BundlePath) {
   $candidates = @(
+    (Join-Path $env:USERPROFILE "Downloads\orca-financial-qwen2.5-3b-q4_k_m.gguf"),
     (Join-Path $env:USERPROFILE "Downloads\orca-fa-gguf-bundle.zip"),
     (Join-Path $env:USERPROFILE "Downloads\orca-fa-qwen2.5-3b-q4_k_m.gguf"),
-    (Join-Path $modelsDir "orca-fa-gguf-bundle.zip"),
     $targetGguf
   )
   foreach ($c in $candidates) {

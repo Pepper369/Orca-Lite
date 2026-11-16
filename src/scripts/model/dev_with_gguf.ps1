@@ -9,7 +9,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $modelsDir = Join-Path $repoRoot "models"
 $binDir = Join-Path $modelsDir "bin"
-$ggufPath = Join-Path $modelsDir "orca-fa-qwen2.5-3b-q4_k_m.gguf"
+$preferredGguf = Join-Path $modelsDir "orca-financial-qwen2.5-3b-q4_k_m.gguf"
+$fallbackGguf = Join-Path $modelsDir "orca-fa-qwen2.5-3b-q4_k_m.gguf"
+$ggufPath = if (Test-Path $preferredGguf) { $preferredGguf } else { $fallbackGguf }
+$modelAlias = if ($ggufPath -match "orca-financial") { "orca-financial-qwen2.5-3b" } else { "orca-fa-qwen2.5-3b" }
 
 $llamaProc = $null
 
@@ -44,7 +47,7 @@ try {
       Write-Host "[Orca GGUF] Khoi dong C++ Engine ngam tai loopback noi bo (Port $GgufPort)..."
       $llamaArgs = @(
         "-m", $ggufPath,
-        "--alias", "orca-fa-qwen2.5-3b",
+        "--alias", $modelAlias,
         "--host", "127.0.0.1",
         "--port", "$GgufPort",
         "-c", "$ContextSize",
@@ -68,12 +71,12 @@ try {
 
       $env:INTERNAL_GGUF_PORT = "$GgufPort"
       if (-not $env:LOCAL_GGUF_BASE_URL) { $env:LOCAL_GGUF_BASE_URL = "http://127.0.0.1:$GgufPort/v1" }
-      if (-not $env:LOCAL_GGUF_MODEL) { $env:LOCAL_GGUF_MODEL = "orca-fa-qwen2.5-3b" }
+      if (-not $env:LOCAL_GGUF_MODEL) { $env:LOCAL_GGUF_MODEL = $modelAlias }
       if (-not $env:LOCAL_GGUF_PRIORITY) { $env:LOCAL_GGUF_PRIORITY = "primary" }
 
       Write-Host ""
       Write-Host "============================================================" -ForegroundColor Cyan
-      Write-Host "  ORCA-FA SINGLE GATEWAY (1 PORT DUY NHAT: 3000)" -ForegroundColor Green
+      Write-Host "  ORCA-FINANCIAL GATEWAY (PORT 3000)" -ForegroundColor Green
       Write-Host "  - Web UI & Dashboard: http://localhost:3000" -ForegroundColor White
       Write-Host "  - AI Chat Endpoint:   http://localhost:3000/api/ask-orca" -ForegroundColor White
       Write-Host "  - OpenAI /v1 API:     http://localhost:3000/v1/chat/completions" -ForegroundColor White

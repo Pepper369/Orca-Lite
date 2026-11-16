@@ -45,6 +45,8 @@ describe("Local GGUF Integration Tests", () => {
     assert.equal(isLocalGgufModelId("local-gguf"), true);
     assert.equal(isLocalGgufModelId("orca-fa-local"), true);
     assert.equal(isLocalGgufModelId("orca-fa-qwen2.5-3b"), true);
+    assert.equal(isLocalGgufModelId("orca-financial-local"), true);
+    assert.equal(isLocalGgufModelId("orca-financial-qwen2.5-3b"), true);
     assert.equal(isLocalGgufModelId("custom-finetune", "custom-finetune"), true);
     assert.equal(isLocalGgufModelId("google/gemini-2.0-flash-001"), false);
   });
