@@ -14,12 +14,13 @@ import {
   buildRatesMacroContext,
   buildVnStockFull,
   buildCryptoContext,
+  buildFastInsightAgentBuilt,
   type AgentBuilt,
 } from "./agent-context";
 import { buildVnMarketBriefing } from "./market-briefing";
 import { createResponseContext, domainsForRoute, routeQuestion, type AgentResponseContext, type AgentRoute } from "./agent-router";
 import { runInDataHub } from "../data-engine";
-import { isScreenerQuery, getFastScreenerFeed } from "./fast-datafeed-hub";
+import { isScreenerQuery, getFastScreenerFeed, getFastStockLiveInsight } from "./fast-datafeed-hub";
 
 /** Hard wall for data-engine calls so agent never hangs past the serverless budget */
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -191,7 +192,18 @@ async function buildRoutedContext(route: AgentRoute, question: string, deep: boo
     if (domain === "commodity") return { domain, built: await withTimeout(buildCommodityContext(question), 22_000, EMPTY_BUILT) };
     const symbols = route.entities.symbols.length > 1 ? route.entities.symbols.slice(0, 4) : [route.entities.symbols[0] ?? "FPT"];
     if (symbols.length > 1 && route.task === "compare") {
-      const stocks = await Promise.all(symbols.map((symbol) => withTimeout(buildVnStockFull(symbol, deep), 22_000, { ...EMPTY_BUILT, symbols: [symbol] })));
+      const stocks = await Promise.all(
+        symbols.map(async (symbol) => {
+          let stockBuilt = await withTimeout(buildVnStockFull(symbol, deep), 15_000, { ...EMPTY_BUILT, symbols: [symbol] });
+          if (stockBuilt.unavailable) {
+            const fast = await getFastStockLiveInsight(symbol).catch(() => null);
+            if (fast && (fast.price || fast.multiFactorQuant || fast.rsi)) {
+              stockBuilt = buildFastInsightAgentBuilt(symbol, fast);
+            }
+          }
+          return stockBuilt;
+        })
+      );
       return {
         domain,
         built: {
@@ -204,7 +216,15 @@ async function buildRoutedContext(route: AgentRoute, question: string, deep: boo
         },
       };
     }
-    return { domain, built: await withTimeout(buildVnStockFull(symbols[0]!, deep), 22_000, { ...EMPTY_BUILT, symbols: [symbols[0]!] }) };
+    const targetSymbol = symbols[0]!;
+    let builtRes = await withTimeout(buildVnStockFull(targetSymbol, deep), 12_000, { ...EMPTY_BUILT, symbols: [targetSymbol] });
+    if (builtRes.unavailable) {
+      const fast = await getFastStockLiveInsight(targetSymbol).catch(() => null);
+      if (fast && (fast.price || fast.multiFactorQuant || fast.rsi)) {
+        builtRes = buildFastInsightAgentBuilt(targetSymbol, fast);
+      }
+    }
+    return { domain, built: builtRes };
   });
   const parts = await Promise.all(jobs);
   const merged: AgentBuilt = {
@@ -278,11 +298,17 @@ async function answerQuestionInner(
       built = await withTimeout(buildVnMarketBriefing(), DATA_MS, EMPTY_BUILT);
       forceBriefingFormat = !built.unavailable;
     } else if (intent.kind === "vn-stock") {
-      built = await withTimeout(buildVnStockFull(intent.symbol, deep), DATA_MS, {
+      built = await withTimeout(buildVnStockFull(intent.symbol, deep), 12_000, {
         ...EMPTY_BUILT,
         narrative: `## ${intent.symbol}\n\nChưa lấy được đủ dữ liệu live cho mã này trong thời gian cho phép. Thử lại sau hoặc kiểm tra /system.`,
         symbols: [intent.symbol],
       });
+      if (built.unavailable) {
+        const fast = await getFastStockLiveInsight(intent.symbol).catch(() => null);
+        if (fast && (fast.price || fast.multiFactorQuant || fast.rsi)) {
+          built = buildFastInsightAgentBuilt(intent.symbol, fast);
+        }
+      }
     } else if (intent.kind === "crypto") {
       built = await withTimeout(buildCryptoContext(intent.symbol), DATA_MS, {
         ...EMPTY_BUILT,

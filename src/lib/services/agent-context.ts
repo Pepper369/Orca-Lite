@@ -19,6 +19,7 @@ import { buildVn } from "./agent-vn-stock";
 import { MiquantFinancialIntelligence } from "./miquant-ai";
 import { DualAiConsensusEngine } from "./dual-ai-consensus";
 import { getSectorTrendSnapshot } from "./sector-trend";
+import { getFastStockLiveInsight, type FastStockLiveInsight } from "./fast-datafeed-hub";
 import { getEconomicCalendar } from "../providers/economic-calendar";
 import type { EconomicSnapshot } from "../economic-data";
 import type { FreshnessStatus } from "../types";
@@ -537,12 +538,125 @@ export async function enrichVnStockPerformance(symbol: string): Promise<string> 
   }
 }
 
+export function buildFastInsightAgentBuilt(symbol: string, insight: FastStockLiveInsight): AgentBuilt {
+  const sym = symbol.toUpperCase().trim();
+  const name = insight.name || sym;
+  const price = insight.price != null ? insight.price.toLocaleString("vi-VN") : "—";
+  const chg = insight.changePercent != null ? `${insight.changePercent >= 0 ? "+" : ""}${insight.changePercent.toFixed(2)}%` : "0.00%";
+  const rsi = insight.rsi != null ? insight.rsi.toFixed(1) : "—";
+  const rsiZone = insight.rsi != null ? (insight.rsi >= 70 ? "Quá mua" : insight.rsi <= 30 ? "Quá bán" : "Trung tính tích cực") : "Trung tính";
+  const star = insight.starVerdict ? `${insight.starVerdict} (${insight.starGauge ?? 80}/100)` : "Tích cực";
+
+  const quant = insight.multiFactorQuant;
+  const sync = insight.screenerSync;
+
+  const lines: string[] = [
+    `## ${sym} — ${name}`,
+    `## Giá & khối lượng realtime\n**Giá hiện tại**: **${price} đ** (${chg}) · Đánh giá xung lực: **${star}**.`,
+    `## Trạng thái kỹ thuật & Chỉ báo\n- **RSI14**: **${rsi}** (${rsiZone})\n- **Xung lực xu hướng**: ${insight.attributionSummary || "Động lực chủ đạo đến từ dòng tiền tích lũy và sức mạnh kỹ thuật."}`,
+  ];
+
+  if (sync?.buyPoint || sync?.buyZoneStatus) {
+    lines.push(
+      `## Tín hiệu Điểm mua & Chiến lược (Orca Smart Pivot)\n- Trạng thái Điểm mua: **${sync.buyZoneStatus || "Đang tích lũy trong nền"}**\n- Giá kích hoạt Pivot (Buy Point): **${sync.buyPoint ? `${(sync.buyPoint * 1000).toLocaleString("vi-VN")} đ` : "—"}**\n- Chiến lược tối ưu: **${sync.buyStrategy || "Giao dịch theo đà bứt phá nền giá"}**`
+    );
+  }
+
+  if (quant?.tripleBarrier) {
+    const tb = quant.tripleBarrier;
+    lines.push(
+      `## Kế hoạch Giao dịch Định lượng (Triple-Barrier T+20)\n- **Vùng giá vào lệnh (Entry)**: **${tb.entryPrice.toLocaleString("vi-VN")} đ**\n- **Mục tiêu chốt lời (Target)**: **${tb.upperBarrierPrice.toLocaleString("vi-VN")} đ** (+${tb.profitTargetPct}%)\n- **Ngưỡng dừng lỗ (Stop Loss)**: **${tb.lowerBarrierPrice.toLocaleString("vi-VN")} đ** (-${tb.stopLossPct}%)\n- **Tỷ lệ Lợi nhuận / Rủi ro (R:R)**: **${tb.riskRewardRatio}x** (Đạt chuẩn quản trị vốn)`
+    );
+  }
+
+  if (quant) {
+    lines.push(
+      `## Điểm Định lượng Đa nhân tố (Multi-Factor Composite)\n- **Orca Quant Composite Score**: **${quant.compositeScore}/99** (${quant.categoryVi})\n- **Chế độ thị trường (Regime)**: **${quant.regime}**\n- **Tóm tắt định lượng**: ${quant.summaryVi}`
+    );
+  }
+
+  if (insight.pe != null || insight.pb != null) {
+    lines.push(
+      `## Định giá & Hiệu quả tài chính\n- **P/E TTM**: **${insight.pe != null ? `${insight.pe.toFixed(1)}x` : "—"}**\n- **P/B**: **${insight.pb != null ? `${insight.pb.toFixed(2)}x` : "—"}**`
+    );
+  }
+
+  return {
+    narrative: lines.join("\n\n"),
+    contract: {
+      asset: { symbol: sym, asset_type: "stock" },
+      price: insight.price,
+      changePercent: insight.changePercent,
+      technical_state: { rsi: insight.rsi, starVerdict: insight.starVerdict },
+      multi_factor: quant,
+      screener_sync: sync,
+    },
+    sectionsUsed: ["quote", "technical", "multi-factor-quant", "screener-sync"],
+    symbols: [sym],
+    freshnesses: ["FRESH"],
+    unavailable: false,
+  };
+}
+
 export async function buildVnStockFull(symbol: string, deep: boolean): Promise<AgentBuilt> {
-  const base = await buildVn(symbol, deep);
-  const extra = await enrichVnStockPerformance(symbol);
+  const sym = symbol.trim().toUpperCase();
+
+  // Run consensus in parallel with 2.5s timeout budget
+  const consensusPromise = Promise.race([
+    DualAiConsensusEngine.getConsensus(sym).catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+  ]);
+
+  // Attempt base build with 8.5s timeout budget
+  let base: AgentBuilt;
+  try {
+    const rawBase = await Promise.race([
+      buildVn(sym, deep),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8500)),
+    ]);
+    if (rawBase && !rawBase.unavailable) {
+      base = rawBase;
+    } else {
+      throw new Error("Base build timed out or unavailable");
+    }
+  } catch {
+    // Ultra-fast L1 fallback to FastStockLiveInsight (<1.5s)
+    const fastInsight = await getFastStockLiveInsight(sym).catch(() => null);
+    if (fastInsight && (fastInsight.price || fastInsight.multiFactorQuant || fastInsight.rsi)) {
+      base = buildFastInsightAgentBuilt(sym, fastInsight);
+    } else {
+      base = {
+        narrative: `## ${sym}\n\nĐang tổng hợp thông tin mã chứng khoán...`,
+        contract: { asset: { symbol: sym, asset_type: "stock" } },
+        sectionsUsed: [],
+        symbols: [sym],
+        freshnesses: [],
+        unavailable: true,
+      };
+    }
+  }
+
+  // Extract performance summary from base.contract without redundant network calls
+  let extra = "";
+  const contract = base.contract as Record<string, unknown>;
+  const perf = contract?.performance as Record<string, number | null | undefined> | undefined;
+  const val = (contract?.fundamental_state as Record<string, unknown> | undefined)?.valuation as Record<string, number | null | undefined> | undefined;
+  if (perf) {
+    const bits: string[] = ["## Hiệu suất & định giá (số liệu hệ thống)"];
+    if (perf.tsr1y != null) bits.push(`TSR ~12 tháng: **${(perf.tsr1y * 100).toFixed(1)}%** (theo giá)`);
+    if (perf.beta != null) bits.push(`Beta vs VNINDEX: **${perf.beta.toFixed(2)}**`);
+    if (perf.sharpe != null) bits.push(`Sharpe: **${perf.sharpe.toFixed(2)}**`);
+    if (perf.alpha != null) bits.push(`Alpha (Jensen, năm): **${(perf.alpha * 100).toFixed(1)}%**`);
+    if (perf.dividendYield != null) bits.push(`Tỷ suất cổ tức: **${(perf.dividendYield * 100).toFixed(2)}%**`);
+    if (perf.payoutRatio != null) bits.push(`Payout ước tính: **${(perf.payoutRatio * 100).toFixed(0)}%**`);
+    if (val?.pe != null) bits.push(`P/E: **${val.pe.toFixed(1)}x**`);
+    if (val?.pb != null) bits.push(`P/B: **${val.pb.toFixed(2)}x**`);
+    if (bits.length > 1) extra = bits.join("\n");
+  }
+
   let dualAiNarrative = "";
   try {
-    const consensus = await DualAiConsensusEngine.getConsensus(symbol);
+    const consensus = await consensusPromise;
     if (consensus) {
       dualAiNarrative = `\n\n## Đồng Thuận Trí Tuệ Kép (MIQuant AI + FireAnt AI)\n- Khuyến nghị Đồng thuận: **${consensus.verdictLabelVi}** (Tin cậy: **${consensus.consensusScore}/100**)\n`;
       if (consensus.priceAnalysis.targetPrice) {
@@ -564,7 +678,7 @@ export async function buildVnStockFull(symbol: string, deep: boolean): Promise<A
     return {
       ...base,
       narrative: `${base.narrative}\n\n${extra}${dualAiNarrative}`,
-      sectionsUsed: [...base.sectionsUsed, "investment-performance", "bctc", "ratios", "dual-ai-consensus"],
+      sectionsUsed: [...base.sectionsUsed, "investment-performance", "dual-ai-consensus"],
     };
   }
   return base;

@@ -5,7 +5,7 @@ import { getCommodityMarket } from "./commodities";
 import { resolveCommodityImpact } from "../commodities-impact";
 import { extractTickers } from "../engines/orca-contextual-reasoning-engine";
 import { getMasterScreenerSnapshot, queryScreenerStocks, type ScreenerFilterParams } from "./screener-snapshot-service";
-import { parseScreeningCriteria, isScreenerQuery } from "./response-structure-architect";
+import { parseScreeningCriteria, isScreenerQuery, type ParsedScreeningCriteria } from "./response-structure-architect";
 export { isScreenerQuery };
 import {
   computeMultiFactorComposite,
@@ -208,8 +208,9 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
 
     const regimeDescriptions: Record<MarketRegime, string> = {
       BULL_EXPANSION: "Mở rộng Tăng trưởng (BULL_EXPANSION) — Tâm lý tích cực, ưu tiên nắm giữ cổ phiếu dẫn dắt",
-      RANGE_BOUND: "Tích lũy Đi ngang (RANGE_BOUND) — Phân hóa mạnh, ưu tiên gom hàng tại hỗ trợ và chốt lời kháng cự",
-      BEAR_CONTRACTION: "Thu hẹp Giảm điểm (BEAR_CONTRACTION) — Rủi ro điều chỉnh cao, ưu tiên giữ tỷ trọng tiền mặt lớn",
+      SIDEWAY_CONSOLIDATION: "Tích lũy Đi ngang (SIDEWAY_CONSOLIDATION) — Phân hóa mạnh, ưu tiên gom hàng tại hỗ trợ và chốt lời kháng cự",
+      BEAR_CAPITULATION: "Thu hẹp Giảm điểm (BEAR_CAPITULATION) — Rủi ro điều chỉnh cao, ưu tiên giữ tỷ trọng tiền mặt lớn",
+      HIGH_VOLATILITY: "Biến động Cao (HIGH_VOLATILITY) — Rung lắc mạnh, thận trọng quản trị rủi ro",
     };
 
     // Enrich with Breadth, Liquidity & Capital Flow
@@ -231,9 +232,12 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
         };
       }
       if (hotIntel.liquidity?.available) {
+        const liqBaseline = hotIntel.liquidity.baseline;
+        const liqVal = hotIntel.liquidity.valueTraded;
+        const ratio = liqBaseline && liqVal ? liqVal / liqBaseline : null;
         liquidity = {
-          valueTradedBillion: hotIntel.liquidity.valueTraded ? Math.round(hotIntel.liquidity.valueTraded / 1_000_000_000) : null,
-          vsMa20Pct: hotIntel.liquidity.ratio ? Math.round((hotIntel.liquidity.ratio - 1) * 100) : null,
+          valueTradedBillion: liqVal ? Math.round(liqVal / 1_000_000_000) : null,
+          vsMa20Pct: ratio ? Math.round((ratio - 1) * 100) : null,
           statusText: hotIntel.liquidity.note,
         };
       }
@@ -342,7 +346,7 @@ export async function getFastDerivativesData(query: string): Promise<FastDerivat
   try {
     const [brief, snapRes] = await Promise.all([
       getDerivativesBriefBlock().catch(() => null),
-      getDerivativesSnapshotWithFlow({ force: false }).catch(() => null),
+      getDerivativesSnapshotWithFlow().catch(() => null),
     ]);
 
     const results: FastDerivativesItem[] = [];
@@ -533,7 +537,7 @@ export async function getFastStockLiveInsight(symbol: string): Promise<FastStock
       activeBuyRatio: 0.58,
       volumeAbsorptionRatio: 1.4,
       launchZoneDistancePct: d.screenerSync?.absBuyDiff || 2.8,
-      overheadRoomPct: d.screenerSync?.overheadRoomPct || 7.5,
+      overheadRoomPct: (d.screenerSync as any)?.overheadRoomPct || 7.5,
       ouHalfLifeDays: 14,
       volume20Avg: q?.volume || 1_200_000,
       atr14: rawPrice ? rawPrice * 0.024 : undefined,
@@ -565,7 +569,7 @@ export async function getFastStockLiveInsight(symbol: string): Promise<FastStock
       vsaSignal: d.screenerSync.vsaSignal,
       rsRating: d.screenerSync.rsRating,
       confluenceBadge: d.screenerSync.confluenceBadge,
-      overheadRoomPct: d.screenerSync.overheadRoomPct,
+      overheadRoomPct: (d.screenerSync as any).overheadRoomPct,
     } : undefined;
 
     const insight: FastStockLiveInsight = {
@@ -1032,7 +1036,7 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
     if (liveQuotes?.quotes?.length) {
       const qMap = new Map(liveQuotes.quotes.map((q) => [(q.symbol as string)?.toUpperCase(), q]));
       candidateStocks = candidateStocks.map((s) => {
-        const live = qMap.get(s.symbol);
+        const live = qMap.get(s.symbol) as Record<string, unknown> | undefined;
         if (live && live.price) {
           const livePrice = Math.round(Number(live.price) * 1000);
           return {

@@ -18,6 +18,7 @@ import { getVnQuotes, getVnOhlcv } from "../../services/stocks";
 import { getVnOrderBook } from "../../services/stock-orderbook";
 import { analyzeWyckoff } from "../../engines/wyckoff-elliott";
 import { analyzeVsaBars } from "../../engines/vsa-engine";
+import { getFastStockLiveInsight } from "../../services/fast-datafeed-hub";
 
 export interface ToolDefinition {
   name: string;
@@ -141,6 +142,17 @@ export const ORCA_FA_TOOLS: ToolDefinition[] = [
       type: "object",
       properties: {
         symbol: { type: "string", description: "Mã cổ phiếu (ví dụ: HPG, FPT, VHM)" },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "tool_get_technical_indicators",
+    description: "Tra cứu toàn diện các chỉ báo phân tích kỹ thuật cốt lõi (RSI14, MACD, MA20/50/200, Hỗ trợ / Kháng cự, Điểm mua chuẩn Pivot, Kế hoạch giao dịch Triple-Barrier và Đánh giá Xung lực) của một mã cổ phiếu.",
+    parameters: {
+      type: "object",
+      properties: {
+        symbol: { type: "string", description: "Mã cổ phiếu cần xem kỹ thuật (ví dụ: BAF, HPG, FPT, SSI)" },
       },
       required: ["symbol"],
     },
@@ -392,6 +404,35 @@ export async function executeOrcaTool(
                   descriptionVi: vsa.latestSignal.descriptionVi,
                 }
               : null,
+          },
+        };
+      }
+
+      case "tool_get_technical_indicators": {
+        if (!symbol) return { success: false, result: null, error: "Thiếu mã cổ phiếu" };
+        const insight = await getFastStockLiveInsight(symbol).catch(() => null);
+        if (!insight) return { success: false, result: null, error: `Không lấy được dữ liệu kỹ thuật cho ${symbol}` };
+        return {
+          success: true,
+          result: {
+            symbol,
+            name: insight.name,
+            price: insight.price,
+            changePercent: insight.changePercent,
+            rsi14: insight.rsi,
+            starGauge: insight.starGauge,
+            starVerdict: insight.starVerdict,
+            attributionSummary: insight.attributionSummary,
+            buyPoint: insight.screenerSync?.buyPoint ? Math.round(insight.screenerSync.buyPoint * 1000) : null,
+            buyZoneStatus: insight.screenerSync?.buyZoneStatus,
+            stopLoss: insight.screenerSync?.stopLoss ? Math.round(insight.screenerSync.stopLoss * 1000) : null,
+            targetPrice: insight.screenerSync?.targetPrice ? Math.round(insight.screenerSync.targetPrice * 1000) : null,
+            riskReward: insight.screenerSync?.riskReward,
+            buyStrategy: insight.screenerSync?.buyStrategy,
+            compositeScore: insight.multiFactorQuant?.compositeScore,
+            categoryVi: insight.multiFactorQuant?.categoryVi,
+            regime: insight.multiFactorQuant?.regime,
+            tripleBarrier: insight.multiFactorQuant?.tripleBarrier,
           },
         };
       }

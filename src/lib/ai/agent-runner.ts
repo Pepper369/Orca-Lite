@@ -72,6 +72,25 @@ function synthesizeFallbackFromObservations(question: string, steps: AgenticStep
       if (v.fairValue != null) lines.push(`- **Giá trị nội tại ước tính:** ${Number(v.fairValue).toLocaleString("vi-VN")} đ`);
       if (v.marginOfSafetyPct != null) lines.push(`- **Biên an toàn (MOS):** ${v.marginOfSafetyPct}%`);
     }
+    if (obs.rsi14 != null || obs.price != null || obs.buyPoint != null || obs.tripleBarrier) {
+      lines.push(`- **Trạng thái Kỹ thuật & Kế hoạch Giao dịch:**`);
+      if (obs.price != null) lines.push(`  + Thị giá hiện tại: ${Number(obs.price).toLocaleString("vi-VN")} đ (${obs.changePercent != null ? `${Number(obs.changePercent) >= 0 ? "+" : ""}${Number(obs.changePercent).toFixed(2)}%` : "0.00%"})`);
+      if (obs.rsi14 != null) lines.push(`  + Chỉ báo RSI(14): ${Number(obs.rsi14).toFixed(1)}`);
+      if (obs.starVerdict) lines.push(`  + Đánh giá Xung lực Kỹ thuật: ${obs.starVerdict} (${obs.starGauge ?? 80}/100)`);
+      if (obs.attributionSummary) lines.push(`  + Phân tích Động lực: ${obs.attributionSummary}`);
+      if (obs.buyPoint != null) lines.push(`  + Điểm mua Pivot: ${Number(obs.buyPoint).toLocaleString("vi-VN")} đ (${obs.buyZoneStatus || "Vùng tích lũy"})`);
+      if (obs.buyStrategy) lines.push(`  + Chiến lược: ${obs.buyStrategy}`);
+      if (obs.compositeScore != null) lines.push(`  + Orca Quant Composite: ${obs.compositeScore}/99 (${obs.categoryVi || "Tích cực"})`);
+      if (obs.tripleBarrier && typeof obs.tripleBarrier === "object") {
+        const tb = obs.tripleBarrier as Record<string, unknown>;
+        lines.push(`  + Kế hoạch T+20: Mục tiêu ${Number(tb.upperBarrierPrice).toLocaleString("vi-VN")} đ (+${tb.profitTargetPct}%), Cắt lỗ ${Number(tb.lowerBarrierPrice).toLocaleString("vi-VN")} đ (-${tb.stopLossPct}%), R:R ${tb.riskRewardRatio}x`);
+      }
+    }
+    if (obs.vsaSummary || obs.phase) {
+      lines.push(`- **Wyckoff & VSA:**`);
+      if (obs.phase) lines.push(`  + Pha Wyckoff: Pha ${obs.phase} (${obs.bias || "Xu hướng"})`);
+      if (obs.vsaSummary) lines.push(`  + Tín hiệu VSA: ${obs.vsaSummary}`);
+    }
   }
 
   lines.push("");
