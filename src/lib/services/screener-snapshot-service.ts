@@ -1403,19 +1403,20 @@ function detectPresets(item: {
   const isTriggerPriceValid =
     item.price != null &&
     item.changePercent != null &&
-    item.changePercent >= -0.8 &&
-    item.changePercent <= 5.5;
+    item.changePercent >= -1.5 &&
+    item.changePercent <= 6.0;
 
   // Anti-chasing extension guard: Exclude stocks that have already surged too far from pivot or bottom
-  const isExtendedFromPivot = (item.buyPointDiffPct != null && item.buyPointDiffPct > 3.5) || item.buyZoneStatus === "EXTENDED";
-  const isExtendedFromBottom = item.extensionFromBottomPct != null && item.extensionFromBottomPct > 8.0;
-  const isIntradayOverExtended = item.changePercent != null && item.changePercent > 5.5;
+  const isExtendedFromPivot = (item.buyPointDiffPct != null && item.buyPointDiffPct > 4.5) || item.buyZoneStatus === "EXTENDED";
+  const isExtendedFromBottom = item.extensionFromBottomPct != null && item.extensionFromBottomPct > 10.0;
+  const isIntradayOverExtended = item.changePercent != null && item.changePercent > 6.0;
   const isChasingRisk = item.isExtended === true || isExtendedFromPivot || isExtendedFromBottom || isIntradayOverExtended;
 
   const isInExecutionZone =
     !isChasingRisk &&
     (item.buyZoneStatus === "AT_BUY_POINT" ||
-      (item.absBuyDiff != null && item.absBuyDiff <= 1.8) ||
+      item.buyZoneStatus === "NEAR_BUY_POINT" ||
+      (item.absBuyDiff != null && item.absBuyDiff <= 2.8) ||
       item.isSweetLaunchZone === true);
 
   const hasApexConfluence =
@@ -1424,19 +1425,19 @@ function detectPresets(item: {
     item.isGoldenPocket === true ||
     item.isFlipZoneSupport === true ||
     item.isSmcOrderBlock === true ||
-    (item.apexQuantScore != null && item.apexQuantScore >= 68) ||
-    item.confluenceScore >= 52 ||
-    (item.orcaMasterScore != null && item.orcaMasterScore >= 72) ||
+    (item.apexQuantScore != null && item.apexQuantScore >= 62) ||
+    item.confluenceScore >= 45 ||
+    (item.orcaMasterScore != null && item.orcaMasterScore >= 68) ||
     item.isMaRibbonSqueeze === true ||
     item.isMaReclaimSpring === true ||
     item.isTightCloses === true ||
     item.isWyckoffLps === true;
 
   const hasVolumeIgnition =
-    (item.volRatio20 != null && item.volRatio20 >= 1.15) ||
-    (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 54) ||
-    (item.foreignNetVal != null && item.foreignNetVal > 0.3) ||
-    (item.upDownVolRatio != null && item.upDownVolRatio >= 1.12) ||
+    (item.volRatio20 != null && item.volRatio20 >= 1.05) ||
+    (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 50) ||
+    (item.foreignNetVal != null && item.foreignNetVal > 0.2) ||
+    (item.upDownVolRatio != null && item.upDownVolRatio >= 1.05) ||
     item.isSqueezeFiredBull === true ||
     item.isAbsorptionSpike === true ||
     item.isVsaNoSupplyTest === true ||
@@ -1448,9 +1449,9 @@ function detectPresets(item: {
     item.vsaSignal === "ABSORPTION";
 
   const hasRunwayRiskReward =
-    (item.overheadRoomPct == null || item.overheadRoomPct >= 5.0) &&
-    ((item.riskReward != null && item.riskReward >= 2.0) ||
-      (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0));
+    (item.overheadRoomPct == null || item.overheadRoomPct >= 3.5) &&
+    ((item.riskReward == null || item.riskReward >= 1.6) ||
+      (item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 1.6));
 
   const hasMtfConsensus =
     item.isPrecisionMtfAligned === true ||
@@ -1458,10 +1459,10 @@ function detectPresets(item: {
     item.mtfConsensus === "ALL_BULL" ||
     item.mtfConsensus === "H1_D1_BULL" ||
     item.superTrendDir === "up" ||
-    (item.mtfScore != null && item.mtfScore >= 60);
+    (item.mtfScore != null && item.mtfScore >= 50);
 
-  // Sector drag check: If sector is LAGGING, require stronger apex score (>= 72)
-  const isSectorOk = !item.isSectorLagging || (item.apexQuantScore != null && item.apexQuantScore >= 72);
+  // Sector drag check: If sector is LAGGING, require stronger apex score (>= 68)
+  const isSectorOk = !item.isSectorLagging || (item.apexQuantScore != null && item.apexQuantScore >= 68);
 
   // Consistency Guard: Tuyệt đối không kích hoạt MUA nếu các chỉ báo kỹ thuật cốt lõi báo BÁN tháo (Death Cross, SuperTrend Down, Gãy hỗ trợ)
   const isNotSellSignal = item.maSignal !== "DEATH_CROSS" && item.superTrendDir !== "down";
@@ -1483,12 +1484,12 @@ function detectPresets(item: {
     passes.push("apex_buy_now");
   }
 
-  // 0. Siêu Lọc Apex Quant Confluence (Score >= 74 or Sweet Zone Reversal >= 65)
+  // 0. Siêu Lọc Apex Quant Confluence (Score >= 68 or Sweet Zone Reversal >= 60)
   if (
     !isExtendedFromBottom &&
     !isTechnicalSell &&
-    ((item.apexQuantScore != null && item.apexQuantScore >= 74) ||
-      (item.apexQuantScore != null && item.apexQuantScore >= 65 && item.isSweetLaunchZone))
+    ((item.apexQuantScore != null && item.apexQuantScore >= 68) ||
+      (item.apexQuantScore != null && item.apexQuantScore >= 60 && item.isSweetLaunchZone))
   ) {
     passes.push("orca_apex_quant");
   }
@@ -1496,14 +1497,14 @@ function detectPresets(item: {
   // 0a. Lợi Thế Thực Nghiệm Lịch Sử (Historical Price Action Edge & Trained High Conviction)
   if (
     !isTechnicalSell &&
-    ((item.historicalEdgeScore != null && item.historicalEdgeScore >= 70) ||
-      (item.historicalWinRate != null && item.historicalWinRate >= 60 && (item.upDownVolRatio ?? 1) >= 1.15))
+    ((item.historicalEdgeScore != null && item.historicalEdgeScore >= 65) ||
+      (item.historicalWinRate != null && item.historicalWinRate >= 55 && (item.upDownVolRatio ?? 1) >= 1.05))
   ) {
     passes.push("historical_edge");
   }
 
-  // 0a. Orca Master Elite (Top 80+ Institutional Multi-Factor Rating)
-  if (isNotSellSignal && item.orcaMasterScore != null && item.orcaMasterScore >= 80) {
+  // 0a. Orca Master Elite (Top 74+ Institutional Multi-Factor Rating)
+  if (isNotSellSignal && item.orcaMasterScore != null && item.orcaMasterScore >= 74) {
     passes.push("orca_master_elite");
   }
 
@@ -1511,10 +1512,11 @@ function detectPresets(item: {
   if (
     !isBrokenSupport &&
     item.maSignal !== "DEATH_CROSS" &&
-    ((item.smartMoneyScore != null && item.smartMoneyScore >= 70) ||
+    ((item.smartMoneyScore != null && item.smartMoneyScore >= 62) ||
       item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
       item.smartMoneySignal === "POCKET_PIVOT" ||
-      item.smartMoneySignal === "SPRING_ABSORPTION")
+      item.smartMoneySignal === "SPRING_ABSORPTION" ||
+      (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 54))
   ) {
     passes.push("smart_money_inflow");
   }
@@ -1524,7 +1526,7 @@ function detectPresets(item: {
     isNotSellSignal &&
     (item.mtfCandleClusterStatus === "TRIPLE_BULL" ||
       item.mtfCandleClusterStatus === "DUAL_BULL" ||
-      (item.mtfCandleScore != null && item.mtfCandleScore >= 78))
+      (item.mtfCandleScore != null && item.mtfCandleScore >= 75))
   ) {
     passes.push("mtf_candle_cluster");
   }
@@ -1539,22 +1541,22 @@ function detectPresets(item: {
     passes.push("vsa_no_supply");
   }
 
-  // 0e. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 80 O'Neil)
-  if (isNotSellSignal && item.rsRating != null && item.rsRating >= 80) {
+  // 0e. Siêu Cổ Phiếu Dẫn Dắt RS Leader (RS Rating >= 72 O'Neil)
+  if (isNotSellSignal && item.rsRating != null && item.rsRating >= 72) {
     passes.push("rs_leaders");
   }
 
-  // 0f. Kim Cương Cơ Bản (Piotroski F-Score >= 7 + Altman Z Vùng An Toàn)
+  // 0f. Kim Cương Cơ Bản (Piotroski F-Score >= 6 + Altman Z Vùng An Toàn / Vùng Xám)
   if (
     item.piotroskiFScore != null &&
-    item.piotroskiFScore >= 7 &&
-    (item.altmanZone === "SAFE" || (item.altmanZScore != null && item.altmanZScore >= 2.0))
+    item.piotroskiFScore >= 6 &&
+    (item.altmanZone === "SAFE" || item.altmanZone === "GREY" || (item.altmanZScore != null && item.altmanZScore >= 1.8))
   ) {
     passes.push("piotroski_diamonds");
   }
 
   // 1. Quant Edge Presets (Institutional Statistical Models)
-  if (!isTechnicalSell && item.quantEdgeScore != null && item.quantEdgeScore >= 62) {
+  if (!isTechnicalSell && item.quantEdgeScore != null && item.quantEdgeScore >= 58) {
     passes.push("quant_edge");
   }
   if (item.ouZScore != null && item.ouZScore <= -1.4 && item.ouHalfLife != null && item.ouHalfLife <= 35) {
@@ -1563,37 +1565,37 @@ function detectPresets(item: {
   if (item.beta != null && item.beta <= 0.88 && item.qualityScore != null && item.qualityScore >= 68) {
     passes.push("quant_low_beta");
   }
-  if (!isBrokenSupport && item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 2.0) {
+  if (!isBrokenSupport && item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 1.8) {
     passes.push("quant_asymmetric");
   }
 
   // 2. CANSLIM
-  const roeGood = item.roe != null && item.roe >= 14;
-  const growthGood = (item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15);
-  const priceHealthy = item.price != null && item.price >= 8;
-  if (!isTechnicalSell && roeGood && (growthGood || (item.changePercent != null && item.changePercent > 0)) && priceHealthy) {
+  const roeGood = item.roe != null && item.roe >= 12;
+  const growthGood = (item.niYoyPct != null && item.niYoyPct >= 10) || (item.revenueYoyPct != null && item.revenueYoyPct >= 10);
+  const priceHealthy = item.price != null && item.price >= 6;
+  if (!isTechnicalSell && roeGood && (growthGood || (item.changePercent != null && item.changePercent > -1.0)) && priceHealthy) {
     passes.push("canslim");
   }
 
   // 3. High Dividend
-  const divGood = item.dividendYield != null && item.dividendYield >= 5;
-  const deSafe = item.debtEquity == null || item.debtEquity <= 1.5;
-  const peFair = item.pe == null || (item.pe > 0 && item.pe <= 16);
+  const divGood = item.dividendYield != null && item.dividendYield >= 4.0;
+  const deSafe = item.debtEquity == null || item.debtEquity <= 2.0;
+  const peFair = item.pe == null || (item.pe > 0 && item.pe <= 18);
   if (divGood && deSafe && peFair) {
     passes.push("dividend");
   }
 
   // 4. High Growth
-  const niHigh = item.niYoyPct != null && item.niYoyPct >= 20;
-  const revHigh = item.revenueYoyPct != null && item.revenueYoyPct >= 15;
-  if ((niHigh || revHigh) && (item.roe == null || item.roe >= 12)) {
+  const niHigh = item.niYoyPct != null && item.niYoyPct >= 15;
+  const revHigh = item.revenueYoyPct != null && item.revenueYoyPct >= 12;
+  if ((niHigh || revHigh) && (item.roe == null || item.roe >= 10)) {
     passes.push("growth");
   }
 
   // 5. Value
-  const peCheap = item.pe != null && item.pe > 0 && item.pe <= 11;
-  const pbCheap = item.pb != null && item.pb > 0 && item.pb <= 1.3;
-  const roePositive = item.roe == null || item.roe >= 8;
+  const peCheap = item.pe != null && item.pe > 0 && item.pe <= 13.5;
+  const pbCheap = item.pb != null && item.pb > 0 && item.pb <= 1.5;
+  const roePositive = item.roe == null || item.roe >= 7.0;
   if (peCheap && pbCheap && roePositive) {
     passes.push("value");
   }
@@ -1613,11 +1615,11 @@ function detectPresets(item: {
     passes.push("ma_cross");
   }
 
-  // 8. Confluence (Siêu hội tụ >= 50 hoặc >= 40 kèm tín hiệu xác nhận)
+  // 8. Confluence (Siêu hội tụ >= 45 hoặc >= 36 kèm tín hiệu xác nhận)
   if (
     !isTechnicalSell &&
-    (item.confluenceScore >= 50 ||
-      (item.confluenceScore >= 40 && (
+    (item.confluenceScore >= 45 ||
+      (item.confluenceScore >= 36 && (
         item.squeezeState === "fired_bull" ||
         item.squeezeState === "squeeze_on" ||
         item.maSignal === "GOLDEN_CROSS" ||

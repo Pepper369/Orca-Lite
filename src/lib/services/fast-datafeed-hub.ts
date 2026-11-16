@@ -913,20 +913,20 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
       minPiotroskiScore: criteria.fScoreMin,
       minRsRating: criteria.rsMin,
       minRiskReward: criteria.minRiskReward,
-      minTradingValue: criteria.minTradingValue || 3,
+      minTradingValue: criteria.minTradingValue ?? 1.5,
       sweetZoneOnly: criteria.sweetZoneOnly,
       vsaOnly: criteria.vsaOnly,
       squeezeOnly: criteria.squeezeOnly,
       sort: (criteria.sort as any) || "compositeScore",
       order: criteria.order || "desc",
-      limit: 15,
+      limit: 20,
     };
 
     const searchRes = await queryScreenerStocks(queryParams).catch(() => null);
 
     if (searchRes && searchRes.items && searchRes.items.length > 0) {
       totalMatched = searchRes.total;
-      candidateStocks = searchRes.items.slice(0, 5).map((x) => {
+      candidateStocks = searchRes.items.slice(0, 6).map((x) => {
         const quantHighlights = [
           `P/E ${x.pe?.toFixed(1) || "—"}x · P/B ${x.pb?.toFixed(1) || "—"}x · ROE ${x.roe?.toFixed(1) || "—"}% · F-Score ${x.piotroskiFScore ?? "—"}/9`,
           x.rsRating ? `RS: ${x.rsRating}/99` : null,
@@ -984,7 +984,7 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
             return (b.compositeScore || 0) - (a.compositeScore || 0);
           });
 
-          candidateStocks = filtered.slice(0, 5).map((x) => ({
+          candidateStocks = filtered.slice(0, 6).map((x) => ({
             symbol: x.symbol,
             name: x.name || x.symbol,
             sector: x.sector || "Chung",
@@ -1024,9 +1024,9 @@ export async function getFastScreenerFeed(query: string): Promise<FastScreenerRe
     });
 
     if (baseFiltered.length === 0) {
-      baseFiltered = BASELINE_INSTITUTIONAL_STOCKS.slice(0, 5);
+      baseFiltered = BASELINE_INSTITUTIONAL_STOCKS.slice(0, 6);
     }
-    candidateStocks = baseFiltered.slice(0, 5);
+    candidateStocks = baseFiltered.slice(0, 6);
     totalMatched = candidateStocks.length;
   }
 

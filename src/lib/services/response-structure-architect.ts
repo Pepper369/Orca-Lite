@@ -79,8 +79,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`ROE ≥ ${val}%`);
     }
   } else if (/(?:roe|khả năng sinh lời)\s*(?:cao|tốt|ổn định)/i.test(q)) {
-    res.roeMin = 15;
-    humanSummary.push("ROE ≥ 15% (Sinh lời cao)");
+    res.roeMin = 12;
+    humanSummary.push("ROE ≥ 12% (Sinh lời bền vững)");
   }
 
   // 2. ROA
@@ -102,8 +102,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`P/E ≤ ${val}x`);
     }
   } else if (/(?:p\/e|pe)\s*(?:thấp|rẻ|hợp lý)|định giá\s*(?:rẻ|thấp)/i.test(q)) {
-    res.peMax = 12;
-    humanSummary.push("P/E ≤ 12x (Định giá hấp dẫn)");
+    res.peMax = 14;
+    humanSummary.push("P/E ≤ 14x (Định giá hấp dẫn)");
   }
 
   // 4. P/B (Price to Book)
@@ -115,8 +115,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`P/B ≤ ${val}x`);
     }
   } else if (/(?:p\/b|pb)\s*(?:thấp|dưới 1|dưới book)/i.test(q)) {
-    res.pbMax = 1.2;
-    humanSummary.push("P/B ≤ 1.2x");
+    res.pbMax = 1.4;
+    humanSummary.push("P/B ≤ 1.4x (Biên an toàn tài sản)");
   }
 
   // 5. Cổ tức / Dividend Yield
@@ -128,8 +128,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`Cổ tức tiền mặt ≥ ${val}%/năm`);
     }
   } else if (/(?:cổ tức|dividend)\s*(?:cao|tiền mặt|đều đặn|bền vững|thay lãi tiết kiệm)/i.test(q)) {
-    res.divYieldMin = 6.0;
-    humanSummary.push("Cổ tức tiền mặt ≥ 6.0%/năm");
+    res.divYieldMin = 4.5;
+    humanSummary.push("Cổ tức tiền mặt ≥ 4.5%/năm (Vượt trội lãi suất tiết kiệm)");
   }
 
   // 6. Nợ vay / D/E (Debt to Equity)
@@ -141,8 +141,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`Nợ/Vốn CSH (D/E) ≤ ${val}`);
     }
   } else if (/(?:nợ thấp|ít nợ|không nợ|sạch nợ|nợ an toàn|bảo thủ)/i.test(q)) {
-    res.debtEquityMax = 0.8;
-    humanSummary.push("Nợ/Vốn CSH (D/E) ≤ 0.8 (Cơ cấu tài chính bảo thủ)");
+    res.debtEquityMax = 1.2;
+    humanSummary.push("Nợ/Vốn CSH (D/E) ≤ 1.2 (Cơ cấu vốn lành mạnh)");
   }
 
   // 7. Piotroski F-Score
@@ -154,8 +154,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`Piotroski F-Score ≥ ${val}/9`);
     }
   } else if (/(?:sức khỏe tài chính|chất lượng bctc|f-?score)\s*(?:tốt|lành mạnh|vững mạnh)/i.test(q)) {
-    res.fScoreMin = 7;
-    humanSummary.push("Piotroski F-Score ≥ 7/9 (Chất lượng BCTC xuất sắc)");
+    res.fScoreMin = 6;
+    humanSummary.push("Piotroski F-Score ≥ 6/9 (Chất lượng BCTC vững vàng)");
   }
 
   // 8. Chân Sóng Apex / Vùng Vàng (Sweet Launch Zone)
@@ -197,10 +197,10 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
   } else if (/magic formula|công thức kỳ diệu|greenblatt/i.test(q)) {
     res.preset = "magic_formula";
     humanSummary.push("Magic Formula Joel Greenblatt (ROIC vượt trội + P/E rẻ)");
-  } else if (/piotroski|f-score\s*[89]|fscore\s*[89]/i.test(q)) {
+  } else if (/piotroski|f-score\s*[789]|fscore\s*[789]/i.test(q)) {
     res.preset = "piotroski_diamonds";
-    res.fScoreMin = 8;
-    humanSummary.push("Piotroski Diamonds (F-Score ≥ 8/9 - BCTC sạch)");
+    res.fScoreMin = 6;
+    humanSummary.push("Piotroski Diamonds (F-Score ≥ 6/9 - BCTC sạch)");
   } else if (/breakout|vượt đỉnh|bứt phá cản/i.test(q)) {
     res.preset = "breakout";
     humanSummary.push("Breakout Vượt Đỉnh (Thanh khoản bùng nổ vượt kháng cự)");
@@ -216,9 +216,9 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`Sức mạnh giá RS Rating ≥ ${val}/99`);
     }
   } else if (/rs cao|sức mạnh giá tốt|dẫn dắt thị trường|siêu cổ phiếu o'neil/i.test(q)) {
-    res.rsMin = 80;
+    res.rsMin = 72;
     if (!res.preset) res.preset = "rs_leaders";
-    humanSummary.push("Sức mạnh giá RS Rating ≥ 80/99 (Top 20% cổ phiếu mạnh nhất sàn)");
+    humanSummary.push("Sức mạnh giá RS Rating ≥ 72/99 (Nhóm cổ phiếu dẫn dắt thị trường)");
   }
 
   // 9. Ngành / Sector
@@ -273,8 +273,16 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
     res.order = "desc";
   }
 
-  res.minTradingValue = 5;
-  humanSummary.push("Thanh khoản tối thiểu: Khớp lệnh ≥ 5 tỷ VNĐ/phiên");
+  if (/thanh khoản cao|thanh khoản khủng|thanh khoản dồi dào|bluechip|vốn hóa lớn/i.test(q)) {
+    res.minTradingValue = 10;
+    humanSummary.push("Thanh khoản cao: Khớp lệnh ≥ 10 tỷ VNĐ/phiên");
+  } else if (/thanh khoản vừa|thanh khoản nhỏ|penny|midcap/i.test(q)) {
+    res.minTradingValue = 1;
+    humanSummary.push("Thanh khoản: Khớp lệnh ≥ 1 tỷ VNĐ/phiên");
+  } else {
+    res.minTradingValue = 2;
+    humanSummary.push("Thanh khoản an toàn: Khớp lệnh ≥ 2 tỷ VNĐ/phiên (Bảo đảm thoát vị thế T+2.5)");
+  }
 
   return res;
 }
