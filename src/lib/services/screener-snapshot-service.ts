@@ -2635,6 +2635,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           pb,
           dividendYield,
           niYoyPct,
+          revenueYoyPct,
           marketCapBillion: marketCap,
           vietcapProfile: vc,
         });

@@ -100,10 +100,12 @@ export function computeFundamentalMatrix(params: {
   pb?: number | null;
   dividendYield?: number | null;
   niYoyPct?: number | null;
+  revenueYoyPct?: number | null;
   marketCapBillion?: number | null;
   vietcapProfile?: VietcapProfile | null;
 }): FundamentalMatrixResult {
-  const { snap, price, pe, pb, dividendYield, niYoyPct, marketCapBillion, vietcapProfile } = params;
+  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
+  const effectiveRevenueYoy = revenueYoyPct ?? snap?.revenueYoyPct ?? null;
 
   // 1. Dòng tiền & Chất lượng Lợi nhuận
   let cfoToNetProfit: number | null = null;
@@ -232,7 +234,7 @@ export function computeFundamentalMatrix(params: {
   const dsri = cfoToNetProfit != null && cfoToNetProfit < 0.6 ? 1.25 : cfoToNetProfit != null && cfoToNetProfit >= 1.0 ? 0.92 : 1.0;
   const gmi = (snap?.grossMargin != null && snap.grossMargin >= 20) ? 0.95 : 1.15;
   const aqi = 1.0;
-  const sgi = 1 + Math.max(-0.4, Math.min(1.2, (snap?.revenueYoyPct ?? 0) / 100));
+  const sgi = 1 + Math.max(-0.4, Math.min(1.2, (effectiveRevenueYoy ?? 0) / 100));
   const depi = 1.0;
   const sgai = 1.0;
   const lvgi = (snap?.debtEquity != null && snap.debtEquity > 2.0) ? 1.2 : 0.98;
@@ -249,7 +251,7 @@ export function computeFundamentalMatrix(params: {
     (netMargin >= 12 || (snap?.grossMargin ?? 0) >= 22) &&
     (isNetCash || isSafeDebt) &&
     (cfoToNetProfit == null || cfoToNetProfit >= 0.85) &&
-    (snap?.revenueYoyPct == null || snap.revenueYoyPct >= 6)
+    (effectiveRevenueYoy == null || effectiveRevenueYoy >= 6)
   );
   let bScore = 40;
   if (roic != null && roic >= 20) bScore += 25;
@@ -268,7 +270,7 @@ export function computeFundamentalMatrix(params: {
     peg > 0 &&
     peg <= 0.85 &&
     (snap?.debtEquity == null || snap.debtEquity <= 1.0) &&
-    (snap?.revenueYoyPct == null || snap.revenueYoyPct >= 10)
+    (effectiveRevenueYoy == null || effectiveRevenueYoy >= 10)
   );
 
   // 10. Benjamin Graham Net-Net (NCAV)
