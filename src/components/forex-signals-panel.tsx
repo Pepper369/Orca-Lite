@@ -10,6 +10,7 @@ import {
 } from "@/lib/engines/forex-position-sizer";
 import type { CurrencyStrengthMatrixResult } from "@/lib/engines/forex-currency-strength";
 import type { SmcScanResult } from "@/lib/engines/forex-smc-scanner";
+import type { InstitutionalFlowSignal } from "@/lib/engines/forex-order-flow-pro";
 import type { ForexSignalsHubData, ForexQuantSignalItem } from "@/lib/services/forex-signals-hub";
 import {
   TrendingUp,
@@ -28,6 +29,9 @@ import {
   Send,
   Copy,
   Cpu,
+  Activity,
+  Radio,
+  Compass,
 } from "lucide-react";
 
 export function ForexSignalsPanel() {
@@ -46,6 +50,7 @@ export function ForexSignalsPanel() {
 
   const [selectedSignal, setSelectedSignal] = useState<ForexQuantSignalItem | null>(null);
   const [smcPair, setSmcPair] = useState<string | null>(null);
+  const [flowPair, setFlowPair] = useState<string | null>(null);
   const [showWebhookModal, setShowWebhookModal] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -56,6 +61,12 @@ export function ForexSignalsPanel() {
   // Fetch SMC details on demand when user clicks on a pair
   const { data: smcData, isLoading: smcLoading } = useApi<SmcScanResult>(
     smcPair ? `/api/v1/forex/smc/${smcPair}` : null,
+    { keepPreviousData: true }
+  );
+
+  // Fetch Order Flow Pro details on demand
+  const { data: flowData, isLoading: flowLoading } = useApi<InstitutionalFlowSignal>(
+    flowPair ? `/api/v1/forex/flow/${flowPair}` : null,
     { keepPreviousData: true }
   );
 
@@ -88,7 +99,7 @@ export function ForexSignalsPanel() {
 
   return (
     <div className="space-y-4">
-      {/* 1. GIAI ĐOẠN 1: CURRENCY STRENGTH METER (CSM) & DXY BAR */}
+      {/* 1. CURRENCY STRENGTH METER (CSM) & DXY BAR */}
       {csmData && (
         <div className="rounded-xl border border-line/70 bg-surface-1 p-3.5 shadow-sm">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -209,6 +220,7 @@ export function ForexSignalsPanel() {
           signals.map((sig) => {
             const isBuy = sig.direction === "BUY";
             const isSell = sig.direction === "SELL";
+            const hasAbsorption = sig.absorption && sig.absorption !== "NONE";
 
             return (
               <div
@@ -254,8 +266,28 @@ export function ForexSignalsPanel() {
                     </div>
                   </div>
 
+                  {/* Flow Intensity & Absorption Indicator */}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {sig.fii != null && (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                          sig.fii > 0
+                            ? "bg-positive/10 text-positive border border-positive/30"
+                            : "bg-negative/10 text-negative border border-negative/30"
+                        }`}
+                      >
+                        <Activity className="size-2.5" /> FII {sig.fii > 0 ? `+${sig.fii}` : sig.fii}
+                      </span>
+                    )}
+                    {hasAbsorption && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent border border-accent/40 animate-pulse">
+                        <Radio className="size-2.5" /> HẤP THỤ CÁ MẬP
+                      </span>
+                    )}
+                  </div>
+
                   {/* Multi-Tier TP & SL Matrix */}
-                  <div className="mt-3 space-y-1.5 rounded-lg border border-line/50 bg-surface-2/60 p-2.5 text-[11px]">
+                  <div className="mt-2.5 space-y-1.5 rounded-lg border border-line/50 bg-surface-2/60 p-2.5 text-[11px]">
                     <div className="flex items-center justify-between text-ink-2">
                       <span className="flex items-center gap-1">
                         <Crosshair className="size-3 text-ink-3" /> Điểm vào (Entry):
@@ -319,21 +351,28 @@ export function ForexSignalsPanel() {
                   </div>
                 </div>
 
-                {/* Footer Actions: Lot Sizer + SMC Inspector */}
-                <div className="mt-3 grid grid-cols-2 gap-1.5 pt-2">
+                {/* Footer Actions: Lot Sizer + SMC + Order Flow */}
+                <div className="mt-3 grid grid-cols-3 gap-1 pt-2">
                   <button
                     onClick={() => setSelectedSignal(sig)}
                     type="button"
-                    className="flex items-center justify-center gap-1 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[11px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[10px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
                   >
                     <Calculator className="size-3" /> Tính Lot
                   </button>
                   <button
                     onClick={() => setSmcPair(sig.pair)}
                     type="button"
-                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[11px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
                   >
-                    <Layers className="size-3 text-accent" /> Soi SMC / FVG
+                    <Layers className="size-3 text-accent" /> SMC/FVG
+                  </button>
+                  <button
+                    onClick={() => setFlowPair(sig.pair)}
+                    type="button"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
+                  >
+                    <Activity className="size-3 text-positive" /> Dòng Tiền
                   </button>
                 </div>
               </div>
@@ -342,7 +381,172 @@ export function ForexSignalsPanel() {
         )}
       </div>
 
-      {/* 2. GIAI ĐOẠN 2: SMC / FVG SCANNER MODAL */}
+      {/* 2. ORDER FLOW PRO & LIQUIDITY READING MODAL */}
+      {flowPair && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-line/60 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Activity className="size-5 text-positive" />
+                  <h3 className="text-base font-bold text-ink-1">
+                    Đọc Dòng Tiền & Vùng Thanh Khoản Tổ Chức — #{flowPair}
+                  </h3>
+                </div>
+                <p className="mt-0.5 text-[12px] text-ink-3">
+                  Volume Profile (VPOC) · Anchored VWAP (±2σ) · Phân kỳ CVD & Bẫy Hấp Thụ
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFlowPair(null)}
+                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {flowLoading ? (
+              <div className="py-12 text-center text-[13px] text-ink-3 animate-pulse">
+                Đang tính toán ma trận phân phối Volume Profile & VWAP...
+              </div>
+            ) : flowData ? (
+              <div className="mt-4 space-y-4">
+                {/* Flow State & FII Summary */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Chỉ Số Dòng Tiền (FII)</span>
+                    <div
+                      className={`num text-xl font-black mt-0.5 ${
+                        flowData.flowIntensityIndex > 0 ? "text-positive" : "text-negative"
+                      }`}
+                    >
+                      {flowData.flowIntensityIndex > 0 ? `+${flowData.flowIntensityIndex}` : flowData.flowIntensityIndex}
+                    </div>
+                    <span className="text-[10px] text-ink-3">{flowData.flowState}</span>
+                  </div>
+
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Điểm Kiểm Soát (VPOC)</span>
+                    <div className="num text-xl font-bold text-accent mt-0.5">
+                      {flowData.volumeProfile.vpocPrice >= 100
+                        ? flowData.volumeProfile.vpocPrice.toFixed(2)
+                        : flowData.volumeProfile.vpocPrice.toFixed(4)}
+                    </div>
+                    <span className="text-[10px] text-ink-3">Nam châm thanh khoản</span>
+                  </div>
+
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Anchored VWAP</span>
+                    <div className="num text-xl font-bold text-ink-1 mt-0.5">
+                      {flowData.vwap.vwap >= 100 ? flowData.vwap.vwap.toFixed(2) : flowData.vwap.vwap.toFixed(4)}
+                    </div>
+                    <span className="text-[10px] text-ink-3">Độ lệch: {flowData.vwap.distanceToVwapPips} pips</span>
+                  </div>
+                </div>
+
+                {/* Absorption Alert Banner */}
+                {flowData.absorption.detected && (
+                  <div className="rounded-xl border border-accent/40 bg-accent/10 p-3 text-[11.5px]">
+                    <div className="font-bold text-accent flex items-center gap-1.5">
+                      <Radio className="size-4 animate-ping" /> CẢNH BÁO HẤP THỤ DÒNG TIỀN (INSTITUTIONAL ABSORPTION):
+                    </div>
+                    <p className="mt-1 text-ink-1 font-medium">{flowData.absorption.detail}</p>
+                  </div>
+                )}
+
+                {/* Value Area 70% Volume Bar */}
+                <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-[11px]">
+                  <div className="flex items-center justify-between font-semibold text-ink-1">
+                    <span>Vùng Giá Trị (70% Value Area):</span>
+                    <span className="num">
+                      VAL {flowData.volumeProfile.valPrice.toFixed(4)} ── VAH {flowData.volumeProfile.vahPrice.toFixed(4)}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-ink-3">
+                    Tổng Volume phân bổ: {flowData.volumeProfile.totalVolume.toLocaleString()} ticks | Giá đang ở{" "}
+                    <strong className="text-ink-1">{flowData.vwap.position}</strong>.
+                  </div>
+                </div>
+
+                {/* Liquidity Targets (BSL / SSL Pools) */}
+                <div>
+                  <h4 className="text-[12px] font-bold text-ink-1 mb-1.5">
+                    Mục tiêu Bể Thanh Khoản (Liquidity Pools):
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    {/* BSL */}
+                    <div className="rounded-lg border border-line/50 bg-surface-2 p-2.5">
+                      <div className="font-bold text-positive flex items-center gap-1">
+                        <Target className="size-3" /> Buy-Side Liquidity (BSL):
+                      </div>
+                      <div className="mt-1.5 space-y-1">
+                        {flowData.liquidityTargets.bslTargets.map((b, idx) => (
+                          <div key={idx} className="flex justify-between text-ink-2">
+                            <span>{b.label}</span>
+                            <strong className="num text-ink-1">{b.price.toFixed(4)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SSL */}
+                    <div className="rounded-lg border border-line/50 bg-surface-2 p-2.5">
+                      <div className="font-bold text-negative flex items-center gap-1">
+                        <Target className="size-3" /> Sell-Side Liquidity (SSL):
+                      </div>
+                      <div className="mt-1.5 space-y-1">
+                        {flowData.liquidityTargets.sslTargets.map((s, idx) => (
+                          <div key={idx} className="flex justify-between text-ink-2">
+                            <span>{s.label}</span>
+                            <strong className="num text-ink-1">{s.price.toFixed(4)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sniper Execution Plan */}
+                {flowData.sniperSetup.direction !== "STAND_ASIDE" && (
+                  <div className="rounded-xl border border-positive/40 bg-positive/5 p-3 text-[11px]">
+                    <div className="font-bold text-positive flex items-center gap-1">
+                      <Crosshair className="size-3.5" /> KẾ HOẠCH BẮN TỈA SNIPER THEO DÒNG TIỀN:
+                    </div>
+                    <div className="mt-1 space-y-1 text-ink-2">
+                      <div>
+                        Vào lệnh <strong className="text-ink-1">{flowData.sniperSetup.direction}</strong> tại Entry:{" "}
+                        <span className="num font-bold text-ink-1">
+                          {flowData.sniperSetup.optimalEntry?.toFixed(4)}
+                        </span>{" "}
+                        | SL siết chặt:{" "}
+                        <span className="num font-bold text-negative">
+                          {flowData.sniperSetup.tightStopLoss?.toFixed(4)}
+                        </span>{" "}
+                        ({flowData.sniperSetup.stopPips} pips) | Tỷ lệ R:R:{" "}
+                        <strong className="text-positive">1:{flowData.sniperSetup.riskRewardRatio}</strong>
+                      </div>
+                      <p className="text-[10px] text-ink-3 italic">{flowData.sniperSetup.riskAdvice}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFlowPair(null)}
+                className="rounded-lg bg-surface-2 px-4 py-1.5 text-[12px] font-semibold text-ink-1 hover:bg-surface-3"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. SMC / FVG SCANNER MODAL */}
       {smcPair && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
@@ -480,7 +684,7 @@ export function ForexSignalsPanel() {
         </div>
       )}
 
-      {/* 3. GIAI ĐOẠN 3: WEBHOOK & MT4/MT5 EA INTEGRATION DRAWER */}
+      {/* 4. WEBHOOK & MT4/MT5 EA INTEGRATION DRAWER */}
       {showWebhookModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
@@ -506,7 +710,6 @@ export function ForexSignalsPanel() {
             </div>
 
             <div className="mt-4 space-y-3.5 text-[12px]">
-              {/* Endpoint 1: MT4/MT5 Polling Endpoint */}
               <div>
                 <label className="font-semibold text-ink-1">
                   1. Đường dẫn cấp lệnh cho MT4/MT5 EA (WebRequest Polling URL):
@@ -534,7 +737,6 @@ export function ForexSignalsPanel() {
                 </p>
               </div>
 
-              {/* Endpoint 2: Telegram / External Webhook */}
               <div>
                 <label className="font-semibold text-ink-1">
                   2. Endpoint bắn Webhook tự động (POST Webhook Dispatcher):
@@ -556,7 +758,6 @@ export function ForexSignalsPanel() {
                 </div>
               </div>
 
-              {/* Sample MT5 Order Payload preview */}
               <div>
                 <label className="font-semibold text-ink-1">Mẫu cấu trúc lệnh MT5 (JSON format):</label>
                 <pre className="mt-1 rounded-lg border border-line bg-surface-2 p-2.5 text-[10px] text-ink-2 overflow-x-auto max-h-32">
@@ -589,7 +790,7 @@ export function ForexSignalsPanel() {
         </div>
       )}
 
-      {/* Position Sizing Calculator Modal / Drawer */}
+      {/* 5. POSITION SIZING CALCULATOR MODAL */}
       {selectedSignal && sizerResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">

@@ -28,3 +28,4 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
     return unavailable("smc-engine", message);
   }
 }
+

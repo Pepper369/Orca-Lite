@@ -2,6 +2,8 @@ import "server-only";
 import { buildMeta } from "../freshness";
 import { buildForexScalpSignal, type ForexScalpResult } from "./forex-scalp";
 import { calculateForexPositionSize } from "../engines/forex-position-sizer";
+import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
+import { getForexDetail } from "./forex";
 import type { Meta } from "../types";
 
 export interface ForexQuantSignalItem {
@@ -25,6 +27,10 @@ export interface ForexQuantSignalItem {
   sessionEligible: boolean;
   spreadPips: number | null;
   regime: string;
+  fii?: number | null;
+  absorption?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
+  vpoc?: number | null;
+  vwap?: number | null;
   recommendedLots: number;
   riskAmountUsd: number;
   evidence: string[];
@@ -100,7 +106,36 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         const tp2 = sig.tp2 ?? setup?.takeProfit2 ?? setup?.takeProfit ?? null;
         const tp3 = sig.tp3 ?? setup?.takeProfit3 ?? null;
         const stopPips = setup?.stopPips ?? (entry && sl ? Math.round(Math.abs(entry - sl) / sig.pipSize * 10) / 10 : 25);
-        const probability = sig.probability ?? (sig.strength > 0 ? Math.min(92, Math.max(50, Math.round(50 + sig.strength * 0.4))) : 50);
+        let probability = sig.probability ?? (sig.strength > 0 ? Math.min(92, Math.max(50, Math.round(50 + sig.strength * 0.4))) : 50);
+
+        let fii: number | null = null;
+        let absorption: ForexQuantSignalItem["absorption"] = null;
+        let vpoc: number | null = null;
+        let vwap: number | null = null;
+        const evidence = [...sig.evidence];
+
+        try {
+          const detail = await getForexDetail(pair);
+          if (detail?.detail?.series?.length && detail.detail.series.length >= 20) {
+            const flow = generateDeepFlowSignal(pair, detail.detail.series);
+            fii = flow.flowIntensityIndex;
+            absorption = flow.absorption.type;
+            vpoc = flow.volumeProfile.vpocPrice;
+            vwap = flow.vwap.vwap;
+
+            if (flow.absorption.detected) {
+              if (flow.absorption.type === "BULLISH_ABSORPTION" && isBuy) {
+                probability = Math.min(96, probability + 8);
+                evidence.push("🚨 Hấp thụ mua (Bullish Absorption) xác nhận đáy");
+              } else if (flow.absorption.type === "BEARISH_ABSORPTION" && isSell) {
+                probability = Math.min(96, probability + 8);
+                evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
+              }
+            }
+          }
+        } catch {
+          /* fallback */
+        }
 
         // Calculate standard lot recommendation for standard $10,000 account, 1% risk ($100)
         let recommendedLots = 0.1;
@@ -141,9 +176,13 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           sessionEligible: sig.filter.eligible,
           spreadPips: sig.filter.spreadPips,
           regime: `${sig.regime.market} / ${sig.regime.volatility}`,
+          fii,
+          absorption,
+          vpoc,
+          vwap,
           recommendedLots,
           riskAmountUsd: 100,
-          evidence: sig.evidence,
+          evidence,
           riskNotes: sig.riskNotes,
           updatedAt: Date.now(),
         });

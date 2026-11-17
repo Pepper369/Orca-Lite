@@ -410,3 +410,4 @@ export function scanForexSmc(pair: string, bars: OhlcvBar[]): SmcScanResult {
     summary,
   };
 }
+
