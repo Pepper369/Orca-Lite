@@ -41,6 +41,7 @@ import {
   Target,
   FileText,
   Settings,
+  Users,
   X,
 } from "lucide-react";
 import { TickerTape } from "@/components/ticker-tape";
@@ -84,6 +85,7 @@ const NAV_SECTIONS: {
     title: "CÔNG CỤ",
     items: [
       { href: "/quant", label: "AI Quant & Bot", icon: Bot, core: true },
+      { href: "/copytrade", label: "Copy Trading & EA", icon: Users, core: true },
       { href: "/earnings", label: "Lịch BCTC & TT96", icon: FileText, core: true },
       { href: "/heatmap", label: "Bản đồ nhiệt", icon: Grid2x2 },
       { href: "/screener", label: "Bộ lọc", icon: FlaskConical },
