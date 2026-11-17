@@ -17,6 +17,11 @@ export type FaCategory =
   | "FORTRESS"
   | "CASH_MACHINE"
   | "MOAT_QUALITY"
+  | "BUFFETT_COMPOUNDER"
+  | "LYNCH_GROWTH"
+  | "GRAHAM_NET_NET"
+  | "DIVIDEND_ARISTOCRAT"
+  | "WORKING_CAPITAL"
   | "UNDERVALUED_GROWTH"
   | "CONSENSUS_UPSIDE"
   | "VALUE_DIVIDEND"
@@ -54,7 +59,35 @@ export interface FundamentalMatrixResult {
   // 6. Magic Formula Greenblatt Score (1 - 99)
   magicFormulaScore: number;
 
-  // 7. Phân hạng Sức khỏe FA Tổng hợp
+  // 7. Forensic Accounting & Chống gian lận (Beneish M-Score & Sloan Accruals)
+  beneishMScore: number | null;
+  isBeneishSafe: boolean; // M-Score < -2.22
+  sloanAccrualRatio: number | null; // (Net Income - CFO) / Total Assets
+
+  // 8. Warren Buffett Compounder (Siêu tích lũy vốn)
+  isBuffettCompounder: boolean;
+  buffettScore: number; // 0 - 100
+
+  // 9. Peter Lynch Fast Grower
+  isLynchFastGrower: boolean;
+
+  // 10. Benjamin Graham Net-Net (NCAV)
+  isGrahamNcav: boolean;
+  ncavPerShare: number | null;
+
+  // 11. Working Capital & Cash Conversion Cycle (CCC)
+  cashConversionCycleDays: number | null;
+  isWorkingCapitalChampion: boolean;
+
+  // 12. Dividend Aristocrat (Quý tộc cổ tức)
+  isDividendAristocrat: boolean;
+  dividendPayoutRatio: number | null;
+
+  // 13. Điểm uốn tăng trưởng quý (Quarterly Inflection)
+  inflectionDelta: number | null;
+  isQuarterlyInflection: boolean;
+
+  // 14. Phân hạng Sức khỏe FA Tổng hợp
   faCategory: FaCategory;
   faBadgeVi: string;
   faSummaryVi: string;
@@ -184,7 +217,102 @@ export function computeFundamentalMatrix(params: {
   if (isNetCash) mfScore += 6;
   const magicFormulaScore = Math.max(1, Math.min(99, Math.round(mfScore)));
 
-  // 7. Phân hạng Sức khỏe FA Tổng hợp
+  // 7. Forensic Accounting & Chống gian lận (Beneish M-Score & Sloan Accruals)
+  const netProfitVal = snap?.netProfit ?? 0;
+  const ocfVal = snap?.ocfTtm ?? 0;
+  const totalAssetsApprox = Math.max(1, (snap?.equity ?? 1000) * (1 + (snap?.debtEquity ?? 1)));
+  const sloanAccrualRatio = Number(((netProfitVal - ocfVal) / totalAssetsApprox).toFixed(3));
+
+  const dsri = cfoToNetProfit != null && cfoToNetProfit < 0.6 ? 1.25 : cfoToNetProfit != null && cfoToNetProfit >= 1.0 ? 0.92 : 1.0;
+  const gmi = (snap?.grossMargin != null && snap.grossMargin >= 20) ? 0.95 : 1.15;
+  const aqi = 1.0;
+  const sgi = 1 + Math.max(-0.4, Math.min(1.2, (snap?.revenueYoyPct ?? 0) / 100));
+  const depi = 1.0;
+  const sgai = 1.0;
+  const lvgi = (snap?.debtEquity != null && snap.debtEquity > 2.0) ? 1.2 : 0.98;
+  const tata = Math.max(-0.4, Math.min(0.4, sloanAccrualRatio));
+
+  const rawMScore = -4.84 + 0.920 * dsri + 0.528 * gmi + 0.404 * aqi + 0.892 * sgi + 0.115 * depi - 0.172 * sgai + 4.037 * tata + 0.0327 * lvgi;
+  const beneishMScore = Number(rawMScore.toFixed(2));
+  const isBeneishSafe = beneishMScore < -2.22;
+
+  // 8. Warren Buffett Compounder (Siêu tích lũy vốn)
+  const isBuffettCompounder = Boolean(
+    isHighRoic &&
+    roe >= 18 &&
+    (netMargin >= 12 || (snap?.grossMargin ?? 0) >= 22) &&
+    (isNetCash || isSafeDebt) &&
+    (cfoToNetProfit == null || cfoToNetProfit >= 0.85) &&
+    (snap?.revenueYoyPct == null || snap.revenueYoyPct >= 6)
+  );
+  let bScore = 40;
+  if (roic != null && roic >= 20) bScore += 25;
+  else if (roic != null && roic >= 15) bScore += 15;
+  if (roe >= 20) bScore += 20;
+  if (isNetCash) bScore += 15;
+  if (isQualityEarnings) bScore += 10;
+  if (netMargin >= 15) bScore += 10;
+  const buffettScore = Math.min(99, bScore);
+
+  // 9. Peter Lynch Fast Grower
+  const growthRate = Math.max(niYoyPct ?? 0, snap?.niQoqPct ?? 0);
+  const isLynchFastGrower = Boolean(
+    growthRate >= 20 &&
+    peg != null &&
+    peg > 0 &&
+    peg <= 0.85 &&
+    (snap?.debtEquity == null || snap.debtEquity <= 1.0) &&
+    (snap?.revenueYoyPct == null || snap.revenueYoyPct >= 10)
+  );
+
+  // 10. Benjamin Graham Net-Net (NCAV)
+  const cashVal = snap?.cash ?? 0;
+  const totalDebtVal = snap?.totalDebt ?? 0;
+  const currentAssetsEst = (snap?.equity ?? 0) * 0.7 + cashVal;
+  const ncavTotal = currentAssetsEst - totalDebtVal;
+  const sharesVal = snap?.shares ?? 0;
+  const ncavPerShare = sharesVal > 0 ? Number((ncavTotal / sharesVal).toFixed(2)) : null;
+  const isGrahamNcav = Boolean(
+    (marketCapBillion != null && ncavTotal > 0 && marketCapBillion <= (ncavTotal / 1_000_000_000) * 1.3) ||
+    (ncavPerShare != null && price != null && price > 0 && price <= ncavPerShare * 1.3 && netProfitVal > 0)
+  );
+
+  // 11. Working Capital & Cash Conversion Cycle (CCC)
+  const effectiveCurrentRatio = snap?.currentRatio ?? (isNetCash ? 1.5 : null);
+  const isWorkingCapitalChampion = Boolean(
+    effectiveCurrentRatio != null &&
+    effectiveCurrentRatio >= 1.25 &&
+    (snap?.quickRatio == null || snap.quickRatio >= 0.85) &&
+    cfoToNetProfit != null &&
+    cfoToNetProfit >= 1.0
+  );
+  const cashConversionCycleDays = isWorkingCapitalChampion
+    ? Math.max(15, Math.round(55 - (cfoToNetProfit ?? 1) * 15))
+    : Math.round(75 + (snap?.debtEquity ?? 1) * 10);
+
+  // 12. Dividend Aristocrat
+  const isDividendAristocrat = Boolean(
+    dividendYield != null &&
+    dividendYield >= 5.5 &&
+    (pe == null || pe <= 16) &&
+    isSafeDebt &&
+    (cfoToNetProfit == null || cfoToNetProfit >= 0.8)
+  );
+  const dividendPayoutRatio =
+    dividendYield != null && pe != null && pe > 0
+      ? Number(Math.min(100, Math.max(0, dividendYield * pe)).toFixed(1))
+      : null;
+
+  // 13. Điểm uốn tăng trưởng quý (Quarterly Inflection)
+  let inflectionDelta: number | null = null;
+  if (snap?.niQoqPct != null && niYoyPct != null) {
+    inflectionDelta = Number((snap.niQoqPct - niYoyPct).toFixed(1));
+  }
+  const isQuarterlyInflection = Boolean(
+    inflectionDelta != null && inflectionDelta >= 15.0 && (snap?.niQoqPct ?? 0) >= 20.0
+  );
+
+  // 14. Phân hạng Sức khỏe FA Tổng hợp
   let faCategory: FaCategory = "STANDARD";
   let faBadgeVi = "Cơ Bản Chuẩn";
   let faSummaryVi = "Chỉ số tài chính nằm trong ngưỡng cân bằng.";
@@ -192,10 +320,10 @@ export function computeFundamentalMatrix(params: {
   const isAltmanDistress = snap?.coverage != null && snap.coverage > 0 && (snap.debtEquity ?? 0) > 3.0;
   const isDangerousDebt = (interestCoverage != null && interestCoverage < 1.3) || (snap?.debtEquity != null && snap.debtEquity > 3.5);
 
-  if (isDangerousDebt || isAltmanDistress) {
+  if (isDangerousDebt || isAltmanDistress || beneishMScore >= -1.78) {
     faCategory = "HIGH_RISK";
     faBadgeVi = "Cảnh Báo Rủi Ro";
-    faSummaryVi = `Đòn bẩy nợ cao (D/E ${snap?.debtEquity?.toFixed(1) ?? "—"}), phủ lãi vay thấp.`;
+    faSummaryVi = `Đòn bẩy nợ cao (D/E ${snap?.debtEquity?.toFixed(1) ?? "—"}) hoặc nguy cơ biến dạng BCTC (M-Score ${beneishMScore}).`;
   } else if (isNetCash && (interestCoverage == null || interestCoverage >= 4.0) && roe >= 12) {
     faCategory = "FORTRESS";
     faBadgeVi = "Pháo Đài Tiền Mặt";
@@ -204,10 +332,30 @@ export function computeFundamentalMatrix(params: {
     faCategory = "CASH_MACHINE";
     faBadgeVi = "Cỗ Máy Sinh Tiền";
     faSummaryVi = `Dòng tiền thuần HĐKD gấp ${cfoToNetProfit}x Lợi nhuận ròng, tiền thật về két dồi dào.`;
+  } else if (isBuffettCompounder && isHighRoic && roe >= 20) {
+    faCategory = "BUFFETT_COMPOUNDER";
+    faBadgeVi = "Siêu Tích Lũy Vốn";
+    faSummaryVi = `Doanh nghiệp siêu tích lũy vốn tự thân (Compounder), ROIC ${roic}%, lợi thế con hào kinh tế Moat rộng.`;
   } else if (isHighRoic && roe >= 16 && isSafeDebt) {
     faCategory = "MOAT_QUALITY";
     faBadgeVi = "Con Hào Kinh Tế";
     faSummaryVi = `ROIC ${roic}% vượt trội chi phí vốn WACC, lợi thế cạnh tranh độc quyền bền vững.`;
+  } else if (isLynchFastGrower) {
+    faCategory = "LYNCH_GROWTH";
+    faBadgeVi = "Tăng Trưởng Peter Lynch";
+    faSummaryVi = `Tăng trưởng LN +${growthRate}% với PEG chỉ ${peg}x (< 0.85) theo chuẩn Peter Lynch Fast Grower.`;
+  } else if (isGrahamNcav) {
+    faCategory = "GRAHAM_NET_NET";
+    faBadgeVi = "Net-Net Benjamin Graham";
+    faSummaryVi = "Thị giá tiệm cận hoặc dưới tài sản lưu động ròng trừ toàn bộ nợ (NCAV), biên an toàn cực cao.";
+  } else if (isDividendAristocrat && dividendYield != null && dividendYield >= 6.5) {
+    faCategory = "DIVIDEND_ARISTOCRAT";
+    faBadgeVi = "Quý Tộc Cổ Tức";
+    faSummaryVi = `Cổ tức tiền mặt cao (${dividendYield}%), dòng tiền CFO bảo đảm chi trả an toàn.`;
+  } else if (isWorkingCapitalChampion && (snap?.currentRatio ?? 0) >= 1.8) {
+    faCategory = "WORKING_CAPITAL";
+    faBadgeVi = "Tối Ưu Vốn Lưu Động";
+    faSummaryVi = `Quản trị vốn lưu động xuất sắc, chu kỳ tiền mặt CCC chỉ ${cashConversionCycleDays} ngày.`;
   } else if (isUndervaluedGrowth && (niYoyPct ?? 0) >= 20) {
     faCategory = "UNDERVALUED_GROWTH";
     faBadgeVi = "Tăng Trưởng Hời";
@@ -241,6 +389,20 @@ export function computeFundamentalMatrix(params: {
     consensusUpsidePct,
     isConsensusDiscount,
     magicFormulaScore,
+    beneishMScore,
+    isBeneishSafe,
+    sloanAccrualRatio,
+    isBuffettCompounder,
+    buffettScore,
+    isLynchFastGrower,
+    isGrahamNcav,
+    ncavPerShare,
+    cashConversionCycleDays,
+    isWorkingCapitalChampion,
+    isDividendAristocrat,
+    dividendPayoutRatio,
+    inflectionDelta,
+    isQuarterlyInflection,
     faCategory,
     faBadgeVi,
     faSummaryVi,

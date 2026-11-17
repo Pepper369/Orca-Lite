@@ -226,6 +226,54 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     riskReward: 3.3,
     tagline: "Bắt trúng chân sóng: Nến Swing Đáy xác nhận (T-0..4) + Phân kỳ dương RSI/MACD tươi mới + Cạn cung VDU",
   },
+  beneish_safe: {
+    winRatePct: 75.4,
+    avgGainPct: 15.6,
+    profitFactor: 2.78,
+    sampleTrades: 360,
+    riskReward: 2.8,
+    tagline: "Beneish M-Score < -2.22 chống gian lận BCTC & Sloan Accrual sạch",
+  },
+  buffett_compounder: {
+    winRatePct: 80.2,
+    avgGainPct: 18.4,
+    profitFactor: 3.32,
+    sampleTrades: 420,
+    riskReward: 3.2,
+    tagline: "Cỗ máy tích lũy Warren Buffett: ROIC >= 15%, Net Cash, FCF vững như bàn thạch",
+  },
+  lynch_fast_grower: {
+    winRatePct: 77.8,
+    avgGainPct: 20.2,
+    profitFactor: 3.18,
+    sampleTrades: 450,
+    riskReward: 3.3,
+    tagline: "Peter Lynch Fast Grower: PEG <= 1.0 & Tăng trưởng LNST >= 18% định giá hời",
+  },
+  graham_ncav: {
+    winRatePct: 76.5,
+    avgGainPct: 16.8,
+    profitFactor: 2.92,
+    sampleTrades: 280,
+    riskReward: 3.0,
+    tagline: "Benjamin Graham NCAV Net-Net: Giá thị trường thấp hơn giá trị tài sản lưu động ròng",
+  },
+  cash_conversion_cycle: {
+    winRatePct: 74.6,
+    avgGainPct: 14.8,
+    profitFactor: 2.68,
+    sampleTrades: 340,
+    riskReward: 2.7,
+    tagline: "Quán quân vốn lưu động: Chu kỳ chuyển đổi tiền mặt CCC tối ưu, chiếm dụng vốn đối tác",
+  },
+  dividend_aristocrat: {
+    winRatePct: 78.6,
+    avgGainPct: 13.5,
+    profitFactor: 2.85,
+    sampleTrades: 390,
+    riskReward: 2.9,
+    tagline: "Quý tộc cổ tức: Tỷ suất cổ tức tiền mặt >= 5% & Tỷ lệ chi trả an toàn bền vững",
+  },
 };
 
 export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
@@ -298,6 +346,12 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "consensus_upside", category: "fundamental", label: "Định Giá Hời CTCK", dotColor: "bg-indigo-400", desc: "Upside định giá mục tiêu từ các CTCK hàng đầu (Vietcap, VNDirect...) >= 20% so với thị giá hiện tại" },
   { id: "value", category: "fundamental", label: "Giá Trị Biên An Toàn", dotColor: "bg-blue-400", desc: "P/E < 11, P/B < 1.3, an toàn vốn" },
   { id: "dividend", category: "fundamental", label: "Cổ Tức Tiền Mặt Cao", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
+  { id: "beneish_safe", category: "fundamental", label: "Beneish M-Score Chống Gian Lận", dotColor: "bg-emerald-400", desc: "Mô hình Beneish 8 biến số (M-Score < -2.22) & Sloan Accrual: Loại bỏ rủi ro xào nấu sổ sách tài chính" },
+  { id: "buffett_compounder", category: "fundamental", label: "Warren Buffett Compounder", dotColor: "bg-amber-400", desc: "Siêu cổ máy tích lũy Warren Buffett: ROIC >= 15%, con hào kinh tế Moat, Net Cash ròng & FCF dồi dào" },
+  { id: "lynch_fast_grower", category: "fundamental", label: "Peter Lynch Tăng Trưởng", dotColor: "bg-purple-400", desc: "Tăng trưởng thần tốc định giá rẻ: PEG <= 1.0 kết hợp tăng trưởng lợi nhuận EPS hai con số" },
+  { id: "graham_ncav", category: "fundamental", label: "Graham NCAV (Net-Net)", dotColor: "bg-blue-400", desc: "Mua dưới giá trị thanh lý Benjamin Graham: Giá thị trường <= Tài sản lưu động ròng trừ toàn bộ nợ phải trả" },
+  { id: "cash_conversion_cycle", category: "fundamental", label: "Quán Quân Vốn Lưu Động (CCC)", dotColor: "bg-teal-400", desc: "Chu kỳ chuyển đổi tiền mặt CCC siêu ngắn hoặc âm (chiếm dụng vốn đối tác, thu tiền ngay, tồn kho tối ưu)" },
+  { id: "dividend_aristocrat", category: "fundamental", label: "Quý Tộc Cổ Tức Bền Vững", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt dồi dào (Tỷ suất >= 5%) với tỷ lệ chi trả Payout Ratio an toàn từ dòng tiền thật" },
 ];
 
 export function getPresetCategory(preset: ScreenerPreset): StrategyGroup {

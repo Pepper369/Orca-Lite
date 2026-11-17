@@ -127,7 +127,13 @@ export type ScreenerPreset =
   | "vcp_vdu"
   | "canslim_accel"
   | "triple_confluence"
-  | "swing_divergence";
+  | "swing_divergence"
+  | "beneish_safe"
+  | "buffett_compounder"
+  | "lynch_fast_grower"
+  | "graham_ncav"
+  | "cash_conversion_cycle"
+  | "dividend_aristocrat";
 
 export const SCREENER_BIT = {
   SWEET_ZONE: 1 << 0,
@@ -156,6 +162,12 @@ export const SCREENER_BIT = {
   SWING_LOW_CONFIRMED: 1 << 23,
   FRESH_BULL_DIV: 1 << 24,
   DUAL_BULL_DIV: 1 << 25,
+  BENEISH_SAFE: 1 << 26,
+  BUFFETT_COMPOUNDER: 1 << 27,
+  LYNCH_GROWER: 1 << 28,
+  GRAHAM_NCAV: 1 << 29,
+  WORKING_CAP_CCC: 1 << 30,
+  DIVIDEND_ARISTOCRAT: 1 << 31,
 } as const;
 
 export type ScreenerStockItem = {
@@ -368,6 +380,20 @@ export type ScreenerStockItem = {
   faCategory?: FaCategory;
   faBadgeVi?: string | null;
   faSummaryVi?: string | null;
+  beneishMScore?: number | null;
+  isBeneishSafe?: boolean;
+  sloanAccrualRatio?: number | null;
+  isBuffettCompounder?: boolean;
+  buffettScore?: number | null;
+  isLynchFastGrower?: boolean;
+  isGrahamNcav?: boolean;
+  ncavPerShare?: number | null;
+  cashConversionCycleDays?: number | null;
+  isWorkingCapitalChampion?: boolean;
+  isDividendAristocrat?: boolean;
+  dividendPayoutRatio?: number | null;
+  inflectionDelta?: number | null;
+  isQuarterlyInflection?: boolean;
   bitFlags?: number;
 };
 
@@ -466,6 +492,13 @@ export type ScreenerFilterParams = {
   swingLowOnly?: boolean;
   freshBullDivOnly?: boolean;
   dualBullDivOnly?: boolean;
+  // Advanced Fundamental Analysis Filters (Phase 1 & 2)
+  beneishSafeOnly?: boolean;
+  buffettCompounderOnly?: boolean;
+  lynchGrowerOnly?: boolean;
+  grahamNcavOnly?: boolean;
+  workingCapOnly?: boolean;
+  dividendAristocratOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -1437,6 +1470,21 @@ function detectPresets(item: {
   isFreshBullishDivergence?: boolean;
   isDualDivergenceFresh?: boolean;
   divergenceFreshnessBars?: number | null;
+  // Advanced Fundamental Analysis 2.0 (Phase 1 & 2)
+  beneishMScore?: number | null;
+  isBeneishSafe?: boolean | null;
+  sloanAccrualRatio?: number | null;
+  isBuffettCompounder?: boolean | null;
+  buffettScore?: number | null;
+  isLynchFastGrower?: boolean | null;
+  isGrahamNcav?: boolean | null;
+  ncavPerShare?: number | null;
+  cashConversionCycleDays?: number | null;
+  isWorkingCapitalChampion?: boolean | null;
+  isDividendAristocrat?: boolean | null;
+  dividendPayoutRatio?: number | null;
+  inflectionDelta?: number | null;
+  isQuarterlyInflection?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1899,6 +1947,59 @@ function detectPresets(item: {
   );
   if (!isBrokenSupport && isSwingLowCandidate && isFreshDivergenceCandidate && isAccumulationAtLow) {
     passes.push("swing_divergence");
+  }
+
+  // 23. Beneish M-Score Chống Gian Lận BCTC (M-Score < -2.22 & Sloan Accrual Sạch)
+  if (
+    item.isBeneishSafe === true ||
+    (item.beneishMScore != null && item.beneishMScore < -2.22)
+  ) {
+    passes.push("beneish_safe");
+  }
+
+  // 24. Siêu Cổ Máy Tích Lũy Warren Buffett (Buffett Compounder: ROIC >= 15%, Net Cash & FCF Vững Bền)
+  if (
+    item.isBuffettCompounder === true ||
+    item.faCategory === "BUFFETT_COMPOUNDER" ||
+    (item.buffettScore != null && item.buffettScore >= 75)
+  ) {
+    passes.push("buffett_compounder");
+  }
+
+  // 25. Cổ Phiếu Tăng Trưởng Thần Tốc Peter Lynch (PEG <= 1.0 & EPS Tăng Trưởng Cao)
+  if (
+    item.isLynchFastGrower === true ||
+    item.faCategory === "LYNCH_GROWTH" ||
+    (item.peg != null && item.peg > 0 && item.peg <= 1.0 && ((item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15)))
+  ) {
+    passes.push("lynch_fast_grower");
+  }
+
+  // 26. Mua Dưới Giá Trị Thanh Lý Benjamin Graham (NCAV Net-Net)
+  if (
+    item.isGrahamNcav === true ||
+    item.faCategory === "GRAHAM_NET_NET" ||
+    (item.ncavPerShare != null && item.price != null && item.price > 0 && item.price <= item.ncavPerShare * 1.05)
+  ) {
+    passes.push("graham_ncav");
+  }
+
+  // 27. Quán Quân Vốn Lưu Động & Chu Kỳ Tiền Mặt CCC (Chiếm Dụng Vốn Lành Mạnh)
+  if (
+    item.isWorkingCapitalChampion === true ||
+    item.faCategory === "WORKING_CAPITAL" ||
+    (item.cashConversionCycleDays != null && item.cashConversionCycleDays <= 60 && item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.8)
+  ) {
+    passes.push("cash_conversion_cycle");
+  }
+
+  // 28. Quý Tộc Cổ Tức Bền Vững (Dividend Aristocrat: Tỷ Suất >= 5% & Payout Ratio An Toàn)
+  if (
+    item.isDividendAristocrat === true ||
+    item.faCategory === "DIVIDEND_ARISTOCRAT" ||
+    (item.dividendYield != null && item.dividendYield >= 5.0 && (item.dividendPayoutRatio == null || (item.dividendPayoutRatio >= 20 && item.dividendPayoutRatio <= 85)))
+  ) {
+    passes.push("dividend_aristocrat");
   }
 
   return passes;
@@ -2795,6 +2896,20 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           peg: entry.faMatrix.peg,
           consensusUpsidePct: entry.faMatrix.consensusUpsidePct,
           magicFormulaScore: entry.faMatrix.magicFormulaScore,
+          beneishMScore: entry.faMatrix.beneishMScore,
+          isBeneishSafe: entry.faMatrix.isBeneishSafe,
+          sloanAccrualRatio: entry.faMatrix.sloanAccrualRatio,
+          isBuffettCompounder: entry.faMatrix.isBuffettCompounder,
+          buffettScore: entry.faMatrix.buffettScore,
+          isLynchFastGrower: entry.faMatrix.isLynchFastGrower,
+          isGrahamNcav: entry.faMatrix.isGrahamNcav,
+          ncavPerShare: entry.faMatrix.ncavPerShare,
+          cashConversionCycleDays: entry.faMatrix.cashConversionCycleDays,
+          isWorkingCapitalChampion: entry.faMatrix.isWorkingCapitalChampion,
+          isDividendAristocrat: entry.faMatrix.isDividendAristocrat,
+          dividendPayoutRatio: entry.faMatrix.dividendPayoutRatio,
+          inflectionDelta: entry.faMatrix.inflectionDelta,
+          isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
         });
 
         const hasCandleReversalSnap = Boolean(
@@ -3156,6 +3271,21 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           faCategory: entry.faMatrix.faCategory,
           faBadgeVi: entry.faMatrix.faBadgeVi,
           faSummaryVi: entry.faMatrix.faSummaryVi,
+          // Advanced Fundamental Analysis 2.0 (Phase 1 & 2)
+          beneishMScore: entry.faMatrix.beneishMScore,
+          isBeneishSafe: entry.faMatrix.isBeneishSafe,
+          sloanAccrualRatio: entry.faMatrix.sloanAccrualRatio,
+          isBuffettCompounder: entry.faMatrix.isBuffettCompounder,
+          buffettScore: entry.faMatrix.buffettScore,
+          isLynchFastGrower: entry.faMatrix.isLynchFastGrower,
+          isGrahamNcav: entry.faMatrix.isGrahamNcav,
+          ncavPerShare: entry.faMatrix.ncavPerShare,
+          cashConversionCycleDays: entry.faMatrix.cashConversionCycleDays,
+          isWorkingCapitalChampion: entry.faMatrix.isWorkingCapitalChampion,
+          isDividendAristocrat: entry.faMatrix.isDividendAristocrat,
+          dividendPayoutRatio: entry.faMatrix.dividendPayoutRatio,
+          inflectionDelta: entry.faMatrix.inflectionDelta,
+          isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
           bitFlags: (() => {
             let b = 0;
             if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) b |= SCREENER_BIT.SWEET_ZONE;
@@ -3184,6 +3314,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             if (entry.apexQuant.reversalMetrics.isSwingLowConfirmed) b |= SCREENER_BIT.SWING_LOW_CONFIRMED;
             if (entry.apexQuant.reversalMetrics.isFreshBullishDivergence) b |= SCREENER_BIT.FRESH_BULL_DIV;
             if (entry.apexQuant.reversalMetrics.isDualDivergenceFresh) b |= SCREENER_BIT.DUAL_BULL_DIV;
+            if (entry.faMatrix.isBeneishSafe) b |= SCREENER_BIT.BENEISH_SAFE;
+            if (entry.faMatrix.isBuffettCompounder) b |= SCREENER_BIT.BUFFETT_COMPOUNDER;
+            if (entry.faMatrix.isLynchFastGrower) b |= SCREENER_BIT.LYNCH_GROWER;
+            if (entry.faMatrix.isGrahamNcav) b |= SCREENER_BIT.GRAHAM_NCAV;
+            if (entry.faMatrix.isWorkingCapitalChampion) b |= SCREENER_BIT.WORKING_CAP_CCC;
+            if (entry.faMatrix.isDividendAristocrat) b |= SCREENER_BIT.DIVIDEND_ARISTOCRAT;
             return b;
           })(),
           presetsPassed,
@@ -3235,6 +3371,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         canslim_accel: 0,
         triple_confluence: 0,
         swing_divergence: 0,
+        beneish_safe: 0,
+        buffett_compounder: 0,
+        lynch_fast_grower: 0,
+        graham_ncav: 0,
+        cash_conversion_cycle: 0,
+        dividend_aristocrat: 0,
       };
 
       const sectorSet = new Set<string>();
@@ -3318,6 +3460,12 @@ function buildSnapshotOutput(
     canslim_accel: 0,
     triple_confluence: 0,
     swing_divergence: 0,
+    beneish_safe: 0,
+    buffett_compounder: 0,
+    lynch_fast_grower: 0,
+    graham_ncav: 0,
+    cash_conversion_cycle: 0,
+    dividend_aristocrat: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -3382,7 +3530,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -3435,6 +3583,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.swingLowOnly) requiredBitMask |= SCREENER_BIT.SWING_LOW_CONFIRMED;
   if (params.freshBullDivOnly) requiredBitMask |= SCREENER_BIT.FRESH_BULL_DIV;
   if (params.dualBullDivOnly) requiredBitMask |= SCREENER_BIT.DUAL_BULL_DIV;
+  if (params.preset === "beneish_safe" || params.beneishSafeOnly) requiredBitMask |= SCREENER_BIT.BENEISH_SAFE;
+  if (params.preset === "buffett_compounder" || params.buffettCompounderOnly) requiredBitMask |= SCREENER_BIT.BUFFETT_COMPOUNDER;
+  if (params.preset === "lynch_fast_grower" || params.lynchGrowerOnly) requiredBitMask |= SCREENER_BIT.LYNCH_GROWER;
+  if (params.preset === "graham_ncav" || params.grahamNcavOnly) requiredBitMask |= SCREENER_BIT.GRAHAM_NCAV;
+  if (params.preset === "cash_conversion_cycle" || params.workingCapOnly) requiredBitMask |= SCREENER_BIT.WORKING_CAP_CCC;
+  if (params.preset === "dividend_aristocrat" || params.dividendAristocratOnly) requiredBitMask |= SCREENER_BIT.DIVIDEND_ARISTOCRAT;
 
   const filtered: ScreenerStockItem[] = [];
   const n = allItems.length;
@@ -3475,6 +3629,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         if (params.swingLowOnly && !x.isSwingLowConfirmed) continue;
         if (params.freshBullDivOnly && !x.isFreshBullishDivergence) continue;
         if (params.dualBullDivOnly && !x.isDualDivergenceFresh) continue;
+        if (params.beneishSafeOnly && !x.isBeneishSafe) continue;
+        if (params.buffettCompounderOnly && !x.isBuffettCompounder) continue;
+        if (params.lynchGrowerOnly && !x.isLynchFastGrower) continue;
+        if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
+        if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
+        if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
       }
     }
 
@@ -3622,6 +3782,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.minConsensusUpside != null && (x.consensusUpsidePct == null || x.consensusUpsidePct < params.minConsensusUpside)) continue;
     if (params.maxPeg != null && (x.peg == null || x.peg > params.maxPeg)) continue;
     if (params.netCashOnly && !x.isNetCash) continue;
+    if (params.beneishSafeOnly && !x.isBeneishSafe) continue;
+    if (params.buffettCompounderOnly && !x.isBuffettCompounder) continue;
+    if (params.lynchGrowerOnly && !x.isLynchFastGrower) continue;
+    if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
+    if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
+    if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
 
     // Advanced Technical Pattern Recognition Filters
     if (params.techPattern && params.techPattern !== "ALL") {
