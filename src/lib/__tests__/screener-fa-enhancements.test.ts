@@ -6,6 +6,9 @@ import {
   calculateCashRealizationRatio,
   calculateRoiic,
   solveReverseDcfImpliedGrowth,
+  calculateMertonDistanceToDefault,
+  QUANT_FA_BIT,
+  QuantFaVectorStore,
 } from "../engines/fundamental-quant-matrix";
 import {
   SCREENER_BIT,
@@ -461,5 +464,121 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
     for (const item of safeRes.items) {
       assert.equal(item.isBookTaxSafe, true);
     }
+  });
+
+  await t.test("Quantitative FA Phase 3: Merton Distance-to-Default correctly measures structural credit safety", () => {
+    // Net cash firm: exceptionally safe
+    const netCashFirm = calculateMertonDistanceToDefault({
+      marketCapBillion: 20000,
+      totalDebt: 500,
+      cash: 3000,
+      isNetCash: true,
+    });
+    assert.equal(netCashFirm.isMertonSafe, true);
+    assert.equal(netCashFirm.mertonDistanceToDefault, 8.0);
+    assert.ok(netCashFirm.mertonPdPct != null && netCashFirm.mertonPdPct < 0.05);
+
+    // Solvent firm with low leverage
+    const solventFirm = calculateMertonDistanceToDefault({
+      marketCapBillion: 15000,
+      totalDebt: 2500,
+      cash: 500,
+      beta: 0.9,
+    });
+    assert.equal(solventFirm.isMertonSafe, true);
+    assert.ok(solventFirm.mertonDistanceToDefault != null && solventFirm.mertonDistanceToDefault >= 2.5);
+
+    // Heavily leveraged firm with large debt vs small equity
+    const distressedFirm = calculateMertonDistanceToDefault({
+      marketCapBillion: 800,
+      totalDebt: 6000,
+      cash: 100,
+      beta: 1.8,
+    });
+    assert.equal(distressedFirm.isMertonSafe, false);
+    assert.ok(distressedFirm.mertonDistanceToDefault != null && distressedFirm.mertonDistanceToDefault < 2.5);
+  });
+
+  await t.test("Quantitative FA Phase 3: New Screener Presets (super_compounder, book_tax_clean, mispriced_growth, merton_safe)", async () => {
+    // 1. super_compounder preset
+    const compPreset = await queryScreenerStocks({ preset: "super_compounder", limit: 5 });
+    assert.ok(compPreset.total >= 0);
+    for (const it of compPreset.items) {
+      assert.ok(it.presetsPassed.includes("super_compounder"));
+    }
+
+    // 2. book_tax_clean preset
+    const taxPreset = await queryScreenerStocks({ preset: "book_tax_clean", limit: 5 });
+    assert.ok(taxPreset.total >= 0);
+    for (const it of taxPreset.items) {
+      assert.ok(it.presetsPassed.includes("book_tax_clean"));
+    }
+
+    // 3. mispriced_growth preset
+    const dcfPreset = await queryScreenerStocks({ preset: "mispriced_growth", limit: 5 });
+    assert.ok(dcfPreset.total >= 0);
+    for (const it of dcfPreset.items) {
+      assert.ok(it.presetsPassed.includes("mispriced_growth"));
+    }
+
+    // 4. merton_safe preset
+    const mertonPreset = await queryScreenerStocks({ preset: "merton_safe", limit: 5 });
+    assert.ok(mertonPreset.total >= 0);
+    for (const it of mertonPreset.items) {
+      assert.ok(it.presetsPassed.includes("merton_safe"));
+    }
+  });
+
+  await t.test("Quantitative FA Phase 4: Vectorized QuantFaVectorStore fast-path execution", () => {
+    const mockStocks = [
+      {
+        symbol: "AAA",
+        roic: 28.0,
+        roiic3Y: 32.5,
+        bookTaxDifference: 0.01,
+        cashRealizationRatio: 1.15,
+        impliedGrowthPct: 6.5,
+        reverseDcfMarginPct: 18.5,
+        mertonDistanceToDefault: 5.5,
+        quantFaBitFlags: QUANT_FA_BIT.SUPER_COMPOUNDER | QUANT_FA_BIT.BOOK_TAX_CLEAN | QUANT_FA_BIT.MERTON_SAFE,
+      },
+      {
+        symbol: "BBB",
+        roic: 10.0,
+        roiic3Y: 8.0,
+        bookTaxDifference: 0.12,
+        cashRealizationRatio: 0.45,
+        impliedGrowthPct: 28.0,
+        reverseDcfMarginPct: -15.0,
+        mertonDistanceToDefault: 1.2,
+        quantFaBitFlags: 0,
+      },
+      {
+        symbol: "CCC",
+        roic: 22.0,
+        roiic3Y: 26.0,
+        bookTaxDifference: -0.02,
+        cashRealizationRatio: 0.95,
+        impliedGrowthPct: 8.0,
+        reverseDcfMarginPct: 12.0,
+        mertonDistanceToDefault: 6.2,
+        quantFaBitFlags: QUANT_FA_BIT.SUPER_COMPOUNDER | QUANT_FA_BIT.BOOK_TAX_CLEAN | QUANT_FA_BIT.MISPRICED_GROWTH | QUANT_FA_BIT.MERTON_SAFE,
+      },
+    ];
+
+    const store = new QuantFaVectorStore(mockStocks);
+    assert.equal(store.capacity, 3);
+
+    // Fast bitmask scan for Super-Compounders
+    const compounderIdxs = store.filterByBitmask(QUANT_FA_BIT.SUPER_COMPOUNDER);
+    assert.deepEqual(compounderIdxs, [0, 2]);
+
+    // Fast range filter for ROIIC >= 25% and Reverse DCF Margin >= 10%
+    const filteredIdxs = store.filterByRange({ minRoiic: 25, minReverseDcfMargin: 10 });
+    assert.deepEqual(filteredIdxs, [0, 2]);
+
+    // Negative case for distress
+    const safeIdxs = store.filterByRange({ minMertonDd: 2.5 });
+    assert.deepEqual(safeIdxs, [0, 2]);
   });
 });

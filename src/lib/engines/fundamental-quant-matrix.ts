@@ -100,7 +100,12 @@ export interface FundamentalMatrixResult {
   impliedGrowthPct: number | null; // Tốc độ tăng trưởng FCF định giá ngụ ý (%)
   reverseDcfMarginPct: number | null; // Biên độ an toàn chiết khấu định giá (%)
 
-  // 17. Phân hạng Sức khỏe FA Tổng hợp
+  // 17. Merton Distance-to-Default & Xác suất vỡ nợ (Phase 3)
+  mertonDistanceToDefault: number | null; // Khoảng cách tới ngưỡng vỡ nợ (DD)
+  mertonPdPct: number | null; // Xác suất vỡ nợ ngụ ý thị trường (%)
+  isMertonSafe: boolean; // DD >= 2.5 & PD < 0.15% (hoặc Net Cash)
+
+  // 18. Phân hạng Sức khỏe FA Tổng hợp
   faCategory: FaCategory;
   faBadgeVi: string;
   faSummaryVi: string;
@@ -272,6 +277,177 @@ export function solveReverseDcfImpliedGrowth(params: {
   return { impliedGrowthPct, reverseDcfMarginPct };
 }
 
+export function calculateMertonDistanceToDefault(params: {
+  marketCapBillion?: number | null;
+  totalDebt?: number | null;
+  cash?: number | null;
+  beta?: number | null;
+  isNetCash?: boolean;
+}): {
+  mertonDistanceToDefault: number | null;
+  mertonPdPct: number | null;
+  isMertonSafe: boolean;
+} {
+  const { marketCapBillion, totalDebt, cash, beta, isNetCash } = params;
+
+  const debtBillion = totalDebt != null
+    ? (Math.abs(totalDebt) > 100_000_000 ? totalDebt / 1_000_000_000 : totalDebt)
+    : 0;
+  const cashBillion = cash != null
+    ? (Math.abs(cash) > 100_000_000 ? cash / 1_000_000_000 : cash)
+    : 0;
+
+  if (isNetCash || debtBillion <= 0 || (cashBillion > 0 && cashBillion >= debtBillion)) {
+    return {
+      mertonDistanceToDefault: 8.0,
+      mertonPdPct: 0.001,
+      isMertonSafe: true,
+    };
+  }
+
+  if (marketCapBillion == null || marketCapBillion <= 0) {
+    return {
+      mertonDistanceToDefault: null,
+      mertonPdPct: null,
+      isMertonSafe: debtBillion <= 0,
+    };
+  }
+
+  const va = marketCapBillion + debtBillion;
+  const d = Math.max(0.1, debtBillion);
+  const rawBeta = beta != null && Number.isFinite(beta) ? beta : 1.0;
+  const sigmaE = Math.max(0.18, Math.min(0.65, rawBeta * 0.25));
+  const sigmaA = Math.max(0.08, Math.min(0.50, sigmaE * (marketCapBillion / va)));
+  const r = 0.045;
+  const T = 1.0;
+
+  const numerator = Math.log(va / d) + (r - 0.5 * sigmaA * sigmaA) * T;
+  const denominator = sigmaA * Math.sqrt(T);
+  const rawDD = numerator / denominator;
+  const mertonDistanceToDefault = Number(Math.max(-5.0, Math.min(10.0, rawDD)).toFixed(2));
+
+  function stdNormCdf(x: number): number {
+    const b1 = 0.319381530;
+    const b2 = -0.356563782;
+    const b3 = 1.781477937;
+    const b4 = -1.821255978;
+    const b5 = 1.330274429;
+    const p = 0.2316419;
+    const c = 0.39894228;
+
+    if (x >= 0.0) {
+      const t = 1.0 / (1.0 + p * x);
+      return (1.0 - c * Math.exp(-x * x / 2.0) * t *
+        (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1));
+    } else {
+      const t = 1.0 / (1.0 - p * x);
+      return (c * Math.exp(-x * x / 2.0) * t *
+        (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1));
+    }
+  }
+
+  const pd = stdNormCdf(-mertonDistanceToDefault);
+  const mertonPdPct = Number((pd * 100).toFixed(3));
+  const isMertonSafe = mertonDistanceToDefault >= 2.5 && mertonPdPct < 0.15;
+
+  return {
+    mertonDistanceToDefault,
+    mertonPdPct,
+    isMertonSafe,
+  };
+}
+
+export const QUANT_FA_BIT = {
+  SUPER_COMPOUNDER: 1 << 0,
+  BOOK_TAX_CLEAN: 1 << 1,
+  MISPRICED_GROWTH: 1 << 2,
+  MERTON_SAFE: 1 << 3,
+  HIGH_ROIIC: 1 << 4,
+  DEEP_VALUE_DCF: 1 << 5,
+  QUALITY_EARNINGS: 1 << 6,
+  SAFE_DEBT: 1 << 7,
+} as const;
+
+export class QuantFaVectorStore {
+  readonly capacity: number;
+  readonly symbols: string[];
+  readonly roic: Float32Array;
+  readonly roiic3Y: Float32Array;
+  readonly bookTaxDiff: Float32Array;
+  readonly cashRealizationRatio: Float32Array;
+  readonly impliedGrowth: Float32Array;
+  readonly reverseDcfMargin: Float32Array;
+  readonly mertonDD: Float32Array;
+  readonly bitFlags: Uint32Array;
+
+  constructor(items: Array<{
+    symbol: string;
+    roic?: number | null;
+    roiic3Y?: number | null;
+    bookTaxDifference?: number | null;
+    cashRealizationRatio?: number | null;
+    impliedGrowthPct?: number | null;
+    reverseDcfMarginPct?: number | null;
+    mertonDistanceToDefault?: number | null;
+    quantFaBitFlags?: number | null;
+  }>) {
+    const size = items.length;
+    this.capacity = size;
+    this.symbols = new Array(size);
+    this.roic = new Float32Array(size);
+    this.roiic3Y = new Float32Array(size);
+    this.bookTaxDiff = new Float32Array(size);
+    this.cashRealizationRatio = new Float32Array(size);
+    this.impliedGrowth = new Float32Array(size);
+    this.reverseDcfMargin = new Float32Array(size);
+    this.mertonDD = new Float32Array(size);
+    this.bitFlags = new Uint32Array(size);
+
+    for (let i = 0; i < size; i++) {
+      const it = items[i];
+      this.symbols[i] = it.symbol;
+      this.roic[i] = it.roic ?? -999;
+      this.roiic3Y[i] = it.roiic3Y ?? -999;
+      this.bookTaxDiff[i] = it.bookTaxDifference ?? -999;
+      this.cashRealizationRatio[i] = it.cashRealizationRatio ?? -999;
+      this.impliedGrowth[i] = it.impliedGrowthPct ?? -999;
+      this.reverseDcfMargin[i] = it.reverseDcfMarginPct ?? -999;
+      this.mertonDD[i] = it.mertonDistanceToDefault ?? -999;
+      this.bitFlags[i] = it.quantFaBitFlags ?? 0;
+    }
+  }
+
+  filterByBitmask(requiredMask: number): number[] {
+    const res: number[] = [];
+    const flags = this.bitFlags;
+    const len = flags.length;
+    for (let i = 0; i < len; i++) {
+      if ((flags[i] & requiredMask) === requiredMask) {
+        res.push(i);
+      }
+    }
+    return res;
+  }
+
+  filterByRange(params: {
+    minRoiic?: number;
+    minReverseDcfMargin?: number;
+    minMertonDd?: number;
+  }): number[] {
+    const res: number[] = [];
+    const len = this.capacity;
+    const { minRoiic, minReverseDcfMargin, minMertonDd } = params;
+
+    for (let i = 0; i < len; i++) {
+      if (minRoiic != null && (this.roiic3Y[i] === -999 || this.roiic3Y[i] < minRoiic)) continue;
+      if (minReverseDcfMargin != null && (this.reverseDcfMargin[i] === -999 || this.reverseDcfMargin[i] < minReverseDcfMargin)) continue;
+      if (minMertonDd != null && (this.mertonDD[i] === -999 || this.mertonDD[i] < minMertonDd)) continue;
+      res.push(i);
+    }
+    return res;
+  }
+}
+
 export function computeFundamentalMatrix(params: {
   snap?: Partial<FundamentalSnapshot> | null;
   price?: number | null;
@@ -281,6 +457,7 @@ export function computeFundamentalMatrix(params: {
   niYoyPct?: number | null;
   revenueYoyPct?: number | null;
   marketCapBillion?: number | null;
+  beta?: number | null;
   vietcapProfile?: VietcapProfile | null;
 }): FundamentalMatrixResult {
   const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
@@ -445,6 +622,18 @@ export function computeFundamentalMatrix(params: {
     marketCapBillion,
     expectedGrowth: expectedGrowthBenchmark,
   });
+
+  // 17. Merton Distance-to-Default & Xác suất vỡ nợ (Phase 3)
+  const mertonRes = calculateMertonDistanceToDefault({
+    marketCapBillion,
+    totalDebt: snap?.totalDebt,
+    cash: snap?.cash,
+    beta: params.beta ?? ((vietcapProfile as Record<string, unknown>)?.beta as number | null | undefined) ?? null,
+    isNetCash,
+  });
+  const mertonDistanceToDefault = mertonRes.mertonDistanceToDefault;
+  const mertonPdPct = mertonRes.mertonPdPct;
+  const isMertonSafe = mertonRes.isMertonSafe;
 
   const isBuffettCompounder = Boolean(
     isHighRoic &&
@@ -630,6 +819,9 @@ export function computeFundamentalMatrix(params: {
     isSuperCompounder,
     impliedGrowthPct,
     reverseDcfMarginPct,
+    mertonDistanceToDefault,
+    mertonPdPct,
+    isMertonSafe,
     faCategory,
     faBadgeVi,
     faSummaryVi,

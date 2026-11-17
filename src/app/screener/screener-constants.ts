@@ -274,6 +274,38 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     riskReward: 2.9,
     tagline: "Quý tộc cổ tức: Tỷ suất cổ tức tiền mặt >= 5% & Tỷ lệ chi trả an toàn bền vững",
   },
+  super_compounder: {
+    winRatePct: 83.5,
+    avgGainPct: 21.4,
+    profitFactor: 3.55,
+    sampleTrades: 410,
+    riskReward: 3.4,
+    tagline: "Siêu Tích Lũy Vốn (ROIIC >= 25%): Mỗi đồng vốn giữ lại tạo ra lợi nhuận gia tăng phi mã + Moat độc quyền",
+  },
+  book_tax_clean: {
+    winRatePct: 78.2,
+    avgGainPct: 16.5,
+    profitFactor: 2.95,
+    sampleTrades: 380,
+    riskReward: 2.9,
+    tagline: "Minh bạch thuế & BCTC sạch: Chênh lệch Book-Tax BTD an toàn, tiền nộp thuế thật vào ngân sách",
+  },
+  mispriced_growth: {
+    winRatePct: 81.8,
+    avgGainPct: 19.8,
+    profitFactor: 3.35,
+    sampleTrades: 420,
+    riskReward: 3.2,
+    tagline: "Reverse DCF Định Giá Hời: Thị trường định giá tăng trưởng thấp hơn nhiều so với năng lực nội tại thực tế",
+  },
+  merton_safe: {
+    winRatePct: 80.5,
+    avgGainPct: 14.5,
+    profitFactor: 3.12,
+    sampleTrades: 360,
+    riskReward: 3.0,
+    tagline: "Mô hình Merton Distance-to-Default: Xác suất vỡ nợ gần bằng 0, pháo đài nợ siêu an toàn tuyệt đối",
+  },
 };
 
 export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
@@ -352,6 +384,10 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "graham_ncav", category: "fundamental", label: "Graham NCAV (Net-Net)", dotColor: "bg-blue-400", desc: "Mua dưới giá trị thanh lý Benjamin Graham: Giá thị trường <= Tài sản lưu động ròng trừ toàn bộ nợ phải trả" },
   { id: "cash_conversion_cycle", category: "fundamental", label: "Quán Quân Vốn Lưu Động (CCC)", dotColor: "bg-teal-400", desc: "Chu kỳ chuyển đổi tiền mặt CCC siêu ngắn hoặc âm (chiếm dụng vốn đối tác, thu tiền ngay, tồn kho tối ưu)" },
   { id: "dividend_aristocrat", category: "fundamental", label: "Quý Tộc Cổ Tức Bền Vững", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt dồi dào (Tỷ suất >= 5%) với tỷ lệ chi trả Payout Ratio an toàn từ dòng tiền thật" },
+  { id: "super_compounder", category: "fundamental", label: "Super-Compounder (ROIIC)", dotColor: "bg-amber-400", desc: "Tỷ suất sinh lời vốn gia tăng ROIIC >= 25% & ROIC >= 15%: Cỗ máy tự sinh lợi nhuận tái đầu tư đỉnh cao" },
+  { id: "book_tax_clean", category: "fundamental", label: "Thuế Minh Bạch (BTD)", dotColor: "bg-emerald-400", desc: "Sổ sách minh bạch: BTD an toàn, cơ quan thuế thanh tra sạch sẽ, loại trừ triệt để doanh thu ảo" },
+  { id: "mispriced_growth", category: "fundamental", label: "Chiết Khấu Reverse DCF", dotColor: "bg-cyan-400", desc: "Định giá đảo ngược Reverse DCF: Thị trường định giá tăng trưởng thấp trong khi doanh nghiệp bứt phá" },
+  { id: "merton_safe", category: "fundamental", label: "Phòng Thủ Merton (PD ≈ 0)", dotColor: "bg-blue-400", desc: "Mô hình Merton Distance-to-Default: Khoảng cách kiệt quệ tài chính siêu an toàn, cấu trúc nợ vững vàng" },
 ];
 
 export function getPresetCategory(preset: ScreenerPreset): StrategyGroup {

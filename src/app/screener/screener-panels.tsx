@@ -3840,6 +3840,24 @@ export function VnScreener({
                       ROIC (%) {sortKey === "roic" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
+                      onClick={() => handleSort("roiic3Y")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-amber-400 text-amber-300"
+                    >
+                      ROIIC 3Y {sortKey === "roiic3Y" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("reverseDcfMarginPct")}
+                      className="py-2.5 text-right font-bold cursor-pointer hover:text-cyan-400 text-cyan-300"
+                    >
+                      Reverse DCF {sortKey === "reverseDcfMarginPct" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("bookTaxDifference")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      BTD Thuế {sortKey === "bookTaxDifference" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("cashConversionCycleDays")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
@@ -3876,13 +3894,13 @@ export function VnScreener({
             <tbody>
               {isLoading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" || viewTab === "fa_matrix" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "fa_matrix" ? 16 : viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     <Loading rows={4} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" || viewTab === "fa_matrix" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "fa_matrix" ? 16 : viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     Không có mã nào thỏa mãn tiêu chí bộ lọc. Hãy thử nới lỏng các điều kiện lọc.
                   </td>
                 </tr>
@@ -4760,6 +4778,61 @@ export function VnScreener({
                             </span>
                           ) : (
                             "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.roiic3Y != null ? (
+                            <span
+                              className={
+                                row.roiic3Y >= 25.0
+                                  ? "text-amber-300 font-extrabold"
+                                  : row.roiic3Y >= 15.0
+                                  ? "text-emerald-400 font-bold"
+                                  : row.roiic3Y < 0
+                                  ? "text-rose-400"
+                                  : "text-text-primary"
+                              }
+                              title={row.isSuperCompounder ? "Super-Compounder (ROIIC >= 25%)" : undefined}
+                            >
+                              {fmtNum(row.roiic3Y, 1)}%
+                              {row.isSuperCompounder && " 👑"}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.reverseDcfMarginPct != null ? (
+                            <span
+                              className={
+                                row.reverseDcfMarginPct >= 8.0
+                                  ? "text-cyan-300 font-bold"
+                                  : row.reverseDcfMarginPct <= -10.0
+                                  ? "text-rose-400"
+                                  : "text-text-primary"
+                              }
+                              title={`Implied FCF Growth: ${row.impliedGrowthPct ?? "—"}%`}
+                            >
+                              {row.reverseDcfMarginPct > 0 ? `+${fmtNum(row.reverseDcfMarginPct, 1)}%` : `${fmtNum(row.reverseDcfMarginPct, 1)}%`}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          {row.bookTaxDifference != null ? (
+                            <span
+                              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                row.isBookTaxSafe
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
+                                  : "bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold"
+                              }`}
+                              title={row.isBookTaxSafe ? "Chênh lệch thuế - sổ sách an toàn" : "Cảnh báo chênh lệch thuế - sổ sách cao bất thường"}
+                            >
+                              {row.isBookTaxSafe ? "✓ BTD Sạch" : `⚠️ ${fmtNum(row.bookTaxDifference, 2)}`}
+                            </span>
+                          ) : (
+                            <span className="text-text-muted text-[10px]">—</span>
                           )}
                         </td>
                         <td className="num py-2.5 text-right font-medium">
