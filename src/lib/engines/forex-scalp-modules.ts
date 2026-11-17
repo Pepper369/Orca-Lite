@@ -97,7 +97,13 @@ export function sessionInfo(pair: string, nowMs = Date.now()): { ok: boolean; la
   return { ok: true, label: "OFF_SESSION" };
 }
 
-export function newsFilterOk(_pair: string, _nowMs = Date.now()): { ok: boolean; reason?: string } {
+import { evaluateNewsCircuitBreaker } from "./forex-news-shield";
+
+export function newsFilterOk(pair: string, nowMs = Date.now()): { ok: boolean; reason?: string } {
+  const cb = evaluateNewsCircuitBreaker(pair, nowMs);
+  if (cb.isLockout) {
+    return { ok: false, reason: cb.warningMessage };
+  }
   return { ok: true };
 }
 

@@ -121,3 +121,4 @@ test("Order Flow Pro: End-to-End Institutional Flow Signal & Sniper Setup", () =
   assert.ok(signal.vwap.vwap > 0);
   assert.ok(signal.sniperSetup != null);
 });
+

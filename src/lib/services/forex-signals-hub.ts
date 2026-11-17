@@ -3,6 +3,8 @@ import { buildMeta } from "../freshness";
 import { buildForexScalpSignal, type ForexScalpResult } from "./forex-scalp";
 import { calculateForexPositionSize } from "../engines/forex-position-sizer";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
+import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
+import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
 import { getForexDetail } from "./forex";
 import type { Meta } from "../types";
 
@@ -31,6 +33,10 @@ export interface ForexQuantSignalItem {
   absorption?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
   vpoc?: number | null;
   vwap?: number | null;
+  newsLockout?: boolean;
+  newsWarning?: string;
+  cmeTicker?: string;
+  domImbalance?: number;
   recommendedLots: number;
   riskAmountUsd: number;
   evidence: string[];
@@ -112,7 +118,20 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         let absorption: ForexQuantSignalItem["absorption"] = null;
         let vpoc: number | null = null;
         let vwap: number | null = null;
+        let newsLockout = false;
+        let newsWarning: string | undefined;
+        let cmeTicker: string | undefined;
+        let domImbalance: number | undefined;
         const evidence = [...sig.evidence];
+        const riskNotes = [...sig.riskNotes];
+
+        // 1. News Circuit Breaker Check (Anti-Slippage Shield)
+        const cb = evaluateNewsCircuitBreaker(pair);
+        if (cb.isLockout) {
+          newsLockout = true;
+          newsWarning = cb.warningMessage;
+          riskNotes.unshift(cb.warningMessage ?? "News lockout window");
+        }
 
         try {
           const detail = await getForexDetail(pair);
@@ -122,6 +141,10 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
             absorption = flow.absorption.type;
             vpoc = flow.volumeProfile.vpocPrice;
             vwap = flow.vwap.vwap;
+
+            const dom = reconstructSyntheticDom(pair, detail.detail.series, sig.filter.spreadPips);
+            cmeTicker = dom.cmeContract?.cmeTicker;
+            domImbalance = dom.orderBookImbalanceRatio;
 
             if (flow.absorption.detected) {
               if (flow.absorption.type === "BULLISH_ABSORPTION" && isBuy) {
@@ -158,19 +181,25 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         signals.push({
           pair,
           symbol: symbolDisplay,
-          direction,
-          action,
+          direction: newsLockout ? "NEUTRAL" : direction,
+          action: newsLockout ? "WAIT" : action,
           timeframe: "M15/H1",
-          status: setup?.status === "TRIGGERED" || setup?.status === "ACTIVE" ? "ACTIVE" : setup?.status === "AWAITING_M5_BREAKOUT" ? "AWAITING_BREAKOUT" : "NEUTRAL",
-          strength: sig.strength,
-          probability,
+          status: newsLockout
+            ? "FILTERED_OUT"
+            : setup?.status === "TRIGGERED" || setup?.status === "ACTIVE"
+            ? "ACTIVE"
+            : setup?.status === "AWAITING_M5_BREAKOUT"
+            ? "AWAITING_BREAKOUT"
+            : "NEUTRAL",
+          strength: newsLockout ? 0 : sig.strength,
+          probability: newsLockout ? 0 : probability,
           lastPrice: sig.last,
-          entryPrice: entry,
-          stopLossPrice: sl,
-          tp1,
-          tp2,
-          tp3,
-          stopPips,
+          entryPrice: newsLockout ? null : entry,
+          stopLossPrice: newsLockout ? null : sl,
+          tp1: newsLockout ? null : tp1,
+          tp2: newsLockout ? null : tp2,
+          tp3: newsLockout ? null : tp3,
+          stopPips: newsLockout ? null : stopPips,
           riskReward: setup?.riskReward ?? 1.5,
           session: sig.filter.sessionLabel,
           sessionEligible: sig.filter.eligible,
@@ -180,10 +209,14 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           absorption,
           vpoc,
           vwap,
+          newsLockout,
+          newsWarning,
+          cmeTicker,
+          domImbalance,
           recommendedLots,
           riskAmountUsd: 100,
           evidence,
-          riskNotes: sig.riskNotes,
+          riskNotes,
           updatedAt: Date.now(),
         });
       }

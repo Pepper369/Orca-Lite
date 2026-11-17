@@ -32,6 +32,9 @@ import {
   Activity,
   Radio,
   Compass,
+  Lock,
+  AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 
 export function ForexSignalsPanel() {
@@ -51,6 +54,7 @@ export function ForexSignalsPanel() {
   const [selectedSignal, setSelectedSignal] = useState<ForexQuantSignalItem | null>(null);
   const [smcPair, setSmcPair] = useState<string | null>(null);
   const [flowPair, setFlowPair] = useState<string | null>(null);
+  const [newsShieldPair, setNewsShieldPair] = useState<string | null>(null);
   const [showWebhookModal, setShowWebhookModal] = useState<boolean>(false);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -69,6 +73,50 @@ export function ForexSignalsPanel() {
     flowPair ? `/api/v1/forex/flow/${flowPair}` : null,
     { keepPreviousData: true }
   );
+
+  // Fetch News Shield & CME Level 2 DOM on demand
+  const { data: newsShieldData, isLoading: newsShieldLoading } = useApi<{
+    pair: string;
+    circuitBreaker: {
+      isLockout: boolean;
+      reason: string | null;
+      warningMessage: string | null;
+      nearestEvent: {
+        name: string;
+        minutesUntil: number;
+        isUpcoming: boolean;
+        impact: string;
+      } | null;
+    };
+    slippageBuffer: {
+      baseSpreadPips: number;
+      recommendedSlippagePips: number;
+      maxAllowedSlippagePips: number;
+      urgencyLevel: string;
+      riskNote: string;
+    };
+    cmeDom: {
+      cmeContract: {
+        cmeTicker: string;
+        contractName: string;
+        multiplier: number;
+        minTick: number;
+      };
+      depthLevels: Array<{
+        level: number;
+        bidPrice: number;
+        bidVolume: number;
+        askPrice: number;
+        askVolume: number;
+      }>;
+      orderBookImbalanceRatio: number;
+      totalBidLiquidity: number;
+      totalAskLiquidity: number;
+      syntheticMicroSpreadPips: number;
+    };
+  }>(newsShieldPair ? `/api/v1/forex/news-shield/${newsShieldPair}` : null, {
+    keepPreviousData: true,
+  });
 
   // Position size result calculated client-side reactively
   const sizerResult: PositionSizerResult | null = useMemo(() => {
@@ -266,8 +314,13 @@ export function ForexSignalsPanel() {
                     </div>
                   </div>
 
-                  {/* Flow Intensity & Absorption Indicator */}
+                  {/* Flow Intensity, Absorption & CME DOM Indicator */}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {sig.newsLockout && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-negative/15 px-1.5 py-0.5 text-[10px] font-bold text-negative border border-negative/40 animate-pulse">
+                        <Lock className="size-2.5" /> KHÓA TIN ĐỎ
+                      </span>
+                    )}
                     {sig.fii != null && (
                       <span
                         className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
@@ -281,7 +334,25 @@ export function ForexSignalsPanel() {
                     )}
                     {hasAbsorption && (
                       <span className="inline-flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent border border-accent/40 animate-pulse">
-                        <Radio className="size-2.5" /> HẤP THỤ CÁ MẬP
+                        <Radio className="size-2.5" /> HẤP THỤ
+                      </span>
+                    )}
+                    {sig.cmeTicker && (
+                      <span className="inline-flex items-center gap-0.5 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2 border border-line">
+                        CME:{sig.cmeTicker.replace("=F", "")}
+                      </span>
+                    )}
+                    {sig.domImbalance != null && (
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                          sig.domImbalance > 10
+                            ? "bg-positive/10 text-positive border border-positive/30"
+                            : sig.domImbalance < -10
+                            ? "bg-negative/10 text-negative border border-negative/30"
+                            : "bg-surface-2 text-ink-3 border border-line"
+                        }`}
+                      >
+                        DOM {sig.domImbalance > 0 ? `+${sig.domImbalance}%` : `${sig.domImbalance}%`}
                       </span>
                     )}
                   </div>
@@ -351,28 +422,39 @@ export function ForexSignalsPanel() {
                   </div>
                 </div>
 
-                {/* Footer Actions: Lot Sizer + SMC + Order Flow */}
-                <div className="mt-3 grid grid-cols-3 gap-1 pt-2">
+                {/* Footer Actions: Lot Sizer + SMC + Order Flow + CME/News Shield */}
+                <div className="mt-3 grid grid-cols-4 gap-1 pt-2">
                   <button
                     onClick={() => setSelectedSignal(sig)}
                     type="button"
-                    className="flex items-center justify-center gap-1 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[10px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
+                    className="flex items-center justify-center gap-0.5 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[10px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
                   >
-                    <Calculator className="size-3" /> Tính Lot
+                    <Calculator className="size-3" /> Lot
                   </button>
                   <button
                     onClick={() => setSmcPair(sig.pair)}
                     type="button"
-                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
+                    className="flex items-center justify-center gap-0.5 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
                   >
-                    <Layers className="size-3 text-accent" /> SMC/FVG
+                    <Layers className="size-3 text-accent" /> SMC
                   </button>
                   <button
                     onClick={() => setFlowPair(sig.pair)}
                     type="button"
-                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
+                    className="flex items-center justify-center gap-0.5 rounded-lg border border-line bg-surface-2 py-1.5 text-[10px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
                   >
                     <Activity className="size-3 text-positive" /> Dòng Tiền
+                  </button>
+                  <button
+                    onClick={() => setNewsShieldPair(sig.pair)}
+                    type="button"
+                    className={`flex items-center justify-center gap-0.5 rounded-lg border py-1.5 text-[10px] font-semibold transition-colors ${
+                      sig.newsLockout
+                        ? "border-negative/50 bg-negative/20 text-negative hover:bg-negative hover:text-white animate-pulse"
+                        : "border-line bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink-1"
+                    }`}
+                  >
+                    <ShieldCheck className="size-3 text-accent" /> Khiên Tin
                   </button>
                 </div>
               </div>
@@ -684,7 +766,196 @@ export function ForexSignalsPanel() {
         </div>
       )}
 
-      {/* 4. WEBHOOK & MT4/MT5 EA INTEGRATION DRAWER */}
+      {/* 4. ANTI-SLIPPAGE NEWS CIRCUIT BREAKER & CME DOM LEVEL 2 MODAL */}
+      {newsShieldPair && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-line/60 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="size-5 text-accent" />
+                  <h3 className="text-base font-bold text-ink-1">
+                    Khiên Chống Trượt Giá & Sổ Lệnh CME DOM Level 2 — #{newsShieldPair}
+                  </h3>
+                </div>
+                <p className="mt-0.5 text-[12px] text-ink-3">
+                  Ngắt mạch tin đỏ NFP/CPI · Sổ lệnh tương lai CME Group 5 bậc giá vi mô
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewsShieldPair(null)}
+                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {newsShieldLoading ? (
+              <div className="py-12 text-center text-[13px] text-ink-3 animate-pulse">
+                Đang nạp dữ liệu hợp đồng tương lai CME & quét lịch vĩ mô...
+              </div>
+            ) : newsShieldData ? (
+              <div className="mt-4 space-y-4">
+                {/* News Circuit Breaker Status */}
+                <div
+                  className={`rounded-xl border p-3.5 ${
+                    newsShieldData.circuitBreaker.isLockout
+                      ? "border-negative/50 bg-negative/10 text-negative"
+                      : "border-positive/40 bg-positive/5 text-positive"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold text-[13px]">
+                    {newsShieldData.circuitBreaker.isLockout ? (
+                      <>
+                        <ShieldAlert className="size-4.5 animate-pulse" />
+                        <span>🚨 CỬA SỔ ĐÓNG BĂNG GIAO DỊCH (CIRCUIT BREAKER LOCKOUT)</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="size-4.5" />
+                        <span>HỆ THỐNG AN TOÀN — KHÔNG CÓ TIN ĐỎ TRONG CỬA SỔ 20 PHÚT</span>
+                      </>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11.5px] text-ink-2">
+                    {newsShieldData.circuitBreaker.warningMessage ??
+                      "Thị trường đang trong pha thanh khoản bình thường. Không phát hiện rủi ro trượt giá đột biến từ NFP, CPI hoặc FOMC."}
+                  </p>
+                </div>
+
+                {/* Dynamic Slippage Buffer Recommendation */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Spread Cơ Bản</span>
+                    <div className="num text-lg font-bold text-ink-1 mt-0.5">
+                      {newsShieldData.slippageBuffer.baseSpreadPips.toFixed(1)} pips
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Đệm Trượt Giá Khuyên Dùng</span>
+                    <div className="num text-lg font-bold text-accent mt-0.5">
+                      +{newsShieldData.slippageBuffer.recommendedSlippagePips.toFixed(1)} pips
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-line/60 bg-surface-2 p-3 text-center">
+                    <span className="text-[10px] text-ink-3 uppercase tracking-wider">Trượt Tối Đa Cho Phép</span>
+                    <div className="num text-lg font-bold text-negative mt-0.5">
+                      {newsShieldData.slippageBuffer.maxAllowedSlippagePips.toFixed(1)} pips
+                    </div>
+                  </div>
+                </div>
+
+                {/* CME Synthetic Level 2 DOM (Depth of Market) */}
+                <div className="rounded-xl border border-line/70 bg-surface-2/40 p-3.5">
+                  <div className="flex items-center justify-between border-b border-line/50 pb-2.5">
+                    <div>
+                      <div className="text-[12px] font-bold text-ink-1 flex items-center gap-1.5">
+                        <Activity className="size-3.5 text-accent" />
+                        Sổ Lệnh CME Level 2 DOM: {newsShieldData.cmeDom.cmeContract.contractName} ({newsShieldData.cmeDom.cmeContract.cmeTicker})
+                      </div>
+                      <span className="text-[10px] text-ink-3">
+                        Tái tạo 5 tầng Bid x 5 tầng Ask từ micro-volatility & CME volume
+                      </span>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] text-ink-3">Mất cân bằng sổ lệnh (Imbalance):</span>
+                      <div
+                        className={`text-[12px] font-black ${
+                          newsShieldData.cmeDom.orderBookImbalanceRatio > 10
+                            ? "text-positive"
+                            : newsShieldData.cmeDom.orderBookImbalanceRatio < -10
+                            ? "text-negative"
+                            : "text-ink-2"
+                        }`}
+                      >
+                        {newsShieldData.cmeDom.orderBookImbalanceRatio > 0 ? "+" : ""}
+                        {newsShieldData.cmeDom.orderBookImbalanceRatio}%{" "}
+                        {newsShieldData.cmeDom.orderBookImbalanceRatio > 15
+                          ? "(Tường Mua Lớn)"
+                          : newsShieldData.cmeDom.orderBookImbalanceRatio < -15
+                          ? "(Tường Bán Lớn)"
+                          : "(Cân bằng)"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* DOM Depth Table */}
+                  <div className="mt-3 overflow-hidden rounded-lg border border-line/60">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-surface-3/60 text-[10px] uppercase text-ink-3">
+                        <tr>
+                          <th className="py-1.5 px-3 text-right">Khối lượng Mua (Bids)</th>
+                          <th className="py-1.5 px-3 text-center text-positive font-bold">Giá Bid</th>
+                          <th className="py-1.5 px-3 text-center text-negative font-bold">Giá Ask</th>
+                          <th className="py-1.5 px-3 text-left">Khối lượng Bán (Asks)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-line/30 bg-surface-1/50">
+                        {newsShieldData.cmeDom.depthLevels.map((lvl) => {
+                          const maxVol = Math.max(
+                            ...newsShieldData.cmeDom.depthLevels.map((d) => Math.max(d.bidVolume, d.askVolume)),
+                            1
+                          );
+                          const bidWidth = Math.round((lvl.bidVolume / maxVol) * 100);
+                          const askWidth = Math.round((lvl.askVolume / maxVol) * 100);
+
+                          return (
+                            <tr key={lvl.level} className="hover:bg-surface-2/60 transition-colors">
+                              <td className="py-1.5 px-3 text-right relative">
+                                <div
+                                  className="absolute inset-y-0 right-0 bg-positive/15 -z-10 transition-all"
+                                  style={{ width: `${bidWidth}%` }}
+                                />
+                                <span className="num font-semibold text-positive">
+                                  {lvl.bidVolume.toLocaleString()} hđ
+                                </span>
+                              </td>
+                              <td className="py-1.5 px-3 text-center num font-bold text-ink-1">
+                                {lvl.bidPrice >= 100 ? lvl.bidPrice.toFixed(2) : lvl.bidPrice.toFixed(4)}
+                              </td>
+                              <td className="py-1.5 px-3 text-center num font-bold text-ink-1">
+                                {lvl.askPrice >= 100 ? lvl.askPrice.toFixed(2) : lvl.askPrice.toFixed(4)}
+                              </td>
+                              <td className="py-1.5 px-3 text-left relative">
+                                <div
+                                  className="absolute inset-y-0 left-0 bg-negative/15 -z-10 transition-all"
+                                  style={{ width: `${askWidth}%` }}
+                                />
+                                <span className="num font-semibold text-negative">
+                                  {lvl.askVolume.toLocaleString()} hđ
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-ink-3">
+                    <span>Tổng thanh khoản Bid: {newsShieldData.cmeDom.totalBidLiquidity.toLocaleString()} hợp đồng</span>
+                    <span>Tổng thanh khoản Ask: {newsShieldData.cmeDom.totalAskLiquidity.toLocaleString()} hợp đồng</span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNewsShieldPair(null)}
+                className="rounded-lg bg-surface-2 px-4 py-1.5 text-[12px] font-semibold text-ink-1 hover:bg-surface-3"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. WEBHOOK & MT4/MT5 EA INTEGRATION DRAWER */}
       {showWebhookModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
