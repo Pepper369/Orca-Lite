@@ -23,7 +23,7 @@
 import { OhlcvBar, Quote } from "../types";
 import { estimateOrnsteinUhlenbeck, calculateTripleBarrierLevels } from "./advanced-quant-math";
 import { detectCandlePatterns, type DetectedCandlePattern } from "./candlestick-patterns";
-import { detectDivergences, SHORT_3_4D } from "./divergence";
+import { detectDivergences, detectFreshSwingDivergence, SHORT_3_4D } from "./divergence";
 import { trainHistoricalPriceAction, type HistoricalEdgeMetrics } from "./historical-price-action-trainer";
 
 export type ApexQuantCategory =
@@ -45,6 +45,14 @@ export interface BottomReversalMetrics {
   nearestResistancePrice: number;
   overheadRoomPct: number;           // % space to nearest overhead resistance
   reversalStageVi: string;           // e.g. "Chân sóng chuẩn (T+2)", "Mới nhú khỏi đáy (+3.1%)"
+  // Swing Low & Fresh Divergence Enhancements
+  isSwingLowConfirmed: boolean;      // True if confirmed Swing Low pivot in last 1-4 bars
+  swingLowBarsAgo: number;           // Bars ago of swing low
+  swingLowPrice: number;             // Price level of swing low
+  isVduAtLow: boolean;               // Volume dry-up at or retesting the low
+  isFreshBullishDivergence: boolean; // Fresh bullish divergence (<= 4 bars ago)
+  isDualDivergenceFresh: boolean;    // Fresh dual divergence across >= 2 oscillators
+  divergenceFreshnessBars: number | null;
 }
 
 export interface ApexQuantInput {
@@ -95,6 +103,10 @@ export interface ApexQuantResult {
   isAbsorptionSpike?: boolean;
   isVsaNoSupplyTest?: boolean;
   isPrecisionMtfAligned?: boolean;
+  isSwingLowConfirmed?: boolean;
+  isFreshBullishDivergence?: boolean;
+  isDualDivergenceFresh?: boolean;
+  divergenceFreshnessBars?: number | null;
   verdictVi: string;
   highlights: string[];
 }
@@ -136,6 +148,13 @@ export function analyzeBottomReversal(
       nearestResistancePrice: currentPrice * 1.1,
       overheadRoomPct: 10,
       reversalStageVi: "Chưa đủ dữ liệu nến",
+      isSwingLowConfirmed: false,
+      swingLowBarsAgo: 0,
+      swingLowPrice: currentPrice,
+      isVduAtLow: false,
+      isFreshBullishDivergence: false,
+      isDualDivergenceFresh: false,
+      divergenceFreshnessBars: null,
     };
   }
 
@@ -223,9 +242,61 @@ export function analyzeBottomReversal(
     ? Number((((nearestResistancePrice - currentPrice) / currentPrice) * 100).toFixed(1))
     : 10.0;
 
+  // 5. Multi-bar Swing Low Detection (Đáy Swing Low 3-5 nến)
+  let isSwingLowConfirmed = false;
+  let swingLowBarsAgo = lowestLowBarsAgo;
+  let swingLowPrice = lowestLow20;
+  let isVduAtLow = false;
+
+  for (let i = Math.max(2, n - 6); i < n; i++) {
+    const isLocalTrough =
+      lows[i] <= lows[i - 1] &&
+      (i < 3 || lows[i] <= lows[i - 2]) &&
+      (i === n - 1 || lows[i] <= lows[i + 1]);
+
+    if (isLocalTrough || i === lowestLowIdx) {
+      const barsAgo = n - 1 - i;
+      const isConfirmedBySubsequent =
+        i === n - 1
+          ? (closes[i] > bars[i].open || isWyckoffSpring)
+          : (closes[n - 1] >= lows[i] && (closes[n - 1] >= closes[i] || curClose >= (highs[i] + lows[i]) / 2));
+
+      if (isConfirmedBySubsequent) {
+        isSwingLowConfirmed = true;
+        swingLowBarsAgo = barsAgo;
+        swingLowPrice = lows[i];
+
+        // Check volume dry-up at or around low
+        let avgVol20 = 0;
+        let vCount = 0;
+        for (let vIdx = Math.max(0, n - 21); vIdx < n - 1; vIdx++) {
+          if (volumes[vIdx] > 0) {
+            avgVol20 += volumes[vIdx];
+            vCount++;
+          }
+        }
+        if (vCount > 0) avgVol20 /= vCount;
+        if (avgVol20 > 0 && (volumes[i] <= avgVol20 * 0.72 || volumes[n - 1] <= avgVol20 * 0.75)) {
+          isVduAtLow = true;
+        }
+        break;
+      }
+    }
+  }
+
+  // 6. Fresh Bullish Divergence Detection
+  const freshDiv = detectFreshSwingDivergence(bars, 4);
+  const isFreshBullishDivergence = freshDiv.isFreshBullishDivergence;
+  const isDualDivergenceFresh = freshDiv.isDualDivergenceFresh;
+  const divergenceFreshnessBars = freshDiv.divergenceFreshnessBars;
+
   // Reversal stage explanation
   let reversalStageVi = "Đang tích lũy";
-  if (isSweetLaunchZone && isWyckoffSpring) {
+  if (isSwingLowConfirmed && isFreshBullishDivergence) {
+    reversalStageVi = isSweetLaunchZone
+      ? `💎 Chân sóng Swing Đáy + Phân kỳ kép tươi mới (+${extensionFromBottomPct}%)`
+      : `✨ Swing Đáy xác nhận kèm Phân kỳ dương (+${extensionFromBottomPct}%)`;
+  } else if (isSweetLaunchZone && isWyckoffSpring) {
     reversalStageVi = `🌟 Chân sóng vàng: Wyckoff Spring xác nhận, nảy +${extensionFromBottomPct}% từ đáy`;
   } else if (isSweetLaunchZone && isMaReclaim) {
     reversalStageVi = `🚀 Chớm khởi động: Lấy lại MA ngắn hạn, mới tăng +${extensionFromBottomPct}% từ đáy`;
@@ -249,6 +320,13 @@ export function analyzeBottomReversal(
     nearestResistancePrice,
     overheadRoomPct,
     reversalStageVi,
+    isSwingLowConfirmed,
+    swingLowBarsAgo,
+    swingLowPrice,
+    isVduAtLow,
+    isFreshBullishDivergence,
+    isDualDivergenceFresh,
+    divergenceFreshnessBars,
   };
 }
 
@@ -333,6 +411,14 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   // PILLAR 1: Bottom Reversal, Wyckoff Spring & Volatility Squeeze (Weight: 30%)
   // =========================================================================
   let pillar1 = 45;
+  if (rev.isSwingLowConfirmed) {
+    pillar1 += 14;
+    highlights.push(`Nến Swing Đáy xác nhận (T-${rev.swingLowBarsAgo})`);
+  }
+  if (rev.isVduAtLow) {
+    pillar1 += 8;
+    highlights.push("Cạn cung VDU tại đáy");
+  }
   if (rev.isWyckoffSpring) {
     pillar1 += 22;
     highlights.push("Wyckoff Spring rút chân đáy");
@@ -389,9 +475,19 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   // PILLAR 3: Multi-Pillar Confluence & Smart Money Flow (Weight: 25%)
   // =========================================================================
   let pillar3 = 45;
-  if (hasBullishDivergence) {
-    pillar3 += 18;
+  if (rev.isDualDivergenceFresh) {
+    pillar3 += 22;
+    highlights.push("Phân kỳ dương kép tươi mới (RSI + MACD)");
+  } else if (rev.isFreshBullishDivergence) {
+    pillar3 += 16;
+    highlights.push(`Phân kỳ dương chân sóng (T-${rev.divergenceFreshnessBars ?? 2})`);
+  } else if (hasBullishDivergence) {
+    pillar3 += 12;
     highlights.push(divSummary);
+  }
+  if (rev.isSwingLowConfirmed && (rev.isFreshBullishDivergence || hasBullishDivergence)) {
+    pillar3 += 8;
+    highlights.push("Hợp lưu Swing Đáy + Phân kỳ");
   }
   if (normalized.isPrecisionMtfAligned || isMtfAligned) {
     pillar3 += 15;
@@ -535,6 +631,10 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
     isAbsorptionSpike: Boolean(normalized.isAbsorptionSpike),
     isVsaNoSupplyTest: Boolean(normalized.isVsaNoSupplyTest),
     isPrecisionMtfAligned: Boolean(normalized.isPrecisionMtfAligned || isMtfAligned),
+    isSwingLowConfirmed: rev.isSwingLowConfirmed,
+    isFreshBullishDivergence: rev.isFreshBullishDivergence,
+    isDualDivergenceFresh: rev.isDualDivergenceFresh,
+    divergenceFreshnessBars: rev.divergenceFreshnessBars,
     verdictVi,
     highlights,
   };

@@ -126,7 +126,8 @@ export type ScreenerPreset =
   | "wyckoff_spring"
   | "vcp_vdu"
   | "canslim_accel"
-  | "triple_confluence";
+  | "triple_confluence"
+  | "swing_divergence";
 
 export const SCREENER_BIT = {
   SWEET_ZONE: 1 << 0,
@@ -152,6 +153,9 @@ export const SCREENER_BIT = {
   VCP_VDU_PIVOT: 1 << 20,
   CANSLIM_ACCEL: 1 << 21,
   TRIPLE_CONFLUENCE_GOLD: 1 << 22,
+  SWING_LOW_CONFIRMED: 1 << 23,
+  FRESH_BULL_DIV: 1 << 24,
+  DUAL_BULL_DIV: 1 << 25,
 } as const;
 
 export type ScreenerStockItem = {
@@ -285,9 +289,17 @@ export type ScreenerStockItem = {
   apexCategoryVi?: string | null;
   reversalStageVi?: string | null;
   extensionFromBottomPct?: number | null;
+  lowestLowBarsAgo?: number | null;
   isSweetLaunchZone?: boolean | null;
   isWyckoffSpring?: boolean | null;
   isMaReclaim?: boolean | null;
+  isSwingLowConfirmed?: boolean;
+  swingLowBarsAgo?: number | null;
+  swingLowPrice?: number | null;
+  isVduAtLow?: boolean;
+  isFreshBullishDivergence?: boolean;
+  isDualDivergenceFresh?: boolean;
+  divergenceFreshnessBars?: number | null;
   // Next-Gen Confluence Engine (Hợp lưu MA + Nến đảo chiều + Phân kỳ)
   isDiamondConfluence?: boolean | null;
   isDualDivergence?: boolean | null;
@@ -450,6 +462,10 @@ export type ScreenerFilterParams = {
   vcpVduOnly?: boolean;
   canslimAccelOnly?: boolean;
   tripleConfluenceOnly?: boolean;
+  // Swing Low & Fresh Divergence Cross-Filters
+  swingLowOnly?: boolean;
+  freshBullDivOnly?: boolean;
+  dualBullDivOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -1414,6 +1430,13 @@ function detectPresets(item: {
   isFlipZoneSupport?: boolean | null;
   structureSummary?: string | null;
   isSmcOrderBlock?: boolean | null;
+  isSwingLowConfirmed?: boolean;
+  swingLowBarsAgo?: number | null;
+  lowestLowBarsAgo?: number | null;
+  isVduAtLow?: boolean;
+  isFreshBullishDivergence?: boolean;
+  isDualDivergenceFresh?: boolean;
+  divergenceFreshnessBars?: number | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
 
@@ -1848,6 +1871,34 @@ function detectPresets(item: {
   );
   if (!isBrokenSupport && isLayer1Support && isLayer2Action && isLayer3Momentum && item.confluenceScore >= 50) {
     passes.push("triple_confluence");
+  }
+
+  // 22. Chân Sóng Swing Đáy & Phân Kỳ Tươi Mới (Swing Low Reversal & Fresh Bullish Divergence)
+  const isSwingLowCandidate = Boolean(
+    item.isSwingLowConfirmed === true ||
+    item.isWyckoffSpring === true ||
+    (item.lowestLowBarsAgo != null && item.lowestLowBarsAgo <= 4 && item.isSweetLaunchZone)
+  );
+  const isFreshDivergenceCandidate = Boolean(
+    item.isFreshBullishDivergence === true ||
+    item.isDualDivergenceFresh === true ||
+    (item.hasBullishDivergence === true && (item.divergenceFreshnessBars == null || item.divergenceFreshnessBars <= 4))
+  );
+  const isAccumulationAtLow = Boolean(
+    item.isVduAtLow === true ||
+    item.isVolumeDryUp === true ||
+    item.isAbsorptionSpike === true ||
+    item.isVsaNoSupplyTest === true ||
+    item.vsaSignal === "NO_SUPPLY" ||
+    item.vsaSignal === "STOPPING_VOLUME" ||
+    item.vsaSignal === "ABSORPTION" ||
+    (item.activeBuyRatioPct != null && item.activeBuyRatioPct >= 50) ||
+    item.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+    item.smartMoneySignal === "SPRING_ABSORPTION" ||
+    item.smartMoneySignal === "POCKET_PIVOT"
+  );
+  if (!isBrokenSupport && isSwingLowCandidate && isFreshDivergenceCandidate && isAccumulationAtLow) {
+    passes.push("swing_divergence");
   }
 
   return passes;
@@ -2728,6 +2779,13 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           isVolumeDryUp: entry.techFeatures.isVolumeDryUp,
           isRsNewHigh20: entry.techFeatures.isRsNewHigh20,
           isWyckoffLps: entry.techFeatures.isWyckoffLps,
+          isSwingLowConfirmed: entry.apexQuant.reversalMetrics.isSwingLowConfirmed,
+          swingLowBarsAgo: entry.apexQuant.reversalMetrics.swingLowBarsAgo,
+          lowestLowBarsAgo: entry.apexQuant.reversalMetrics.lowestLowBarsAgo,
+          isVduAtLow: entry.apexQuant.reversalMetrics.isVduAtLow,
+          isFreshBullishDivergence: entry.apexQuant.reversalMetrics.isFreshBullishDivergence,
+          isDualDivergenceFresh: entry.apexQuant.reversalMetrics.isDualDivergenceFresh,
+          divergenceFreshnessBars: entry.apexQuant.reversalMetrics.divergenceFreshnessBars,
           faCategory: entry.faMatrix.faCategory,
           roic: entry.faMatrix.roic,
           interestCoverage: entry.faMatrix.interestCoverage,
@@ -2784,6 +2842,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           if (entry.techFeatures.isVolumeDryUp) rawTriggerScore += 3;
           if (entry.techFeatures.isWyckoffLps) rawTriggerScore += 3;
           if (entry.techFeatures.isRsNewHigh20) rawTriggerScore += 3;
+          if (entry.apexQuant.reversalMetrics.isSwingLowConfirmed) rawTriggerScore += 4;
+          if (entry.apexQuant.reversalMetrics.isFreshBullishDivergence) rawTriggerScore += 4;
+          if (entry.apexQuant.reversalMetrics.isDualDivergenceFresh) rawTriggerScore += 3;
           if (entry.faMatrix.isNetCash) rawTriggerScore += 2;
           if (entry.faMatrix.cfoToNetProfit != null && entry.faMatrix.cfoToNetProfit >= 1.0) rawTriggerScore += 2;
           buyTriggerScore = Math.max(1, Math.min(99, rawTriggerScore));
@@ -2793,6 +2854,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             reasons.push("Chạm chuẩn điểm mua");
           } else if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) {
             reasons.push("Vùng Vàng chân sóng");
+          }
+          if (entry.apexQuant.reversalMetrics.isSwingLowConfirmed && entry.apexQuant.reversalMetrics.isFreshBullishDivergence) {
+            reasons.push(entry.apexQuant.reversalMetrics.isDualDivergenceFresh ? "Swing Đáy + Phân kỳ kép" : "Swing Đáy + Phân kỳ");
           }
           if (entry.techFeatures.isTightCloses) {
             reasons.push("Nén giá phẳng Minervini");
@@ -3025,6 +3089,14 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           isSweetLaunchZone: entry.apexQuant.reversalMetrics.isSweetLaunchZone,
           isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
           isMaReclaim: entry.apexQuant.reversalMetrics.isMaReclaim,
+          lowestLowBarsAgo: entry.apexQuant.reversalMetrics.lowestLowBarsAgo,
+          isSwingLowConfirmed: entry.apexQuant.reversalMetrics.isSwingLowConfirmed,
+          swingLowBarsAgo: entry.apexQuant.reversalMetrics.swingLowBarsAgo,
+          swingLowPrice: entry.apexQuant.reversalMetrics.swingLowPrice,
+          isVduAtLow: entry.apexQuant.reversalMetrics.isVduAtLow,
+          isFreshBullishDivergence: entry.apexQuant.reversalMetrics.isFreshBullishDivergence,
+          isDualDivergenceFresh: entry.apexQuant.reversalMetrics.isDualDivergenceFresh,
+          divergenceFreshnessBars: entry.apexQuant.reversalMetrics.divergenceFreshnessBars,
           isDiamondConfluence,
           isDualDivergence,
           setupGrade: (entry.techFeatures as Record<string, unknown>)?.setupGrade as "A+" | "A" | "B" | "C" | undefined ?? (entry.techFeatures.confluenceScore >= 75 ? "A+" : entry.techFeatures.confluenceScore >= 68 ? "A" : "B"),
@@ -3109,6 +3181,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             if (presetsPassed.includes("vcp_vdu")) b |= SCREENER_BIT.VCP_VDU_PIVOT;
             if (presetsPassed.includes("canslim_accel")) b |= SCREENER_BIT.CANSLIM_ACCEL;
             if (presetsPassed.includes("triple_confluence")) b |= SCREENER_BIT.TRIPLE_CONFLUENCE_GOLD;
+            if (entry.apexQuant.reversalMetrics.isSwingLowConfirmed) b |= SCREENER_BIT.SWING_LOW_CONFIRMED;
+            if (entry.apexQuant.reversalMetrics.isFreshBullishDivergence) b |= SCREENER_BIT.FRESH_BULL_DIV;
+            if (entry.apexQuant.reversalMetrics.isDualDivergenceFresh) b |= SCREENER_BIT.DUAL_BULL_DIV;
             return b;
           })(),
           presetsPassed,
@@ -3159,6 +3234,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         vcp_vdu: 0,
         canslim_accel: 0,
         triple_confluence: 0,
+        swing_divergence: 0,
       };
 
       const sectorSet = new Set<string>();
@@ -3241,6 +3317,7 @@ function buildSnapshotOutput(
     vcp_vdu: 0,
     canslim_accel: 0,
     triple_confluence: 0,
+    swing_divergence: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -3355,6 +3432,9 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.preset === "vcp_vdu" || params.vcpVduOnly) requiredBitMask |= SCREENER_BIT.VCP_VDU_PIVOT;
   if (params.preset === "canslim_accel" || params.canslimAccelOnly) requiredBitMask |= SCREENER_BIT.CANSLIM_ACCEL;
   if (params.preset === "triple_confluence" || params.tripleConfluenceOnly) requiredBitMask |= SCREENER_BIT.TRIPLE_CONFLUENCE_GOLD;
+  if (params.swingLowOnly) requiredBitMask |= SCREENER_BIT.SWING_LOW_CONFIRMED;
+  if (params.freshBullDivOnly) requiredBitMask |= SCREENER_BIT.FRESH_BULL_DIV;
+  if (params.dualBullDivOnly) requiredBitMask |= SCREENER_BIT.DUAL_BULL_DIV;
 
   const filtered: ScreenerStockItem[] = [];
   const n = allItems.length;
@@ -3368,7 +3448,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (hasSector && x.sector !== sectorTarget) continue;
     if (hasMaSignal && x.maSignal !== maSignalTarget) continue;
 
-    // Bitmask fast-rejection: 1 CPU instruction tests up to 19 boolean filters simultaneously
+    // Bitmask fast-rejection: 1 CPU instruction tests up to 25 boolean filters simultaneously
     if (requiredBitMask !== 0) {
       if (x.bitFlags != null) {
         if ((x.bitFlags & requiredBitMask) !== requiredBitMask) continue;
@@ -3392,6 +3472,9 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         if (params.flipZoneOnly && !x.isFlipZoneSupport) continue;
         if (params.smcOrderBlockOnly && !x.isSmcOrderBlock) continue;
         if (params.mtfOnly && !x.isMtfAligned) continue;
+        if (params.swingLowOnly && !x.isSwingLowConfirmed) continue;
+        if (params.freshBullDivOnly && !x.isFreshBullishDivergence) continue;
+        if (params.dualBullDivOnly && !x.isDualDivergenceFresh) continue;
       }
     }
 

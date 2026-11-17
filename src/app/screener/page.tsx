@@ -403,7 +403,7 @@ function ScreenerInner() {
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="bottom_confluence"
+            defaultPreset="swing_divergence"
             defaultView="confluence"
             onOpenBacktest={() => setShowBacktest(true)}
           />

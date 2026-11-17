@@ -491,3 +491,102 @@ export function divergenceSummaryLine(s: DivergenceSignal): string {
   const agoStr = s.barsAgo != null ? ` · T-${s.barsAgo}` : "";
   return `${DIVERGENCE_KIND_VI[s.kind]} · ${osc}${tf}${struct} · class ${s.strength} · hạng ${s.strength} · ${s.barsBetween} nến${vol}${statusStr}${agoStr}`;
 }
+
+export interface FreshSwingDivergenceResult {
+  hasBullishDivergence: boolean;
+  isFreshBullishDivergence: boolean; // barsAgo <= maxFreshBars (mặc định <= 4)
+  isDualDivergenceFresh: boolean; // >= 2 chỉ báo cùng cho phân kỳ dương tươi mới
+  divergenceFreshnessBars: number | null; // Số phiên từ khi phân kỳ xuất hiện
+  primaryOscillator: string | null;
+  oscillators: DivergenceOscillator[];
+  bestSignal: DivergenceSignal | null;
+  summaryVi: string;
+}
+
+/**
+ * Nhận diện phân kỳ chân sóng tươi mới (Fresh Swing Divergence).
+ * Tối ưu bắt đáy chân sóng: lọc tín hiệu phân kỳ dương hình thành trong vòng 1-4 phiên gần nhất.
+ */
+export function detectFreshSwingDivergence(
+  bars: OhlcvBar[],
+  maxFreshBars: number = 4,
+): FreshSwingDivergenceResult {
+  if (!bars || bars.length < 15) {
+    return {
+      hasBullishDivergence: false,
+      isFreshBullishDivergence: false,
+      isDualDivergenceFresh: false,
+      divergenceFreshnessBars: null,
+      primaryOscillator: null,
+      oscillators: [],
+      bestSignal: null,
+      summaryVi: "",
+    };
+  }
+
+  const allDivs = detectDivergences(bars, {
+    ...SHORT_3_4D,
+    lookback: Math.min(bars.length, 60),
+    maxAgeBarsFromEnd: 8,
+  });
+
+  const bullSignals = allDivs.filter(
+    (s) =>
+      s.kind.includes("bullish") &&
+      s.status !== "invalidated" &&
+      s.barsAgo != null &&
+      s.barsAgo <= 8,
+  );
+
+  if (bullSignals.length === 0) {
+    return {
+      hasBullishDivergence: false,
+      isFreshBullishDivergence: false,
+      isDualDivergenceFresh: false,
+      divergenceFreshnessBars: null,
+      primaryOscillator: null,
+      oscillators: [],
+      bestSignal: null,
+      summaryVi: "",
+    };
+  }
+
+  const freshBullSignals = bullSignals.filter((s) => s.barsAgo! <= maxFreshBars);
+  const isFresh = freshBullSignals.length > 0;
+  const targetSignals = isFresh ? freshBullSignals : bullSignals;
+
+  const oscSet = new Set<DivergenceOscillator>();
+  let minBarsAgo = 999;
+  let bestSignal: DivergenceSignal = targetSignals[0]!;
+
+  for (const s of targetSignals) {
+    oscSet.add(s.oscillator);
+    if (s.barsAgo! < minBarsAgo) {
+      minBarsAgo = s.barsAgo!;
+      bestSignal = s;
+    } else if (s.barsAgo! === minBarsAgo && s.confidence > bestSignal.confidence) {
+      bestSignal = s;
+    }
+  }
+
+  const oscillators = Array.from(oscSet);
+  const isDual = oscillators.length >= 2;
+
+  let summaryVi = "";
+  if (isDual) {
+    summaryVi = `Phân kỳ dương kép ${oscillators.map((o) => OSC_LABEL[o] ?? o).join(" + ")} (T-${minBarsAgo})`;
+  } else {
+    summaryVi = `Phân kỳ dương ${OSC_LABEL[bestSignal.oscillator] ?? bestSignal.oscillator} (T-${minBarsAgo})`;
+  }
+
+  return {
+    hasBullishDivergence: true,
+    isFreshBullishDivergence: isFresh,
+    isDualDivergenceFresh: isFresh && isDual,
+    divergenceFreshnessBars: minBarsAgo === 999 ? null : minBarsAgo,
+    primaryOscillator: bestSignal.oscillator,
+    oscillators,
+    bestSignal,
+    summaryVi,
+  };
+}

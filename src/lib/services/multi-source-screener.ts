@@ -80,6 +80,11 @@ export interface MultiSourceStockItem {
   // Giai đoạn 11: Bộ Lọc Bảo Vệ Kỹ Thuật (Technical Consistency Guard)
   apexQuantScore?: number | null;
   apexCategoryVi?: string | null;
+  reversalStageVi?: string | null;
+  isSwingLowConfirmed?: boolean;
+  isFreshBullishDivergence?: boolean;
+  isDualDivergenceFresh?: boolean;
+  divergenceFreshnessBars?: number | null;
   maSignal?: string | null;
   superTrendDir?: string | null;
   isBrokenSupport?: boolean;
@@ -310,6 +315,11 @@ export async function getMultiSourceScreenerData(opts?: MultiSourceFilterOpts): 
           // Bảo vệ kỹ thuật
           apexQuantScore: snap?.apexQuantScore ?? null,
           apexCategoryVi: snap?.apexCategoryVi ?? null,
+          reversalStageVi: snap?.reversalStageVi ?? null,
+          isSwingLowConfirmed: snap?.isSwingLowConfirmed ?? false,
+          isFreshBullishDivergence: snap?.isFreshBullishDivergence ?? false,
+          isDualDivergenceFresh: snap?.isDualDivergenceFresh ?? false,
+          divergenceFreshnessBars: snap?.divergenceFreshnessBars ?? null,
           maSignal: snap?.maSignal ?? null,
           superTrendDir: snap?.superTrendDir ?? null,
           isBrokenSupport: isBroken,

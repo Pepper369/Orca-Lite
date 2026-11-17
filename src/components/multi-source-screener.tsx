@@ -42,7 +42,7 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
   const [foreignFilter, setForeignFilter] = useState<"ALL" | "BUY" | "SELL">("ALL");
   const [researchFilter, setResearchFilter] = useState<"ALL" | "BUY" | "HIGH_UPSIDE">("ALL");
   const [instFilter, setInstFilter] = useState<"ALL" | "HIGH_INST">("ALL");
-  const [quantFilter, setQuantFilter] = useState<"ALL" | "QUANT_EDGE" | "OU_OVERSOLD">("ALL");
+  const [quantFilter, setQuantFilter] = useState<"ALL" | "QUANT_EDGE" | "OU_OVERSOLD" | "SWING_DIV">("ALL");
   const [buyZoneFilter, setBuyZoneFilter] = useState<"ALL" | "NEAR_BUY" | "AT_BUY">("ALL");
   const [smartMoneyFilter, setSmartMoneyFilter] = useState<
     "ALL" | "INFLOW" | "ABSORPTION" | "POCKET_PIVOT" | "SUPER_FLOW"
@@ -169,6 +169,9 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
         return false;
       }
       if (quantFilter === "OU_OVERSOLD" && (item.ouZScore == null || item.ouZScore > -1.4)) {
+        return false;
+      }
+      if (quantFilter === "SWING_DIV" && (!item.isSwingLowConfirmed || (!item.isFreshBullishDivergence && !item.isDualDivergenceFresh))) {
         return false;
       }
 
@@ -551,6 +554,15 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                   }`}
                 >
                   Bắt đáy OU Z &le; -1.4
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQuantFilter("SWING_DIV")}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    quantFilter === "SWING_DIV" ? "bg-cyan-500/20 text-cyan-300 font-bold" : "text-text-muted"
+                  }`}
+                >
+                  Swing Đáy &amp; Phân Kỳ 💎
                 </button>
               </div>
 
@@ -1142,6 +1154,14 @@ export const MultiSourceScreener = memo(function MultiSourceScreener() {
                             {item.quantAnomalyTag && (
                               <span className="rounded bg-accent-primary/15 px-1 py-0.2 text-[9px] font-semibold text-accent-primary">
                                 {item.quantAnomalyTag}
+                              </span>
+                            )}
+                            {item.isSwingLowConfirmed && (item.isFreshBullishDivergence || item.isDualDivergenceFresh) && (
+                              <span
+                                title={item.reversalStageVi || "Nến Swing Đáy kèm Phân kỳ dương tươi mới"}
+                                className="rounded bg-cyan-500/20 border border-cyan-400/40 px-1 py-0.2 text-[9px] font-bold text-cyan-300 whitespace-nowrap"
+                              >
+                                {item.isDualDivergenceFresh ? "Swing Đáy + PK Kép ✨" : "Swing Đáy + PK 💎"}
                               </span>
                             )}
                           </div>

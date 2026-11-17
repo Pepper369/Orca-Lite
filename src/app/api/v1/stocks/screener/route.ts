@@ -203,6 +203,7 @@ export async function GET(req: Request) {
             vcp_vdu: 0,
             canslim_accel: 0,
             triple_confluence: 0,
+            swing_divergence: 0,
           },
           sectorsAvailable: [],
           meta: buildMeta({

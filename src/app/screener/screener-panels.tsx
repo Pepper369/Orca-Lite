@@ -695,6 +695,54 @@ export function SmcOrderBlockBadge({
   );
 }
 
+export function SwingDivergenceBadge({
+  isSwingLow,
+  isFreshDiv,
+  isDualDiv,
+  freshnessBars,
+  stageVi,
+}: {
+  isSwingLow?: boolean | null;
+  isFreshDiv?: boolean | null;
+  isDualDiv?: boolean | null;
+  freshnessBars?: number | null;
+  stageVi?: string | null;
+}) {
+  if (!isSwingLow && !isFreshDiv && !isDualDiv) return null;
+
+  if (isSwingLow && (isDualDiv || isFreshDiv)) {
+    return (
+      <span
+        title={stageVi || `Chân sóng xác nhận: Nến Swing Đáy + Phân kỳ dương tươi mới (T-${freshnessBars ?? 1})`}
+        className="inline-flex items-center gap-1 rounded bg-cyan-500/25 border border-cyan-400/60 px-1.5 py-0.5 text-[9px] font-bold text-cyan-200 whitespace-nowrap shadow-xs"
+      >
+        <span className="size-1.5 rounded-full bg-cyan-400 animate-pulse" />
+        <span>{isDualDiv ? "Swing Đáy + PK Kép ✨" : "Swing Đáy + PK 💎"}</span>
+      </span>
+    );
+  }
+
+  if (isSwingLow) {
+    return (
+      <span
+        title="Nến Swing Đáy xác nhận (đã tạo đáy và rút chân)"
+        className="inline-flex items-center gap-1 rounded bg-blue-500/20 border border-blue-400/40 px-1.5 py-0.5 text-[9px] font-medium text-blue-300 whitespace-nowrap"
+      >
+        <span>Swing Đáy</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={`Phân kỳ dương tươi mới (T-${freshnessBars ?? 2})`}
+      className="inline-flex items-center gap-1 rounded bg-teal-500/20 border border-teal-400/40 px-1.5 py-0.5 text-[9px] font-medium text-teal-300 whitespace-nowrap"
+    >
+      <span>PK Dương (T-{freshnessBars ?? 2})</span>
+    </span>
+  );
+}
+
 export function SqueezeBadge({
   state,
   bars,
@@ -1270,7 +1318,7 @@ export function VnScreener({
       ? "smartMoneyScore"
       : defaultPreset === "canslim_accel"
       ? "rsRating"
-      : defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu"
+      : defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu" || defaultPreset === "swing_divergence"
       ? "confluenceScore"
       : "marketCap";
   const [sortKey, setSortKey] = useState<string>(initialSortKey);
@@ -1359,7 +1407,7 @@ export function VnScreener({
     } else if (defaultPreset === "canslim_accel") {
       setSortKey("rsRating");
       setSortOrder("desc");
-    } else if (defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu") {
+    } else if (defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu" || defaultPreset === "swing_divergence") {
       setSortKey("confluenceScore");
       setSortOrder("desc");
     }
@@ -4079,7 +4127,16 @@ export function VnScreener({
                                   {row.sniperTriggerLabelVi || row.sniperTriggerSubtype} {row.sniperRiskReward ? `(${row.sniperRiskReward.toFixed(1)}R)` : ""}
                                 </span>
                               )}
-                              {row.hasBullishDivergence && (
+                              {(row.isSwingLowConfirmed || row.isFreshBullishDivergence) && (
+                                <SwingDivergenceBadge
+                                  isSwingLow={row.isSwingLowConfirmed}
+                                  isFreshDiv={row.isFreshBullishDivergence}
+                                  isDualDiv={row.isDualDivergenceFresh}
+                                  freshnessBars={row.divergenceFreshnessBars}
+                                  stageVi={row.reversalStageVi}
+                                />
+                              )}
+                              {row.hasBullishDivergence && !row.isFreshBullishDivergence && (
                                 <span className="inline-flex items-center gap-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300">
                                   {row.divergenceSummary || "Phân kỳ dương"}
                                 </span>

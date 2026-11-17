@@ -68,3 +68,4 @@ test("Enhanced Specialized Screeners - queryScreenerStocks filters without failu
   assert.ok(resConfluence, "Triple Confluence query must return response");
   assert.ok(Array.isArray(resConfluence.items));
 });
+

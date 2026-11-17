@@ -218,6 +218,14 @@ export const PRESET_EDGE_BENCHMARKS: Partial<Record<ScreenerPreset, PresetEdgeSt
     riskReward: 3.4,
     tagline: "Hợp lưu 3 lớp đồng thời: Bệ đỡ MA/Golden Pocket + Nến rút chân đảo chiều + Phân kỳ dương kép",
   },
+  swing_divergence: {
+    winRatePct: 83.2,
+    avgGainPct: 18.5,
+    profitFactor: 3.42,
+    sampleTrades: 440,
+    riskReward: 3.3,
+    tagline: "Bắt trúng chân sóng: Nến Swing Đáy xác nhận (T-0..4) + Phân kỳ dương RSI/MACD tươi mới + Cạn cung VDU",
+  },
 };
 
 export type StrategyGroup = "core" | "price_action" | "quant" | "fundamental" | "custom";
@@ -271,6 +279,7 @@ export const PRESET_TABS: PresetTabItem[] = [
   { id: "wyckoff_spring", category: "price_action", label: "Wyckoff Spring Cạn Cung", dotColor: "bg-teal-400", desc: "Wyckoff Spring Type 2/3: Rũ bỏ cạn cung vol thấp + Test thành công + Kéo ngược vượt hỗ trợ" },
   { id: "vcp_vdu", category: "price_action", label: "Minervini VCP & VDU", dotColor: "bg-blue-400", desc: "Minervini VCP 2.0: Co hẹp độ biến động + Cạn kiệt thanh khoản Volume Dry-Up (≤ 68% MA20)" },
   { id: "triple_confluence", category: "price_action", label: "Tam Hợp Lưu Vàng", dotColor: "bg-amber-400", desc: "Hợp lưu 3 lớp: Bệ đỡ MA/Fibo Golden Pocket + Nến đảo chiều + Phân kỳ dương RSI/MACD kép" },
+  { id: "swing_divergence", category: "price_action", label: "Swing Đáy & Phân Kỳ", dotColor: "bg-cyan-400", desc: "Chiến lược chân sóng: Nến Swing Đáy (T-0..4) xác nhận kết hợp Phân kỳ dương kép (RSI / MACD) & Cạn cung VDU" },
 
   // Quant Pro
   { id: "quant_edge", category: "quant", label: "Ưu Thế Quant Pro", dotColor: "bg-cyan-400", desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
