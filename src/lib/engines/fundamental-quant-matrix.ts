@@ -224,8 +224,8 @@ export function solveReverseDcfImpliedGrowth(params: {
     fcfBillion != null && fcfBillion > 0
       ? fcfBillion
       : netProfitBillion != null && netProfitBillion > 0
-      ? netProfitBillion * 0.85
-      : null;
+        ? netProfitBillion * 0.85
+        : null;
 
   if (baseCf == null || baseCf <= 0) {
     return { impliedGrowthPct: null, reverseDcfMarginPct: null };
@@ -460,7 +460,7 @@ export function computeFundamentalMatrix(params: {
   beta?: number | null;
   vietcapProfile?: VietcapProfile | null;
 }): FundamentalMatrixResult {
-  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, beta, vietcapProfile } = params;
+  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
   const effectiveRevenueYoy = revenueYoyPct ?? snap?.revenueYoyPct ?? null;
 
   // 1. Dòng tiền & Chất lượng Lợi nhuận
@@ -506,8 +506,8 @@ export function computeFundamentalMatrix(params: {
     snap?.netMargin != null
       ? snap.netMargin
       : snap?.netProfit && snap?.revenue && snap.revenue > 0
-      ? (snap.netProfit / snap.revenue) * 100
-      : 0;
+        ? (snap.netProfit / snap.revenue) * 100
+        : 0;
   const roe = snap?.roe != null ? snap.roe : roic != null ? roic : 15;
 
   let dupontDrive: FundamentalMatrixResult["dupontDrive"] = "BALANCED";
@@ -628,7 +628,7 @@ export function computeFundamentalMatrix(params: {
     marketCapBillion,
     totalDebt: snap?.totalDebt,
     cash: snap?.cash,
-    beta: beta ?? null,
+    beta: params.beta ?? (vietcapProfile as { beta?: number | null } | null)?.beta ?? null,
     isNetCash,
   });
   const mertonDistanceToDefault = mertonRes.mertonDistanceToDefault;

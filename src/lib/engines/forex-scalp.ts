@@ -53,6 +53,9 @@ function regimeFallbackSetup(
 
   const stopLoss = direction === "BUY" ? entry - stopDist : entry + stopDist;
   const takeProfit = direction === "BUY" ? entry + stopDist * rr : entry - stopDist * rr;
+  const takeProfit1 = direction === "BUY" ? entry + stopDist * 1.2 : entry - stopDist * 1.2;
+  const takeProfit2 = direction === "BUY" ? entry + stopDist * 2.0 : entry - stopDist * 2.0;
+  const takeProfit3 = direction === "BUY" ? entry + stopDist * 3.0 : entry - stopDist * 3.0;
   const baseStrength = regime.market === "RANGING" ? 28 : 38;
   const strength = Math.max(12, Math.round(baseStrength * sessionSoft));
 
@@ -61,10 +64,17 @@ function regimeFallbackSetup(
     direction,
     status: "ACTIVE",
     strength,
+    probability: Math.min(85, Math.max(45, Math.round(48 + strength * 0.4))),
     entry,
     stopLoss,
     takeProfit,
+    takeProfit1,
+    takeProfit2,
+    takeProfit3,
     riskReward: rr,
+    riskReward1: 1.2,
+    riskReward2: 2.0,
+    riskReward3: 3.0,
     invalidation: stopLoss,
     entryZone: direction === "BUY" ? [stopLoss, entry] : [entry, stopLoss],
     stopPips: toPips(pair, stopDist),
@@ -210,6 +220,28 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
 
   const micro = supportResistance((input.barsM15.length >= 40 ? input.barsM15 : input.barsM5).slice(-96), 96);
 
+  const probability =
+    primarySetup?.probability ??
+    (strength > 0 ? Math.min(92, Math.max(45, Math.round(50 + strength * 0.42))) : null);
+
+  const tp1 =
+    primarySetup?.takeProfit1 ??
+    (primarySetup?.entry && primarySetup?.stopLoss
+      ? primarySetup.direction === "BUY"
+        ? primarySetup.entry + Math.abs(primarySetup.entry - primarySetup.stopLoss) * 1.2
+        : primarySetup.entry - Math.abs(primarySetup.entry - primarySetup.stopLoss) * 1.2
+      : null);
+
+  const tp2 = primarySetup?.takeProfit2 ?? primarySetup?.takeProfit ?? null;
+
+  const tp3 =
+    primarySetup?.takeProfit3 ??
+    (primarySetup?.entry && primarySetup?.stopLoss
+      ? primarySetup.direction === "BUY"
+        ? primarySetup.entry + Math.abs(primarySetup.entry - primarySetup.stopLoss) * 3.0
+        : primarySetup.entry - Math.abs(primarySetup.entry - primarySetup.stopLoss) * 3.0
+      : null);
+
   return {
     pair,
     timeframe: "M15->M5->M1",
@@ -227,6 +259,10 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     evidence: evidence.slice(0, 8),
     filter,
     regime,
+    probability,
+    tp1,
+    tp2,
+    tp3,
     activeSetups,
     primarySetup,
     moduleBStatus,

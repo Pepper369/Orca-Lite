@@ -209,16 +209,39 @@ function levelsFromBias(
   entry: number,
   bars: OhlcvBar[],
   rr = 1.5,
-): { stopLoss: number; takeProfit: number; stopPips: number; riskReward: number } {
+): {
+  stopLoss: number;
+  takeProfit: number;
+  takeProfit1: number;
+  takeProfit2: number;
+  takeProfit3: number;
+  stopPips: number;
+  riskReward: number;
+  riskReward1: number;
+  riskReward2: number;
+  riskReward3: number;
+} {
   const atrV = atr(bars, 14) ?? rangeOf(bars[bars.length - 1]);
   const stopDist = Math.max(atrV * 0.9, pipSize(pair) * 5);
   const stopLoss = direction === "BUY" ? entry - stopDist : entry + stopDist;
   const takeProfit = direction === "BUY" ? entry + stopDist * rr : entry - stopDist * rr;
+  const rr1 = 1.2;
+  const rr2 = Math.max(rr, 2.0);
+  const rr3 = 3.0;
+  const takeProfit1 = direction === "BUY" ? entry + stopDist * rr1 : entry - stopDist * rr1;
+  const takeProfit2 = direction === "BUY" ? entry + stopDist * rr2 : entry - stopDist * rr2;
+  const takeProfit3 = direction === "BUY" ? entry + stopDist * rr3 : entry - stopDist * rr3;
   return {
     stopLoss,
     takeProfit,
+    takeProfit1,
+    takeProfit2,
+    takeProfit3,
     stopPips: toPips(pair, stopDist),
     riskReward: rr,
+    riskReward1: rr1,
+    riskReward2: rr2,
+    riskReward3: rr3,
   };
 }
 
@@ -378,10 +401,17 @@ export function strategyTech(
     direction,
     status,
     strength,
+    probability: Math.min(92, Math.max(50, Math.round(52 + strength * 0.4))),
     entry,
     stopLoss: lv.stopLoss,
     takeProfit: lv.takeProfit,
+    takeProfit1: lv.takeProfit1,
+    takeProfit2: lv.takeProfit2,
+    takeProfit3: lv.takeProfit3,
     riskReward: lv.riskReward,
+    riskReward1: lv.riskReward1,
+    riskReward2: lv.riskReward2,
+    riskReward3: lv.riskReward3,
     invalidation: lv.stopLoss,
     entryZone: direction === "BUY" ? [lv.stopLoss, entry] : [entry, lv.stopLoss],
     stopPips: lv.stopPips,
@@ -453,10 +483,17 @@ export function strategyA(
       direction,
       status: "AWAITING_M5_BREAKOUT",
       strength: 42,
+      probability: 58,
       entry: provisionalEntry,
       stopLoss: lv.stopLoss,
       takeProfit: lv.takeProfit,
+      takeProfit1: lv.takeProfit1,
+      takeProfit2: lv.takeProfit2,
+      takeProfit3: lv.takeProfit3,
       riskReward: lv.riskReward,
+      riskReward1: lv.riskReward1,
+      riskReward2: lv.riskReward2,
+      riskReward3: lv.riskReward3,
       invalidation: direction === "BUY" ? m15.low : m15.high,
       entryZone: direction === "BUY" ? [m15.high, m15.high] : [m15.low, m15.low],
       stopPips: lv.stopPips,
@@ -500,6 +537,9 @@ export function strategyA(
   if (risk <= 0) return null;
   const rr = 1.25;
   const takeProfit = direction === "BUY" ? entry + risk * rr : entry - risk * rr;
+  const takeProfit1 = direction === "BUY" ? entry + risk * 1.2 : entry - risk * 1.2;
+  const takeProfit2 = direction === "BUY" ? entry + risk * 2.0 : entry - risk * 2.0;
+  const takeProfit3 = direction === "BUY" ? entry + risk * 3.0 : entry - risk * 3.0;
   const stopPips = toPips(pair, risk);
 
   if (regime.volatility === "HIGH_VOLATILITY") {
@@ -512,10 +552,17 @@ export function strategyA(
     direction,
     status,
     strength,
+    probability: Math.min(92, Math.max(50, Math.round(50 + strength * 0.42))),
     entry,
     stopLoss,
     takeProfit,
+    takeProfit1,
+    takeProfit2,
+    takeProfit3,
     riskReward: rr,
+    riskReward1: 1.2,
+    riskReward2: 2.0,
+    riskReward3: 3.0,
     invalidation: stopLoss,
     entryZone: direction === "BUY" ? [entry, stopLoss] : [stopLoss, entry],
     stopPips,
@@ -609,10 +656,17 @@ export function strategyC(
       direction,
       status: "AWAITING_M5_BREAKOUT",
       strength: 44,
+      probability: 60,
       entry: provisionalEntry,
       stopLoss: trend === "UPTREND" ? sweep.low : sweep.high,
       takeProfit: lv.takeProfit,
+      takeProfit1: lv.takeProfit1,
+      takeProfit2: lv.takeProfit2,
+      takeProfit3: lv.takeProfit3,
       riskReward: lv.riskReward,
+      riskReward1: lv.riskReward1,
+      riskReward2: lv.riskReward2,
+      riskReward3: lv.riskReward3,
       invalidation: trend === "UPTREND" ? rectangle.bottom : rectangle.top,
       entryZone: [rectangle.bottom, rectangle.top],
       stopPips: toPips(pair, Math.abs((trend === "UPTREND" ? sweep.low : sweep.high) - provisionalEntry)),
@@ -636,22 +690,33 @@ export function strategyC(
     takeProfit = s ?? entry - risk * 1.5;
   }
   const rr = risk > 0 ? Math.abs(takeProfit - entry) / risk : 0;
+  const takeProfit1 = direction === "BUY" ? entry + risk * 1.2 : entry - risk * 1.2;
+  const takeProfit2 = takeProfit;
+  const takeProfit3 = direction === "BUY" ? entry + risk * 3.0 : entry - risk * 3.0;
   const stopPips = toPips(pair, risk);
   if (regime.atrPips != null && stopPips > regime.atrPips * 2.5) {
     riskNotes.push("SL qua rong vs ATR — bo");
     return null;
   }
 
+  const cStrength = clamp(Math.round(55 + Math.min(rr, 2) * 15), 0, 92);
   evidence.push(`M5 confirm | RR ${rr.toFixed(2)} | SL ${stopPips.toFixed(1)} pip`);
   return {
     strategy: "C",
     direction,
     status: "TRIGGERED",
-    strength: clamp(Math.round(55 + Math.min(rr, 2) * 15), 0, 92),
+    strength: cStrength,
+    probability: Math.min(92, Math.max(50, Math.round(52 + cStrength * 0.4))),
     entry,
     stopLoss,
     takeProfit,
+    takeProfit1,
+    takeProfit2,
+    takeProfit3,
     riskReward: Number(rr.toFixed(2)),
+    riskReward1: 1.2,
+    riskReward2: Number(rr.toFixed(2)),
+    riskReward3: 3.0,
     invalidation: stopLoss,
     entryZone: [Math.min(entry, stopLoss), Math.max(entry, stopLoss)],
     stopPips,

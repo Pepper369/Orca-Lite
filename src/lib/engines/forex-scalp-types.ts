@@ -19,10 +19,17 @@ export interface ForexScalpSetup {
   direction: ForexScalpDirection;
   status: ForexSetupStatus;
   strength: number;
+  probability?: number | null;
   entry: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
+  takeProfit1?: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
   riskReward: number | null;
+  riskReward1?: number | null;
+  riskReward2?: number | null;
+  riskReward3?: number | null;
   invalidation: number | null;
   entryZone: [number, number] | null;
   stopPips: number | null;
@@ -68,6 +75,10 @@ export interface ForexScalpSignal {
   evidence: string[];
   filter: ForexFilterResult;
   regime: ForexRegimeSnapshot;
+  probability?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
   activeSetups: ForexScalpSetup[];
   primarySetup: ForexScalpSetup | null;
   moduleBStatus: "AVAILABLE" | "ORDER_FLOW_UNAVAILABLE";
