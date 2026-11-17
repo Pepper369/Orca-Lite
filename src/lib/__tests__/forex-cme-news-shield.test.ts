@@ -137,3 +137,4 @@ test("CME DOM Bridge: reconstructs 5 Bids x 5 Asks synthetic Level 2 DOM", () =>
   assert.ok(dom.totalAskLiquidity > 0);
   assert.ok(dom.orderBookImbalanceRatio >= -100 && dom.orderBookImbalanceRatio <= 100);
 });
+

@@ -7,8 +7,9 @@ import type { CryptoSummary } from "@/lib/services/crypto";
 import type { CryptoMarketRow, Meta } from "@/lib/types";
 import { Badge, Chg, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, priceDigits, Unavailable } from "@/components/ui";
 import { usePrefCurrency } from "@/lib/fx-pref";
-import { ArrowUpRight, Coins, RefreshCw, Search, TrendingDown, TrendingUp, Waves, X } from "lucide-react";
+import { ArrowUpRight, Coins, RefreshCw, Search, TrendingDown, TrendingUp, Waves, X, Zap } from "lucide-react";
 import { BOOTSTRAP_CRYPTO_DATA } from "@/lib/bootstrap-data";
+import { CryptoSignalsPanel } from "./crypto-signals-panel";
 
 type MarketsData = { rows: CryptoMarketRow[]; summary: CryptoSummary };
 
@@ -24,6 +25,7 @@ export function CryptoMarketPage() {
   const { fmtUsd } = usePrefCurrency();
   const [tab, setTab] = useState<FilterTab>("volume");
   const [q, setQ] = useState("");
+  const [viewMode, setViewMode] = useState<"signals" | "market">("signals");
 
   const activeData = (data?.rows?.length ? data : BOOTSTRAP_CRYPTO_DATA) as MarketsData;
 
@@ -48,9 +50,41 @@ export function CryptoMarketPage() {
   const advancerPct = Math.round((s.advancers / totalBreadth) * 100);
 
   return (
-    <div className="space-y-3">
-      {/* Market Breadth & Benchmark Stats Grid */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 md:grid-cols-5">
+    <div className="space-y-4">
+      {/* View Switcher: Tín Hiệu Định Lượng VIP vs Bảng Giá Thị Trường */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode("signals")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold transition-all ${
+              viewMode === "signals"
+                ? "bg-accent-primary text-white shadow-sm"
+                : "border border-border-subtle bg-surface-elevated text-text-secondary hover:bg-surface-elevated/80 hover:text-text-primary"
+            }`}
+          >
+            <Zap className="size-3.5" /> Tín Hiệu Phái Sinh & True L2 DOM
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("market")}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold transition-all ${
+              viewMode === "market"
+                ? "bg-accent-primary text-white shadow-sm"
+                : "border border-border-subtle bg-surface-elevated text-text-secondary hover:bg-surface-elevated/80 hover:text-text-primary"
+            }`}
+          >
+            <Coins className="size-3.5" /> Bảng Giá Toàn Thị Trường (120+)
+          </button>
+        </div>
+      </div>
+
+      {viewMode === "signals" ? (
+        <CryptoSignalsPanel />
+      ) : (
+        <div className="space-y-3">
+          {/* Market Breadth & Benchmark Stats Grid */}
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 md:grid-cols-5">
         <BenchmarkCard
           label="Bitcoin · BTC"
           price={btcRow ? fmtNum(btcRow.price, 2) : "—"}
@@ -294,6 +328,8 @@ export function CryptoMarketPage() {
         </div>
       </Panel>
     </div>
+  )}
+</div>
   );
 }
 
