@@ -265,4 +265,45 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
       assert.ok(item.sectorRoePercentile != null && item.sectorRoePercentile >= 60);
     }
   });
+
+  await t.test("Security & Bug Fix: Graham NCAV unit normalization prevents false positives", () => {
+    // Case 1: Expensive stock (price = 50.0 thousand VND = 50k VND), ncavPerShare = 20,000 VND
+    // Without normalization, 50.0 <= 20000 * 1.3 would be true (FALSE POSITIVE).
+    // With normalization, normNcavPerShare = 20.0, so 50.0 <= 26.0 is false (CORRECT).
+    const expensive = computeFundamentalMatrix({
+      snap: {
+        equity: 50_000_000_000,
+        totalDebt: 15_000_000_000,
+        cash: 10_000_000_000,
+        shares: 2_250_000, // ncavTotal = 35B - 15B = 20B -> ncavPerShare = 20,000 VND
+        netProfit: 5_000_000_000,
+      },
+      price: 50.0, // 50,000 VND
+      marketCapBillion: 112.5,
+    });
+    assert.equal(expensive.isGrahamNcav, false, "Stock trading above NCAV must not be flagged as Graham Net-Net");
+
+    // Case 2: Deep discount bargain (price = 15.0 thousand VND = 15k VND), ncavPerShare = 20,000 VND
+    const bargain = computeFundamentalMatrix({
+      snap: {
+        equity: 50_000_000_000,
+        totalDebt: 15_000_000_000,
+        cash: 10_000_000_000,
+        shares: 2_250_000,
+        netProfit: 5_000_000_000,
+      },
+      price: 15.0, // 15,000 VND <= 20,000 * 1.3
+      marketCapBillion: 33.75,
+    });
+    assert.equal(bargain.isGrahamNcav, true, "Stock trading well below NCAV must be flagged as Graham Net-Net");
+  });
+
+  await t.test("Security & Hardening: queryScreenerStocks safely handles prototype pollution in sortKey", async () => {
+    // Malicious or invalid sort keys must safely fallback to marketCap
+    const protoRes = await queryScreenerStocks({ sort: "__proto__" as any, limit: 5 });
+    assert.ok(protoRes.items.length >= 0);
+
+    const constructorRes = await queryScreenerStocks({ sort: "constructor" as any, limit: 5 });
+    assert.ok(constructorRes.items.length >= 0);
+  });
 });

@@ -218,10 +218,16 @@ export function computeFundamentalMatrix(params: {
   const magicFormulaScore = Math.max(1, Math.min(99, Math.round(mfScore)));
 
   // 7. Forensic Accounting & Chống gian lận (Beneish M-Score & Sloan Accruals)
-  const netProfitVal = snap?.netProfit ?? 0;
-  const ocfVal = snap?.ocfTtm ?? 0;
-  const totalAssetsApprox = Math.max(1, (snap?.equity ?? 1000) * (1 + (snap?.debtEquity ?? 1)));
-  const sloanAccrualRatio = Number(((netProfitVal - ocfVal) / totalAssetsApprox).toFixed(3));
+  // Ensure consistent scale for Sloan accrual ratio (normalize to billion VND if in full VND)
+  const rawNetProfit = snap?.netProfit ?? 0;
+  const rawOcf = snap?.ocfTtm ?? 0;
+  const rawEquity = snap?.equity ?? 1000;
+  const netProfitBillion = Math.abs(rawNetProfit) > 100_000_000 ? rawNetProfit / 1_000_000_000 : rawNetProfit;
+  const ocfRatioBillion = Math.abs(rawOcf) > 100_000_000 ? rawOcf / 1_000_000_000 : rawOcf;
+  const equityBillion = Math.abs(rawEquity) > 100_000_000 ? rawEquity / 1_000_000_000 : rawEquity;
+
+  const totalAssetsApprox = Math.max(1, equityBillion * (1 + (snap?.debtEquity ?? 1)));
+  const sloanAccrualRatio = Number(((netProfitBillion - ocfRatioBillion) / totalAssetsApprox).toFixed(3));
 
   const dsri = cfoToNetProfit != null && cfoToNetProfit < 0.6 ? 1.25 : cfoToNetProfit != null && cfoToNetProfit >= 1.0 ? 0.92 : 1.0;
   const gmi = (snap?.grossMargin != null && snap.grossMargin >= 20) ? 0.95 : 1.15;
@@ -271,11 +277,21 @@ export function computeFundamentalMatrix(params: {
   const currentAssetsEst = (snap?.equity ?? 0) * 0.7 + cashVal;
   const ncavTotal = currentAssetsEst - totalDebtVal;
   const sharesVal = snap?.shares ?? 0;
-  const ncavPerShare = sharesVal > 0 ? Number((ncavTotal / sharesVal).toFixed(2)) : null;
+  const rawNcavPerShare = sharesVal > 0 ? Number((ncavTotal / sharesVal).toFixed(2)) : null;
+  // Normalize ncavPerShare to match price unit (thousand VND vs full VND)
+  let normNcavPerShare = rawNcavPerShare;
+  if (normNcavPerShare != null && price != null && price > 0) {
+    if (price < 500 && normNcavPerShare > 500) {
+      normNcavPerShare = normNcavPerShare / 1000;
+    } else if (price > 500 && normNcavPerShare < 500) {
+      normNcavPerShare = normNcavPerShare * 1000;
+    }
+  }
   const isGrahamNcav = Boolean(
     (marketCapBillion != null && ncavTotal > 0 && marketCapBillion <= (ncavTotal / 1_000_000_000) * 1.3) ||
-    (ncavPerShare != null && price != null && price > 0 && price <= ncavPerShare * 1.3 && netProfitVal > 0)
+    (normNcavPerShare != null && price != null && price > 0 && price <= normNcavPerShare * 1.3 && rawNetProfit > 0)
   );
+  const ncavPerShare = normNcavPerShare ?? rawNcavPerShare;
 
   // 11. Working Capital & Cash Conversion Cycle (CCC)
   const effectiveCurrentRatio = snap?.currentRatio ?? (isNetCash ? 1.5 : null);

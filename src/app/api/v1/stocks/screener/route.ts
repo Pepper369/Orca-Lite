@@ -126,12 +126,12 @@ export async function GET(req: Request) {
     workingCapOnly: url.searchParams.get("workingCapOnly") === "true" ? true : undefined,
     dividendAristocratOnly: url.searchParams.get("dividendAristocratOnly") === "true" ? true : undefined,
     quarterlyInflectionOnly: url.searchParams.get("quarterlyInflectionOnly") === "true" ? true : undefined,
-    minSectorRoePercentile: num(url.searchParams.get("minSectorRoePercentile")),
-    maxSectorPePercentile: num(url.searchParams.get("maxSectorPePercentile")),
-    maxCccDays: num(url.searchParams.get("maxCccDays")),
-    minBuffettScore: num(url.searchParams.get("minBuffettScore")),
+    minSectorRoePercentile: num(url.searchParams.get("minSectorRoePercentile"), 0, 100),
+    maxSectorPePercentile: num(url.searchParams.get("maxSectorPePercentile"), 0, 100),
+    maxCccDays: num(url.searchParams.get("maxCccDays"), 0, 1000),
+    minBuffettScore: num(url.searchParams.get("minBuffettScore"), 0, 100),
     maSignal: url.searchParams.get("maSignal") ?? undefined,
-    sort: url.searchParams.get("sort") ?? "marketCap",
+    sort: (url.searchParams.get("sort") ?? "marketCap").slice(0, 40).replace(/[^a-zA-Z0-9_]/g, ""),
     order: (url.searchParams.get("order")
       ? url.searchParams.get("order") === "asc" ? "asc" : "desc"
       : (url.searchParams.get("sort") === "absBuyDiff" || url.searchParams.get("sort") === "buyPointDiffPct") ? "asc" : "desc") as "asc" | "desc",

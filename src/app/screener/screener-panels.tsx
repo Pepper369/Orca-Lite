@@ -2034,6 +2034,26 @@ export function VnScreener({
       setViewTab("quant");
       setSortKey("quantEdgeScore");
       setSortOrder("desc");
+    } else if (p === "buffett_compounder" || p === "beneish_safe") {
+      setViewTab("fa_matrix");
+      setSortKey("buffettScore");
+      setSortOrder("desc");
+    } else if (p === "lynch_fast_grower") {
+      setViewTab("fa_matrix");
+      setSortKey("peg");
+      setSortOrder("asc");
+    } else if (p === "graham_ncav") {
+      setViewTab("fa_matrix");
+      setSortKey("price");
+      setSortOrder("asc");
+    } else if (p === "cash_conversion_cycle") {
+      setViewTab("fa_matrix");
+      setSortKey("cashConversionCycleDays");
+      setSortOrder("asc");
+    } else if (p === "dividend_aristocrat") {
+      setViewTab("fa_matrix");
+      setSortKey("dividendYield");
+      setSortOrder("desc");
     }
     setApplied((prev) => ({ ...prev, preset: p }));
   };
@@ -4865,6 +4885,21 @@ export function VnScreener({
                       isNetCash={row.isNetCash}
                       roic={row.roic}
                       cfoToNp={row.cfoToNetProfit}
+                    />
+                  )}
+                  {(row.isBeneishSafe != null || row.isQuarterlyInflection) && (
+                    <FaForensicBadge
+                      beneishMScore={row.beneishMScore}
+                      isBeneishSafe={row.isBeneishSafe}
+                      sloanAccrualRatio={row.sloanAccrualRatio}
+                      isQuarterlyInflection={row.isQuarterlyInflection}
+                    />
+                  )}
+                  {row.industryRankVi && (
+                    <IndustryRankBadge
+                      industryRankVi={row.industryRankVi}
+                      sectorPePercentile={row.sectorPePercentile}
+                      sectorRoePercentile={row.sectorRoePercentile}
                     />
                   )}
                   {(row.isTightCloses || row.isVolumeDryUp || row.isWyckoffLps) && (

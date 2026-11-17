@@ -1985,10 +1985,13 @@ function detectPresets(item: {
   }
 
   // 26. Mua Dưới Giá Trị Thanh Lý Benjamin Graham (NCAV Net-Net)
+  const normNcav = (item.ncavPerShare != null && item.price != null && item.price < 500 && item.ncavPerShare > 500)
+    ? item.ncavPerShare / 1000
+    : item.ncavPerShare;
   if (
     item.isGrahamNcav === true ||
     item.faCategory === "GRAHAM_NET_NET" ||
-    (item.ncavPerShare != null && item.price != null && item.price > 0 && item.price <= item.ncavPerShare * 1.05)
+    (normNcav != null && item.price != null && item.price > 0 && item.price <= normNcav * 1.05)
   ) {
     passes.push("graham_ncav");
   }
@@ -3898,8 +3901,16 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     filtered.push(x);
   }
 
-  // High-performance sorting comparator
-  const sortKey = (params.sort ?? "marketCap") as keyof ScreenerStockItem;
+  // High-performance sorting comparator with property access protection
+  const requestedSort = params.sort ?? "marketCap";
+  const sample = filtered[0];
+  const isValidSortKey =
+    typeof requestedSort === "string" &&
+    requestedSort !== "__proto__" &&
+    requestedSort !== "constructor" &&
+    requestedSort !== "prototype" &&
+    (sample == null || Object.prototype.hasOwnProperty.call(sample, requestedSort));
+  const sortKey = (isValidSortKey ? requestedSort : "marketCap") as keyof ScreenerStockItem;
   const isAsc = params.order != null
     ? params.order === "asc"
     : (sortKey === "absBuyDiff" || sortKey === "buyPointDiffPct");
