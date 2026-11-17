@@ -219,4 +219,50 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
       assert.equal(item.isBeneishSafe, true);
     }
   });
+
+  await t.test("Phase 3: Industry sector relative percentiles and ranking labels are computed", async () => {
+    const res = await queryScreenerStocks({ limit: 50 });
+    assert.ok(res.items.length > 0);
+
+    // Look for items with sector percentiles
+    const itemsWithSectorRank = res.items.filter(
+      (it) => it.sectorRoePercentile != null || it.sectorPePercentile != null,
+    );
+    assert.ok(itemsWithSectorRank.length > 0, "Should have stocks with sector percentile rankings");
+
+    for (const item of itemsWithSectorRank) {
+      if (item.sectorRoePercentile != null) {
+        assert.ok(item.sectorRoePercentile >= 0 && item.sectorRoePercentile <= 100);
+      }
+      if (item.sectorPePercentile != null) {
+        assert.ok(item.sectorPePercentile >= 0 && item.sectorPePercentile <= 100);
+      }
+      if (item.industryRankVi != null) {
+        assert.ok(typeof item.industryRankVi === "string" && item.industryRankVi.length > 0);
+      }
+    }
+  });
+
+  await t.test("Phase 3: queryScreenerStocks filters with minBuffettScore, maxCccDays, minSectorRoePercentile", async () => {
+    // Test minBuffettScore
+    const buffettRes = await queryScreenerStocks({ minBuffettScore: 70, limit: 15 });
+    assert.ok(buffettRes.total >= 0);
+    for (const item of buffettRes.items) {
+      assert.ok(item.buffettScore != null && item.buffettScore >= 70);
+    }
+
+    // Test maxCccDays
+    const cccRes = await queryScreenerStocks({ maxCccDays: 90, limit: 15 });
+    assert.ok(cccRes.total >= 0);
+    for (const item of cccRes.items) {
+      assert.ok(item.cashConversionCycleDays != null && item.cashConversionCycleDays <= 90);
+    }
+
+    // Test minSectorRoePercentile
+    const roeRes = await queryScreenerStocks({ minSectorRoePercentile: 60, limit: 15 });
+    assert.ok(roeRes.total >= 0);
+    for (const item of roeRes.items) {
+      assert.ok(item.sectorRoePercentile != null && item.sectorRoePercentile >= 60);
+    }
+  });
 });

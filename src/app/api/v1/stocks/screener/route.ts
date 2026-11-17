@@ -125,6 +125,11 @@ export async function GET(req: Request) {
     grahamNcavOnly: url.searchParams.get("grahamNcavOnly") === "true" ? true : undefined,
     workingCapOnly: url.searchParams.get("workingCapOnly") === "true" ? true : undefined,
     dividendAristocratOnly: url.searchParams.get("dividendAristocratOnly") === "true" ? true : undefined,
+    quarterlyInflectionOnly: url.searchParams.get("quarterlyInflectionOnly") === "true" ? true : undefined,
+    minSectorRoePercentile: num(url.searchParams.get("minSectorRoePercentile")),
+    maxSectorPePercentile: num(url.searchParams.get("maxSectorPePercentile")),
+    maxCccDays: num(url.searchParams.get("maxCccDays")),
+    minBuffettScore: num(url.searchParams.get("minBuffettScore")),
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: url.searchParams.get("sort") ?? "marketCap",
     order: (url.searchParams.get("order")

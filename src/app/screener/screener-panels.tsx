@@ -91,7 +91,8 @@ type ViewTab =
   | "technical"
   | "valuation"
   | "profitability"
-  | "health";
+  | "health"
+  | "fa_matrix";
 
 export function OrcaMasterBadge({
   score,
@@ -968,6 +969,21 @@ export function FaHealthBadge({
   if (faCategory === "FORTRESS") {
     colorClass = "bg-emerald-500/20 text-emerald-200 border-emerald-400/40 font-bold";
     dotClass = "bg-emerald-400";
+  } else if (faCategory === "BUFFETT_COMPOUNDER") {
+    colorClass = "bg-amber-500/25 text-amber-200 border-amber-400/50 font-bold shadow-xs";
+    dotClass = "bg-amber-300";
+  } else if (faCategory === "LYNCH_GROWTH") {
+    colorClass = "bg-purple-500/25 text-purple-200 border-purple-400/50 font-bold";
+    dotClass = "bg-purple-300";
+  } else if (faCategory === "GRAHAM_NET_NET") {
+    colorClass = "bg-blue-500/25 text-blue-200 border-blue-400/50 font-bold";
+    dotClass = "bg-blue-300";
+  } else if (faCategory === "DIVIDEND_ARISTOCRAT") {
+    colorClass = "bg-emerald-500/25 text-emerald-200 border-emerald-400/50 font-bold";
+    dotClass = "bg-emerald-300";
+  } else if (faCategory === "WORKING_CAPITAL") {
+    colorClass = "bg-teal-500/25 text-teal-200 border-teal-400/50 font-bold";
+    dotClass = "bg-teal-300";
   } else if (faCategory === "CASH_MACHINE") {
     colorClass = "bg-cyan-500/20 text-cyan-200 border-cyan-400/40 font-bold";
     dotClass = "bg-cyan-400";
@@ -996,6 +1012,65 @@ export function FaHealthBadge({
       <span className={`size-1.5 rounded-full ${dotClass}`} />
       <span>{faBadgeVi ?? faCategory}</span>
       {roic != null && roic >= 15 && <span className="opacity-80">· ROIC {roic.toFixed(0)}%</span>}
+    </span>
+  );
+}
+
+export function FaForensicBadge({
+  beneishMScore,
+  isBeneishSafe,
+  sloanAccrualRatio,
+  isQuarterlyInflection,
+  inflectionDelta,
+}: {
+  beneishMScore?: number | null;
+  isBeneishSafe?: boolean | null;
+  sloanAccrualRatio?: number | null;
+  isQuarterlyInflection?: boolean | null;
+  inflectionDelta?: number | null;
+}) {
+  if (isBeneishSafe == null && !isQuarterlyInflection) return null;
+  return (
+    <div className="inline-flex items-center gap-1 flex-wrap">
+      {isBeneishSafe === true && (
+        <span
+          title={`Beneish M-Score: ${beneishMScore?.toFixed(2) ?? "<-2.22"} (Sạch gian lận BCTC)${sloanAccrualRatio != null ? ` · Sloan Accrual: ${(sloanAccrualRatio * 100).toFixed(1)}%` : ""}`}
+          className="inline-flex items-center gap-1 rounded bg-emerald-500/20 border border-emerald-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-emerald-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-emerald-400" />
+          Beneish Sạch {beneishMScore != null ? `(${beneishMScore.toFixed(1)})` : ""}
+        </span>
+      )}
+      {isQuarterlyInflection && (
+        <span
+          title={`Điểm uốn tăng trưởng quý: LNST tăng tốc +${inflectionDelta?.toFixed(1) ?? "15"}% so với quý liền trước`}
+          className="inline-flex items-center gap-1 rounded bg-indigo-500/20 border border-indigo-400/40 px-1.5 py-0.5 text-[9.5px] font-bold text-indigo-300 whitespace-nowrap"
+        >
+          <span className="size-1.5 rounded-full bg-indigo-400" />
+          Điểm Uốn {inflectionDelta != null ? `(+${inflectionDelta.toFixed(0)}%)` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function IndustryRankBadge({
+  industryRankVi,
+  sectorRoePercentile,
+  sectorPePercentile,
+}: {
+  industryRankVi?: string | null;
+  sectorRoePercentile?: number | null;
+  sectorPePercentile?: number | null;
+}) {
+  if (!industryRankVi && sectorRoePercentile == null && sectorPePercentile == null) return null;
+  return (
+    <span
+      title={`Vị thế phân vị ngành: ${industryRankVi ?? `ROE: ${sectorRoePercentile ?? "—"}% | P/E Rẻ: ${sectorPePercentile ?? "—"}%`}`}
+      className="inline-flex items-center gap-1 rounded bg-blue-500/15 border border-blue-400/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-blue-300 whitespace-nowrap"
+    >
+      <span className="size-1.5 rounded-full bg-blue-400" />
+      <span>{industryRankVi ?? (sectorRoePercentile != null ? `Top ${100 - sectorRoePercentile}% ROE Ngành` : "Vị thế Ngành")}</span>
     </span>
   );
 }
@@ -1244,6 +1319,17 @@ export function VnScreener({
   const [netCashOnly, setNetCashOnly] = useState(false);
   const [tightClosesOnly, setTightClosesOnly] = useState(false);
   const [vduOnly, setVduOnly] = useState(false);
+  // Phase 3 & 4 Fundamental Analysis Matrix States
+  const [beneishSafeOnly, setBeneishSafeOnly] = useState(false);
+  const [buffettCompounderOnly, setBuffettCompounderOnly] = useState(false);
+  const [lynchGrowerOnly, setLynchGrowerOnly] = useState(false);
+  const [grahamNcavOnly, setGrahamNcavOnly] = useState(false);
+  const [workingCapOnly, setWorkingCapOnly] = useState(false);
+  const [dividendAristocratOnly, setDividendAristocratOnly] = useState(false);
+  const [quarterlyInflectionOnly, setQuarterlyInflectionOnly] = useState(false);
+  const [maxCccDays, setMaxCccDays] = useState("");
+  const [minBuffettScore, setMinBuffettScore] = useState("");
+  const [minSectorRoePercentile, setMinSectorRoePercentile] = useState("");
 
   const handleBuyPositionChange = (val: string) => {
     setBuyPositionCombo(val);
@@ -1320,6 +1406,14 @@ export function VnScreener({
       ? "rsRating"
       : defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu" || defaultPreset === "swing_divergence"
       ? "confluenceScore"
+      : defaultPreset === "buffett_compounder" || defaultView === "fa_matrix"
+      ? "buffettScore"
+      : defaultPreset === "lynch_fast_grower"
+      ? "peg"
+      : defaultPreset === "graham_ncav"
+      ? "ncavPerShare"
+      : defaultPreset === "cash_conversion_cycle"
+      ? "cashConversionCycleDays"
       : "marketCap";
   const [sortKey, setSortKey] = useState<string>(initialSortKey);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
@@ -1378,6 +1472,16 @@ export function VnScreener({
     smcOrderBlockFilter: false,
     sniperSubtypeFilter: "all" as "all" | "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM",
     minSniperRRFilter: "",
+    beneishSafeOnly: false,
+    buffettCompounderOnly: false,
+    lynchGrowerOnly: false,
+    grahamNcavOnly: false,
+    workingCapOnly: false,
+    dividendAristocratOnly: false,
+    quarterlyInflectionOnly: false,
+    maxCccDays: "",
+    minBuffettScore: "",
+    minSectorRoePercentile: "",
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -1489,6 +1593,16 @@ export function VnScreener({
     if (applied.smcOrderBlockFilter) p.set("smcOrderBlockOnly", "true");
     if (applied.sniperSubtypeFilter && applied.sniperSubtypeFilter !== "all") p.set("sniperTriggerSubtype", applied.sniperSubtypeFilter);
     if (applied.minSniperRRFilter) p.set("minSniperRR", applied.minSniperRRFilter);
+    if (applied.beneishSafeOnly) p.set("beneishSafeOnly", "true");
+    if (applied.buffettCompounderOnly) p.set("buffettCompounderOnly", "true");
+    if (applied.lynchGrowerOnly) p.set("lynchGrowerOnly", "true");
+    if (applied.grahamNcavOnly) p.set("grahamNcavOnly", "true");
+    if (applied.workingCapOnly) p.set("workingCapOnly", "true");
+    if (applied.dividendAristocratOnly) p.set("dividendAristocratOnly", "true");
+    if (applied.quarterlyInflectionOnly) p.set("quarterlyInflectionOnly", "true");
+    if (applied.maxCccDays) p.set("maxCccDays", applied.maxCccDays);
+    if (applied.minBuffettScore) p.set("minBuffettScore", applied.minBuffettScore);
+    if (applied.minSectorRoePercentile) p.set("minSectorRoePercentile", applied.minSectorRoePercentile);
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -1556,6 +1670,16 @@ export function VnScreener({
       smcOrderBlockFilter,
       sniperSubtypeFilter,
       minSniperRRFilter,
+      beneishSafeOnly,
+      buffettCompounderOnly,
+      lynchGrowerOnly,
+      grahamNcavOnly,
+      workingCapOnly,
+      dividendAristocratOnly,
+      quarterlyInflectionOnly,
+      maxCccDays,
+      minBuffettScore,
+      minSectorRoePercentile,
     });
     void mutate();
   }, [
@@ -1605,6 +1729,16 @@ export function VnScreener({
     smcOrderBlockFilter,
     sniperSubtypeFilter,
     minSniperRRFilter,
+    beneishSafeOnly,
+    buffettCompounderOnly,
+    lynchGrowerOnly,
+    grahamNcavOnly,
+    workingCapOnly,
+    dividendAristocratOnly,
+    quarterlyInflectionOnly,
+    maxCccDays,
+    minBuffettScore,
+    minSectorRoePercentile,
     mutate,
   ]);
 
@@ -1632,6 +1766,16 @@ export function VnScreener({
     if (key === "minPiotroskiScore") setMinPiotroskiScore(val as string);
     if (key === "minRoic") setMinRoic(val as string);
     if (key === "maxPeg") setMaxPeg(val as string);
+    if (key === "beneishSafeOnly") setBeneishSafeOnly(Boolean(val));
+    if (key === "buffettCompounderOnly") setBuffettCompounderOnly(Boolean(val));
+    if (key === "lynchGrowerOnly") setLynchGrowerOnly(Boolean(val));
+    if (key === "grahamNcavOnly") setGrahamNcavOnly(Boolean(val));
+    if (key === "workingCapOnly") setWorkingCapOnly(Boolean(val));
+    if (key === "dividendAristocratOnly") setDividendAristocratOnly(Boolean(val));
+    if (key === "quarterlyInflectionOnly") setQuarterlyInflectionOnly(Boolean(val));
+    if (key === "maxCccDays") setMaxCccDays(val as string);
+    if (key === "minBuffettScore") setMinBuffettScore(val as string);
+    if (key === "minSectorRoePercentile") setMinSectorRoePercentile(val as string);
 
     setApplied((prev) => ({ ...prev, [key]: val }));
   }, []);
@@ -1660,6 +1804,16 @@ export function VnScreener({
     setMinPiotroskiScore("");
     setMinRoic("");
     setMaxPeg("");
+    setBeneishSafeOnly(false);
+    setBuffettCompounderOnly(false);
+    setLynchGrowerOnly(false);
+    setGrahamNcavOnly(false);
+    setWorkingCapOnly(false);
+    setDividendAristocratOnly(false);
+    setQuarterlyInflectionOnly(false);
+    setMaxCccDays("");
+    setMinBuffettScore("");
+    setMinSectorRoePercentile("");
 
     setApplied((prev) => ({
       ...prev,
@@ -1686,6 +1840,16 @@ export function VnScreener({
       minPiotroskiScore: "",
       minRoic: "",
       maxPeg: "",
+      beneishSafeOnly: false,
+      buffettCompounderOnly: false,
+      lynchGrowerOnly: false,
+      grahamNcavOnly: false,
+      workingCapOnly: false,
+      dividendAristocratOnly: false,
+      quarterlyInflectionOnly: false,
+      maxCccDays: "",
+      minBuffettScore: "",
+      minSectorRoePercentile: "",
     }));
   }, []);
 
@@ -1739,6 +1903,16 @@ export function VnScreener({
     setSmcOrderBlockFilter(false);
     setSniperSubtypeFilter("all");
     setMinSniperRRFilter("");
+    setBeneishSafeOnly(false);
+    setBuffettCompounderOnly(false);
+    setLynchGrowerOnly(false);
+    setGrahamNcavOnly(false);
+    setWorkingCapOnly(false);
+    setDividendAristocratOnly(false);
+    setQuarterlyInflectionOnly(false);
+    setMaxCccDays("");
+    setMinBuffettScore("");
+    setMinSectorRoePercentile("");
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1791,6 +1965,16 @@ export function VnScreener({
       smcOrderBlockFilter: false,
       sniperSubtypeFilter: "all",
       minSniperRRFilter: "",
+      beneishSafeOnly: false,
+      buffettCompounderOnly: false,
+      lynchGrowerOnly: false,
+      grahamNcavOnly: false,
+      workingCapOnly: false,
+      dividendAristocratOnly: false,
+      quarterlyInflectionOnly: false,
+      maxCccDays: "",
+      minBuffettScore: "",
+      minSectorRoePercentile: "",
     });
     void mutate();
   }, [mutate]);
@@ -2428,6 +2612,11 @@ export function VnScreener({
                   className="input !w-full !py-1.5 text-[12px] font-medium"
                 >
                   <option value="ALL">Mọi hồ sơ cơ bản</option>
+                  <option value="BUFFETT_COMPOUNDER">Lãi Kép Buffett (Moat + Cash + Rủi ro thấp)</option>
+                  <option value="LYNCH_GROWTH">Tăng Trưởng Lynch (PEG ≤ 1.0 & Nợ thấp)</option>
+                  <option value="GRAHAM_NET_NET">Giá Trị Sâu Graham (NCAV / Biên an toàn)</option>
+                  <option value="DIVIDEND_ARISTOCRAT">Quý Tộc Cổ Tức (Cổ tức đều & CFO mạnh)</option>
+                  <option value="WORKING_CAPITAL">Vốn Lưu Động Tối Ưu (Chu kỳ CCC ngắn)</option>
                   <option value="FORTRESS">Pháo Đài Tiền Mặt (Net Cash)</option>
                   <option value="CASH_MACHINE">Cỗ Máy Tiền Mặt (CFO/LNST ≥ 1.0)</option>
                   <option value="MOAT_QUALITY">Con Hào Kinh Tế (ROIC ≥ 15%)</option>
@@ -2489,7 +2678,7 @@ export function VnScreener({
             </div>
 
             {/* Row 2: Fundamental & Valuation Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2.5 pt-2 border-t border-line/40">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-12 gap-2 pt-2 border-t border-line/40">
               <Field label="P/E tối đa" value={maxPe} onChange={setMaxPe} small placeholder="15" />
               <Field label="P/B tối đa" value={maxPb} onChange={setMaxPb} small placeholder="2.0" />
               <Field label="PEG tối đa" value={maxPeg} onChange={setMaxPeg} small placeholder="1.2" />
@@ -2499,6 +2688,9 @@ export function VnScreener({
               <Field label="Cổ tức min (%)" value={minDivYield} onChange={setMinDivYield} small placeholder="5" />
               <Field label="Nợ/VCSH tối đa" value={maxDe} onChange={setMaxDe} small placeholder="1.2" />
               <Field label="Vốn hóa min (tỷ)" value={minMarketCap} onChange={setMinMarketCap} small placeholder="1000" />
+              <Field label="Buffett Score min" value={minBuffettScore} onChange={setMinBuffettScore} small placeholder="70" />
+              <Field label="CCC max (ngày)" value={maxCccDays} onChange={setMaxCccDays} small placeholder="60" />
+              <Field label="ROE Top Ngành (%)" value={minSectorRoePercentile} onChange={setMinSectorRoePercentile} small placeholder="75" />
             </div>
 
             {/* Row 3: Actionable Precision Switches */}
@@ -2548,7 +2740,34 @@ export function VnScreener({
                     onChange={(e) => setNetCashOnly(e.target.checked)}
                     className="rounded accent-amber-500"
                   />
-                  <span className="font-semibold">Pháo Đài Tiền Mặt Ròng (Net Cash)</span>
+                  <span className="font-semibold">Pháo Đài Tiền Mặt (Net Cash)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-emerald-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={beneishSafeOnly}
+                    onChange={(e) => setBeneishSafeOnly(e.target.checked)}
+                    className="rounded accent-emerald-500"
+                  />
+                  <span className="font-semibold">Báo Cáo Sạch (Beneish Safe)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={buffettCompounderOnly}
+                    onChange={(e) => setBuffettCompounderOnly(e.target.checked)}
+                    className="rounded accent-amber-500"
+                  />
+                  <span className="font-semibold">Lãi Kép Buffett (Moat + Cash)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={quarterlyInflectionOnly}
+                    onChange={(e) => setQuarterlyInflectionOnly(e.target.checked)}
+                    className="rounded accent-cyan-500"
+                  />
+                  <span className="font-semibold">Đảo Chiều Tăng Trưởng Quý</span>
                 </label>
               </div>
             </div>
@@ -2685,6 +2904,22 @@ export function VnScreener({
               }`}
             >
               Sức khỏe tài chính & Nợ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewTab("fa_matrix");
+                setSortKey("buffettScore");
+                setSortOrder("desc");
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all flex items-center gap-1.5 ${
+                viewTab === "fa_matrix"
+                  ? "bg-panel-3 text-emerald-400 font-bold shadow-xs"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <span className="size-1.5 rounded-full bg-emerald-400" />
+              Ma Trận Cơ Bản (FA)
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -3555,18 +3790,79 @@ export function VnScreener({
                     </th>
                   </>
                 )}
+
+                {viewTab === "fa_matrix" && (
+                  <>
+                    <th
+                      onClick={() => handleSort("price")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Giá {sortKey === "price" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th className="py-2.5 text-center font-bold text-emerald-300">Hồ Sơ FA</th>
+                    <th className="py-2.5 text-center font-medium">Beneish & BCTC</th>
+                    <th
+                      onClick={() => handleSort("buffettScore")}
+                      className="py-2.5 text-center font-bold cursor-pointer hover:text-amber-400 text-amber-300"
+                    >
+                      Buffett (0-100) {sortKey === "buffettScore" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("sectorRoePercentile")}
+                      className="py-2.5 text-center font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Vị Thế Ngành {sortKey === "sectorRoePercentile" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("roic")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ROIC (%) {sortKey === "roic" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("cashConversionCycleDays")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      CCC (ngày) {sortKey === "cashConversionCycleDays" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("cfoToNetProfit")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      CFO/LNST {sortKey === "cfoToNetProfit" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("peg")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      PEG {sortKey === "peg" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("interestCoverage")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      ICR {sortKey === "interestCoverage" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("dividendYield")}
+                      className="py-2.5 pr-3.5 text-right font-medium cursor-pointer hover:text-accent-primary"
+                    >
+                      Cổ tức %
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {isLoading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" || viewTab === "fa_matrix" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     <Loading rows={4} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={viewTab === "quant" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
+                  <td colSpan={viewTab === "quant" || viewTab === "fa_matrix" ? 13 : viewTab === "buy_point" ? 12 : viewTab === "confluence" ? 10 : 9} className="px-3.5 py-8 text-center text-text-muted">
                     Không có mã nào thỏa mãn tiêu chí bộ lọc. Hãy thử nới lỏng các điều kiện lọc.
                   </td>
                 </tr>
@@ -4383,6 +4679,119 @@ export function VnScreener({
                         </td>
                         <td className="num py-2.5 pr-3.5 text-right font-medium text-text-secondary">
                           {row.qualityScore != null ? `${row.qualityScore}/100` : "—"}
+                        </td>
+                      </>
+                    )}
+
+                    {viewTab === "fa_matrix" && (
+                      <>
+                        <td className={getPriceCellClass(flash)}>
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-cyan-400" title="Tick Realtime" />}
+                            {row.price != null ? fmtNum(row.price, 2) : "—"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <FaHealthBadge
+                            faCategory={row.faCategory}
+                            faBadgeVi={row.faBadgeVi}
+                            faSummaryVi={row.faSummaryVi}
+                            isNetCash={row.isNetCash}
+                            roic={row.roic}
+                            cfoToNp={row.cfoToNetProfit}
+                          />
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <FaForensicBadge
+                            beneishMScore={row.beneishMScore}
+                            isBeneishSafe={row.isBeneishSafe}
+                            sloanAccrualRatio={row.sloanAccrualRatio}
+                            isQuarterlyInflection={row.isQuarterlyInflection}
+                          />
+                        </td>
+                        <td className="num py-2.5 text-center font-bold">
+                          {row.buffettScore != null ? (
+                            <span
+                              className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-mono ${
+                                row.buffettScore >= 80
+                                  ? "bg-amber-500/20 text-amber-300 font-extrabold border border-amber-500/30"
+                                  : row.buffettScore >= 60
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
+                                  : "bg-panel-3 text-text-secondary"
+                              }`}
+                            >
+                              {row.buffettScore}/100
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <IndustryRankBadge
+                            industryRankVi={row.industryRankVi}
+                            sectorPePercentile={row.sectorPePercentile}
+                            sectorRoePercentile={row.sectorRoePercentile}
+                          />
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.roic != null ? (
+                            <span className={row.roic >= 15 ? "text-emerald-400 font-bold" : "text-text-primary"}>
+                              {fmtNum(row.roic, 1)}%
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.cashConversionCycleDays != null ? (
+                            <span
+                              className={
+                                row.cashConversionCycleDays <= 45
+                                  ? "text-emerald-400 font-bold"
+                                  : row.cashConversionCycleDays > 120
+                                  ? "text-rose-400"
+                                  : "text-text-secondary"
+                              }
+                            >
+                              {fmtNum(row.cashConversionCycleDays, 0)}d
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.cfoToNetProfit != null ? (
+                            <span className={row.cfoToNetProfit >= 1.0 ? "text-emerald-400 font-bold" : "text-text-secondary"}>
+                              {fmtNum(row.cfoToNetProfit, 2)}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.peg != null ? (
+                            <span className={row.peg > 0 && row.peg <= 1.0 ? "text-emerald-400 font-bold" : "text-text-primary"}>
+                              {fmtNum(row.peg, 2)}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right font-medium">
+                          {row.interestCoverage != null ? (
+                            <span className={row.interestCoverage >= 4.0 ? "text-emerald-400" : row.interestCoverage < 1.5 ? "text-rose-400" : "text-text-primary"}>
+                              {fmtNum(row.interestCoverage, 1)}x
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 pr-3.5 text-right font-medium text-text-secondary">
+                          {row.dividendYield != null && row.dividendYield > 0 ? (
+                            <span className="text-emerald-400 font-semibold">{fmtNum(row.dividendYield, 1)}%</span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                       </>
                     )}

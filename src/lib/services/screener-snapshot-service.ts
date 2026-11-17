@@ -394,6 +394,9 @@ export type ScreenerStockItem = {
   dividendPayoutRatio?: number | null;
   inflectionDelta?: number | null;
   isQuarterlyInflection?: boolean;
+  sectorPePercentile?: number | null;
+  sectorRoePercentile?: number | null;
+  industryRankVi?: string | null;
   bitFlags?: number;
 };
 
@@ -499,6 +502,12 @@ export type ScreenerFilterParams = {
   grahamNcavOnly?: boolean;
   workingCapOnly?: boolean;
   dividendAristocratOnly?: boolean;
+  // Advanced Fundamental Analysis & Sector Relative Filters (Phase 3 & 4)
+  quarterlyInflectionOnly?: boolean;
+  minSectorRoePercentile?: number;
+  maxSectorPePercentile?: number;
+  maxCccDays?: number;
+  minBuffettScore?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -2798,12 +2807,75 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       // 4b. Multi-factor Universe Orca Master Composite percentile ranking (1 - 99)
       const orcaMasterMap = calculateUniverseOrcaMaster(orcaInputs);
 
+      // 4c. Multi-factor Industry Sector Relative Percentile Ranking (ROE & P/E)
+      type SectorRankMetrics = {
+        sectorPePercentile: number | null;
+        sectorRoePercentile: number | null;
+        industryRankVi: string | null;
+      };
+      const sectorRankMap = new Map<string, SectorRankMetrics>();
+      const sectorGroups = new Map<string, typeof intermediateEntries>();
+
+      for (let i = 0; i < intermediateEntries.length; i++) {
+        const e = intermediateEntries[i];
+        const sec = e.sec?.sector ?? sectorOf(e.sym) ?? e.vc?.sector ?? "Khác";
+        let grp = sectorGroups.get(sec);
+        if (!grp) {
+          grp = [];
+          sectorGroups.set(sec, grp);
+        }
+        grp.push(e);
+      }
+
+      for (const [secName, grp] of sectorGroups.entries()) {
+        const withRoe = grp.filter((x) => x.roe != null && Number.isFinite(x.roe)).sort((a, b) => (b.roe ?? 0) - (a.roe ?? 0));
+        const withPe = grp.filter((x) => x.pe != null && x.pe > 0 && Number.isFinite(x.pe)).sort((a, b) => (a.pe ?? 0) - (b.pe ?? 0));
+
+        const roeRankMap = new Map<string, number>();
+        for (let r = 0; r < withRoe.length; r++) {
+          const pct = Math.round(((withRoe.length - r) / Math.max(1, withRoe.length)) * 100);
+          roeRankMap.set(withRoe[r].sym, pct);
+        }
+
+        const peRankMap = new Map<string, number>();
+        for (let r = 0; r < withPe.length; r++) {
+          const pct = Math.round(((withPe.length - r) / Math.max(1, withPe.length)) * 100);
+          peRankMap.set(withPe[r].sym, pct);
+        }
+
+        for (let i = 0; i < grp.length; i++) {
+          const e = grp[i];
+          const roePct = roeRankMap.get(e.sym) ?? null;
+          const pePct = peRankMap.get(e.sym) ?? null;
+          let rankLabel: string | null = null;
+          if (roePct != null && roePct >= 80) {
+            rankLabel = `Top 20% ROE ${secName}`;
+          } else if (pePct != null && pePct >= 80) {
+            rankLabel = `P/E Rẻ Top 20% ${secName}`;
+          } else if (e.faMatrix.isBuffettCompounder) {
+            rankLabel = `Compounder ${secName}`;
+          } else if (e.faMatrix.isNetCash) {
+            rankLabel = `Net Cash ${secName}`;
+          }
+
+          sectorRankMap.set(e.sym, {
+            sectorRoePercentile: roePct,
+            sectorPePercentile: pePct,
+            industryRankVi: rankLabel,
+          });
+        }
+      }
+
       for (let i = 0; i < intermediateEntries.length; i++) {
         const entry = intermediateEntries[i];
         const orcaRes = orcaMasterMap.get(entry.sym);
         const orcaMasterScore = orcaRes?.compositeScore ?? null;
         const orcaMasterCategory = orcaRes?.category;
         const orcaMasterStrengthVi = orcaRes?.primaryStrengthVi ?? null;
+        const secRanks = sectorRankMap.get(entry.sym);
+        const sectorPePercentile = secRanks?.sectorPePercentile ?? null;
+        const sectorRoePercentile = secRanks?.sectorRoePercentile ?? null;
+        const industryRankVi = secRanks?.industryRankVi ?? null;
 
         const presetsPassed = detectPresets({
           roe: entry.roe,
@@ -3286,6 +3358,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           dividendPayoutRatio: entry.faMatrix.dividendPayoutRatio,
           inflectionDelta: entry.faMatrix.inflectionDelta,
           isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
+          // Industry Sector Relative Percentiles (Phase 3)
+          sectorPePercentile,
+          sectorRoePercentile,
+          industryRankVi,
           bitFlags: (() => {
             let b = 0;
             if (entry.apexQuant.reversalMetrics.isSweetLaunchZone) b |= SCREENER_BIT.SWEET_ZONE;
@@ -3530,7 +3606,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -3635,6 +3711,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
         if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
         if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
+        if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
+        if (params.minSectorRoePercentile != null && (x.sectorRoePercentile == null || x.sectorRoePercentile < params.minSectorRoePercentile)) continue;
+        if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
+        if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
+        if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
       }
     }
 
@@ -3788,6 +3869,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
     if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
     if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
+    if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
+    if (params.minSectorRoePercentile != null && (x.sectorRoePercentile == null || x.sectorRoePercentile < params.minSectorRoePercentile)) continue;
+    if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
+    if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
+    if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
 
     // Advanced Technical Pattern Recognition Filters
     if (params.techPattern && params.techPattern !== "ALL") {
