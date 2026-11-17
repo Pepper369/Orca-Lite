@@ -8,6 +8,8 @@ import {
   calculateForexPositionSize,
   type PositionSizerResult,
 } from "@/lib/engines/forex-position-sizer";
+import type { CurrencyStrengthMatrixResult } from "@/lib/engines/forex-currency-strength";
+import type { SmcScanResult } from "@/lib/engines/forex-smc-scanner";
 import type { ForexSignalsHubData, ForexQuantSignalItem } from "@/lib/services/forex-signals-hub";
 import {
   TrendingUp,
@@ -22,18 +24,40 @@ import {
   ChevronRight,
   Crosshair,
   Percent,
+  Layers,
+  Send,
+  Copy,
+  Cpu,
 } from "lucide-react";
 
 export function ForexSignalsPanel() {
-  const { data, isLoading } = useApi<ForexSignalsHubData>("/api/v1/forex/signals", {
-    refreshInterval: 20_000,
+  const { data: hubData, isLoading: hubLoading } = useApi<ForexSignalsHubData>(
+    "/api/v1/forex/signals",
+    {
+      refreshInterval: 20_000,
+      keepPreviousData: true,
+    }
+  );
+
+  const { data: csmData } = useApi<CurrencyStrengthMatrixResult>("/api/v1/forex/csm", {
+    refreshInterval: 25_000,
     keepPreviousData: true,
   });
 
   const [selectedSignal, setSelectedSignal] = useState<ForexQuantSignalItem | null>(null);
+  const [smcPair, setSmcPair] = useState<string | null>(null);
+  const [showWebhookModal, setShowWebhookModal] = useState<boolean>(false);
+  const [copiedText, setCopiedText] = useState<string | null>(null);
+
   const [accountBalance, setAccountBalance] = useState<number>(10_000);
   const [riskPercent, setRiskPercent] = useState<number>(1.0);
   const [leverage, setLeverage] = useState<number>(100);
+
+  // Fetch SMC details on demand when user clicks on a pair
+  const { data: smcData, isLoading: smcLoading } = useApi<SmcScanResult>(
+    smcPair ? `/api/v1/forex/smc/${smcPair}` : null,
+    { keepPreviousData: true }
+  );
 
   // Position size result calculated client-side reactively
   const sizerResult: PositionSizerResult | null = useMemo(() => {
@@ -53,11 +77,103 @@ export function ForexSignalsPanel() {
     });
   }, [selectedSignal, accountBalance, riskPercent, leverage]);
 
-  const signals = data?.signals ?? [];
-  const marketSessions = data?.marketSessions ?? [];
+  const signals = hubData?.signals ?? [];
+  const marketSessions = hubData?.marketSessions ?? [];
+
+  const handleCopy = (text: string, label: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopiedText(label);
+    setTimeout(() => setCopiedText(null), 2500);
+  };
 
   return (
     <div className="space-y-4">
+      {/* 1. GIAI ĐOẠN 1: CURRENCY STRENGTH METER (CSM) & DXY BAR */}
+      {csmData && (
+        <div className="rounded-xl border border-line/70 bg-surface-1 p-3.5 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="size-4 text-accent" />
+              <h3 className="text-[13px] font-bold text-ink-1">
+                Ma Trận Sức Mạnh 8 Đồng Tiền (Currency Strength Meter - CSM)
+              </h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowWebhookModal(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent hover:text-white transition-colors"
+              >
+                <Cpu className="size-3.5" /> Kết Nối MT5 EA & Webhook
+              </button>
+            </div>
+          </div>
+
+          {/* 8 Currency Strength Bars */}
+          <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-8">
+            {csmData.scores.map((s) => {
+              const isStrong = s.score >= 6.0;
+              const isWeak = s.score <= 4.0;
+              const barWidth = `${Math.min(100, Math.max(10, s.score * 10))}%`;
+
+              return (
+                <div
+                  key={s.currency}
+                  className="rounded-lg border border-line/50 bg-surface-2/60 p-2 text-center"
+                >
+                  <div className="text-[12px] font-bold text-ink-1">{s.currency}</div>
+                  <div
+                    className={`num text-[15px] font-black ${
+                      isStrong
+                        ? "text-positive"
+                        : isWeak
+                        ? "text-negative"
+                        : "text-ink-2"
+                    }`}
+                  >
+                    {s.score.toFixed(1)}
+                  </div>
+                  {/* Progress Bar */}
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        isStrong ? "bg-positive" : isWeak ? "bg-negative" : "bg-ink-3"
+                      }`}
+                      style={{ width: barWidth }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Institutional Divergence Insight */}
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-line/40 pt-2 text-[11px] text-ink-2">
+            <div>
+              <span className="font-semibold text-accent">Cặp lệch pha tối ưu:</span>{" "}
+              <strong className="text-ink-1 font-bold">
+                {csmData.bestPairToTrade.action} {csmData.bestPairToTrade.pair}
+              </strong>{" "}
+              (Lệch {csmData.bestPairToTrade.strengthDiff} điểm)
+            </div>
+            <div>
+              <span className="font-semibold">DXY Bias:</span>{" "}
+              <Badge
+                tone={
+                  csmData.dxyEstimate.bias === "BULLISH"
+                    ? "up"
+                    : csmData.dxyEstimate.bias === "BEARISH"
+                    ? "down"
+                    : "neutral"
+                }
+              >
+                {csmData.dxyEstimate.bias} ({csmData.dxyEstimate.score}/10)
+              </Badge>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Session tracker bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line/60 bg-surface-1/70 px-4 py-2.5 text-[12px]">
         <div className="flex items-center gap-2 font-medium text-ink-1">
@@ -82,7 +198,7 @@ export function ForexSignalsPanel() {
 
       {/* Main Signals Grid */}
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-4">
-        {isLoading && signals.length === 0 ? (
+        {hubLoading && signals.length === 0 ? (
           Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
@@ -93,7 +209,6 @@ export function ForexSignalsPanel() {
           signals.map((sig) => {
             const isBuy = sig.direction === "BUY";
             const isSell = sig.direction === "SELL";
-            const isNeutral = sig.direction === "NEUTRAL";
 
             return (
               <div
@@ -204,14 +319,21 @@ export function ForexSignalsPanel() {
                   </div>
                 </div>
 
-                {/* Footer Action */}
-                <div className="mt-3 pt-2">
+                {/* Footer Actions: Lot Sizer + SMC Inspector */}
+                <div className="mt-3 grid grid-cols-2 gap-1.5 pt-2">
                   <button
                     onClick={() => setSelectedSignal(sig)}
                     type="button"
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[11px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-accent/40 bg-accent/10 py-1.5 text-[11px] font-semibold text-accent transition-colors hover:bg-accent hover:text-white"
                   >
-                    <Calculator className="size-3.5" /> Tính Lot & Quản Lý Vốn
+                    <Calculator className="size-3" /> Tính Lot
+                  </button>
+                  <button
+                    onClick={() => setSmcPair(sig.pair)}
+                    type="button"
+                    className="flex items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 py-1.5 text-[11px] font-semibold text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink-1"
+                  >
+                    <Layers className="size-3 text-accent" /> Soi SMC / FVG
                   </button>
                 </div>
               </div>
@@ -219,6 +341,253 @@ export function ForexSignalsPanel() {
           })
         )}
       </div>
+
+      {/* 2. GIAI ĐOẠN 2: SMC / FVG SCANNER MODAL */}
+      {smcPair && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-line/60 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Layers className="size-5 text-accent" />
+                  <h3 className="text-base font-bold text-ink-1">
+                    Cấu Trúc SMC & Vùng Thanh Khoản FVG — #{smcPair}
+                  </h3>
+                </div>
+                <p className="mt-0.5 text-[12px] text-ink-3">
+                  Quét tự động Unmitigated Fair Value Gaps, Order Blocks & Liquidity Sweeps
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSmcPair(null)}
+                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {smcLoading ? (
+              <div className="py-12 text-center text-[13px] text-ink-3 animate-pulse">
+                Đang giải mã cấu trúc nến tổ chức...
+              </div>
+            ) : smcData ? (
+              <div className="mt-4 space-y-3">
+                {/* Bias Box */}
+                <div className="flex items-center justify-between rounded-xl border border-line/60 bg-surface-2 p-3">
+                  <div>
+                    <span className="text-[11px] text-ink-3">Xu hướng cấu trúc vi mô:</span>
+                    <div className="text-sm font-bold text-ink-1">{smcData.summary}</div>
+                  </div>
+                  <Badge tone={smcData.bias === "BULLISH" ? "up" : smcData.bias === "BEARISH" ? "down" : "neutral"}>
+                    {smcData.bias} ({smcData.score}%)
+                  </Badge>
+                </div>
+
+                {/* Unmitigated FVG List */}
+                <div>
+                  <h4 className="text-[12px] font-bold text-ink-1">
+                    Vùng mất cân bằng giá (Unmitigated FVGs):
+                  </h4>
+                  {smcData.unmitigatedFvgList.length === 0 ? (
+                    <div className="text-[11px] text-ink-3 mt-1">Không có FVG tồn đọng.</div>
+                  ) : (
+                    <div className="mt-1.5 space-y-1.5 max-h-36 overflow-y-auto">
+                      {smcData.unmitigatedFvgList.map((fvg, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between rounded-lg border border-line/40 bg-surface-2/70 px-3 py-1.5 text-[11px]"
+                        >
+                          <span
+                            className={
+                              fvg.type === "BULLISH_FVG" ? "font-semibold text-positive" : "font-semibold text-negative"
+                            }
+                          >
+                            {fvg.type === "BULLISH_FVG" ? "▲ Bullish FVG" : "▼ Bearish FVG"}
+                          </span>
+                          <span className="num text-ink-1">
+                            {fvg.bottom.toFixed(4)} — {fvg.top.toFixed(4)} ({fvg.sizePips} pips)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Active Order Blocks */}
+                <div>
+                  <h4 className="text-[12px] font-bold text-ink-1">
+                    Khối lệnh tổ chức đang mở (Active Order Blocks):
+                  </h4>
+                  {smcData.activeOrderBlocks.length === 0 ? (
+                    <div className="text-[11px] text-ink-3 mt-1">Chưa có Order Block mới.</div>
+                  ) : (
+                    <div className="mt-1.5 space-y-1.5 max-h-36 overflow-y-auto">
+                      {smcData.activeOrderBlocks.map((ob, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between rounded-lg border border-line/40 bg-surface-2/70 px-3 py-1.5 text-[11px]"
+                        >
+                          <span
+                            className={
+                              ob.type === "BULLISH_OB" ? "font-semibold text-positive" : "font-semibold text-negative"
+                            }
+                          >
+                            {ob.type === "BULLISH_OB" ? "🟩 Demand OB" : "🟥 Supply OB"} [{ob.status}]
+                          </span>
+                          <span className="num text-ink-1">
+                            {ob.low.toFixed(4)} — {ob.high.toFixed(4)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* SMC Trade Setup */}
+                {smcData.optimalTradeSetup.direction !== "WAIT" && (
+                  <div className="rounded-xl border border-accent/40 bg-accent/5 p-3 text-[11px]">
+                    <div className="font-bold text-accent">Kế hoạch vào lệnh theo SMC:</div>
+                    <div className="mt-1 text-ink-2">
+                      Khuyến nghị {smcData.optimalTradeSetup.direction} tại vùng Entry:{" "}
+                      <strong className="text-ink-1">
+                        {smcData.optimalTradeSetup.entry?.toFixed(4)}
+                      </strong>{" "}
+                      | Cắt lỗ siết hẹp (SL):{" "}
+                      <strong className="text-negative">
+                        {smcData.optimalTradeSetup.tightStopLoss?.toFixed(4)}
+                      </strong>{" "}
+                      ({smcData.optimalTradeSetup.stopPips} pips) | Tỷ lệ R:R:{" "}
+                      <strong className="text-positive">
+                        1:{smcData.optimalTradeSetup.riskRewardRatio}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSmcPair(null)}
+                className="rounded-lg bg-surface-2 px-4 py-1.5 text-[12px] font-semibold text-ink-1 hover:bg-surface-3"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. GIAI ĐOẠN 3: WEBHOOK & MT4/MT5 EA INTEGRATION DRAWER */}
+      {showWebhookModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-xl rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
+            <div className="flex items-start justify-between border-b border-line/60 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Cpu className="size-5 text-accent" />
+                  <h3 className="text-base font-bold text-ink-1">
+                    Cầu Nối Tự Động Hóa (MT4 / MT5 EA & Telegram Webhook)
+                  </h3>
+                </div>
+                <p className="mt-0.5 text-[12px] text-ink-3">
+                  Kết nối trực tiếp tín hiệu VIP với Robot giao dịch MQL4/MQL5 hoặc Bot Telegram
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWebhookModal(false)}
+                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5 text-[12px]">
+              {/* Endpoint 1: MT4/MT5 Polling Endpoint */}
+              <div>
+                <label className="font-semibold text-ink-1">
+                  1. Đường dẫn cấp lệnh cho MT4/MT5 EA (WebRequest Polling URL):
+                </label>
+                <div className="mt-1 flex items-center justify-between rounded-lg border border-line bg-surface-2 p-2">
+                  <code className="text-[11px] text-accent select-all">
+                    http://localhost:3000/api/v1/forex/ea-feed?magic=888369
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopy(
+                        "http://localhost:3000/api/v1/forex/ea-feed?magic=888369",
+                        "ea-feed"
+                      )
+                    }
+                    className="flex items-center gap-1 rounded bg-surface-3 px-2 py-1 text-[10px] font-semibold text-ink-1 hover:bg-accent hover:text-white"
+                  >
+                    <Copy className="size-3" />
+                    {copiedText === "ea-feed" ? "Đã chép!" : "Copy URL"}
+                  </button>
+                </div>
+                <p className="mt-1 text-[10px] text-ink-3">
+                  Robot MT5 gửi lệnh `WebRequest("GET", url)` định kỳ 5s để tự động khớp Entry, SL và TP1/2/3.
+                </p>
+              </div>
+
+              {/* Endpoint 2: Telegram / External Webhook */}
+              <div>
+                <label className="font-semibold text-ink-1">
+                  2. Endpoint bắn Webhook tự động (POST Webhook Dispatcher):
+                </label>
+                <div className="mt-1 flex items-center justify-between rounded-lg border border-line bg-surface-2 p-2">
+                  <code className="text-[11px] text-ink-1 select-all">
+                    http://localhost:3000/api/v1/forex/webhook
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopy("http://localhost:3000/api/v1/forex/webhook", "webhook")
+                    }
+                    className="flex items-center gap-1 rounded bg-surface-3 px-2 py-1 text-[10px] font-semibold text-ink-1 hover:bg-accent hover:text-white"
+                  >
+                    <Copy className="size-3" />
+                    {copiedText === "webhook" ? "Đã chép!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sample MT5 Order Payload preview */}
+              <div>
+                <label className="font-semibold text-ink-1">Mẫu cấu trúc lệnh MT5 (JSON format):</label>
+                <pre className="mt-1 rounded-lg border border-line bg-surface-2 p-2.5 text-[10px] text-ink-2 overflow-x-auto max-h-32">
+{`{
+  "version": "1.0",
+  "symbol": "EURUSD",
+  "cmd": "OP_BUY",
+  "price": 1.0850,
+  "sl": 1.0825,
+  "tp1": 1.0880,
+  "tp2": 1.0900,
+  "tp3": 1.0925,
+  "lots": 0.40,
+  "magicNumber": 888369
+}`}
+                </pre>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowWebhookModal(false)}
+                className="rounded-lg bg-accent px-4 py-1.5 text-[12px] font-semibold text-white hover:opacity-90"
+              >
+                Hoàn tất
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Position Sizing Calculator Modal / Drawer */}
       {selectedSignal && sizerResult && (

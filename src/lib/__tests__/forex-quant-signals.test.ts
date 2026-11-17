@@ -106,3 +106,4 @@ test("Forex Scalp Quant Engine: Multi-Tier TP & Confidence Probability Output", 
   // Confidence probability is bounded in reasonable quant range [45, 92]
   assert.ok(signal.probability != null && signal.probability >= 45 && signal.probability <= 92);
 });
+

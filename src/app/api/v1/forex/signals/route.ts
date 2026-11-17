@@ -20,3 +20,4 @@ export async function GET() {
     return unavailable("forex-signals-engine", message);
   }
 }
+
