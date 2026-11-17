@@ -460,7 +460,7 @@ export function computeFundamentalMatrix(params: {
   beta?: number | null;
   vietcapProfile?: VietcapProfile | null;
 }): FundamentalMatrixResult {
-  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
+  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, beta, vietcapProfile } = params;
   const effectiveRevenueYoy = revenueYoyPct ?? snap?.revenueYoyPct ?? null;
 
   // 1. Dòng tiền & Chất lượng Lợi nhuận
@@ -628,7 +628,7 @@ export function computeFundamentalMatrix(params: {
     marketCapBillion,
     totalDebt: snap?.totalDebt,
     cash: snap?.cash,
-    beta: params.beta ?? ((vietcapProfile as Record<string, unknown>)?.beta as number | null | undefined) ?? null,
+    beta: beta ?? null,
     isNetCash,
   });
   const mertonDistanceToDefault = mertonRes.mertonDistanceToDefault;

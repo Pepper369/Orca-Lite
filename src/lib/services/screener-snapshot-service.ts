@@ -2709,6 +2709,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           niYoyPct,
           revenueYoyPct,
           marketCapBillion: marketCap,
+          beta: quantFeatures.beta ?? beta,
           vietcapProfile: vc,
         });
 
