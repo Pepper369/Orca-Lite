@@ -93,3 +93,4 @@ export function calculateCryptoSlippageBufferUsd(
   const maxAllowedSlippageUsd = Math.round(bufferUsd * 2.5 * 100) / 100;
   return { bufferUsd, maxAllowedSlippageUsd };
 }
+

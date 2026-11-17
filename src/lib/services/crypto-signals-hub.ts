@@ -6,6 +6,7 @@ import { analyzeScalp } from "../engines/scalp";
 import { analyzeFundingRate, evaluateTrueLevel2Dom } from "../engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "../engines/crypto-news-shield";
 import { calculateCryptoPositionSize } from "../engines/crypto-position-sizer";
+import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import type { Meta } from "../types";
 
 export interface CryptoQuantSignalItem {
@@ -31,6 +32,9 @@ export interface CryptoQuantSignalItem {
   domImbalance: number;
   circuitBreakerLockout: boolean;
   circuitBreakerWarning?: string;
+  isHighWinrateVerified?: boolean;
+  winrateScore?: number;
+  liquiditySweepDetected?: boolean;
   recommendedMarginUsd: number;
   riskAmountUsd: number;
   evidence: string[];
@@ -169,6 +173,31 @@ async function scanSingleCryptoPair(pair: string): Promise<CryptoQuantSignalItem
 
     const stopPct = entry && sl ? Math.round((Math.abs(entry - sl) / entry) * 100 * 10) / 10 : 1.5;
 
+    let isHighWinrateVerified = false;
+    let winrateScore = probability;
+    let liquiditySweepDetected = false;
+
+    if (direction !== "NEUTRAL" && entry && sl) {
+      const gate = evaluateHighWinrateGate({
+        symbol: pair,
+        series: klines,
+        candidateDirection: direction,
+        entryPrice: entry,
+        stopLossPrice: sl,
+        orderBookImbalance: domImbalance,
+        assetType: "CRYPTO",
+      });
+
+      isHighWinrateVerified = gate.isHighWinrateVerified;
+      winrateScore = gate.winrateScore;
+      liquiditySweepDetected = gate.liquiditySweepDetected;
+
+      if (gate.isHighWinrateVerified) {
+        probability = Math.max(probability, gate.winrateScore);
+        evidence.unshift("🎯 Siêu tín hiệu Winrate cao ≥75% (HTF Trend + OTE Sweep)");
+      }
+    }
+
     let action: "BUY" | "SELL" | "WAIT" = direction === "NEUTRAL" ? "WAIT" : direction;
     let status: CryptoQuantSignalItem["status"] =
       primarySetup?.status === "TRIGGERED" || primarySetup?.status === "ACTIVE"
@@ -228,6 +257,9 @@ async function scanSingleCryptoPair(pair: string): Promise<CryptoQuantSignalItem
       domImbalance,
       circuitBreakerLockout: shield.isLockout,
       circuitBreakerWarning: shield.warningMessage ?? undefined,
+      isHighWinrateVerified,
+      winrateScore,
+      liquiditySweepDetected,
       recommendedMarginUsd,
       riskAmountUsd: 100,
       evidence,

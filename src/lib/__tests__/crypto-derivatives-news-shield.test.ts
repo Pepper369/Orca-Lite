@@ -134,3 +134,4 @@ test("Crypto Position Sizer: calculates isolated margin, position qty & early li
   assert.equal(sizer50x.isSafeFromEarlyLiquidation, false);
   assert.ok(sizer50x.advice.includes("NGUY HIỂM"));
 });
+

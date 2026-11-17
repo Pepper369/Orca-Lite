@@ -151,3 +151,4 @@ export function calculateCryptoPositionSize(input: CryptoPositionSizerInput): Cr
     advice,
   };
 }
+

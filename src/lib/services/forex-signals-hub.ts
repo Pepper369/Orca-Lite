@@ -5,6 +5,7 @@ import { calculateForexPositionSize } from "../engines/forex-position-sizer";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
+import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import { getForexDetail } from "./forex";
 import type { Meta } from "../types";
 
@@ -37,6 +38,9 @@ export interface ForexQuantSignalItem {
   newsWarning?: string;
   cmeTicker?: string;
   domImbalance?: number;
+  isHighWinrateVerified?: boolean;
+  winrateScore?: number;
+  liquiditySweepDetected?: boolean;
   recommendedLots: number;
   riskAmountUsd: number;
   evidence: string[];
@@ -133,6 +137,10 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           riskNotes.unshift(cb.warningMessage ?? "News lockout window");
         }
 
+        let isHighWinrateVerified = false;
+        let winrateScore = probability;
+        let liquiditySweepDetected = false;
+
         try {
           const detail = await getForexDetail(pair);
           if (detail?.detail?.series?.length && detail.detail.series.length >= 20) {
@@ -153,6 +161,28 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
               } else if (flow.absorption.type === "BEARISH_ABSORPTION" && isSell) {
                 probability = Math.min(96, probability + 8);
                 evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
+              }
+            }
+
+            // High Winrate Confluence Gate Check
+            if (direction !== "NEUTRAL") {
+              const gate = evaluateHighWinrateGate({
+                symbol: pair,
+                series: detail.detail.series,
+                candidateDirection: isBuy ? "BUY" : "SELL",
+                entryPrice: entry ?? sig.last,
+                stopLossPrice: sl ?? (isBuy ? sig.last - 0.0025 : sig.last + 0.0025),
+                orderBookImbalance: domImbalance,
+                assetType: "FOREX",
+              });
+
+              isHighWinrateVerified = gate.isHighWinrateVerified;
+              winrateScore = gate.winrateScore;
+              liquiditySweepDetected = gate.liquiditySweepDetected;
+
+              if (gate.isHighWinrateVerified) {
+                probability = Math.max(probability, gate.winrateScore);
+                evidence.unshift("🎯 Siêu tín hiệu Winrate cao ≥75% (HTF Trend + OTE Sweep)");
               }
             }
           }
@@ -213,6 +243,9 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           newsWarning,
           cmeTicker,
           domImbalance,
+          isHighWinrateVerified,
+          winrateScore,
+          liquiditySweepDetected,
           recommendedLots,
           riskAmountUsd: 100,
           evidence,
@@ -258,3 +291,5 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
   return res?.value ?? null;
 }
+
+export const getForexSignalsHubData = getForexSignalsHub;

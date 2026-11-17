@@ -32,6 +32,7 @@ import {
   Copy,
   AlertTriangle,
   Flame,
+  Users,
 } from "lucide-react";
 
 interface DerivativesDetailResponse {
@@ -124,12 +125,18 @@ export function CryptoSignalsPanel() {
               <span className="text-ink-3">{stats.neutralCount} WAIT</span>
             </div>
           )}
+          <Link
+            href="/copytrade"
+            className="flex items-center gap-1.5 rounded-lg border border-positive/40 bg-positive/10 px-2.5 py-1 text-[11px] font-semibold text-positive hover:bg-positive hover:text-white transition-colors"
+          >
+            <Users className="size-3.5" /> Copy Trading & Bot API
+          </Link>
           <button
             type="button"
             onClick={() => setShowWebhookModal(true)}
             className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent hover:text-white transition-colors"
           >
-            <Cpu className="size-3.5" /> Bot Webhook & API
+            <Cpu className="size-3.5" /> Webhook
           </button>
         </div>
       </div>
@@ -193,6 +200,16 @@ export function CryptoSignalsPanel() {
                     {sig.circuitBreakerLockout && (
                       <span className="inline-flex items-center gap-1 rounded-md bg-negative/15 px-1.5 py-0.5 text-[10px] font-bold text-negative border border-negative/40 animate-pulse">
                         <Lock className="size-2.5" /> KHÓA LỆNH
+                      </span>
+                    )}
+                    {sig.isHighWinrateVerified && (
+                      <span className="inline-flex items-center gap-0.5 rounded-md bg-positive/15 px-1.5 py-0.5 text-[10px] font-bold text-positive border border-positive/40">
+                        🎯 VIP {sig.winrateScore ?? sig.probability}%
+                      </span>
+                    )}
+                    {sig.liquiditySweepDetected && (
+                      <span className="inline-flex items-center gap-0.5 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent border border-accent/40">
+                        ⚡ SWEEP
                       </span>
                     )}
                     <span className="inline-flex items-center gap-0.5 rounded-md bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-accent border border-accent/40">
@@ -734,3 +751,4 @@ export function CryptoSignalsPanel() {
     </div>
   );
 }
+
