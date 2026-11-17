@@ -87,10 +87,189 @@ export interface FundamentalMatrixResult {
   inflectionDelta: number | null;
   isQuarterlyInflection: boolean;
 
-  // 14. Phân hạng Sức khỏe FA Tổng hợp
+  // 14. Forensic Book-Tax Difference & Cash Realization (Phase 1)
+  bookTaxDifference: number | null; // Pretax Income - (Tax Expense / 0.20) / Total Assets
+  isBookTaxSafe: boolean; // BTD <= 0.04 & BTD >= -0.08
+  cashRealizationRatio: number | null; // OCF / EBITDA (>= 0.85 = xuất sắc)
+
+  // 15. Return on Incremental Invested Capital & Super Compounder (Phase 1)
+  roiic3Y: number | null; // ROIIC (%)
+  isSuperCompounder: boolean; // ROIIC >= 25% & ROIC >= 15% & Safe Debt
+
+  // 16. Reverse DCF & Implied Growth Solver (Phase 2)
+  impliedGrowthPct: number | null; // Tốc độ tăng trưởng FCF định giá ngụ ý (%)
+  reverseDcfMarginPct: number | null; // Biên độ an toàn chiết khấu định giá (%)
+
+  // 17. Phân hạng Sức khỏe FA Tổng hợp
   faCategory: FaCategory;
   faBadgeVi: string;
   faSummaryVi: string;
+}
+
+export function calculateBookTaxDifference(
+  snap?: Partial<FundamentalSnapshot> | null,
+  totalAssetsFallback?: number
+): { bookTaxDifference: number | null; isBookTaxSafe: boolean } {
+  if (!snap) return { bookTaxDifference: null, isBookTaxSafe: true };
+  const rawPretax = snap.pretaxIncome;
+  const rawTax = snap.taxExpense;
+  const rawNetProfit = snap.netProfit ?? 0;
+
+  let pretaxBillion: number | null = null;
+  let taxBillion: number | null = null;
+
+  if (rawPretax != null && rawTax != null) {
+    pretaxBillion = Math.abs(rawPretax) > 100_000_000 ? rawPretax / 1_000_000_000 : rawPretax;
+    taxBillion = Math.abs(rawTax) > 100_000_000 ? rawTax / 1_000_000_000 : rawTax;
+  } else if (rawNetProfit !== 0) {
+    const npBillion = Math.abs(rawNetProfit) > 100_000_000 ? rawNetProfit / 1_000_000_000 : rawNetProfit;
+    pretaxBillion = npBillion / 0.8;
+    taxBillion = pretaxBillion * 0.2;
+  }
+
+  if (pretaxBillion == null || taxBillion == null) {
+    return { bookTaxDifference: null, isBookTaxSafe: true };
+  }
+
+  const rawTotalAssets = snap.totalAssets;
+  let assetsBillion =
+    rawTotalAssets != null
+      ? Math.abs(rawTotalAssets) > 100_000_000
+        ? rawTotalAssets / 1_000_000_000
+        : rawTotalAssets
+      : totalAssetsFallback ?? 1000;
+  if (assetsBillion <= 0) assetsBillion = 1000;
+
+  // Corporate income tax standard rate in Vietnam is 20%
+  const btd = (pretaxBillion - taxBillion / 0.2) / assetsBillion;
+  const bookTaxDifference = Number(btd.toFixed(3));
+  const isBookTaxSafe = bookTaxDifference <= 0.04 && bookTaxDifference >= -0.08;
+
+  return { bookTaxDifference, isBookTaxSafe };
+}
+
+export function calculateCashRealizationRatio(
+  snap?: Partial<FundamentalSnapshot> | null,
+  ocfBillion?: number | null
+): number | null {
+  if (!snap) return null;
+  const rawEbitda = snap.ebitdaTtm;
+  let ebitdaBillion: number | null = null;
+  if (rawEbitda != null && rawEbitda !== 0) {
+    ebitdaBillion = Math.abs(rawEbitda) > 100_000_000 ? rawEbitda / 1_000_000_000 : rawEbitda;
+  } else if (snap.netProfit != null && snap.netProfit > 0) {
+    const npBillion = Math.abs(snap.netProfit) > 100_000_000 ? snap.netProfit / 1_000_000_000 : snap.netProfit;
+    ebitdaBillion = npBillion * 1.25;
+  }
+
+  const ocf =
+    ocfBillion ??
+    (snap.ocfTtm != null
+      ? Math.abs(snap.ocfTtm) > 100_000_000
+        ? snap.ocfTtm / 1_000_000_000
+        : snap.ocfTtm
+      : null);
+
+  if (ocf == null || ebitdaBillion == null || ebitdaBillion <= 0) return null;
+  return Number((ocf / ebitdaBillion).toFixed(2));
+}
+
+export function calculateRoiic(params: {
+  snap?: Partial<FundamentalSnapshot> | null;
+  roic: number | null;
+  niYoyPct: number | null;
+}): { roiic3Y: number | null; isSuperCompounder: boolean } {
+  const { snap, roic, niYoyPct } = params;
+  let roiic3Y: number | null = null;
+
+  if (snap?.roiic3Y != null && Number.isFinite(snap.roiic3Y)) {
+    roiic3Y = Number(snap.roiic3Y.toFixed(1));
+  } else if (snap?.deltaNopat != null && snap?.deltaIc != null && snap.deltaIc > 0) {
+    roiic3Y = Number(((snap.deltaNopat / snap.deltaIc) * 100).toFixed(1));
+  } else if (roic != null && Number.isFinite(roic)) {
+    const growth = niYoyPct != null ? Math.max(-50, Math.min(100, niYoyPct)) : 10;
+    const modeled = roic * (1 + growth / 100);
+    roiic3Y = Number(Math.max(-50, Math.min(100, modeled)).toFixed(1));
+  }
+
+  const isSuperCompounder = Boolean(
+    roiic3Y != null &&
+    roiic3Y >= 25.0 &&
+    roic != null &&
+    roic >= 15.0
+  );
+
+  return { roiic3Y, isSuperCompounder };
+}
+
+export function solveReverseDcfImpliedGrowth(params: {
+  fcfBillion: number | null;
+  netProfitBillion: number | null;
+  marketCapBillion: number | null;
+  wacc?: number;
+  terminalGrowth?: number;
+  expectedGrowth?: number | null;
+}): { impliedGrowthPct: number | null; reverseDcfMarginPct: number | null } {
+  const { fcfBillion, netProfitBillion, marketCapBillion } = params;
+  if (marketCapBillion == null || marketCapBillion <= 0) {
+    return { impliedGrowthPct: null, reverseDcfMarginPct: null };
+  }
+
+  const baseCf =
+    fcfBillion != null && fcfBillion > 0
+      ? fcfBillion
+      : netProfitBillion != null && netProfitBillion > 0
+      ? netProfitBillion * 0.85
+      : null;
+
+  if (baseCf == null || baseCf <= 0) {
+    return { impliedGrowthPct: null, reverseDcfMarginPct: null };
+  }
+
+  const w = params.wacc ?? 0.1; // 10.0% WACC
+  const gT = params.terminalGrowth ?? 0.03; // 3.0% perpetual growth
+  const years = 5;
+
+  function dcfVal(g: number): number {
+    let pvForecast = 0;
+    let cf_t = baseCf!;
+    for (let t = 1; t <= years; t++) {
+      cf_t *= 1 + g;
+      pvForecast += cf_t / Math.pow(1 + w, t);
+    }
+    const terminalVal = (cf_t * (1 + gT)) / (w - gT);
+    const pvTerminal = terminalVal / Math.pow(1 + w, years);
+    return pvForecast + pvTerminal;
+  }
+
+  let low = -0.3;
+  let high = 0.6;
+  const valLow = dcfVal(low);
+  const valHigh = dcfVal(high);
+
+  let impliedG: number;
+  if (marketCapBillion <= valLow) {
+    impliedG = low;
+  } else if (marketCapBillion >= valHigh) {
+    impliedG = high;
+  } else {
+    for (let i = 0; i < 24; i++) {
+      const mid = (low + high) / 2;
+      const v = dcfVal(mid);
+      if (v < marketCapBillion) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    impliedG = (low + high) / 2;
+  }
+
+  const impliedGrowthPct = Number((impliedG * 100).toFixed(1));
+  const expG = params.expectedGrowth ?? 12.0;
+  const reverseDcfMarginPct = Number((expG - impliedGrowthPct).toFixed(1));
+
+  return { impliedGrowthPct, reverseDcfMarginPct };
 }
 
 export function computeFundamentalMatrix(params: {
@@ -244,7 +423,29 @@ export function computeFundamentalMatrix(params: {
   const beneishMScore = Number(rawMScore.toFixed(2));
   const isBeneishSafe = beneishMScore < -2.22;
 
-  // 8. Warren Buffett Compounder (Siêu tích lũy vốn)
+  // 8. Warren Buffett Compounder (Siêu tích lũy vốn) & ROIIC
+  // 14. Forensic Book-Tax Difference & Cash Realization (Phase 1)
+  const { bookTaxDifference, isBookTaxSafe } = calculateBookTaxDifference(snap, totalAssetsApprox);
+  const cashRealizationRatio = calculateCashRealizationRatio(snap, ocfBillion);
+
+  // 15. Return on Incremental Invested Capital & Super Compounder (Phase 1)
+  const roiicRes = calculateRoiic({ snap, roic, niYoyPct });
+  const roiic3Y = roiicRes.roiic3Y;
+  const isSuperCompounder = Boolean(
+    roiicRes.isSuperCompounder &&
+    isSafeDebt &&
+    (cfoToNetProfit == null || cfoToNetProfit >= 0.8)
+  );
+
+  // 16. Reverse DCF & Implied Growth Solver (Phase 2)
+  const expectedGrowthBenchmark = Math.max(5.0, Math.min(35.0, niYoyPct ?? effectiveRevenueYoy ?? 12.0));
+  const { impliedGrowthPct, reverseDcfMarginPct } = solveReverseDcfImpliedGrowth({
+    fcfBillion,
+    netProfitBillion,
+    marketCapBillion,
+    expectedGrowth: expectedGrowthBenchmark,
+  });
+
   const isBuffettCompounder = Boolean(
     isHighRoic &&
     roe >= 18 &&
@@ -260,6 +461,7 @@ export function computeFundamentalMatrix(params: {
   if (isNetCash) bScore += 15;
   if (isQualityEarnings) bScore += 10;
   if (netMargin >= 15) bScore += 10;
+  if (isSuperCompounder) bScore += 10;
   const buffettScore = Math.min(99, bScore);
 
   // 9. Peter Lynch Fast Grower
@@ -338,10 +540,10 @@ export function computeFundamentalMatrix(params: {
   const isAltmanDistress = snap?.coverage != null && snap.coverage > 0 && (snap.debtEquity ?? 0) > 3.0;
   const isDangerousDebt = (interestCoverage != null && interestCoverage < 1.3) || (snap?.debtEquity != null && snap.debtEquity > 3.5);
 
-  if (isDangerousDebt || isAltmanDistress || beneishMScore >= -1.78) {
+  if (isDangerousDebt || isAltmanDistress || beneishMScore >= -1.78 || (bookTaxDifference != null && bookTaxDifference > 0.08)) {
     faCategory = "HIGH_RISK";
     faBadgeVi = "Cảnh Báo Rủi Ro";
-    faSummaryVi = `Đòn bẩy nợ cao (D/E ${snap?.debtEquity?.toFixed(1) ?? "—"}) hoặc nguy cơ biến dạng BCTC (M-Score ${beneishMScore}).`;
+    faSummaryVi = `Đòn bẩy nợ cao (D/E ${snap?.debtEquity?.toFixed(1) ?? "—"}) hoặc nguy cơ biến dạng BCTC (M-Score ${beneishMScore}${bookTaxDifference != null && bookTaxDifference > 0.08 ? `, BTD ${bookTaxDifference}` : ""}).`;
   } else if (isNetCash && (interestCoverage == null || interestCoverage >= 4.0) && roe >= 12) {
     faCategory = "FORTRESS";
     faBadgeVi = "Pháo Đài Tiền Mặt";
@@ -353,7 +555,7 @@ export function computeFundamentalMatrix(params: {
   } else if (isBuffettCompounder && isHighRoic && roe >= 20) {
     faCategory = "BUFFETT_COMPOUNDER";
     faBadgeVi = "Siêu Tích Lũy Vốn";
-    faSummaryVi = `Doanh nghiệp siêu tích lũy vốn tự thân (Compounder), ROIC ${roic}%, lợi thế con hào kinh tế Moat rộng.`;
+    faSummaryVi = `Doanh nghiệp siêu tích lũy vốn tự thân (Compounder), ROIC ${roic}%, ROIIC ${roiic3Y ?? roic}%, lợi thế con hào kinh tế Moat rộng.`;
   } else if (isHighRoic && roe >= 16 && isSafeDebt) {
     faCategory = "MOAT_QUALITY";
     faBadgeVi = "Con Hào Kinh Tế";
@@ -421,6 +623,13 @@ export function computeFundamentalMatrix(params: {
     dividendPayoutRatio,
     inflectionDelta,
     isQuarterlyInflection,
+    bookTaxDifference,
+    isBookTaxSafe,
+    cashRealizationRatio,
+    roiic3Y,
+    isSuperCompounder,
+    impliedGrowthPct,
+    reverseDcfMarginPct,
     faCategory,
     faBadgeVi,
     faSummaryVi,

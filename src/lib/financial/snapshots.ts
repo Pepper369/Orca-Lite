@@ -38,6 +38,12 @@ export type FundamentalSnapshot = {
   shares: number | null;
   epsTtm: number | null;
   ebitdaTtm: number | null;
+  pretaxIncome?: number | null;
+  taxExpense?: number | null;
+  totalAssets?: number | null;
+  roiic3Y?: number | null;
+  deltaNopat?: number | null;
+  deltaIc?: number | null;
   revenueYoyPct: number | null;
   niYoyPct: number | null;
   revenueQoqPct: number | null;
@@ -131,6 +137,9 @@ export function buildSnapshotFromBundle(b: PackageBundle): FundamentalSnapshot {
     shares: a.shares,
     epsTtm: a.epsTtm,
     ebitdaTtm: a.ebitdaTtm,
+    pretaxIncome: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.profitBeforeTax ?? null,
+    taxExpense: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.taxExpense ?? null,
+    totalAssets: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.totalAssets ?? null,
     revenueYoyPct: growthOf(g, "revenue", "yoy") ?? growthOf(g, "netRevenue", "yoy"),
     niYoyPct: growthOf(g, "netIncome", "yoy") ?? growthOf(g, "netIncomeParent", "yoy"),
     revenueQoqPct: growthOf(g, "revenue", "qoq") ?? growthOf(g, "netRevenue", "qoq"),

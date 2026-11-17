@@ -394,6 +394,13 @@ export type ScreenerStockItem = {
   dividendPayoutRatio?: number | null;
   inflectionDelta?: number | null;
   isQuarterlyInflection?: boolean;
+  bookTaxDifference?: number | null;
+  isBookTaxSafe?: boolean;
+  cashRealizationRatio?: number | null;
+  roiic3Y?: number | null;
+  isSuperCompounder?: boolean;
+  impliedGrowthPct?: number | null;
+  reverseDcfMarginPct?: number | null;
   sectorPePercentile?: number | null;
   sectorRoePercentile?: number | null;
   industryRankVi?: string | null;
@@ -508,6 +515,12 @@ export type ScreenerFilterParams = {
   maxSectorPePercentile?: number;
   maxCccDays?: number;
   minBuffettScore?: number;
+  // Quantitative FA Optimization Filters (Phase 1 & 2)
+  superCompounderOnly?: boolean;
+  bookTaxSafeOnly?: boolean;
+  minRoiic?: number;
+  maxImpliedGrowth?: number;
+  minReverseDcfMargin?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -2658,6 +2671,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             faMatrix.peg = Number((pe / niYoyPct).toFixed(2));
             faMatrix.isUndervaluedGrowth = faMatrix.peg <= 1.0;
           }
+          if (faMatrix.roiic3Y == null && seed.roic != null) {
+            faMatrix.roiic3Y = seed.roic;
+            faMatrix.isSuperCompounder = seed.roic >= 25.0;
+          }
         }
 
         // Enhanced VCP details
@@ -3362,6 +3379,14 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           dividendPayoutRatio: entry.faMatrix.dividendPayoutRatio,
           inflectionDelta: entry.faMatrix.inflectionDelta,
           isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
+          // Quantitative FA Optimization Fields (Phase 1 & 2)
+          bookTaxDifference: entry.faMatrix.bookTaxDifference,
+          isBookTaxSafe: entry.faMatrix.isBookTaxSafe,
+          cashRealizationRatio: entry.faMatrix.cashRealizationRatio,
+          roiic3Y: entry.faMatrix.roiic3Y,
+          isSuperCompounder: entry.faMatrix.isSuperCompounder,
+          impliedGrowthPct: entry.faMatrix.impliedGrowthPct,
+          reverseDcfMarginPct: entry.faMatrix.reverseDcfMarginPct,
           // Industry Sector Relative Percentiles (Phase 3)
           sectorPePercentile,
           sectorRoePercentile,
@@ -3610,7 +3635,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -3720,6 +3745,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
         if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
         if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
+    // Quantitative FA Optimization Filters (Phase 1 & 2)
+    if (params.superCompounderOnly && !x.isSuperCompounder) continue;
+    if (params.bookTaxSafeOnly && !x.isBookTaxSafe) continue;
+    if (params.minRoiic != null && (x.roiic3Y == null || x.roiic3Y < params.minRoiic)) continue;
+    if (params.maxImpliedGrowth != null && (x.impliedGrowthPct == null || x.impliedGrowthPct > params.maxImpliedGrowth)) continue;
+    if (params.minReverseDcfMargin != null && (x.reverseDcfMarginPct == null || x.reverseDcfMarginPct < params.minReverseDcfMargin)) continue;
       }
     }
 
@@ -3878,6 +3909,12 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
     if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
     if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
+    // Quantitative FA Optimization Filters (Phase 1 & 2)
+    if (params.superCompounderOnly && !x.isSuperCompounder) continue;
+    if (params.bookTaxSafeOnly && !x.isBookTaxSafe) continue;
+    if (params.minRoiic != null && (x.roiic3Y == null || x.roiic3Y < params.minRoiic)) continue;
+    if (params.maxImpliedGrowth != null && (x.impliedGrowthPct == null || x.impliedGrowthPct > params.maxImpliedGrowth)) continue;
+    if (params.minReverseDcfMargin != null && (x.reverseDcfMarginPct == null || x.reverseDcfMarginPct < params.minReverseDcfMargin)) continue;
 
     // Advanced Technical Pattern Recognition Filters
     if (params.techPattern && params.techPattern !== "ALL") {

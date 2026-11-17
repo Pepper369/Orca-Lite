@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeFundamentalMatrix } from "../engines/fundamental-quant-matrix";
+import {
+  computeFundamentalMatrix,
+  calculateBookTaxDifference,
+  calculateCashRealizationRatio,
+  calculateRoiic,
+  solveReverseDcfImpliedGrowth,
+} from "../engines/fundamental-quant-matrix";
 import {
   SCREENER_BIT,
   queryScreenerStocks,
@@ -318,5 +324,142 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
 
     const constructorRes = await queryScreenerStocks({ sort: "constructor" as any, limit: 5 });
     assert.ok(constructorRes.items.length >= 0);
+  });
+
+  await t.test("Quantitative FA Phase 1: Book-Tax Difference (BTD) detects aggressive tax reporting vs safe", () => {
+    // Normal healthy reporting
+    const safeStock = computeFundamentalMatrix({
+      snap: {
+        roic: 18.0,
+        netProfit: 800,
+        pretaxIncome: 1000,
+        taxExpense: 200, // 200 / 0.20 = 1000 => BTD = 0
+        totalAssets: 5000,
+        ebitdaTtm: 1200,
+        ocfTtm: 1100, // CRR = 1100 / 1200 = 0.92
+      },
+      price: 40.0,
+      pe: 10.0,
+      marketCapBillion: 8000,
+    });
+
+    assert.equal(safeStock.isBookTaxSafe, true);
+    assert.equal(safeStock.bookTaxDifference, 0);
+    assert.ok(safeStock.cashRealizationRatio != null && safeStock.cashRealizationRatio >= 0.85);
+
+    // Aggressive earnings management: Pretax 2500 but Tax declared only 200
+    const aggressive = computeFundamentalMatrix({
+      snap: {
+        roic: 12.0,
+        netProfit: 2300,
+        pretaxIncome: 2500,
+        taxExpense: 200, // 200 / 0.20 = 1000 => (2500 - 1000) / 5000 = 0.30 >> 0.08
+        totalAssets: 5000,
+        interestCoverage: 5.0,
+      },
+      price: 30.0,
+      marketCapBillion: 6000,
+    });
+
+    assert.equal(aggressive.isBookTaxSafe, false);
+    assert.ok(aggressive.bookTaxDifference != null && aggressive.bookTaxDifference > 0.08);
+    assert.equal(aggressive.faCategory, "HIGH_RISK");
+  });
+
+  await t.test("Quantitative FA Phase 1: ROIIC and Super-Compounder classification", () => {
+    // Super compounder: high ROIC + high growth deployment => ROIIC >= 25%
+    const superStock = computeFundamentalMatrix({
+      snap: {
+        roic: 22.0,
+        interestCoverage: 10.0,
+        cash: 500,
+        totalDebt: 1000,
+        ocfTtm: 1150, // cfoToNetProfit = 0.96 (between 0.85 and 1.1)
+        fcfTtm: 900,
+        netProfit: 1200,
+        revenue: 8000,
+        niYoyPct: 25.0, // ROIIC modeled = 22 * 1.25 = 27.5% >= 25%
+      },
+      price: 55.0,
+      pe: 15.0,
+      niYoyPct: 25.0,
+      marketCapBillion: 18000,
+    });
+
+    assert.equal(superStock.isSuperCompounder, true);
+    assert.equal(superStock.isBuffettCompounder, true);
+    assert.ok(superStock.roiic3Y != null && superStock.roiic3Y >= 25.0);
+    assert.equal(superStock.faCategory, "BUFFETT_COMPOUNDER");
+
+    // Explicit delta NOPAT and delta IC
+    const explicitCompounder = computeFundamentalMatrix({
+      snap: {
+        roic: 18.0,
+        interestCoverage: 8.0,
+        cash: 2000,
+        totalDebt: 1000,
+        ocfTtm: 1400,
+        fcfTtm: 1000,
+        netProfit: 1000,
+        deltaNopat: 350,
+        deltaIc: 1000, // ROIIC = 35%
+      },
+      price: 50.0,
+      pe: 12.0,
+      marketCapBillion: 12000,
+    });
+
+    assert.equal(explicitCompounder.isSuperCompounder, true);
+    assert.equal(explicitCompounder.roiic3Y, 35.0);
+  });
+
+  await t.test("Quantitative FA Phase 2: Reverse DCF Implied Growth Solver & Margin of Safety", () => {
+    // Undervalued stock: FCF is high (1,000B), Market Cap is low (10,000B, 10x FCF), Expected growth = 20%
+    const undervalued = computeFundamentalMatrix({
+      snap: {
+        roic: 16.0,
+        fcfTtm: 1000,
+        netProfit: 1200,
+        interestCoverage: 6.0,
+      },
+      price: 25.0,
+      niYoyPct: 20.0,
+      marketCapBillion: 10000,
+    });
+
+    assert.ok(undervalued.impliedGrowthPct != null);
+    // At 10x FCF with WACC=10%, implied growth is modest/negative (~ -3.5%)
+    assert.ok(undervalued.impliedGrowthPct < 5.0);
+    // Margin of safety is substantial (Expected 20% - Implied <= 5% => Margin >= 15%)
+    assert.ok(undervalued.reverseDcfMarginPct != null && undervalued.reverseDcfMarginPct > 15.0);
+
+    // Direct solver validation
+    const dcfSolver = solveReverseDcfImpliedGrowth({
+      fcfBillion: 500,
+      netProfitBillion: 600,
+      marketCapBillion: 15000, // 30x FCF => Market implies strong growth
+      wacc: 0.10,
+      terminalGrowth: 0.03,
+      expectedGrowth: 10.0,
+    });
+
+    assert.ok(dcfSolver.impliedGrowthPct != null && dcfSolver.impliedGrowthPct > 10.0);
+    // Since expected growth (10%) < implied growth (>10%), margin is negative (premium)
+    assert.ok(dcfSolver.reverseDcfMarginPct != null && dcfSolver.reverseDcfMarginPct < 0);
+  });
+
+  await t.test("Quantitative FA Phase 1 & 2: Screener filters query by superCompounder and bookTaxSafe", async () => {
+    const res = await queryScreenerStocks({ superCompounderOnly: true, limit: 10 });
+    assert.ok(res.total >= 0);
+    for (const item of res.items) {
+      assert.equal(item.isSuperCompounder, true);
+      assert.ok(item.roiic3Y != null && item.roiic3Y >= 25.0);
+    }
+
+    const safeRes = await queryScreenerStocks({ bookTaxSafeOnly: true, limit: 10 });
+    assert.ok(safeRes.total >= 0);
+    for (const item of safeRes.items) {
+      assert.equal(item.isBookTaxSafe, true);
+    }
   });
 });
