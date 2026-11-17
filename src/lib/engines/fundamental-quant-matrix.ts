@@ -94,7 +94,7 @@ export interface FundamentalMatrixResult {
 }
 
 export function computeFundamentalMatrix(params: {
-  snap?: FundamentalSnapshot | null;
+  snap?: Partial<FundamentalSnapshot> | null;
   price?: number | null;
   pe?: number | null;
   pb?: number | null;

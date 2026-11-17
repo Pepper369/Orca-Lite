@@ -4,7 +4,6 @@ import { computeFundamentalMatrix } from "../engines/fundamental-quant-matrix";
 import {
   SCREENER_BIT,
   queryScreenerStocks,
-  type ScreenerStockItem,
 } from "../services/screener-snapshot-service";
 
 test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t) => {
@@ -263,6 +262,20 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
     assert.ok(roeRes.total >= 0);
     for (const item of roeRes.items) {
       assert.ok(item.sectorRoePercentile != null && item.sectorRoePercentile >= 60);
+    }
+
+    // Test maxSectorPePercentile
+    const peRes = await queryScreenerStocks({ maxSectorPePercentile: 50, limit: 15 });
+    assert.ok(peRes.total >= 0);
+    for (const item of peRes.items) {
+      assert.ok(item.sectorPePercentile != null && item.sectorPePercentile <= 50);
+    }
+
+    // Test quarterlyInflectionOnly
+    const inflectionRes = await queryScreenerStocks({ quarterlyInflectionOnly: true, limit: 15 });
+    assert.ok(inflectionRes.total >= 0);
+    for (const item of inflectionRes.items) {
+      assert.equal(item.isQuarterlyInflection, true);
     }
   });
 
