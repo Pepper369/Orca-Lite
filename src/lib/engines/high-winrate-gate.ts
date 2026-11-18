@@ -11,6 +11,12 @@
 
 import type { OhlcvBar } from "../types";
 import { ema } from "../technical";
+import {
+  calculateRequiredSpeedPace,
+  evaluateCheapTailMispricing,
+  type ReversalPaceMetrics,
+  type TailMispricingMetrics,
+} from "./quant-reversal-pace";
 
 export interface HighWinrateGateResult {
   isHighWinrateVerified: boolean;
@@ -29,6 +35,8 @@ export interface HighWinrateGateResult {
     fibRatio: number; // 0.0 to 1.0 within dealing range
     isOteZone: boolean; // between 0.618 and 0.786
   };
+  reversalPace?: ReversalPaceMetrics;
+  cheapTail?: TailMispricingMetrics;
   passedGates: string[];
   failedGates: string[];
   breakevenPlan: {
@@ -221,18 +229,50 @@ export function evaluateHighWinrateGate(params: {
   }
 
   // -------------------------------------------------------------
-  // GATE 5: BREAKEVEN AUTOMATION PLAN
+  // GATE 5: QUANT REVERSAL PACE & TAIL PROBABILITY (0x50f7 Model)
+  // -------------------------------------------------------------
+  const recentRanges = series.slice(-10).map((b) => b.high - b.low);
+  const avgRange = recentRanges.length > 0 ? recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length : 0.001;
+  const microVol = Math.max(1e-6, avgRange / Math.sqrt(300));
+
+  const reversalPace = calculateRequiredSpeedPace({
+    currentPrice: lastBar.close,
+    referencePrice: lastBar.open,
+    secondsRemaining: 45, // Late candle snapshot
+    microVolatilityPerSec: microVol,
+    assetType,
+  });
+
+  const cheapTail = evaluateCheapTailMispricing({
+    symbol: params.symbol,
+    bars: series,
+    currentPrice: lastBar.close,
+    paceMetrics: reversalPace,
+    orderFlowImbalance: orderBookImbalance,
+    assetType,
+  });
+
+  if (reversalPace.isIrreversibleLock) {
+    score += 8;
+    passedGates.push(`Gate 5 (Pace Lock): Required Speed ${reversalPace.requiredSpeedPerMin.toFixed(1)} vượt ${reversalPace.zScoreSpeed}σ (Khóa đà không thể đảo chiều)`);
+  } else if (cheapTail.isCheapTailDetected) {
+    score += 6;
+    passedGates.push(`Gate 5 (Tail Hunt): Lệch giá đuôi (Fair ${cheapTail.fairTailProbability * 100}% vs Implied ${cheapTail.impliedMarketOdds * 100}%, R:R 1:${cheapTail.asymmetricRewardRatio})`);
+  }
+
+  // -------------------------------------------------------------
+  // GATE 6: BREAKEVEN AUTOMATION PLAN
   // -------------------------------------------------------------
   const priceRisk = Math.abs(entryPrice - stopLossPrice);
   const trailingBuffer = assetType === "FOREX" ? 1.0 : Math.round(entryPrice * 0.0015 * 100) / 100;
 
-  passedGates.push("Gate 5: Kích hoạt kế hoạch Breakeven (Chốt 50% tại TP1, dời SL hòa vốn)");
+  passedGates.push("Gate 6: Kích hoạt kế hoạch Breakeven (Chốt 50% tại TP1, dời SL hòa vốn)");
 
   const winrateScore = Math.min(95, Math.max(35, score));
   const isHighWinrateVerified = winrateScore >= 75 && htfTrendAligned;
 
   const commentary = isHighWinrateVerified
-    ? `🎯 SIÊU TÍN HIỆU WINRATE CAO (${winrateScore}%): Đạt trọn vẹn 5 cổng định lượng. Xu hướng HTF ${htfTrend}, đã quét thanh khoản ${sweptSide} và vào lệnh tại vùng giá OTE tối ưu.`
+    ? `🎯 SIÊU TÍN HIỆU WINRATE CAO (${winrateScore}%): Đạt trọn vẹn các cổng định lượng. Xu hướng HTF ${htfTrend}, quét thanh khoản ${sweptSide}, OTE Fib ${(rangePosition * 100).toFixed(0)}% và bảo chứng tốc độ Reversal Pace.`
     : `⚠️ TÍN HIỆU TIÊU CHUẨN (${winrateScore}%): Chưa đạt chuẩn Winrate cao tối đa do [${failedGates[0] ?? "cần thêm hội tụ"}]. Khuyến nghị giảm 50% khối lượng giao dịch.`;
 
   return {
@@ -248,6 +288,8 @@ export function evaluateHighWinrateGate(params: {
       fibRatio: Math.round(rangePosition * 1000) / 1000,
       isOteZone,
     },
+    reversalPace,
+    cheapTail,
     passedGates,
     failedGates,
     breakevenPlan: {
