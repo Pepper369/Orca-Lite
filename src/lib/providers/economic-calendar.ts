@@ -175,3 +175,32 @@ export async function getEconomicCalendar(asOfDate: Date = new Date()): Promise<
     },
   };
 }
+
+const COUNTRY_TO_CURRENCY: Record<EconomicCalendarEvent["country"], string> = {
+  US: "USD",
+  EU: "EUR",
+  CN: "CNY",
+  VN: "VND",
+  GLOBAL: "ALL",
+};
+
+/**
+ * Maps scheduled high-impact global macro events (US/EU/GLOBAL) into circuit-breaker format.
+ */
+export async function getGlobalMacroShieldEvents(
+  asOfDate: Date = new Date(),
+): Promise<{ name: string; currency: string; time: string; importance: string }[]> {
+  try {
+    const snap = await getEconomicCalendar(asOfDate);
+    return snap.events
+      .filter((ev) => ev.impact === "HIGH" && (ev.country === "US" || ev.country === "EU" || ev.country === "GLOBAL"))
+      .map((ev) => ({
+        name: ev.title,
+        currency: COUNTRY_TO_CURRENCY[ev.country] ?? "USD",
+        time: `${ev.date}T${ev.time ?? "12:00"}:00+07:00`,
+        importance: ev.impact === "HIGH" ? "high" : "medium",
+      }));
+  } catch {
+    return [];
+  }
+}

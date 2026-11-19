@@ -1,12 +1,15 @@
 import "server-only";
 import { buildMeta } from "../freshness";
-import { buildForexScalpSignal, type ForexScalpResult } from "./forex-scalp";
+import { buildForexScalpSignal } from "./forex-scalp";
 import { calculateForexPositionSize } from "../engines/forex-position-sizer";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
 import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
-import { getForexDetail } from "./forex";
+import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
+import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
+import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
+import { getForexDetail, getForexMarkets } from "./forex";
 import type { Meta } from "../types";
 
 export interface ForexQuantSignalItem {
@@ -41,6 +44,13 @@ export interface ForexQuantSignalItem {
   isHighWinrateVerified?: boolean;
   winrateScore?: number;
   liquiditySweepDetected?: boolean;
+  setupGrade?: SetupGrade;
+  expectancyR?: number;
+  entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  vetoReasons?: string[];
+  netRiskReward?: number | null;
+  recommendedSizeMultiplier?: number;
+  csmSpread?: number | null;
   recommendedLots: number;
   riskAmountUsd: number;
   evidence: string[];
@@ -71,10 +81,17 @@ const MONITORED_PAIRS = [
   "XAUUSD",
 ];
 
+const GRADE_RANK: Record<SetupGrade, number> = {
+  "A+": 4,
+  A: 3,
+  B: 2,
+  NO_TRADE: 1,
+};
+
 export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData; meta: Meta } | null> {
   const { cached } = await import("../cache");
 
-  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v1", {
+  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v2", {
     ttlMs: 20_000,
     staleMs: 120_000,
     softSwr: true,
@@ -89,113 +106,178 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         { name: "New York (Mỹ)", hours: "12:00 - 21:00 UTC", isOpen: utcHour >= 12 && utcHour < 21 },
       ];
 
-      // Scan pairs concurrently with fallback resilience
-      const results = await Promise.allSettled(
-        MONITORED_PAIRS.map(async (pair) => {
-          const res = await buildForexScalpSignal(pair);
-          return { pair, res };
-        })
-      );
+      // Pre-load global macro calendar & CSM once per scan
+      const [calendarEvents, marketsRes, results] = await Promise.all([
+        getGlobalMacroShieldEvents(now).catch(() => []),
+        getForexMarkets().catch(() => null),
+        Promise.allSettled(
+          MONITORED_PAIRS.map(async (pair) => {
+            const [res, detail] = await Promise.all([
+              buildForexScalpSignal(pair),
+              getForexDetail(pair).catch(() => null),
+            ]);
+            return { pair, res, detail };
+          }),
+        ),
+      ]);
+
+      const csmScoreMap = new Map<string, number>();
+      if (marketsRes?.data?.rows?.length) {
+        const csmInputs: PairPriceInput[] = marketsRes.data.rows
+          .filter((r) => r.price > 0)
+          .map((r) => ({
+            pair: r.pair,
+            price: r.price,
+            changePercent: r.changePercent ?? 0,
+          }));
+        if (csmInputs.length >= 4) {
+          const csm = calculateCurrencyStrengthMatrix(csmInputs);
+          for (const s of csm.scores) csmScoreMap.set(s.currency, s.score);
+        }
+      }
 
       const signals: ForexQuantSignalItem[] = [];
 
       for (const item of results) {
         if (item.status !== "fulfilled" || !item.value.res) continue;
-        const { pair, res } = item.value;
+        const { pair, res, detail } = item.value;
         const sig = res.result.signal;
         const setup = sig.primarySetup;
 
-        const isBuy = sig.direction === "watch-long" || setup?.direction === "BUY";
-        const isSell = sig.direction === "watch-short" || setup?.direction === "SELL";
-        const direction = isBuy ? "BUY" : isSell ? "SELL" : "NEUTRAL";
-        const action = direction === "NEUTRAL" ? "WAIT" : direction;
+        const baseCurr = pair.slice(0, 3);
+        const quoteCurr = pair.slice(3, 6);
+        const baseScore = csmScoreMap.get(baseCurr);
+        const quoteScore = csmScoreMap.get(quoteCurr);
+        const csmSpread =
+          baseScore != null && quoteScore != null
+            ? Number((baseScore - quoteScore).toFixed(1))
+            : baseCurr === "XAU" && quoteScore != null
+              ? Number((5.0 - quoteScore).toFixed(1))
+              : null;
 
-        const entry = setup?.entry ?? sig.last;
-        const sl = setup?.stopLoss ?? (entry ? (isBuy ? entry * 0.995 : entry * 1.005) : null);
-        const tp1 = sig.tp1 ?? setup?.takeProfit1 ?? null;
-        const tp2 = sig.tp2 ?? setup?.takeProfit2 ?? setup?.takeProfit ?? null;
-        const tp3 = sig.tp3 ?? setup?.takeProfit3 ?? null;
-        const stopPips = setup?.stopPips ?? (entry && sl ? Math.round(Math.abs(entry - sl) / sig.pipSize * 10) / 10 : 25);
-        let probability = sig.probability ?? (sig.strength > 0 ? Math.min(92, Math.max(50, Math.round(50 + sig.strength * 0.4))) : 50);
+        // 1. Real Economic Calendar News Circuit Breaker Check (Anti-Slippage Shield)
+        const cb = evaluateNewsCircuitBreaker(pair, Date.now(), calendarEvents);
+        const newsLockout = cb.isLockout;
+        const newsWarning = cb.isLockout ? cb.warningMessage : undefined;
 
+        const detailSeries = detail?.detail?.series ?? [];
         let fii: number | null = null;
         let absorption: ForexQuantSignalItem["absorption"] = null;
         let vpoc: number | null = null;
         let vwap: number | null = null;
-        let newsLockout = false;
-        let newsWarning: string | undefined;
         let cmeTicker: string | undefined;
         let domImbalance: number | undefined;
-        const evidence = [...sig.evidence];
-        const riskNotes = [...sig.riskNotes];
-
-        // 1. News Circuit Breaker Check (Anti-Slippage Shield)
-        const cb = evaluateNewsCircuitBreaker(pair);
-        if (cb.isLockout) {
-          newsLockout = true;
-          newsWarning = cb.warningMessage;
-          riskNotes.unshift(cb.warningMessage ?? "News lockout window");
-        }
-
         let isHighWinrateVerified = false;
-        let winrateScore = probability;
         let liquiditySweepDetected = false;
 
-        try {
-          const detail = await getForexDetail(pair);
-          if (detail?.detail?.series?.length && detail.detail.series.length >= 20) {
-            const flow = generateDeepFlowSignal(pair, detail.detail.series);
-            fii = flow.flowIntensityIndex;
-            absorption = flow.absorption.type;
-            vpoc = flow.volumeProfile.vpocPrice;
-            vwap = flow.vwap.vwap;
+        const evidence = [...sig.evidence];
+        const riskNotes = [...sig.riskNotes];
+        if (newsWarning) riskNotes.unshift(newsWarning);
 
-            const dom = reconstructSyntheticDom(pair, detail.detail.series, sig.filter.spreadPips);
-            cmeTicker = dom.cmeContract?.cmeTicker;
-            domImbalance = dom.orderBookImbalanceRatio;
+        if (detailSeries.length >= 20) {
+          const flow = generateDeepFlowSignal(pair, detailSeries);
+          fii = flow.flowIntensityIndex;
+          absorption = flow.absorption.type;
+          vpoc = flow.volumeProfile.vpocPrice;
+          vwap = flow.vwap.vwap;
 
-            if (flow.absorption.detected) {
-              if (flow.absorption.type === "BULLISH_ABSORPTION" && isBuy) {
-                probability = Math.min(96, probability + 8);
-                evidence.push("🚨 Hấp thụ mua (Bullish Absorption) xác nhận đáy");
-              } else if (flow.absorption.type === "BEARISH_ABSORPTION" && isSell) {
-                probability = Math.min(96, probability + 8);
-                evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
-              }
-            }
+          const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
+          cmeTicker = dom.cmeContract?.cmeTicker;
+          domImbalance = dom.orderBookImbalanceRatio;
 
-            // High Winrate Confluence Gate Check
-            if (direction !== "NEUTRAL") {
-              const gate = evaluateHighWinrateGate({
-                symbol: pair,
-                series: detail.detail.series,
-                candidateDirection: isBuy ? "BUY" : "SELL",
-                entryPrice: entry ?? sig.last,
-                stopLossPrice: sl ?? (isBuy ? sig.last - 0.0025 : sig.last + 0.0025),
-                orderBookImbalance: domImbalance,
-                assetType: "FOREX",
-              });
-
-              isHighWinrateVerified = gate.isHighWinrateVerified;
-              winrateScore = gate.winrateScore;
-              liquiditySweepDetected = gate.liquiditySweepDetected;
-
-              if (gate.isHighWinrateVerified) {
-                probability = Math.max(probability, gate.winrateScore);
-                evidence.unshift("🎯 Siêu tín hiệu Winrate cao ≥75% (HTF Trend + OTE Sweep)");
-              }
+          if (flow.absorption.detected) {
+            if (flow.absorption.type === "BULLISH_ABSORPTION" && sig.direction === "watch-long") {
+              evidence.push("🚨 Hấp thụ mua (Bullish Absorption) xác nhận đáy");
+            } else if (flow.absorption.type === "BEARISH_ABSORPTION" && sig.direction === "watch-short") {
+              evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
             }
           }
-        } catch {
-          /* fallback */
         }
 
-        // Calculate standard lot recommendation for standard $10,000 account, 1% risk ($100)
-        let recommendedLots = 0.1;
-        if (entry && sl) {
+        // 2. Harmonized Precision Evaluation
+        const intradayPrecision = sig.precision;
+        const dailyPrecision =
+          detailSeries.length >= 30
+            ? evaluatePrecisionTradeSetup({
+                symbol: pair,
+                assetType: "FOREX",
+                barsExecution: detailSeries,
+                candidateDirection:
+                  intradayPrecision && intradayPrecision.direction !== "NEUTRAL"
+                    ? intradayPrecision.direction
+                    : setup?.direction === "BUY" || setup?.direction === "SELL"
+                      ? setup.direction
+                      : "AUTO",
+                orderBookImbalance: domImbalance ?? null,
+                csmBaseMinusQuote: csmSpread,
+                sessionLabel: sig.filter.sessionLabel,
+                spreadPipsOrPct: sig.filter.spreadPips,
+                isNewsOrCascadeLockout: newsLockout,
+                lockoutReason: newsWarning,
+              })
+            : null;
+
+        const effectivePrecision = intradayPrecision ?? dailyPrecision;
+        const rawDir = effectivePrecision?.direction ?? (sig.direction === "watch-long" ? "BUY" : sig.direction === "watch-short" ? "SELL" : "NEUTRAL");
+        const vetoReasons = [...(effectivePrecision?.vetoReasons ?? [])];
+        if (newsLockout && newsWarning && !vetoReasons.includes(newsWarning)) {
+          vetoReasons.unshift(newsWarning);
+        }
+
+        // Cross-check CSM conflict
+        if (csmSpread != null && rawDir !== "NEUTRAL") {
+          if ((rawDir === "BUY" && csmSpread <= -2.5) || (rawDir === "SELL" && csmSpread >= 2.5)) {
+            vetoReasons.push(`Lệch pha CSM mạnh ngược chiều (${csmSpread > 0 ? `+${csmSpread}` : csmSpread})`);
+          }
+        }
+
+        let setupGrade: SetupGrade = effectivePrecision?.grade ?? "NO_TRADE";
+        if (newsLockout || vetoReasons.length > 0 || rawDir === "NEUTRAL") {
+          setupGrade = "NO_TRADE";
+        }
+
+        const direction: ForexQuantSignalItem["direction"] = setupGrade === "NO_TRADE" ? "NEUTRAL" : rawDir;
+        const action: ForexQuantSignalItem["action"] = direction === "NEUTRAL" ? "WAIT" : direction;
+        const isBuy = direction === "BUY";
+
+        const entry = effectivePrecision?.entry ?? setup?.entry ?? sig.last;
+        const sl = effectivePrecision?.stopLoss ?? setup?.stopLoss ?? (entry ? (isBuy ? entry * 0.995 : entry * 1.005) : null);
+        const tp1 = effectivePrecision?.tp1 ?? sig.tp1 ?? setup?.takeProfit1 ?? null;
+        const tp2 = effectivePrecision?.tp2 ?? sig.tp2 ?? setup?.takeProfit2 ?? setup?.takeProfit ?? null;
+        const tp3 = effectivePrecision?.tp3 ?? sig.tp3 ?? setup?.takeProfit3 ?? null;
+        const stopPips =
+          entry && sl
+            ? Math.round((Math.abs(entry - sl) / sig.pipSize) * 10) / 10
+            : setup?.stopPips ?? 25;
+
+        let probability = effectivePrecision?.calibratedWinRatePct ?? sig.probability ?? 50;
+        let winrateScore = effectivePrecision?.precisionScore ?? probability;
+
+        if (direction !== "NEUTRAL" && detailSeries.length >= 30 && entry && sl) {
+          const gate = evaluateHighWinrateGate({
+            symbol: pair,
+            series: detailSeries,
+            candidateDirection: direction,
+            entryPrice: entry,
+            stopLossPrice: sl,
+            orderBookImbalance: domImbalance ?? 0,
+            assetType: "FOREX",
+          });
+          isHighWinrateVerified = gate.isHighWinrateVerified || setupGrade === "A+";
+          winrateScore = Math.max(winrateScore, gate.winrateScore);
+          liquiditySweepDetected = gate.liquiditySweepDetected;
+          if (gate.isHighWinrateVerified) {
+            probability = Math.max(probability, Math.min(86, gate.winrateScore));
+            evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
+          }
+        }
+
+        const sizeMult = setupGrade === "NO_TRADE" ? 0 : effectivePrecision?.recommendedSizeMultiplier ?? 0.5;
+        let recommendedLots = 0;
+        if (entry && sl && action !== "WAIT" && sizeMult > 0) {
           const sizer = calculateForexPositionSize({
             accountBalance: 10_000,
-            riskPercent: 1.0,
+            riskPercent: Number((1.0 * sizeMult).toFixed(2)),
             pair,
             entryPrice: entry,
             stopLossPrice: sl,
@@ -211,30 +293,30 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         signals.push({
           pair,
           symbol: symbolDisplay,
-          direction: newsLockout ? "NEUTRAL" : direction,
-          action: newsLockout ? "WAIT" : action,
+          direction,
+          action,
           timeframe: "M15/H1",
           status: newsLockout
             ? "FILTERED_OUT"
-            : setup?.status === "TRIGGERED" || setup?.status === "ACTIVE"
-            ? "ACTIVE"
-            : setup?.status === "AWAITING_M5_BREAKOUT"
-            ? "AWAITING_BREAKOUT"
-            : "NEUTRAL",
-          strength: newsLockout ? 0 : sig.strength,
+            : action === "WAIT"
+              ? "NEUTRAL"
+              : setup?.status === "TRIGGERED" || setup?.status === "ACTIVE" || setupGrade === "A+" || setupGrade === "A"
+                ? "ACTIVE"
+                : "AWAITING_BREAKOUT",
+          strength: action === "WAIT" ? Math.min(35, winrateScore) : sig.strength,
           probability: newsLockout ? 0 : probability,
           lastPrice: sig.last,
-          entryPrice: newsLockout ? null : entry,
-          stopLossPrice: newsLockout ? null : sl,
-          tp1: newsLockout ? null : tp1,
-          tp2: newsLockout ? null : tp2,
-          tp3: newsLockout ? null : tp3,
-          stopPips: newsLockout ? null : stopPips,
-          riskReward: setup?.riskReward ?? 1.5,
+          entryPrice: action === "WAIT" ? null : entry,
+          stopLossPrice: action === "WAIT" ? null : sl,
+          tp1: action === "WAIT" ? null : tp1,
+          tp2: action === "WAIT" ? null : tp2,
+          tp3: action === "WAIT" ? null : tp3,
+          stopPips: action === "WAIT" ? null : stopPips,
+          riskReward: effectivePrecision?.grossRiskReward ?? setup?.riskReward ?? 2.0,
           session: sig.filter.sessionLabel,
           sessionEligible: sig.filter.eligible,
           spreadPips: sig.filter.spreadPips,
-          regime: `${sig.regime.market} / ${sig.regime.volatility}`,
+          regime: `${effectivePrecision?.regime.state ?? sig.regime.market} / ${sig.regime.volatility}`,
           fii,
           absorption,
           vpoc,
@@ -246,19 +328,27 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           isHighWinrateVerified,
           winrateScore,
           liquiditySweepDetected,
+          setupGrade,
+          expectancyR: effectivePrecision?.expectancyR ?? 0,
+          entryMode: action === "WAIT" ? "WAIT" : effectivePrecision?.entryMode ?? "MARKET_CONFIRMED",
+          vetoReasons,
+          netRiskReward: effectivePrecision?.netRiskReward ?? null,
+          recommendedSizeMultiplier: sizeMult,
+          csmSpread,
           recommendedLots,
-          riskAmountUsd: 100,
-          evidence,
-          riskNotes,
+          riskAmountUsd: Math.round(100 * sizeMult),
+          evidence: [...new Set(evidence)].slice(0, 8),
+          riskNotes: [...new Set([...vetoReasons, ...riskNotes])].slice(0, 8),
           updatedAt: Date.now(),
         });
       }
 
-      // Sort signals by probability & strength descending
+      // Sort strictly by Setup Grade (A+ > A > B > NO_TRADE), Expectancy E[R], then calibrated probability
       signals.sort((a, b) => {
-        if (a.action !== "WAIT" && b.action === "WAIT") return -1;
-        if (a.action === "WAIT" && b.action !== "WAIT") return 1;
-        return b.probability - a.probability || b.strength - a.strength;
+        const ga = GRADE_RANK[a.setupGrade ?? "NO_TRADE"];
+        const gb = GRADE_RANK[b.setupGrade ?? "NO_TRADE"];
+        if (ga !== gb) return gb - ga;
+        return (b.expectancyR ?? -1) - (a.expectancyR ?? -1) || b.probability - a.probability;
       });
 
       const buyCount = signals.filter((s) => s.direction === "BUY").length;
@@ -267,9 +357,9 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
       const topPick = signals.find((s) => s.action !== "WAIT") ?? signals[0] ?? null;
 
       const meta = buildMeta({
-        source: "Orca Forex Scalp Engine + Multi-Tier Quant Confluence",
+        source: "Orca Forex Precision Engine v2 + CSM + Calendar Shield",
         sourceTimestampMs: Date.now(),
-        note: `Đã quét ${signals.length}/${MONITORED_PAIRS.length} cặp tiền thanh khoản cao. Phân tích đa khung M15->M5->M1.`,
+        note: `Đã thẩm định ${signals.length}/${MONITORED_PAIRS.length} cặp tiền qua 7 Cổng Precision + Macro Shield.`,
       });
 
       return {

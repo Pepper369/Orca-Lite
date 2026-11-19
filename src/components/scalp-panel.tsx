@@ -7,6 +7,23 @@ import { Crosshair, RefreshCw, ShieldAlert, Timer, Zap } from "lucide-react";
 import type { Meta, QualityStatus } from "@/lib/types";
 
 /** Client-local shapes — never import server-only modules. */
+interface PrecisionSummaryView {
+  direction: string;
+  action: string;
+  grade: "A+" | "A" | "B" | "NO_TRADE";
+  precisionScore: number;
+  calibratedWinRatePct: number;
+  expectancyR: number;
+  entryMode: string;
+  entry: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  netRiskReward: number | null;
+  vetoReasons: string[];
+}
+
 interface ScalpSignalView {
   timeframe: string;
   direction: "watch-long" | "watch-short" | "neutral" | string;
@@ -19,9 +36,15 @@ interface ScalpSignalView {
   micro: { support: number[]; resistance: number[] };
   riskNotes: string[];
   evidence: string[];
+  probability?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
+  precision?: PrecisionSummaryView | null;
   primarySetup?: {
     strategy: string;
     status: string;
+    grade?: string;
     entry: number | null;
     stopLoss: number | null;
     takeProfit: number | null;
@@ -101,9 +124,10 @@ export function ScalpPanel({ symbol }: { symbol: string }) {
 
 function ScalpView({ result, meta }: { result: ScalpResult; meta: Meta | null }) {
   const s = result.signal;
-  const digits = priceDigits(s.last);
+  const digits = s.last < 0.01 ? 8 : s.last < 1 ? 4 : priceDigits(s.last);
   const dir = DIR_UI[s.direction] ?? DIR_UI.neutral;
   const setup = s.primarySetup;
+  const prec = s.precision ?? null;
 
   return (
     <div className="space-y-2">
@@ -111,8 +135,19 @@ function ScalpView({ result, meta }: { result: ScalpResult; meta: Meta | null })
         <Badge tone={dir.tone}>
           <span className="text-[12px] font-bold">{dir.label}</span>
         </Badge>
+        {prec && (
+          <Badge tone={prec.grade === "A+" || prec.grade === "A" ? "up" : prec.grade === "B" ? "warn" : "neutral"}>
+            {prec.grade === "NO_TRADE" ? "WAIT / LỌC" : `GRADE ${prec.grade}`}
+          </Badge>
+        )}
+        {prec && prec.grade !== "NO_TRADE" && (
+          <Badge tone={prec.expectancyR >= 0.2 ? "up" : "accent"}>
+            E[R] {prec.expectancyR >= 0 ? `+${prec.expectancyR}R` : `${prec.expectancyR}R`}
+          </Badge>
+        )}
         <span className="num text-[11px] text-text-secondary">
-          strength <b className="text-text-primary">{s.strength}</b>/100 · score {s.score >= 0 ? "+" : ""}
+          winrate <b className="text-text-primary">{prec?.calibratedWinRatePct ?? s.probability ?? s.strength}</b>% · score{" "}
+          {s.score >= 0 ? "+" : ""}
           {s.score}
         </span>
         <span className="flex items-center gap-1 text-[10px] text-text-muted">
@@ -127,6 +162,13 @@ function ScalpView({ result, meta }: { result: ScalpResult; meta: Meta | null })
         {s.filter && <Badge tone={s.filter.eligible ? "up" : "down"}>tier {s.filter.tier}</Badge>}
       </div>
 
+      {prec?.grade === "NO_TRADE" && prec.vetoReasons?.length > 0 && (
+        <div className="rounded-md border border-warning/30 bg-warning/5 p-2 text-[11px] text-text-secondary">
+          <span className="font-semibold text-warning">🛡 Veto Precision: </span>
+          {prec.vetoReasons[0]}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         <Metric label="Last" value={fmtNum(s.last, digits)} />
         <Metric
@@ -139,18 +181,40 @@ function ScalpView({ result, meta }: { result: ScalpResult; meta: Meta | null })
           value={s.invalidation != null ? fmtNum(s.invalidation, digits) : "-"}
           tone="down"
         />
-        <Metric label="Source" value={result.wsLive ? "WS+REST" : "REST"} />
+        <Metric label="Mode" value={prec?.entryMode === "LIMIT_PULLBACK" ? "LIMIT OTE" : result.wsLive ? "WS+REST" : "REST"} />
       </div>
 
-      {setup && (setup.entry != null || setup.stopLoss != null) && (
-        <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-          <Metric label="Entry" value={setup.entry != null ? fmtNum(setup.entry, digits) : "-"} tone="up" />
-          <Metric label="Stop" value={setup.stopLoss != null ? fmtNum(setup.stopLoss, digits) : "-"} tone="down" />
-          <Metric
-            label="TP"
-            value={setup.takeProfit != null ? fmtNum(setup.takeProfit, digits) : "-"}
-            hint={setup.riskReward != null ? `RR ${setup.riskReward}` : undefined}
-          />
+      {s.direction !== "neutral" && (prec?.entry ?? setup?.entry) != null && (prec?.stopLoss ?? setup?.stopLoss) != null && (
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+            <Metric label="Entry" value={fmtNum((prec?.entry ?? setup?.entry) as number, digits)} tone="up" />
+            <Metric label="SL Cấu trúc" value={fmtNum((prec?.stopLoss ?? setup?.stopLoss) as number, digits)} tone="down" />
+            <Metric
+              label="TP2 Mục tiêu"
+              value={(prec?.tp2 ?? s.tp2 ?? setup?.takeProfit) != null ? fmtNum((prec?.tp2 ?? s.tp2 ?? setup?.takeProfit) as number, digits) : "-"}
+              hint={(prec?.netRiskReward ?? setup?.riskReward) != null ? `Net RR ${prec?.netRiskReward ?? setup?.riskReward}` : undefined}
+            />
+          </div>
+          {(prec?.tp1 ?? s.tp1) != null && (
+            <div className="grid grid-cols-3 gap-1.5 rounded-md border border-border-subtle bg-surface-elevated/30 p-1.5 text-[10px]">
+              <div>
+                <span className="text-text-muted">TP1 (50%+BE): </span>
+                <b className="num text-positive">{fmtNum((prec?.tp1 ?? s.tp1) as number, digits)}</b>
+              </div>
+              <div>
+                <span className="text-text-muted">TP2 (30%): </span>
+                <b className="num text-positive">
+                  {(prec?.tp2 ?? s.tp2) != null ? fmtNum((prec?.tp2 ?? s.tp2) as number, digits) : "—"}
+                </b>
+              </div>
+              <div>
+                <span className="text-text-muted">TP3 (20%): </span>
+                <b className="num text-positive">
+                  {(prec?.tp3 ?? s.tp3) != null ? fmtNum((prec?.tp3 ?? s.tp3) as number, digits) : "—"}
+                </b>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

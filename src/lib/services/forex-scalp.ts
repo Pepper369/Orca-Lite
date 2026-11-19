@@ -3,6 +3,7 @@ import { buildMeta } from "../freshness";
 import { getYahooChart, yahooSymbolForPair, yahooIntervalFor } from "../providers/yahoo";
 import { validateBars, logQualityEvent } from "../quality";
 import { analyzeForexScalp, type ForexScalpSignal } from "../engines/forex-scalp";
+import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import type { Meta, OhlcvBar } from "../types";
 import type { ChartCandle } from "../chart-const";
 
@@ -48,10 +49,12 @@ export async function buildForexScalpSignal(
       staleMs: 120_000,
       softSwr: true,
       producer: async () => {
-        const [m15, m5, m1] = await Promise.all([
+        const [h1, m15, m5, m1, calendarEvents] = await Promise.all([
+          fetchTf(pair, "1h", 80),
           fetchTf(pair, "15m", 120),
           fetchTf(pair, "5m", 200),
           fetchTf(pair, "1m", 120),
+          getGlobalMacroShieldEvents().catch(() => []),
         ]);
 
         let barsM5 = m5 ?? m15;
@@ -72,6 +75,7 @@ export async function buildForexScalpSignal(
         }
 
         const barsM15 = m15 && m15.length >= 25 ? m15 : barsM5;
+        const barsH1 = h1 && h1.length >= 20 ? validateBars(h1).cleaned : null;
 
         const q5 = validateBars(barsM5);
         const q15 = validateBars(barsM15);
@@ -83,6 +87,8 @@ export async function buildForexScalpSignal(
           barsM15: q15.cleaned,
           barsM5: q5.cleaned,
           barsM1: m1 && m1.length >= 25 ? validateBars(m1).cleaned : null,
+          barsH1,
+          calendarEvents,
         });
         if (!signal) {
           throw new Error("engine could not compute forex scalp signal");

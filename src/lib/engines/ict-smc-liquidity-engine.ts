@@ -10,6 +10,8 @@
  */
 
 import type { OhlcvBar } from "../types";
+import { atr, ema } from "../technical";
+import { getAssetPipSize, normalizeEpochMs, roundPrice } from "./asset-precision";
 
 export interface LiquidityPool {
   id: string;
@@ -136,22 +138,14 @@ export function analyzeIctSmcLiquidity(params: {
   const n = bars.length;
   const currentPrice = inputPrice ?? (n > 0 ? bars[n - 1].close : 1.0);
   const isForex = assetType === "FOREX";
-  const pipSize =
-    inputPipSize ??
-    (assetType === "FOREX"
-      ? symbol.toUpperCase().includes("JPY")
-        ? 0.01
-        : 0.0001
-      : assetType === "STOCK"
-      ? Math.max(0.05, currentPrice * 0.002)
-      : currentPrice * 0.0001);
+  const pipSize = inputPipSize ?? getAssetPipSize(symbol, assetType, currentPrice);
 
   if (n < 25) {
     return createEmptyResult(symbol, currentPrice);
   }
 
   // 1. LIQUIDITY MAP (BSL / SSL / EQH / EQL)
-  const { buySidePools, sellSidePools } = detectLiquidityPools(bars, pipSize);
+  const { allBslPools, allSslPools, buySidePools, sellSidePools } = detectLiquidityPools(bars, pipSize);
   const nearestBsl = buySidePools.find((p) => p.price > currentPrice && p.status === "UNTOUCHED") ?? null;
   const nearestSsl = sellSidePools.find((p) => p.price < currentPrice && p.status === "UNTOUCHED") ?? null;
 
@@ -161,15 +155,15 @@ export function analyzeIctSmcLiquidity(params: {
   // 3. ORDER BLOCKS & BREAKER BLOCKS
   const orderBlocks = detectOrderBlocksAndBreakers(bars);
 
-  // 4. PRECISION LIQUIDITY SWEEPS (Turtle Soup, Judas Swing, Purge & Revert)
-  const recentSweeps = detectAdvancedSweeps(bars, buySidePools, sellSidePools, pipSize, isForex);
+  // 4. PRECISION LIQUIDITY SWEEPS (Turtle Soup, Judas Swing, Purge & Revert) - strictly causal
+  const recentSweeps = detectAdvancedSweeps(bars, allBslPools, allSslPools, pipSize, isForex);
 
   // 5. DEALING RANGE & OTE (Optimal Trade Entry)
   const windowBars = bars.slice(-45);
   const swingHigh = Math.max(...windowBars.map((b) => b.high));
   const swingLow = Math.min(...windowBars.map((b) => b.low));
   const equilibrium = (swingHigh + swingLow) / 2;
-  const rangeDiff = Math.max(1e-5, swingHigh - swingLow);
+  const rangeDiff = Math.max(1e-12, swingHigh - swingLow);
 
   const currentZone: "PREMIUM" | "DISCOUNT" | "EQUILIBRIUM" =
     currentPrice > equilibrium + rangeDiff * 0.05
@@ -221,13 +215,23 @@ export function analyzeIctSmcLiquidity(params: {
       : "ERL_TO_IRL";
 
   // 7. BUILD OPTIMAL TRADE SETUP
+  const atrVal = atr(bars, 14) ?? rangeDiff * 0.15;
+  const closes = bars.map((b) => b.close);
+  const e9 = ema(closes, 9)[n - 1] ?? currentPrice;
+  const e21 = ema(closes, 21)[n - 1] ?? currentPrice;
+  const trendDir: 1 | -1 | 0 = e9 > e21 && currentPrice >= e21 ? 1 : e9 < e21 && currentPrice <= e21 ? -1 : 0;
+
   const optimalTradeSetup = buildOteTradeSetup({
+    symbol,
+    assetType,
     bars,
     currentPrice,
     currentZone,
     swingHigh,
     swingLow,
     rangeDiff,
+    atr14: atrVal,
+    trendDir,
     bullOte618,
     bullOte705,
     bullOte786,
@@ -301,7 +305,12 @@ export function analyzeIctSmcLiquidity(params: {
 function detectLiquidityPools(
   bars: OhlcvBar[],
   pipSize: number
-): { buySidePools: LiquidityPool[]; sellSidePools: LiquidityPool[] } {
+): {
+  allBslPools: LiquidityPool[];
+  allSslPools: LiquidityPool[];
+  buySidePools: LiquidityPool[];
+  sellSidePools: LiquidityPool[];
+} {
   const buySidePools: LiquidityPool[] = [];
   const sellSidePools: LiquidityPool[] = [];
   const n = bars.length;
@@ -355,20 +364,27 @@ function detectLiquidityPools(
     }
   }
 
-  // Check sweep status
-  const lastCloses = bars.slice(-10);
+  // Strictly causal sweep status: only mark SWEPT from bars AFTER the pivot confirmed (j > pool.barIndex + 3)
   for (const pool of buySidePools) {
-    if (lastCloses.some((b) => b.high > pool.price)) {
-      pool.status = "SWEPT";
+    for (let j = pool.barIndex + 4; j < n; j++) {
+      if (bars[j].high > pool.price) {
+        pool.status = "SWEPT";
+        break;
+      }
     }
   }
   for (const pool of sellSidePools) {
-    if (lastCloses.some((b) => b.low < pool.price)) {
-      pool.status = "SWEPT";
+    for (let j = pool.barIndex + 4; j < n; j++) {
+      if (bars[j].low < pool.price) {
+        pool.status = "SWEPT";
+        break;
+      }
     }
   }
 
   return {
+    allBslPools: buySidePools,
+    allSslPools: sellSidePools,
     buySidePools: buySidePools.slice(-6),
     sellSidePools: sellSidePools.slice(-6),
   };
@@ -541,30 +557,31 @@ function detectAdvancedSweeps(
   bslPools: LiquidityPool[],
   sslPools: LiquidityPool[],
   pipSize: number,
-  isForex: boolean
+  _isForex: boolean
 ): AdvancedSweepEvent[] {
   const sweeps: AdvancedSweepEvent[] = [];
   const n = bars.length;
 
-  for (let i = n - 15; i < n; i++) {
-    if (i < 5) continue;
+  for (let i = Math.max(5, n - 15); i < n; i++) {
     const b = bars[i];
     const prev = bars[i - 1];
-    const barRange = Math.max(1e-5, b.high - b.low);
+    const barRange = Math.max(1e-12, b.high - b.low);
 
-    // Check Sell-Side Liquidity Swept (Bullish Turtle Soup)
-    // Low pierced below SSL, but Close snapped back above SSL
+    // Check Sell-Side Liquidity Swept (Bullish Turtle Soup / Judas Swing) - strictly causal
+    let bestSslSweep: AdvancedSweepEvent | null = null;
     for (const pool of sslPools) {
+      if (pool.barIndex + 3 > i) continue; // Zero look-ahead: pivot must exist cleanly before bar i
       if (b.low < pool.price && b.close > pool.price) {
         const lowerWick = Math.min(b.open, b.close) - b.low;
         const wickRatio = lowerWick / barRange;
+        const hasVolumeOrStrongReclaim =
+          (b.volume ?? 0) >= (prev.volume ?? 0) * 1.1 || b.close > pool.price + pipSize;
 
-        if (wickRatio >= 0.45) {
-          const depthPips = Math.round(((pool.price - b.low) / pipSize) * 10) / 10;
+        if (wickRatio >= 0.45 || (wickRatio >= 0.35 && hasVolumeOrStrongReclaim)) {
+          const depthPips = Math.round(((pool.price - b.low) / Math.max(1e-12, pipSize)) * 10) / 10;
           const isJudas = checkJudasSessionTime(b.time);
-
-          sweeps.push({
-            id: `sweep_${b.time}`,
+          const candidate: AdvancedSweepEvent = {
+            id: `sweep_ssl_${b.time}`,
             time: b.time,
             barIndex: i,
             sweepType: isJudas ? "JUDAS_SWING" : "TURTLE_SOUP",
@@ -575,25 +592,31 @@ function detectAdvancedSweeps(
             sweepDepthPipsOrPct: depthPips,
             mssConfirmed: b.close > prev.high,
             displacementRatio: Number(wickRatio.toFixed(2)),
-            conviction: wickRatio >= 0.60 ? "INSTITUTIONAL_PRIME" : "HIGH",
-          });
+            conviction: wickRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : wickRatio >= 0.42 ? "HIGH" : "MODERATE",
+          };
+          if (!bestSslSweep || pool.price < bestSslSweep.sweptLevel) {
+            bestSslSweep = candidate;
+          }
         }
       }
     }
+    if (bestSslSweep) sweeps.push(bestSslSweep);
 
-    // Check Buy-Side Liquidity Swept (Bearish Turtle Soup)
-    // High pierced above BSL, but Close snapped back below BSL
+    // Check Buy-Side Liquidity Swept (Bearish Turtle Soup / Judas Swing) - strictly causal
+    let bestBslSweep: AdvancedSweepEvent | null = null;
     for (const pool of bslPools) {
+      if (pool.barIndex + 3 > i) continue; // Zero look-ahead
       if (b.high > pool.price && b.close < pool.price) {
         const upperWick = b.high - Math.max(b.open, b.close);
         const wickRatio = upperWick / barRange;
+        const hasVolumeOrStrongReclaim =
+          (b.volume ?? 0) >= (prev.volume ?? 0) * 1.1 || b.close < pool.price - pipSize;
 
-        if (wickRatio >= 0.45) {
-          const depthPips = Math.round(((b.high - pool.price) / pipSize) * 10) / 10;
+        if (wickRatio >= 0.45 || (wickRatio >= 0.35 && hasVolumeOrStrongReclaim)) {
+          const depthPips = Math.round(((b.high - pool.price) / Math.max(1e-12, pipSize)) * 10) / 10;
           const isJudas = checkJudasSessionTime(b.time);
-
-          sweeps.push({
-            id: `sweep_${b.time}`,
+          const candidate: AdvancedSweepEvent = {
+            id: `sweep_bsl_${b.time}`,
             time: b.time,
             barIndex: i,
             sweepType: isJudas ? "JUDAS_SWING" : "TURTLE_SOUP",
@@ -604,11 +627,15 @@ function detectAdvancedSweeps(
             sweepDepthPipsOrPct: depthPips,
             mssConfirmed: b.close < prev.low,
             displacementRatio: Number(wickRatio.toFixed(2)),
-            conviction: wickRatio >= 0.60 ? "INSTITUTIONAL_PRIME" : "HIGH",
-          });
+            conviction: wickRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : wickRatio >= 0.42 ? "HIGH" : "MODERATE",
+          };
+          if (!bestBslSweep || pool.price > bestBslSweep.sweptLevel) {
+            bestBslSweep = candidate;
+          }
         }
       }
     }
+    if (bestBslSweep) sweeps.push(bestBslSweep);
   }
 
   return sweeps.slice(-4);
@@ -616,23 +643,30 @@ function detectAdvancedSweeps(
 
 /**
  * Checks if timestamp coincides with London or NY Judas Swing Killzone (07:00-09:00 or 12:00-14:00 UTC)
+ * Normalizes both Unix seconds and milliseconds safely.
  */
-function checkJudasSessionTime(timestampSec: number): boolean {
-  const date = new Date(timestampSec * 1000);
+export function checkJudasSessionTime(timestamp: number): boolean {
+  const ms = normalizeEpochMs(timestamp);
+  if (ms <= 0) return false;
+  const date = new Date(ms);
   const hour = date.getUTCHours();
   return (hour >= 7 && hour <= 9) || (hour >= 12 && hour <= 14);
 }
 
 /**
- * 5. Generates the Precision Optimal Trade Entry (OTE) Setup
+ * 5. Generates the Precision Optimal Trade Entry (OTE) Setup (symmetrical bull/bear evaluation)
  */
 function buildOteTradeSetup(params: {
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO" | "STOCK";
   bars: OhlcvBar[];
   currentPrice: number;
   currentZone: "PREMIUM" | "DISCOUNT" | "EQUILIBRIUM";
   swingHigh: number;
   swingLow: number;
   rangeDiff: number;
+  atr14: number;
+  trendDir: 1 | -1 | 0;
   bullOte618: number;
   bullOte705: number;
   bullOte786: number;
@@ -649,10 +683,14 @@ function buildOteTradeSetup(params: {
   isForex: boolean;
 }): OteTradeSetup {
   const {
+    symbol,
+    assetType,
     currentPrice,
     currentZone,
     swingHigh,
     swingLow,
+    atr14,
+    trendDir,
     bullOte618,
     bullOte705,
     bullOte786,
@@ -668,123 +706,141 @@ function buildOteTradeSetup(params: {
     pipSize,
   } = params;
 
-  const lastSweep = recentSweeps[recentSweeps.length - 1];
+  const fmtP = (p: number) => roundPrice(p, symbol, assetType);
+  const stopBuffer = Math.max(pipSize * 4, atr14 * 0.25);
 
-  // ==========================================
-  // CASE 1: BULLISH OTE SETUP (BUY)
-  // Conditions: Swept SSL or in Discount Zone, seeking retracement to 0.618 - 0.705
-  // ==========================================
-  const isBullCandidate =
-    (lastSweep?.side === "SELL_SIDE_SWEPT" && lastSweep.conviction !== "MODERATE") ||
+  const bullSweep = [...recentSweeps].reverse().find((s) => s.side === "SELL_SIDE_SWEPT");
+  const bearSweep = [...recentSweeps].reverse().find((s) => s.side === "BUY_SIDE_SWEPT");
+
+  const matchingBullFvg = activeFvgList.find(
+    (f) => f.direction === "BULLISH_FVG" && f.top >= bullOte786 && f.bottom <= bullOte618,
+  );
+  const matchingBullOb = orderBlocks.find((ob) => ob.direction === "BULLISH" && ob.high >= bullOte786);
+  const inBullOte = currentPrice >= bullOte786 && currentPrice <= bullOte618;
+
+  const matchingBearFvg = activeFvgList.find(
+    (f) => f.direction === "BEARISH_FVG" && f.bottom <= bearOte786 && f.top >= bearOte618,
+  );
+  const matchingBearOb = orderBlocks.find((ob) => ob.direction === "BEARISH" && ob.low <= bearOte786);
+  const inBearOte = currentPrice >= bearOte618 && currentPrice <= bearOte786;
+
+  // Require real catalyst (Sweep / MSS / FVG+OB+Trend in OTE) — no blind OTE triggers
+  const hasBullCatalyst =
+    Boolean(bullSweep && bullSweep.conviction !== "MODERATE") ||
     (currentZone === "DISCOUNT" && lastMss === "BULLISH_MSS") ||
-    (currentPrice >= bullOte786 && currentPrice <= bullOte618);
+    (inBullOte && Boolean(matchingBullFvg || matchingBullOb) && trendDir >= 0);
 
-  if (isBullCandidate) {
+  const hasBearCatalyst =
+    Boolean(bearSweep && bearSweep.conviction !== "MODERATE") ||
+    (currentZone === "PREMIUM" && lastMss === "BEARISH_MSS") ||
+    (inBearOte && Boolean(matchingBearFvg || matchingBearOb) && trendDir <= 0);
+
+  const buildBull = (): OteTradeSetup => {
     const entryOptimal = bullOte705;
-    const entryZone: [number, number] = [bullOte786, bullOte618];
-    const stopLoss = swingLow - pipSize * 5;
-    const targetTP1 = (swingHigh + swingLow) / 2; // Equilibrium 50%
-    const targetTP2 = nearestBsl?.price ?? swingHigh; // External BSL target
-
-    const risk = Math.max(1e-5, entryOptimal - stopLoss);
-    const reward = Math.max(1e-5, targetTP2 - entryOptimal);
+    const structLow = bullSweep ? Math.min(swingLow, bullSweep.wickExtreme) : swingLow;
+    const stopLoss = structLow - stopBuffer;
+    const targetTP1 = (swingHigh + swingLow) / 2;
+    const targetTP2 = nearestBsl?.price ?? swingHigh;
+    const risk = Math.max(1e-12, entryOptimal - stopLoss);
+    const reward = Math.max(1e-12, targetTP2 - entryOptimal);
     const riskRewardRatio = Number((reward / risk).toFixed(2));
 
-    const matchingFvg = activeFvgList.find((f) => f.direction === "BULLISH_FVG" && f.top >= bullOte786 && f.bottom <= bullOte618);
-    const matchingOb = orderBlocks.find((ob) => ob.direction === "BULLISH" && ob.high >= bullOte786);
-
     const checklist = [
-      { rule: "1. Đã quét sạch thanh khoản Sell-Side (SSL Swept)", passed: lastSweep?.side === "SELL_SIDE_SWEPT" },
+      { rule: "1. Đã quét sạch thanh khoản Sell-Side (SSL Swept)", passed: Boolean(bullSweep) },
       { rule: "2. Giá nằm trong vùng chiết khấu Discount (Dưới 50% Equilibrium)", passed: currentZone === "DISCOUNT" },
-      { rule: "3. Điểm vào nằm trong vùng vàng OTE Fib 0.618 - 0.786", passed: currentPrice >= bullOte786 && currentPrice <= bullOte618 },
-      { rule: "4. Hội tụ vùng FVG chưa bị lấp hoặc Order Block tươi mới", passed: Boolean(matchingFvg || matchingOb) },
-      { rule: "5. Tỷ lệ Lợi nhuận / Rủi ro (R:R) tối thiểu đạt trên 1:2.5", passed: riskRewardRatio >= 2.5 },
+      { rule: "3. Điểm vào nằm trong vùng vàng OTE Fib 0.618 - 0.786", passed: inBullOte },
+      { rule: "4. Hội tụ vùng FVG chưa bị lấp hoặc Order Block tươi mới", passed: Boolean(matchingBullFvg || matchingBullOb) },
+      { rule: "5. Tỷ lệ Lợi nhuận / Rủi ro (R:R) tối thiểu đạt trên 1:2.0", passed: riskRewardRatio >= 2.0 },
     ];
-
     const passedCount = checklist.filter((c) => c.passed).length;
     const confluenceScore = Math.round((passedCount / checklist.length) * 100);
 
     return {
       direction: "BUY",
-      setupName: matchingFvg ? "ICT_OTE_FVG_CONFLUENCE" : "SMC_TURTLE_SOUP_REVERSAL",
-      entryOptimal: Number(entryOptimal.toFixed(5)),
-      entryZone: [Number(entryZone[0].toFixed(5)), Number(entryZone[1].toFixed(5))],
-      stopLoss: Number(stopLoss.toFixed(5)),
-      targetTP1: Number(targetTP1.toFixed(5)),
-      targetTP2: Number(targetTP2.toFixed(5)),
+      setupName: bullSweep?.sweepType === "JUDAS_SWING"
+        ? "JUDAS_SWING_EXPLOIT"
+        : matchingBullFvg
+          ? "ICT_OTE_FVG_CONFLUENCE"
+          : "SMC_TURTLE_SOUP_REVERSAL",
+      entryOptimal: fmtP(entryOptimal),
+      entryZone: [fmtP(bullOte786), fmtP(bullOte618)],
+      stopLoss: fmtP(stopLoss),
+      targetTP1: fmtP(targetTP1),
+      targetTP2: fmtP(targetTP2),
       riskRewardRatio,
       confluenceScore,
       dealingRange: {
-        swingHigh,
-        swingLow,
-        equilibrium: (swingHigh + swingLow) / 2,
+        swingHigh: fmtP(swingHigh),
+        swingLow: fmtP(swingLow),
+        equilibrium: fmtP((swingHigh + swingLow) / 2),
         currentZone,
-        fibOte618: Number(bullOte618.toFixed(5)),
-        fibOte705: Number(bullOte705.toFixed(5)),
-        fibOte786: Number(bullOte786.toFixed(5)),
+        fibOte618: fmtP(bullOte618),
+        fibOte705: fmtP(bullOte705),
+        fibOte786: fmtP(bullOte786),
       },
       executionChecklist: checklist,
-      rationale: `Thiết lập Mua OTE: Đã quét SSL tại ${lastSweep?.sweptLevel ?? "đáy"} và hồi về vùng giá sỉ Discount. Điểm vào tối ưu OTE 0.705 hội tụ cùng ${matchingFvg ? "Bullish FVG" : "Order Block"}. TP2 hướng về BSL tại ${targetTP2}.`,
+      rationale: `Thiết lập Mua OTE: Đã quét SSL tại ${bullSweep?.sweptLevel ? fmtP(bullSweep.sweptLevel) : "đáy"} và hồi về vùng giá sỉ Discount. Điểm vào tối ưu OTE 0.705 hội tụ cùng ${matchingBullFvg ? "Bullish FVG" : "Order Block"}. TP2 hướng về BSL tại ${fmtP(targetTP2)}.`,
     };
-  }
+  };
 
-  // ==========================================
-  // CASE 2: BEARISH OTE SETUP (SELL)
-  // Conditions: Swept BSL or in Premium Zone, seeking retracement to 0.618 - 0.705
-  // ==========================================
-  const isBearCandidate =
-    (lastSweep?.side === "BUY_SIDE_SWEPT" && lastSweep.conviction !== "MODERATE") ||
-    (currentZone === "PREMIUM" && lastMss === "BEARISH_MSS") ||
-    (currentPrice >= bearOte618 && currentPrice <= bearOte786);
-
-  if (isBearCandidate) {
+  const buildBear = (): OteTradeSetup => {
     const entryOptimal = bearOte705;
-    const entryZone: [number, number] = [bearOte618, bearOte786];
-    const stopLoss = swingHigh + pipSize * 5;
-    const targetTP1 = (swingHigh + swingLow) / 2; // Equilibrium 50%
-    const targetTP2 = nearestSsl?.price ?? swingLow; // External SSL target
-
-    const risk = Math.max(1e-5, stopLoss - entryOptimal);
-    const reward = Math.max(1e-5, entryOptimal - targetTP2);
+    const structHigh = bearSweep ? Math.max(swingHigh, bearSweep.wickExtreme) : swingHigh;
+    const stopLoss = structHigh + stopBuffer;
+    const targetTP1 = (swingHigh + swingLow) / 2;
+    const targetTP2 = nearestSsl?.price ?? swingLow;
+    const risk = Math.max(1e-12, stopLoss - entryOptimal);
+    const reward = Math.max(1e-12, entryOptimal - targetTP2);
     const riskRewardRatio = Number((reward / risk).toFixed(2));
 
-    const matchingFvg = activeFvgList.find((f) => f.direction === "BEARISH_FVG" && f.bottom <= bearOte786 && f.top >= bearOte618);
-    const matchingOb = orderBlocks.find((ob) => ob.direction === "BEARISH" && ob.low <= bearOte786);
-
     const checklist = [
-      { rule: "1. Đã quét sạch thanh khoản Buy-Side (BSL Swept)", passed: lastSweep?.side === "BUY_SIDE_SWEPT" },
+      { rule: "1. Đã quét sạch thanh khoản Buy-Side (BSL Swept)", passed: Boolean(bearSweep) },
       { rule: "2. Giá nằm trong vùng giá đắt Premium (Trên 50% Equilibrium)", passed: currentZone === "PREMIUM" },
-      { rule: "3. Điểm vào nằm trong vùng vàng OTE Fib 0.618 - 0.786", passed: currentPrice >= bearOte618 && currentPrice <= bearOte786 },
-      { rule: "4. Hội tụ vùng FVG chưa bị lấp hoặc Order Block tươi mới", passed: Boolean(matchingFvg || matchingOb) },
-      { rule: "5. Tỷ lệ Lợi nhuận / Rủi ro (R:R) tối thiểu đạt trên 1:2.5", passed: riskRewardRatio >= 2.5 },
+      { rule: "3. Điểm vào nằm trong vùng vàng OTE Fib 0.618 - 0.786", passed: inBearOte },
+      { rule: "4. Hội tụ vùng FVG chưa bị lấp hoặc Order Block tươi mới", passed: Boolean(matchingBearFvg || matchingBearOb) },
+      { rule: "5. Tỷ lệ Lợi nhuận / Rủi ro (R:R) tối thiểu đạt trên 1:2.0", passed: riskRewardRatio >= 2.0 },
     ];
-
     const passedCount = checklist.filter((c) => c.passed).length;
     const confluenceScore = Math.round((passedCount / checklist.length) * 100);
 
     return {
       direction: "SELL",
-      setupName: matchingFvg ? "ICT_OTE_FVG_CONFLUENCE" : "SMC_TURTLE_SOUP_REVERSAL",
-      entryOptimal: Number(entryOptimal.toFixed(5)),
-      entryZone: [Number(entryZone[0].toFixed(5)), Number(entryZone[1].toFixed(5))],
-      stopLoss: Number(stopLoss.toFixed(5)),
-      targetTP1: Number(targetTP1.toFixed(5)),
-      targetTP2: Number(targetTP2.toFixed(5)),
+      setupName: bearSweep?.sweepType === "JUDAS_SWING"
+        ? "JUDAS_SWING_EXPLOIT"
+        : matchingBearFvg
+          ? "ICT_OTE_FVG_CONFLUENCE"
+          : "SMC_TURTLE_SOUP_REVERSAL",
+      entryOptimal: fmtP(entryOptimal),
+      entryZone: [fmtP(bearOte618), fmtP(bearOte786)],
+      stopLoss: fmtP(stopLoss),
+      targetTP1: fmtP(targetTP1),
+      targetTP2: fmtP(targetTP2),
       riskRewardRatio,
       confluenceScore,
       dealingRange: {
-        swingHigh,
-        swingLow,
-        equilibrium: (swingHigh + swingLow) / 2,
+        swingHigh: fmtP(swingHigh),
+        swingLow: fmtP(swingLow),
+        equilibrium: fmtP((swingHigh + swingLow) / 2),
         currentZone,
-        fibOte618: Number(bearOte618.toFixed(5)),
-        fibOte705: Number(bearOte705.toFixed(5)),
-        fibOte786: Number(bearOte786.toFixed(5)),
+        fibOte618: fmtP(bearOte618),
+        fibOte705: fmtP(bearOte705),
+        fibOte786: fmtP(bearOte786),
       },
       executionChecklist: checklist,
-      rationale: `Thiết lập Bán OTE: Đã quét BSL tại ${lastSweep?.sweptLevel ?? "đỉnh"} và hồi về vùng giá lẻ Premium. Điểm vào tối ưu OTE 0.705 hội tụ cùng ${matchingFvg ? "Bearish FVG" : "Order Block"}. TP2 hướng về SSL tại ${targetTP2}.`,
+      rationale: `Thiết lập Bán OTE: Đã quét BSL tại ${bearSweep?.sweptLevel ? fmtP(bearSweep.sweptLevel) : "đỉnh"} và hồi về vùng giá lẻ Premium. Điểm vào tối ưu OTE 0.705 hội tụ cùng ${matchingBearFvg ? "Bearish FVG" : "Order Block"}. TP2 hướng về SSL tại ${fmtP(targetTP2)}.`,
     };
+  };
+
+  const bullCandidate = hasBullCatalyst ? buildBull() : null;
+  const bearCandidate = hasBearCatalyst ? buildBear() : null;
+
+  if (bullCandidate && bearCandidate) {
+    const bullRank = bullCandidate.confluenceScore + (trendDir > 0 ? 10 : 0) + (bullSweep?.barIndex ?? 0);
+    const bearRank = bearCandidate.confluenceScore + (trendDir < 0 ? 10 : 0) + (bearSweep?.barIndex ?? 0);
+    return bearRank > bullRank ? bearCandidate : bullCandidate;
   }
+  if (bullCandidate) return bullCandidate;
+  if (bearCandidate) return bearCandidate;
 
   // ==========================================
   // CASE 3: NEUTRAL / WAIT
@@ -792,21 +848,21 @@ function buildOteTradeSetup(params: {
   return {
     direction: "NEUTRAL",
     setupName: "NONE",
-    entryOptimal: currentPrice,
-    entryZone: [currentPrice, currentPrice],
-    stopLoss: currentPrice,
-    targetTP1: currentPrice,
-    targetTP2: currentPrice,
+    entryOptimal: fmtP(currentPrice),
+    entryZone: [fmtP(currentPrice), fmtP(currentPrice)],
+    stopLoss: fmtP(currentPrice),
+    targetTP1: fmtP(currentPrice),
+    targetTP2: fmtP(currentPrice),
     riskRewardRatio: 1.0,
     confluenceScore: 35,
     dealingRange: {
-      swingHigh,
-      swingLow,
-      equilibrium: (swingHigh + swingLow) / 2,
+      swingHigh: fmtP(swingHigh),
+      swingLow: fmtP(swingLow),
+      equilibrium: fmtP((swingHigh + swingLow) / 2),
       currentZone,
-      fibOte618: bullOte618,
-      fibOte705: bullOte705,
-      fibOte786: bullOte786,
+      fibOte618: fmtP(bullOte618),
+      fibOte705: fmtP(bullOte705),
+      fibOte786: fmtP(bullOte786),
     },
     executionChecklist: [
       { rule: "1. Chờ quét thanh khoản BSL hoặc SSL", passed: false },

@@ -1,4 +1,5 @@
 import type { OhlcvBar } from "../types";
+import type { PrecisionTradeSetup, SetupGrade } from "./fx-crypto-precision-engine";
 
 export type ForexTier = "A" | "B" | "C" | "EXCLUDED";
 export type ForexVolatilityRegime = "LOW_VOLATILITY" | "NORMAL" | "HIGH_VOLATILITY" | "EXTREME_VOLATILITY";
@@ -18,6 +19,7 @@ export interface ForexScalpSetup {
   strategy: "A" | "B" | "C";
   direction: ForexScalpDirection;
   status: ForexSetupStatus;
+  grade?: SetupGrade;
   strength: number;
   probability?: number | null;
   entry: number | null;
@@ -82,6 +84,7 @@ export interface ForexScalpSignal {
   activeSetups: ForexScalpSetup[];
   primarySetup: ForexScalpSetup | null;
   moduleBStatus: "AVAILABLE" | "ORDER_FLOW_UNAVAILABLE";
+  precision?: PrecisionTradeSetup;
   riskHint: {
     recommendedRiskPct: number;
     stopPips: number | null;
@@ -94,8 +97,11 @@ export interface ForexScalpInput {
   barsM15: OhlcvBar[];
   barsM5: OhlcvBar[];
   barsM1?: OhlcvBar[] | null;
+  barsH1?: OhlcvBar[] | null;
   bid?: number | null;
   ask?: number | null;
   spreadPips?: number | null;
   nowMs?: number;
+  calendarEvents?: { name?: string; time?: string; currency?: string; importance?: string }[];
+  csmBaseMinusQuote?: number | null;
 }

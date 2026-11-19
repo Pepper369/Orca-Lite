@@ -45,6 +45,13 @@ interface DerivativesDetailResponse {
   };
 }
 
+function fmtCryptoUsd(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  if (v >= 1) return `$${v.toLocaleString()}`;
+  if (v >= 0.01) return `$${v.toFixed(4)}`;
+  return `$${v.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")}`;
+}
+
 export function CryptoSignalsPanel() {
   const { data: hubData, isLoading: hubLoading } = useApi<CryptoSignalsHubData>(
     "/api/v1/crypto/signals",
@@ -171,7 +178,7 @@ export function CryptoSignalsPanel() {
                         {sig.symbol}
                       </Link>
                       <div className="num mt-0.5 text-[15px] font-semibold text-ink-1">
-                        ${sig.lastPrice >= 1 ? sig.lastPrice.toLocaleString() : sig.lastPrice.toFixed(4)}
+                        {fmtCryptoUsd(sig.lastPrice)}
                       </div>
                     </div>
 
@@ -195,8 +202,45 @@ export function CryptoSignalsPanel() {
                     </div>
                   </div>
 
-                  {/* Badges: Lockout, Leverage, Funding, DOM */}
+                  {/* Badges: Grade, Expectancy, Lockout, Leverage, Funding, DOM */}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {sig.setupGrade && (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-black border ${
+                          sig.setupGrade === "A+"
+                            ? "bg-positive/20 text-positive border-positive/50"
+                            : sig.setupGrade === "A"
+                              ? "bg-accent/20 text-accent border-accent/50"
+                              : sig.setupGrade === "B"
+                                ? "bg-warning/15 text-warning border-warning/40"
+                                : "bg-surface-2 text-ink-3 border-line"
+                        }`}
+                      >
+                        {sig.setupGrade === "A+"
+                          ? "A+ SNIPER"
+                          : sig.setupGrade === "A"
+                            ? "GRADE A"
+                            : sig.setupGrade === "B"
+                              ? "GRADE B"
+                              : "WAIT / LỌC"}
+                      </span>
+                    )}
+                    {sig.expectancyR != null && sig.action !== "WAIT" && (
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${
+                          sig.expectancyR >= 0.2
+                            ? "bg-positive/10 text-positive border-positive/30"
+                            : "bg-surface-2 text-ink-2 border-line"
+                        }`}
+                      >
+                        E[R] {sig.expectancyR >= 0 ? `+${sig.expectancyR}R` : `${sig.expectancyR}R`}
+                      </span>
+                    )}
+                    {sig.entryMode && sig.entryMode !== "WAIT" && (
+                      <span className="inline-flex items-center rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2 border border-line">
+                        {sig.entryMode === "LIMIT_PULLBACK" ? "LIMIT OTE" : "MARKET"}
+                      </span>
+                    )}
                     {sig.circuitBreakerLockout && (
                       <span className="inline-flex items-center gap-1 rounded-md bg-negative/15 px-1.5 py-0.5 text-[10px] font-bold text-negative border border-negative/40 animate-pulse">
                         <Lock className="size-2.5" /> KHÓA LỆNH
@@ -239,56 +283,43 @@ export function CryptoSignalsPanel() {
                     </span>
                   </div>
 
+                  {/* Veto Reason Note */}
+                  {sig.action === "WAIT" && sig.vetoReasons && sig.vetoReasons.length > 0 && (
+                    <div className="mt-2 rounded-md border border-warning/30 bg-warning/5 px-2 py-1 text-[10px] text-ink-2">
+                      🛡 {sig.vetoReasons[0]}
+                    </div>
+                  )}
+
                   {/* Multi-Tier TP & SL Matrix */}
                   <div className="mt-2.5 space-y-1.5 rounded-lg border border-line/50 bg-surface-2/60 p-2.5 text-[11px]">
                     <div className="flex items-center justify-between text-ink-2">
                       <span className="flex items-center gap-1">
                         <Crosshair className="size-3 text-ink-3" /> Điểm vào (Entry):
                       </span>
-                      <strong className="num text-ink-1">
-                        {sig.entryPrice
-                          ? `$${sig.entryPrice >= 1 ? sig.entryPrice.toLocaleString() : sig.entryPrice.toFixed(4)}`
-                          : "—"}
-                      </strong>
+                      <strong className="num text-ink-1">{fmtCryptoUsd(sig.entryPrice)}</strong>
                     </div>
 
                     <div className="flex items-center justify-between text-negative">
-                      <span>Cắt lỗ (SL - {sig.stopPct}%):</span>
-                      <strong className="num font-semibold">
-                        {sig.stopLossPrice
-                          ? `$${sig.stopLossPrice >= 1 ? sig.stopLossPrice.toLocaleString() : sig.stopLossPrice.toFixed(4)}`
-                          : "—"}
-                      </strong>
+                      <span>Cắt lỗ ({sig.stopPct != null ? `SL - ${sig.stopPct}%` : "SL cấu trúc"}):</span>
+                      <strong className="num font-semibold">{fmtCryptoUsd(sig.stopLossPrice)}</strong>
                     </div>
 
                     <div className="border-t border-line/40 pt-1">
                       <div className="flex items-center justify-between text-positive font-medium">
                         <span className="flex items-center gap-1">
-                          <Target className="size-3" /> TP1 (R:R 1.2):
+                          <Target className="size-3" /> TP1 (R:R 1.15):
                         </span>
-                        <span className="num">
-                          {sig.tp1
-                            ? `$${sig.tp1 >= 1 ? sig.tp1.toLocaleString() : sig.tp1.toFixed(4)}`
-                            : "—"}
-                        </span>
+                        <span className="num">{fmtCryptoUsd(sig.tp1)}</span>
                       </div>
 
                       <div className="flex items-center justify-between text-positive/90 text-[10px] mt-0.5">
-                        <span>TP2 (R:R 2.0):</span>
-                        <span className="num">
-                          {sig.tp2
-                            ? `$${sig.tp2 >= 1 ? sig.tp2.toLocaleString() : sig.tp2.toFixed(4)}`
-                            : "—"}
-                        </span>
+                        <span>TP2 ({sig.netRiskReward != null ? `Net RR ${sig.netRiskReward}` : "Target 2"}):</span>
+                        <span className="num">{fmtCryptoUsd(sig.tp2)}</span>
                       </div>
 
                       <div className="flex items-center justify-between text-positive/75 text-[10px] mt-0.5">
-                        <span>TP3 (R:R 3.0):</span>
-                        <span className="num">
-                          {sig.tp3
-                            ? `$${sig.tp3 >= 1 ? sig.tp3.toLocaleString() : sig.tp3.toFixed(4)}`
-                            : "—"}
-                        </span>
+                        <span>TP3 (Runner 3.1R):</span>
+                        <span className="num">{fmtCryptoUsd(sig.tp3)}</span>
                       </div>
                     </div>
                   </div>

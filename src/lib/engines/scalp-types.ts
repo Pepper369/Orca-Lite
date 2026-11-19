@@ -1,4 +1,5 @@
 import type { OhlcvBar } from "../types";
+import type { PrecisionTradeSetup, SetupGrade } from "./fx-crypto-precision-engine";
 
 export type AssetTier = "A" | "B" | "C" | "EXCLUDED";
 export type VolatilityRegime = "LOW_VOLATILITY" | "NORMAL" | "HIGH_VOLATILITY" | "EXTREME_VOLATILITY";
@@ -18,10 +19,15 @@ export interface ScalpSetup {
   strategy: "A" | "B" | "C";
   direction: ScalpDirection;
   status: SetupStatus;
+  grade?: SetupGrade;
   strength: number;
+  probability?: number | null;
   entry: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
+  takeProfit1?: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
   riskReward: number | null;
   invalidation: number | null;
   entryZone: [number, number] | null;
@@ -74,6 +80,11 @@ export interface ScalpSignal {
   activeSetups?: ScalpSetup[];
   primarySetup?: ScalpSetup | null;
   moduleBStatus?: "AVAILABLE" | "ORDER_FLOW_UNAVAILABLE";
+  precision?: PrecisionTradeSetup;
+  probability?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
   context?: {
     fundingRate: number | null;
     openInterest: number | null;
@@ -86,8 +97,12 @@ export interface ScalpAnalyzeInput {
   barsM15: OhlcvBar[];
   barsM5: OhlcvBar[];
   barsM1?: OhlcvBar[] | null;
+  barsH1?: OhlcvBar[] | null;
   quoteVolume24h?: number | null;
   fundingRate?: number | null;
   openInterest?: number | null;
   spreadPct?: number | null;
+  orderBookImbalance?: number | null;
+  isLockout?: boolean;
+  lockoutReason?: string | null;
 }

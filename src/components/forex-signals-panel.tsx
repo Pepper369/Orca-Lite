@@ -321,8 +321,45 @@ export function ForexSignalsPanel() {
                     </div>
                   </div>
 
-                  {/* Flow Intensity, Absorption & CME DOM Indicator */}
+                  {/* Setup Grade, Expectancy, Flow Intensity, Absorption & CME DOM Indicator */}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {sig.setupGrade && (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-black border ${
+                          sig.setupGrade === "A+"
+                            ? "bg-positive/20 text-positive border-positive/50"
+                            : sig.setupGrade === "A"
+                              ? "bg-accent/20 text-accent border-accent/50"
+                              : sig.setupGrade === "B"
+                                ? "bg-warning/15 text-warning border-warning/40"
+                                : "bg-surface-2 text-ink-3 border-line"
+                        }`}
+                      >
+                        {sig.setupGrade === "A+"
+                          ? "A+ SNIPER"
+                          : sig.setupGrade === "A"
+                            ? "GRADE A"
+                            : sig.setupGrade === "B"
+                              ? "GRADE B"
+                              : "WAIT / LỌC"}
+                      </span>
+                    )}
+                    {sig.expectancyR != null && sig.action !== "WAIT" && (
+                      <span
+                        className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${
+                          sig.expectancyR >= 0.2
+                            ? "bg-positive/10 text-positive border-positive/30"
+                            : "bg-surface-2 text-ink-2 border-line"
+                        }`}
+                      >
+                        E[R] {sig.expectancyR >= 0 ? `+${sig.expectancyR}R` : `${sig.expectancyR}R`}
+                      </span>
+                    )}
+                    {sig.entryMode && sig.entryMode !== "WAIT" && (
+                      <span className="inline-flex items-center rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2 border border-line">
+                        {sig.entryMode === "LIMIT_PULLBACK" ? "LIMIT OTE" : "MARKET"}
+                      </span>
+                    )}
                     {sig.newsLockout && (
                       <span className="inline-flex items-center gap-1 rounded-md bg-negative/15 px-1.5 py-0.5 text-[10px] font-bold text-negative border border-negative/40 animate-pulse">
                         <Lock className="size-2.5" /> KHÓA TIN ĐỎ
@@ -373,6 +410,13 @@ export function ForexSignalsPanel() {
                       </span>
                     )}
                   </div>
+
+                  {/* Veto Reason Note (when filtered out) */}
+                  {sig.action === "WAIT" && sig.vetoReasons && sig.vetoReasons.length > 0 && (
+                    <div className="mt-2 rounded-md border border-warning/30 bg-warning/5 px-2 py-1 text-[10px] text-ink-2">
+                      🛡 {sig.vetoReasons[0]}
+                    </div>
+                  )}
 
                   {/* Multi-Tier TP & SL Matrix */}
                   <div className="mt-2.5 space-y-1.5 rounded-lg border border-line/50 bg-surface-2/60 p-2.5 text-[11px]">

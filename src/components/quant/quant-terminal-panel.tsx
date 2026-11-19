@@ -23,15 +23,16 @@ import {
   Zap,
 } from "lucide-react";
 import { evaluateHighWinrateGate } from "@/lib/engines/high-winrate-gate";
+import { evaluateLateCandleResolution } from "@/lib/engines/quant-reversal-pace";
+import { analyzeIctSmcLiquidity } from "@/lib/engines/ict-smc-liquidity-engine";
 import {
-  evaluateLateCandleResolution,
-  calculateRequiredSpeedPace,
-  evaluateCheapTailMispricing,
-} from "@/lib/engines/quant-reversal-pace";
+  buildMtfConfluenceMatrix,
+  estimateClvOrderFlowImbalance,
+  getAssetPipSize,
+} from "@/lib/engines/asset-precision";
 import { estimateOrnsteinUhlenbeck } from "@/lib/engines/advanced-quant-math";
 import { detectDivergences } from "@/lib/engines/divergence";
 import { ReversalPaceMeter } from "@/components/scalp/reversal-pace-meter";
-import { ema, rsi } from "@/lib/technical";
 
 interface QuantTerminalPanelProps {
   symbol: string;
@@ -41,15 +42,6 @@ interface QuantTerminalPanelProps {
   assetType?: "forex" | "crypto" | "stock";
   tech?: TechnicalSnapshot | null;
   digits?: number;
-}
-
-interface MtfRow {
-  tf: string;
-  trend: "BULLISH" | "BEARISH" | "RANGING";
-  rsiVal: number;
-  macdState: "EXPANDING" | "CONTRACTING" | "NEUTRAL";
-  structure: string;
-  confluencePct: number;
 }
 
 export function QuantTerminalPanel({
@@ -67,13 +59,8 @@ export function QuantTerminalPanel({
   const lastBar = series[series.length - 1];
   const price = currentPrice ?? lastBar?.close ?? 1.0;
   const isForex = assetType === "forex";
-  const pipSize = isForex
-    ? symbol.includes("JPY")
-      ? 0.01
-      : 0.0001
-    : assetType === "stock"
-    ? Math.max(0.05, price * 0.002)
-    : price * 0.0001;
+  const precisionAssetType = isForex ? "FOREX" : assetType === "stock" ? "STOCK" : "CRYPTO";
+  const pipSize = getAssetPipSize(symbol, precisionAssetType, price);
 
   // Run Quantitative Engines
   const quantAnalysis = useMemo(() => {
@@ -84,15 +71,35 @@ export function QuantTerminalPanel({
     // 1. Ornstein-Uhlenbeck (OU) Mean Reversion
     const ouResult = estimateOrnsteinUhlenbeck(closes);
 
-    // 2. High-Winrate 6-Gate Confluence
+    // 2. Causal Resampled Multi-Timeframe Matrix
+    const { rows: mtfRows, dominantTrend, confluencePct: mtfConfluencePct } = buildMtfConfluenceMatrix(series);
+
+    // 3. Real CLV Order Flow Imbalance (replaces static placeholder) & ICT Direction
+    const realImbalance = estimateClvOrderFlowImbalance(series, 12);
+    const ictResult = analyzeIctSmcLiquidity({
+      symbol,
+      bars: series,
+      currentPrice: price,
+      assetType: precisionAssetType,
+      pipSize,
+    });
+
+    const ictDir = ictResult.optimalTradeSetup.direction;
     const candidateDir: "BUY" | "SELL" =
-      tech?.rsi14 != null
-        ? tech.rsi14 < 48
+      ictDir !== "NEUTRAL" &&
+      (dominantTrend === "RANGING" ||
+        (ictDir === "BUY" && dominantTrend === "BULLISH") ||
+        (ictDir === "SELL" && dominantTrend === "BEARISH"))
+        ? ictDir
+        : dominantTrend === "BULLISH"
           ? "BUY"
-          : "SELL"
-        : lastBar.close >= lastBar.open
-        ? "BUY"
-        : "SELL";
+          : dominantTrend === "BEARISH"
+            ? "SELL"
+            : ictDir === "SELL"
+              ? "SELL"
+              : lastBar.close >= lastBar.open
+                ? "BUY"
+                : "SELL";
 
     const slDistance = isForex ? pipSize * 15 : price * 0.005;
     const stopLossPrice = candidateDir === "BUY" ? price - slDistance : price + slDistance;
@@ -103,39 +110,26 @@ export function QuantTerminalPanel({
       candidateDirection: candidateDir,
       entryPrice: price,
       stopLossPrice,
-      orderBookImbalance: candidateDir === "BUY" ? 22 : -18,
+      orderBookImbalance: realImbalance,
       assetType: isForex ? "FOREX" : "CRYPTO",
     });
 
-    // 3. Quant Reversal Pace (0x50f7 Model)
+    // 4. Quant Reversal Pace (0x50f7 Model)
     const tfParam = interval === "1m" ? "1m" : interval === "15m" ? "15m" : "5m";
     const paceResolution = evaluateLateCandleResolution({
       symbol,
       timeframe: tfParam,
       bars: series,
+      orderFlowImbalance: realImbalance,
       assetType: isForex ? "FOREX" : "CRYPTO",
       pipSize,
     });
 
-    // 4. Advanced Divergence Engine
+    // 5. Advanced Divergence Engine
     const divergences = detectDivergences(series, {
       lookback: 60,
       maxSignals: 4,
     });
-
-    // 5. Multi-Timeframe Matrix (Synthesized from multiple lookbacks)
-    const mtfRows: MtfRow[] = [
-      generateMtfRow("M1 / M5", series, 12, 14),
-      generateMtfRow("M15", series, 25, 20),
-      generateMtfRow("H1", series, 50, 28),
-      generateMtfRow("H4", series, 80, 40),
-      generateMtfRow("D1 (Macro)", series, Math.min(120, series.length - 1), 50),
-    ];
-
-    const bullishCount = mtfRows.filter((r) => r.trend === "BULLISH").length;
-    const bearishCount = mtfRows.filter((r) => r.trend === "BEARISH").length;
-    const dominantTrend = bullishCount >= 3 ? "BULLISH" : bearishCount >= 3 ? "BEARISH" : "RANGING";
-    const mtfConfluencePct = Math.round((Math.max(bullishCount, bearishCount) / mtfRows.length) * 100);
 
     return {
       ouResult,
@@ -146,7 +140,7 @@ export function QuantTerminalPanel({
       dominantTrend,
       mtfConfluencePct,
     };
-  }, [series, price, pipSize, isForex, symbol, tech, interval, lastBar]);
+  }, [series, price, pipSize, isForex, precisionAssetType, symbol, interval, lastBar]);
 
   if (!quantAnalysis) {
     return (
@@ -512,58 +506,4 @@ export function QuantTerminalPanel({
       </div>
     </div>
   );
-}
-
-/**
- * Helper to synthesize multi-timeframe row metrics
- */
-function generateMtfRow(
-  tf: string,
-  series: OhlcvBar[],
-  fastPeriod: number,
-  slowPeriod: number
-): MtfRow {
-  const closes = series.map((b) => b.close);
-  const fastEma = ema(closes, Math.max(5, Math.min(fastPeriod, closes.length - 2)));
-  const slowEma = ema(closes, Math.max(10, Math.min(slowPeriod, closes.length - 1)));
-
-  const curFast = fastEma[fastEma.length - 1] ?? closes[closes.length - 1];
-  const curSlow = slowEma[slowEma.length - 1] ?? curFast;
-  const lastClose = closes[closes.length - 1];
-
-  let trend: MtfRow["trend"] = "RANGING";
-  if (curFast > curSlow && lastClose >= curFast) {
-    trend = "BULLISH";
-  } else if (curFast < curSlow && lastClose <= curFast) {
-    trend = "BEARISH";
-  }
-
-  const rsiArr = rsi(closes, 14);
-  const rsiVal = rsiArr[rsiArr.length - 1] ?? 50;
-
-  let macdState: MtfRow["macdState"] = "NEUTRAL";
-  if (curFast > curSlow) {
-    macdState = "EXPANDING";
-  } else if (curFast < curSlow) {
-    macdState = "CONTRACTING";
-  }
-
-  const highs = series.slice(-30).map((b) => b.high);
-  const lows = series.slice(-30).map((b) => b.low);
-  const maxHigh = Math.max(...highs);
-  const minLow = Math.min(...lows);
-  const range = maxHigh - minLow;
-  const pos = range > 0 ? (lastClose - minLow) / range : 0.5;
-  const structure = pos > 0.65 ? "Premium Zone" : pos < 0.35 ? "Discount (OTE)" : "Equilibrium";
-
-  const confluencePct = Math.round(55 + (trend !== "RANGING" ? 25 : 0) + (rsiVal > 40 && rsiVal < 60 ? 10 : 20));
-
-  return {
-    tf,
-    trend,
-    rsiVal,
-    macdState,
-    structure,
-    confluencePct: Math.min(95, confluencePct),
-  };
 }

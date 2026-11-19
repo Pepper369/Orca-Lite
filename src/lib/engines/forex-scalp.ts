@@ -2,6 +2,7 @@ import "server-only";
 import type { OhlcvBar } from "../types";
 import { atr, supportResistance } from "../technical";
 import type { ForexScalpInput, ForexScalpSetup, ForexScalpSignal } from "./forex-scalp-types";
+import { evaluatePrecisionTradeSetup } from "./fx-crypto-precision-engine";
 import {
   detectForexRegime,
   pipSize,
@@ -28,72 +29,8 @@ export type {
 
 export { pipSize, toPips, sessionInfo, classifyForexTier } from "./forex-scalp-modules";
 
-/** Guaranteed levels from regime bias + ATR — always fills Entry/SL/TP. */
-function regimeFallbackSetup(
-  pair: string,
-  bars: OhlcvBar[],
-  regime: ReturnType<typeof detectForexRegime>,
-  sessionSoft: number,
-): ForexScalpSetup | null {
-  if (bars.length < 20) return null;
-  const last = bars[bars.length - 1];
-  const entry = last.close;
-  const atrV = atr(bars, 14) ?? Math.max(last.high - last.low, pipSize(pair) * 8);
-  const stopDist = Math.max(atrV * 1.0, pipSize(pair) * 6);
-  const rr = 1.5;
-
-  const direction: "BUY" | "SELL" =
-    regime.market === "TRENDING_UP"
-      ? "BUY"
-      : regime.market === "TRENDING_DOWN"
-        ? "SELL"
-        : last.close >= last.open
-          ? "BUY"
-          : "SELL";
-
-  const stopLoss = direction === "BUY" ? entry - stopDist : entry + stopDist;
-  const takeProfit = direction === "BUY" ? entry + stopDist * rr : entry - stopDist * rr;
-  const takeProfit1 = direction === "BUY" ? entry + stopDist * 1.2 : entry - stopDist * 1.2;
-  const takeProfit2 = direction === "BUY" ? entry + stopDist * 2.0 : entry - stopDist * 2.0;
-  const takeProfit3 = direction === "BUY" ? entry + stopDist * 3.0 : entry - stopDist * 3.0;
-  const baseStrength = regime.market === "RANGING" ? 28 : 38;
-  const strength = Math.max(12, Math.round(baseStrength * sessionSoft));
-
-  return {
-    strategy: "A",
-    direction,
-    status: "ACTIVE",
-    strength,
-    probability: Math.min(85, Math.max(45, Math.round(48 + strength * 0.4))),
-    entry,
-    stopLoss,
-    takeProfit,
-    takeProfit1,
-    takeProfit2,
-    takeProfit3,
-    riskReward: rr,
-    riskReward1: 1.2,
-    riskReward2: 2.0,
-    riskReward3: 3.0,
-    invalidation: stopLoss,
-    entryZone: direction === "BUY" ? [stopLoss, entry] : [entry, stopLoss],
-    stopPips: toPips(pair, stopDist),
-    evidence: [
-      `Fallback regime ${regime.market} → ${direction}`,
-      `ATR-based levels | SL ${toPips(pair, stopDist).toFixed(1)} pip | RR ${rr}`,
-      "Minh họa kỹ thuật — chưa đủ confluence pattern/breakout",
-    ],
-    riskNotes: [
-      "Mức giá fallback theo regime + ATR",
-      sessionSoft < 1 ? "Ngoài phiên chính — giảm size" : "Kiểm tra spread trước khi vào",
-    ],
-  };
-}
-
 /**
- * Multi-TF forex scalping per M15→M5→M1 + technical/pattern confluence.
- * Session is a soft gate (strength discount) — hard blocks only on spread/data/excluded.
- * Always attempts to surface Entry/SL/TP via regime fallback when no strategy fires.
+ * Multi-TF forex scalping per M15->M5->M1 + 7-Gate Institutional Precision Engine.
  */
 export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | null {
   if (input.barsM5.length < 40) return null;
@@ -149,11 +86,73 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     }
   }
 
-  // Guaranteed levels so UI never shows empty Entry/SL/TP when data exists
+  const prelimRanked = [...activeSetups].sort((x, y) => {
+    const lx = x.entry != null && x.stopLoss != null && x.direction !== "NONE" ? 1 : 0;
+    const ly = y.entry != null && y.stopLoss != null && y.direction !== "NONE" ? 1 : 0;
+    if (lx !== ly) return ly - lx;
+    return y.strength - x.strength;
+  });
+  const prelimCandidate = prelimRanked.find((s) => s.direction === "BUY" || s.direction === "SELL") ?? null;
+
+  const precision = evaluatePrecisionTradeSetup({
+    symbol: pair,
+    assetType: "FOREX",
+    barsExecution: input.barsM5,
+    barsHtf: input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null,
+    barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
+    candidateDirection:
+      prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL"
+        ? prelimCandidate.direction
+        : "AUTO",
+    candidateEntry: prelimCandidate?.entry ?? null,
+    candidateStopLoss: prelimCandidate?.stopLoss ?? null,
+    spreadPipsOrPct: filter.spreadPips,
+    csmBaseMinusQuote: input.csmBaseMinusQuote ?? null,
+    sessionLabel: filter.sessionLabel,
+    isNewsOrCascadeLockout: !filter.newsOk || !filter.eligible,
+    lockoutReason: !filter.newsOk
+      ? filter.reasons.find((r) => r.includes("KHÓA") || r.includes("COOLDOWN")) ?? "News lockout"
+      : !filter.eligible
+        ? filter.reasons[0] ?? "Filter blocked"
+        : null,
+  });
+
+  // Only emit synthesized trend continuation levels when Precision Engine validates Grade B/A/A+ (NO coin-flip fallback in chop)
   const hasLevels = activeSetups.some((s) => s.entry != null && s.stopLoss != null && s.direction !== "NONE");
-  if (!hasLevels && regime.market !== "CHAOTIC") {
-    const fb = regimeFallbackSetup(pair, input.barsM5, regime, sessionSoft);
-    if (fb) activeSetups.push(fb);
+  if (
+    !hasLevels &&
+    regime.market !== "CHAOTIC" &&
+    precision.grade !== "NO_TRADE" &&
+    precision.direction !== "NEUTRAL" &&
+    precision.entry != null &&
+    precision.stopLoss != null
+  ) {
+    activeSetups.push({
+      strategy: "A",
+      direction: precision.direction,
+      status: precision.grade === "A+" || precision.grade === "A" ? "TRIGGERED" : "ACTIVE",
+      grade: precision.grade,
+      strength: precision.precisionScore,
+      probability: precision.calibratedWinRatePct,
+      entry: precision.entry,
+      stopLoss: precision.stopLoss,
+      takeProfit: precision.tp2,
+      takeProfit1: precision.tp1,
+      takeProfit2: precision.tp2,
+      takeProfit3: precision.tp3,
+      riskReward: precision.grossRiskReward,
+      riskReward1: 1.15,
+      riskReward2: precision.grossRiskReward ?? 2.0,
+      riskReward3: 3.1,
+      invalidation: precision.stopLoss,
+      entryZone: precision.entryZone,
+      stopPips: toPips(pair, Math.abs(precision.entry - precision.stopLoss)),
+      evidence: [
+        `Precision Engine Grade ${precision.grade} | E[R] +${precision.expectancyR}R`,
+        ...precision.gatesPassed.slice(0, 4),
+      ],
+      riskNotes: sessionSoft < 1 ? ["Ngoài phiên chính — giảm size"] : ["Kiểm tra spread trước khi vào"],
+    });
   }
 
   if (activeSetups.length === 0) {
@@ -161,6 +160,7 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
       strategy: "A",
       direction: "NONE",
       status: regime.market === "CHAOTIC" ? "NO_SETUP" : "FILTERED_OUT",
+      grade: "NO_TRADE",
       strength: 0,
       entry: null,
       stopLoss: null,
@@ -170,7 +170,12 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
       entryZone: null,
       stopPips: null,
       evidence: regime.market === "CHAOTIC" ? ["CHAOTIC regime — khong scalp"] : filter.reasons,
-      riskNotes: regime.market === "CHAOTIC" ? ["Khoa giao dich"] : ["Filter chan entry"],
+      riskNotes:
+        precision.vetoReasons.length > 0
+          ? precision.vetoReasons
+          : regime.market === "CHAOTIC"
+            ? ["Khoa giao dich"]
+            : ["Filter chan entry"],
     });
   }
 
@@ -188,43 +193,66 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     ranked[0] ??
     null;
 
+  if (primarySetup) {
+    primarySetup.grade = precision.grade;
+    if (precision.grade !== "NO_TRADE" && precision.entry != null && precision.stopLoss != null) {
+      primarySetup.takeProfit1 = precision.tp1;
+      primarySetup.takeProfit2 = precision.tp2 ?? primarySetup.takeProfit;
+      primarySetup.takeProfit3 = precision.tp3;
+      primarySetup.probability = precision.calibratedWinRatePct;
+    } else if (precision.grade === "NO_TRADE" && primarySetup.direction !== "NONE") {
+      primarySetup.status = "FILTERED_OUT";
+      primarySetup.strength = Math.min(primarySetup.strength, 35);
+    }
+  }
+
   let direction: ForexScalpSignal["direction"] = "neutral";
   let strength = 0;
   if (
+    precision.grade !== "NO_TRADE" &&
     primarySetup?.direction === "BUY" &&
     primarySetup.status !== "INVALIDATED" &&
     primarySetup.status !== "FILTERED_OUT"
   ) {
     direction = "watch-long";
-    strength = primarySetup.strength;
+    strength = Math.round((primarySetup.strength + precision.precisionScore) / 2);
   } else if (
+    precision.grade !== "NO_TRADE" &&
     primarySetup?.direction === "SELL" &&
     primarySetup.status !== "INVALIDATED" &&
     primarySetup.status !== "FILTERED_OUT"
   ) {
     direction = "watch-short";
-    strength = primarySetup.strength;
+    strength = Math.round((primarySetup.strength + precision.precisionScore) / 2);
+  } else if (precision.grade === "NO_TRADE") {
+    direction = "neutral";
+    strength = Math.min(35, precision.precisionScore);
   }
 
   const riskNotes = [
+    ...precision.vetoReasons,
     ...filter.reasons.filter((r) => !r.startsWith("Pass") && !r.startsWith("Soft")),
     ...regime.evidence,
     ...(primarySetup?.riskNotes ?? []),
   ];
 
   const evidence = [
+    `Precision Grade ${precision.grade} | E[R] ${precision.expectancyR >= 0 ? "+" : ""}${precision.expectancyR}R | Net RR 1:${precision.netRiskReward ?? "-"}`,
     `Filter: tier ${filter.tier} | ${filter.sessionLabel} | spread ${filter.spreadPips?.toFixed(1) ?? "n/a"}/${filter.maxSpreadPips} pip`,
     `Regime: ${regime.market} / ${regime.volatility}`,
-    ...(primarySetup?.evidence ?? []).slice(0, 5),
+    ...(primarySetup?.evidence ?? []).slice(0, 4),
   ];
 
   const micro = supportResistance((input.barsM15.length >= 40 ? input.barsM15 : input.barsM5).slice(-96), 96);
 
   const probability =
-    primarySetup?.probability ??
-    (strength > 0 ? Math.min(92, Math.max(45, Math.round(50 + strength * 0.42))) : null);
+    precision.grade !== "NO_TRADE"
+      ? precision.calibratedWinRatePct
+      : primarySetup?.probability ??
+        (strength > 0 ? Math.min(92, Math.max(40, Math.round(45 + strength * 0.4))) : null);
 
   const tp1 =
+    precision.tp1 ??
     primarySetup?.takeProfit1 ??
     (primarySetup?.entry && primarySetup?.stopLoss
       ? primarySetup.direction === "BUY"
@@ -232,15 +260,22 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
         : primarySetup.entry - Math.abs(primarySetup.entry - primarySetup.stopLoss) * 1.2
       : null);
 
-  const tp2 = primarySetup?.takeProfit2 ?? primarySetup?.takeProfit ?? null;
+  const tp2 = precision.tp2 ?? primarySetup?.takeProfit2 ?? primarySetup?.takeProfit ?? null;
 
   const tp3 =
+    precision.tp3 ??
     primarySetup?.takeProfit3 ??
     (primarySetup?.entry && primarySetup?.stopLoss
       ? primarySetup.direction === "BUY"
         ? primarySetup.entry + Math.abs(primarySetup.entry - primarySetup.stopLoss) * 3.0
         : primarySetup.entry - Math.abs(primarySetup.entry - primarySetup.stopLoss) * 3.0
       : null);
+
+  const baseRiskPct = sessionSoft < 1 ? 0.2 : 0.35;
+  const scaledRiskPct =
+    precision.grade !== "NO_TRADE"
+      ? Number((baseRiskPct * precision.recommendedSizeMultiplier).toFixed(2))
+      : 0;
 
   return {
     pair,
@@ -252,8 +287,8 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     pipSize: pip,
     atr: atrV,
     atrPips: atrV != null ? toPips(pair, atrV) : null,
-    entryZone: primarySetup?.entryZone ?? null,
-    invalidation: primarySetup?.invalidation ?? null,
+    entryZone: precision.grade !== "NO_TRADE" ? (precision.entryZone ?? primarySetup?.entryZone ?? null) : null,
+    invalidation: primarySetup?.invalidation ?? precision.stopLoss ?? null,
     micro,
     riskNotes: [...new Set(riskNotes)].slice(0, 8),
     evidence: evidence.slice(0, 8),
@@ -266,9 +301,10 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     activeSetups,
     primarySetup,
     moduleBStatus,
+    precision,
     riskHint: {
-      recommendedRiskPct: sessionSoft < 1 ? 0.15 : 0.25,
-      stopPips: primarySetup?.stopPips ?? null,
+      recommendedRiskPct: scaledRiskPct,
+      stopPips: primarySetup?.stopPips ?? (precision.entry && precision.stopLoss ? toPips(pair, Math.abs(precision.entry - precision.stopLoss)) : null),
       note: "lot = risk_amount / (stop_pips × pip_value) — kiem tra margin & correlation USD. Khong phai khuyen nghi.",
     },
   };

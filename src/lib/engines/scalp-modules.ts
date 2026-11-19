@@ -1,5 +1,6 @@
 import type { OhlcvBar } from "../types";
-import { atr, ema, supportResistance } from "../technical";
+import { adx, atr, ema, macd, rsi, supportResistance } from "../technical";
+import { computeEfficiencyRatio } from "./asset-precision";
 import type {
   AssetFilterResult,
   AssetTier,
@@ -115,13 +116,16 @@ export function detectRegime(barsM15: OhlcvBar[]): RegimeSnapshot {
   const closes = barsM15.map((b) => b.close);
   const highs = barsM15.map((b) => b.high);
   const lows = barsM15.map((b) => b.low);
-  const look = Math.min(20, barsM15.length - 2);
-  const recentHighs = highs.slice(-look);
-  const recentLows = lows.slice(-look);
-  const hh = recentHighs[recentHighs.length - 1] > Math.max(...recentHighs.slice(0, -3));
-  const hl = recentLows[recentLows.length - 1] > Math.min(...recentLows.slice(0, -3));
-  const lh = recentHighs[recentHighs.length - 1] < Math.min(...recentHighs.slice(0, -3));
-  const ll = recentLows[recentLows.length - 1] < Math.max(...recentLows.slice(0, -3));
+  const look = Math.min(24, barsM15.length);
+  const half = Math.floor(look / 2);
+  const priorHighs = highs.slice(-look, -half);
+  const recentHighs = highs.slice(-half);
+  const priorLows = lows.slice(-look, -half);
+  const recentLows = lows.slice(-half);
+  const hh = priorHighs.length > 0 && Math.max(...recentHighs) > Math.max(...priorHighs);
+  const hl = priorLows.length > 0 && Math.min(...recentLows) > Math.min(...priorLows);
+  const lh = priorHighs.length > 0 && Math.max(...recentHighs) < Math.max(...priorHighs);
+  const ll = priorLows.length > 0 && Math.min(...recentLows) < Math.min(...priorLows);
 
   const ema9a = ema(closes, 9);
   const ema21a = ema(closes, 21);
@@ -130,15 +134,21 @@ export function detectRegime(barsM15: OhlcvBar[]): RegimeSnapshot {
   const emaUp = e9 != null && e21 != null && e9 > e21;
   const emaDown = e9 != null && e21 != null && e9 < e21;
 
+  const adxPeriod = highs.length >= 28 ? 14 : Math.max(5, Math.floor(highs.length / 2) - 1);
+  const adxArr = adx(highs, lows, closes, adxPeriod).adx;
+  const adxVal = adxArr[adxArr.length - 1];
+  const er = computeEfficiencyRatio(closes, 14);
+  const hasDirectionalStrength = (adxVal != null && adxVal >= 18) || er >= 0.28;
+
   const ret6 = closes.length > 7 ? Math.abs(closes[closes.length - 1] / closes[closes.length - 7] - 1) * 100 : 0;
   let market: MarketRegime = "RANGING";
   if (volatility === "EXTREME_VOLATILITY" && ret6 > 3) market = "CHAOTIC";
-  else if ((hh && hl) || (emaUp && !ll)) market = "TRENDING_UP";
-  else if ((lh && ll) || (emaDown && !hh)) market = "TRENDING_DOWN";
+  else if (hasDirectionalStrength && ((hh && hl) || (emaUp && (hh || hl) && !ll))) market = "TRENDING_UP";
+  else if (hasDirectionalStrength && ((lh && ll) || (emaDown && (lh || ll) && !hh))) market = "TRENDING_DOWN";
   else market = "RANGING";
 
   evidence.push(
-    `Cau truc M15: ${hh ? "HH " : ""}${hl ? "HL " : ""}${lh ? "LH " : ""}${ll ? "LL " : ""}| EMA9 ${emaUp ? ">" : emaDown ? "<" : "~"} EMA21 -> ${market}`,
+    `Cau truc M15: ${hh ? "HH " : ""}${hl ? "HL " : ""}${lh ? "LH " : ""}${ll ? "LL " : ""}| EMA9 ${emaUp ? ">" : emaDown ? "<" : "~"} EMA21 | ADX ${adxVal != null ? adxVal.toFixed(1) : "?"} | ER ${(er * 100).toFixed(0)}% -> ${market}`,
   );
 
   return { volatility, market, atrPct, atrRatio, evidence };
@@ -486,4 +496,214 @@ export function strategyB(
     };
   }
   return { setup: null, status: "ORDER_FLOW_UNAVAILABLE" };
+}
+
+/**
+ * Strategy T (Crypto) — pullback/sweep + VWAP + EMA9/21 + RSI + Volume confluence.
+ * Strictly regime-aligned and anti-chase to capture pullbacks and sweep rejections.
+ */
+export function strategyTechCrypto(
+  barsM15: OhlcvBar[],
+  barsM5: OhlcvBar[],
+  regime: RegimeSnapshot,
+  opts: { fundingRate?: number | null; quoteVolume24h?: number | null } = {},
+): ScalpSetup | null {
+  if (barsM5.length < 40 || barsM15.length < 25) return null;
+  if (regime.volatility === "EXTREME_VOLATILITY" || regime.market === "CHAOTIC") return null;
+
+  const closes = barsM5.map((b) => b.close);
+  const last = barsM5[barsM5.length - 1]!;
+  const prev = barsM5[barsM5.length - 2]!;
+  const avgB = avgBody(barsM5, 12);
+  const body = bodyOf(last);
+  const lW = lowerWickOf(last);
+  const uW = upperWickOf(last);
+
+  // Session VWAP over recent 96 M5 bars (~8h)
+  const vwapSlice = barsM5.slice(-96);
+  let pv = 0;
+  let vv = 0;
+  for (const b of vwapSlice) {
+    if (b.volume > 0) {
+      pv += ((b.high + b.low + b.close) / 3) * b.volume;
+      vv += b.volume;
+    }
+  }
+  const vwap = vv > 0 ? pv / vv : null;
+
+  const e9 = ema(closes, 9)[closes.length - 1];
+  const e21 = ema(closes, 21)[closes.length - 1];
+  const m15Closes = barsM15.map((b) => b.close);
+  const htfE9 = ema(m15Closes, 9)[m15Closes.length - 1];
+  const htfE21 = ema(m15Closes, 21)[m15Closes.length - 1];
+  const rsiArr = rsi(closes, 14);
+  const rsiLast = rsiArr[rsiArr.length - 1];
+  const macdHist = macd(closes).histogram;
+  const histLast = macdHist[macdHist.length - 1];
+  const atrV = atr(barsM5, 14) ?? rangeOf(last);
+
+  const medVol = median(barsM5.slice(-24, -1).map((b) => b.volume).filter((v) => v > 0));
+  const volRatio = medVol > 0 ? last.volume / medVol : 1;
+
+  // Sweep/rejection detection at 10-bar edge
+  const lookback = barsM5.slice(-11, -1);
+  const priorLow = Math.min(...lookback.map((b) => b.low));
+  const priorHigh = Math.max(...lookback.map((b) => b.high));
+  const bullSweep = last.low < priorLow && last.close > priorLow && lW >= rangeOf(last) * 0.38;
+  const bearSweep = last.high > priorHigh && last.close < priorHigh && uW >= rangeOf(last) * 0.38;
+
+  // Pullback reclaim onto EMA21 / VWAP in trend
+  const bullPullback =
+    e9 != null &&
+    e21 != null &&
+    e9 > e21 &&
+    last.low <= Math.max(e21, vwap ?? e21) * 1.002 &&
+    last.close > e9 &&
+    isBull(last);
+  const bearPullback =
+    e9 != null &&
+    e21 != null &&
+    e9 < e21 &&
+    last.high >= Math.min(e21, vwap ?? e21) * 0.998 &&
+    last.close < e9 &&
+    isBear(last);
+
+  const bullEngulf =
+    isBear(prev) && isBull(last) && body > avgB * 0.9 && last.close >= prev.open && last.open <= prev.close;
+  const bearEngulf =
+    isBull(prev) && isBear(last) && body > avgB * 0.9 && last.close <= prev.open && last.open >= prev.close;
+
+  let bullScore = 0;
+  let bearScore = 0;
+  const evidence: string[] = [];
+  const riskNotes: string[] = [];
+
+  if (bullSweep) {
+    bullScore += 28;
+    evidence.push("Quet thanh khoan SSL + rut chan hap thu M5");
+  }
+  if (bearSweep) {
+    bearScore += 28;
+    evidence.push("Quet thanh khoan BSL + tu choi gia M5");
+  }
+  if (bullPullback) {
+    bullScore += 22;
+    evidence.push("Pullback ve EMA21/VWAP trong trend tang");
+  }
+  if (bearPullback) {
+    bearScore += 22;
+    evidence.push("Retest EMA21/VWAP trong trend giam");
+  }
+  if (bullEngulf) {
+    bullScore += 18;
+    evidence.push("Bullish Engulfing M5");
+  }
+  if (bearEngulf) {
+    bearScore += 18;
+    evidence.push("Bearish Engulfing M5");
+  }
+
+  if (e9 != null && e21 != null) {
+    if (e9 > e21 && last.close > e9) bullScore += 12;
+    else if (e9 < e21 && last.close < e9) bearScore += 12;
+  }
+  if (htfE9 != null && htfE21 != null) {
+    if (htfE9 > htfE21) bullScore += 12;
+    else if (htfE9 < htfE21) bearScore += 12;
+  }
+  if (vwap != null) {
+    if (last.close > vwap) bullScore += 8;
+    else if (last.close < vwap) bearScore += 8;
+  }
+  if (histLast != null) {
+    if (histLast > 0) bullScore += 8;
+    else if (histLast < 0) bearScore += 8;
+  }
+  if (volRatio >= 1.35) {
+    if (isBull(last)) bullScore += 8;
+    else if (isBear(last)) bearScore += 8;
+  }
+
+  let direction: ScalpDirection = "NONE";
+  let score = 0;
+  const diff = Math.abs(bullScore - bearScore);
+  if (bullScore > bearScore && bullScore >= 38 && diff >= 14) {
+    direction = "BUY";
+    score = bullScore - Math.round(bearScore * 0.25);
+  } else if (bearScore > bullScore && bearScore >= 38 && diff >= 14) {
+    direction = "SELL";
+    score = bearScore - Math.round(bullScore * 0.25);
+  } else {
+    return null;
+  }
+
+  // Strict regime & anti-chase enforcement
+  const hasCatalyst = direction === "BUY" ? bullSweep || bullEngulf : bearSweep || bearEngulf;
+  if (direction === "BUY" && regime.market === "TRENDING_DOWN" && !bullSweep) return null;
+  if (direction === "SELL" && regime.market === "TRENDING_UP" && !bearSweep) return null;
+  if (regime.market === "RANGING" && !hasCatalyst) {
+    score -= 14;
+    riskNotes.push("Sideway chop - chi vao lenh khi co Sweep xac nhan");
+  }
+
+  if (rsiLast != null) {
+    if (direction === "BUY" && rsiLast >= 74) {
+      score -= 16;
+      riskNotes.push(`Anti-chase: RSI ${rsiLast.toFixed(0)} >= 74`);
+    } else if (direction === "SELL" && rsiLast <= 26) {
+      score -= 16;
+      riskNotes.push(`Anti-chase: RSI ${rsiLast.toFixed(0)} <= 26`);
+    }
+  }
+
+  if (opts.fundingRate != null) {
+    if (direction === "BUY" && opts.fundingRate >= 0.0006) {
+      score -= 18;
+      riskNotes.push("Funding Rate qua nong (+0.06%) - rui ro Long squeeze");
+    } else if (direction === "SELL" && opts.fundingRate <= -0.0005) {
+      score -= 18;
+      riskNotes.push("Funding Rate am sau (-0.05%) - rui ro Short squeeze");
+    }
+  }
+
+  if (score < 36) return null;
+
+  const entry = last.close;
+  const rawStopDist =
+    direction === "BUY"
+      ? entry - (Math.min(...barsM5.slice(-8).map((b) => b.low)) - 0.35 * atrV)
+      : Math.max(...barsM5.slice(-8).map((b) => b.high)) + 0.35 * atrV - entry;
+  const stopDist = clamp(rawStopDist, atrV * 0.8, atrV * 2.2);
+  const stopLoss = direction === "BUY" ? entry - stopDist : entry + stopDist;
+
+  const sr = supportResistance(barsM15, 48);
+  let takeProfit = direction === "BUY" ? entry + stopDist * 2.0 : entry - stopDist * 2.0;
+  if (direction === "BUY") {
+    const structRes = sr.resistance.find((r) => r >= entry + stopDist * 1.6);
+    if (structRes != null) takeProfit = structRes;
+  } else {
+    const structSup = sr.support.find((s) => s <= entry - stopDist * 1.6);
+    if (structSup != null) takeProfit = structSup;
+  }
+
+  const rr = stopDist > 0 ? Number((Math.abs(takeProfit - entry) / stopDist).toFixed(2)) : 2.0;
+  const strength = clamp(Math.round(score), 0, 92);
+
+  return {
+    strategy: "A",
+    direction,
+    status: strength >= 60 ? "TRIGGERED" : "ACTIVE",
+    strength,
+    entry,
+    stopLoss,
+    takeProfit,
+    riskReward: rr,
+    invalidation: stopLoss,
+    entryZone:
+      direction === "BUY"
+        ? [entry - atrV * 0.25, entry]
+        : [entry, entry + atrV * 0.25],
+    evidence: evidence.slice(0, 6),
+    riskNotes,
+  };
 }

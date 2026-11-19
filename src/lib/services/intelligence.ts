@@ -5,6 +5,10 @@ import { getCryptoDetail } from "./crypto";
 import { getForexDetail } from "./forex";
 import { getNews } from "./news";
 import { getCryptoKlines, getCryptoMarkets } from "./crypto";
+import * as binance from "../providers/binance";
+import { evaluateTrueLevel2Dom } from "../engines/crypto-derivatives-engine";
+import { evaluateCryptoShield } from "../engines/crypto-news-shield";
+import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import { binanceWs, ensureBinanceWsStarted } from "../realtime/binance-ws";
 import { detectMarketState, STATE_VI, type MarketStateResult } from "../engines/market-state";
 import { analyzeScalp, analyzeScalpMulti, type ScalpSignal } from "../engines/scalp";
@@ -211,12 +215,15 @@ export async function buildScalpSignal(symbolRaw: string, timeframe = "5m"): Pro
       staleMs: 60_000,
       softSwr: true,
       producer: async () => {
-        const [m15, m5, m1, markets, detail] = await Promise.all([
+        const [h1, m15, m5, m1, markets, detail, book, calendarEvents] = await Promise.all([
+          getCryptoKlines(sym, "1h", 80).catch(() => null),
           getCryptoKlines(sym, "15m", 120).catch(() => null),
           getCryptoKlines(sym, m5Interval, 320).catch(() => null),
           getCryptoKlines(sym, "1m", 120).catch(() => null),
           getCryptoMarkets().catch(() => null),
           getCryptoDetail(sym, "15m").catch(() => null),
+          binance.getOrderBook(sym, 10).catch(() => null),
+          getGlobalMacroShieldEvents().catch(() => []),
         ]);
 
         const detailBars = detail?.detail.bars ?? null;
@@ -231,6 +238,7 @@ export async function buildScalpSignal(symbolRaw: string, timeframe = "5m"): Pro
 
         const barsM15 = m15?.bars && m15.bars.length >= 30 ? m15.bars : barsM5;
         const barsM1 = m1?.bars && m1.bars.length >= 25 ? m1.bars : null;
+        const barsH1 = h1?.bars && h1.bars.length >= 20 ? validateBars(h1.bars).cleaned : null;
 
         const q5 = validateBars(barsM5);
         const q15 = validateBars(barsM15);
@@ -241,15 +249,32 @@ export async function buildScalpSignal(symbolRaw: string, timeframe = "5m"): Pro
         const row = markets?.rows.find((r) => r.symbol === sym);
         const funding = detail?.detail.funding?.fundingRate ?? null;
         const oi = detail?.detail.openInterest?.openInterest ?? null;
+        const domImbalance = book ? evaluateTrueLevel2Dom(book, 5).imbalanceRatio : null;
+
+        const n5 = q5.cleaned.length;
+        const recent5mPct =
+          n5 >= 2 && q5.cleaned[n5 - 2]!.close > 0
+            ? ((q5.cleaned[n5 - 1]!.close - q5.cleaned[n5 - 2]!.close) / q5.cleaned[n5 - 2]!.close) * 100
+            : 0;
+        const shield = evaluateCryptoShield({
+          symbol: sym,
+          fundingRate: funding ?? 0.0001,
+          recentPriceChangePct5m: recent5mPct,
+          calendarEvents,
+        });
 
         let signal = analyzeScalpMulti({
           symbol: sym,
           barsM15: q15.cleaned,
           barsM5: q5.cleaned,
           barsM1: q1?.cleaned ?? null,
+          barsH1,
           quoteVolume24h: row?.quoteVolume ?? null,
           fundingRate: funding,
           openInterest: oi,
+          orderBookImbalance: domImbalance,
+          isLockout: shield.isLockout,
+          lockoutReason: shield.warningMessage,
         });
 
         if (!signal) {

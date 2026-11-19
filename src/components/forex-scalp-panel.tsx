@@ -18,6 +18,28 @@ interface FxSetup {
   stopPips: number | null;
 }
 
+interface PrecisionSummaryView {
+  direction: string;
+  action: string;
+  grade: "A+" | "A" | "B" | "NO_TRADE";
+  precisionScore: number;
+  calibratedWinRatePct: number;
+  expectancyR: number;
+  entryMode: string;
+  entry: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  tp3: number | null;
+  netRiskReward: number | null;
+  vetoReasons: string[];
+  breakevenPlan?: {
+    tp1ClosePct: number;
+    moveSlToBeAtTp1: boolean;
+    trailingAtrMult: number;
+  };
+}
+
 interface FxSignal {
   pair: string;
   timeframe: string;
@@ -40,6 +62,11 @@ interface FxSignal {
     maxSpreadPips: number;
   };
   regime: { market: string; volatility: string };
+  probability?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
+  precision?: PrecisionSummaryView | null;
   primarySetup: FxSetup | null;
   moduleBStatus: string;
   riskHint: { recommendedRiskPct: number; stopPips: number | null; note: string };
@@ -225,13 +252,16 @@ export const ForexScalpPanel = memo(function ForexScalpPanel({ pair }: { pair: s
 
 const View = memo(function View({ signal: s, meta }: { signal: FxSignal; meta: Meta | null }) {
   const dir = DIR[s.direction] ?? DIR.neutral;
-  const digits = s.last >= 100 ? 2 : s.last >= 10 ? 3 : 5;
+  const digits = s.pair.includes("JPY") ? 3 : s.last >= 100 ? 2 : s.last >= 10 ? 3 : 5;
   const setup = s.primarySetup;
-  const conf = Math.max(0, Math.min(100, Math.round(s.strength)));
+  const prec = s.precision ?? null;
+  const conf = Math.max(0, Math.min(100, Math.round(prec?.calibratedWinRatePct ?? s.probability ?? s.strength)));
   const [leverage, setLeverage] = useState(10);
+  const [slMode, setSlMode] = useState<"structural" | "leverage">("structural");
   const capital = 10_000;
+  const pipSz = s.pipSize > 0 ? s.pipSize : s.last >= 50 ? 0.01 : 0.0001;
 
-  const levels = useMemo(
+  const levLevels = useMemo(
     () =>
       levelsForLeverage({
         last: s.last,
@@ -240,18 +270,28 @@ const View = memo(function View({ signal: s, meta }: { signal: FxSignal; meta: M
         setupSl: setup?.stopLoss ?? null,
         entryZone: s.entryZone,
         micro: s.micro,
-        pipSize: s.pipSize > 0 ? s.pipSize : s.last >= 50 ? 0.01 : 0.0001,
+        pipSize: pipSz,
         atrPips: s.atrPips,
         leverage,
       }),
-    [s.last, s.direction, s.entryZone, s.micro, s.pipSize, s.atrPips, setup, leverage],
+    [s.last, s.direction, s.entryZone, s.micro, pipSz, s.atrPips, setup, leverage],
   );
 
-  const entry = levels?.entry ?? null;
-  const stopLoss = levels?.stopLoss ?? null;
-  const takeProfit = levels?.takeProfit ?? null;
-  const stopPips = levels?.stopPips ?? null;
-  const riskReward = levels?.riskReward ?? null;
+  const structuralEntry = prec?.entry ?? setup?.entry ?? null;
+  const structuralSl = prec?.stopLoss ?? setup?.stopLoss ?? null;
+  const structuralTp = prec?.tp2 ?? s.tp2 ?? setup?.takeProfit ?? null;
+  const hasStructural = structuralEntry != null && structuralSl != null && structuralTp != null;
+  const useStructural = slMode === "structural" && hasStructural;
+
+  const entry = useStructural ? structuralEntry : levLevels?.entry ?? null;
+  const stopLoss = useStructural ? structuralSl : levLevels?.stopLoss ?? null;
+  const takeProfit = useStructural ? structuralTp : levLevels?.takeProfit ?? null;
+  const stopPips =
+    entry != null && stopLoss != null ? Math.abs(entry - stopLoss) / pipSz : levLevels?.stopPips ?? null;
+  const riskReward = useStructural
+    ? prec?.netRiskReward ?? setup?.riskReward ?? levLevels?.riskReward ?? null
+    : levLevels?.riskReward ?? null;
+  const showLevels = s.direction !== "neutral" && entry != null && stopLoss != null;
 
   const levScenario = useMemo(() => {
     if (entry == null || !Number.isFinite(entry) || entry <= 0 || stopLoss == null) return null;
@@ -297,6 +337,16 @@ const View = memo(function View({ signal: s, meta }: { signal: FxSignal; meta: M
             {s.filter.sessionLabel}
           </Badge>
           <Badge tone="neutral">{s.regime.market}</Badge>
+          {prec && (
+            <Badge tone={prec.grade === "A+" || prec.grade === "A" ? "up" : prec.grade === "B" ? "warn" : "neutral"}>
+              {prec.grade === "NO_TRADE" ? "WAIT / LỌC" : `GRADE ${prec.grade}`}
+            </Badge>
+          )}
+          {prec && prec.grade !== "NO_TRADE" && (
+            <Badge tone={prec.expectancyR >= 0.2 ? "up" : "accent"}>
+              E[R] {prec.expectancyR >= 0 ? `+${prec.expectancyR}R` : `${prec.expectancyR}R`}
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -304,34 +354,75 @@ const View = memo(function View({ signal: s, meta }: { signal: FxSignal; meta: M
         <div className={`h-full ${confBar} transition-all`} style={{ width: `${conf}%` }} />
       </div>
 
-      {levels && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Metric
-            label="Entry đề xuất"
-            value={entry != null ? fmtNum(entry, digits) : "-"}
-            tone="up"
-            hint="Limit / vùng chờ"
-          />
-          <Metric
-            label="SL"
-            value={stopLoss != null ? fmtNum(stopLoss, digits) : "-"}
-            tone="down"
-            hint={stopPips != null ? `${stopPips.toFixed(1)} pip · ${leverage}x` : undefined}
-          />
-          <Metric
-            label="TP"
-            value={takeProfit != null ? fmtNum(takeProfit, digits) : "-"}
-            tone="up"
-            hint={riskReward != null ? `RR ${riskReward}` : undefined}
-          />
-          <Metric label="Giá TT" value={fmtNum(s.last, digits)} hint="Tham chiếu" />
+      {prec?.grade === "NO_TRADE" && prec.vetoReasons?.length > 0 && (
+        <div className="rounded-md border border-warning/30 bg-warning/5 p-2 text-[11px] text-text-secondary">
+          <div className="font-semibold text-warning">🛡 Bộ lọc Precision tạm giữ quan sát (NO TRADE):</div>
+          <p className="mt-0.5">{prec.vetoReasons[0]}</p>
+        </div>
+      )}
+
+      {showLevels && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Metric
+              label="Entry đề xuất"
+              value={entry != null ? fmtNum(entry, digits) : "-"}
+              tone="up"
+              hint={prec?.entryMode === "LIMIT_PULLBACK" ? "Limit Pullback OTE" : "Confirmed Entry"}
+            />
+            <Metric
+              label={useStructural ? "SL Cấu trúc" : `SL ${leverage}x`}
+              value={stopLoss != null ? fmtNum(stopLoss, digits) : "-"}
+              tone="down"
+              hint={stopPips != null ? `${stopPips.toFixed(1)} pip` : undefined}
+            />
+            <Metric
+              label="TP2 Mục tiêu"
+              value={takeProfit != null ? fmtNum(takeProfit, digits) : "-"}
+              tone="up"
+              hint={riskReward != null ? `Net RR ${riskReward}` : undefined}
+            />
+            <Metric label="Giá TT" value={fmtNum(s.last, digits)} hint="Tham chiếu" />
+          </div>
+
+          {(prec?.tp1 ?? s.tp1) != null && (
+            <div className="grid grid-cols-3 gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated/30 p-2 text-[10px]">
+              <div>
+                <span className="text-text-muted">TP1 (50% + SL➔BE)</span>
+                <div className="num font-semibold text-positive">
+                  {fmtNum((prec?.tp1 ?? s.tp1) as number, digits)}
+                </div>
+              </div>
+              <div>
+                <span className="text-text-muted">TP2 (Chốt 30%)</span>
+                <div className="num font-semibold text-positive">
+                  {(prec?.tp2 ?? s.tp2) != null ? fmtNum((prec?.tp2 ?? s.tp2) as number, digits) : "—"}
+                </div>
+              </div>
+              <div>
+                <span className="text-text-muted">TP3 (Runner 20%)</span>
+                <div className="num font-semibold text-positive">
+                  {(prec?.tp3 ?? s.tp3) != null ? fmtNum((prec?.tp3 ?? s.tp3) as number, digits) : "—"}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="rounded-lg border border-border-subtle bg-background-secondary/40 p-2.5">
         <div className="mb-1.5 flex items-center justify-between text-[10px]">
-          <span className="font-semibold text-text-secondary">Đòn bẩy · SL/TP theo mức</span>
-          <span className="num text-text-primary">{leverage}x</span>
+          <span className="font-semibold text-text-secondary">Đòn bẩy · Mô phỏng Notional & SL</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSlMode((m) => (m === "structural" ? "leverage" : "structural"))}
+              className="rounded border border-border-subtle bg-surface-primary px-1.5 py-0.5 text-[9.5px] font-semibold text-accent-primary hover:bg-surface-elevated"
+            >
+              {slMode === "structural" ? "🛡 SL Cấu trúc (Chuẩn)" : "⚡ SL siết theo đòn bẩy"}
+            </button>
+            <span className="num text-text-primary">{leverage}x</span>
+          </div>
         </div>
         <input
           type="range"

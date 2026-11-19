@@ -1,5 +1,6 @@
 import type { OhlcvBar } from "../types";
-import { atr, ema, macd, rsi, supportResistance } from "../technical";
+import { adx, atr, ema, macd, rsi, supportResistance } from "../technical";
+import { computeEfficiencyRatio, getAssetPipSize } from "./asset-precision";
 import type {
   ForexFilterResult,
   ForexMarketRegime,
@@ -36,10 +37,7 @@ const fmt = (v: number, digits = 5) =>
   v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 export function pipSize(pair: string): number {
-  const p = pair.toUpperCase().replace("/", "");
-  if (p.endsWith("JPY") || p.startsWith("JPY")) return 0.01;
-  if (p.endsWith("VND")) return 1;
-  return 0.0001;
+  return getAssetPipSize(pair, "FOREX");
 }
 
 export function toPips(pair: string, priceDelta: number): number {
@@ -99,8 +97,12 @@ export function sessionInfo(pair: string, nowMs = Date.now()): { ok: boolean; la
 
 import { evaluateNewsCircuitBreaker } from "./forex-news-shield";
 
-export function newsFilterOk(pair: string, nowMs = Date.now()): { ok: boolean; reason?: string } {
-  const cb = evaluateNewsCircuitBreaker(pair, nowMs);
+export function newsFilterOk(
+  pair: string,
+  nowMs = Date.now(),
+  calendarEvents: { name?: string; time?: string; currency?: string; importance?: string }[] = [],
+): { ok: boolean; reason?: string } {
+  const cb = evaluateNewsCircuitBreaker(pair, nowMs, calendarEvents);
   if (cb.isLockout) {
     return { ok: false, reason: cb.warningMessage };
   }
@@ -128,7 +130,7 @@ export function runForexFilter(input: ForexScalpInput): ForexFilterResult {
     reasons.push(`Session filter: ${session.label} — strength giảm, mức giá minh họa`);
   }
 
-  const news = newsFilterOk(pair, input.nowMs ?? Date.now());
+  const news = newsFilterOk(pair, input.nowMs ?? Date.now(), input.calendarEvents ?? []);
   if (!news.ok) reasons.push(news.reason ?? "News lock window");
 
   const dataOk = input.barsM5.length >= 40;
@@ -185,26 +187,37 @@ export function detectForexRegime(barsM15: OhlcvBar[], pair: string): ForexRegim
   const closes = barsM15.map((b) => b.close);
   const highs = barsM15.map((b) => b.high);
   const lows = barsM15.map((b) => b.low);
-  const look = Math.min(20, barsM15.length - 2);
-  const recentHighs = highs.slice(-look);
-  const recentLows = lows.slice(-look);
-  const hh = recentHighs[recentHighs.length - 1] > Math.max(...recentHighs.slice(0, -3));
-  const hl = recentLows[recentLows.length - 1] > Math.min(...recentLows.slice(0, -3));
-  const lh = recentHighs[recentHighs.length - 1] < Math.min(...recentHighs.slice(0, -3));
-  const ll = recentLows[recentLows.length - 1] < Math.max(...recentLows.slice(0, -3));
+  const look = Math.min(24, barsM15.length);
+  const half = Math.floor(look / 2);
+  const priorHighs = highs.slice(-look, -half);
+  const recentHighs = highs.slice(-half);
+  const priorLows = lows.slice(-look, -half);
+  const recentLows = lows.slice(-half);
+  const hh = priorHighs.length > 0 && Math.max(...recentHighs) > Math.max(...priorHighs);
+  const hl = priorLows.length > 0 && Math.min(...recentLows) > Math.min(...priorLows);
+  const lh = priorHighs.length > 0 && Math.max(...recentHighs) < Math.max(...priorHighs);
+  const ll = priorLows.length > 0 && Math.min(...recentLows) < Math.min(...priorLows);
 
   const e9 = ema(closes, 9)[closes.length - 1];
   const e21 = ema(closes, 21)[closes.length - 1];
   const emaUp = e9 != null && e21 != null && e9 > e21;
   const emaDown = e9 != null && e21 != null && e9 < e21;
 
+  const adxPeriod = highs.length >= 28 ? 14 : Math.max(5, Math.floor(highs.length / 2) - 1);
+  const adxArr = adx(highs, lows, closes, adxPeriod).adx;
+  const adxVal = adxArr[adxArr.length - 1];
+  const er = computeEfficiencyRatio(closes, 14);
+  const hasDirectionalStrength = (adxVal != null && adxVal >= 18) || er >= 0.28;
+
   const ret6 = closes.length > 7 ? Math.abs(closes[closes.length - 1] / closes[closes.length - 7] - 1) * 100 : 0;
   let market: ForexMarketRegime = "RANGING";
   if (volatility === "EXTREME_VOLATILITY" && ret6 > 0.8) market = "CHAOTIC";
-  else if ((hh && hl) || (emaUp && !ll)) market = "TRENDING_UP";
-  else if ((lh && ll) || (emaDown && !hh)) market = "TRENDING_DOWN";
+  else if (hasDirectionalStrength && ((hh && hl) || (emaUp && (hh || hl) && !ll))) market = "TRENDING_UP";
+  else if (hasDirectionalStrength && ((lh && ll) || (emaDown && (lh || ll) && !hh))) market = "TRENDING_DOWN";
 
-  evidence.push(`M15 structure ${hh ? "HH " : ""}${hl ? "HL " : ""}${lh ? "LH " : ""}${ll ? "LL " : ""}-> ${market}`);
+  evidence.push(
+    `M15 structure ${hh ? "HH " : ""}${hl ? "HL " : ""}${lh ? "LH " : ""}${ll ? "LL " : ""}| ADX ${adxVal != null ? adxVal.toFixed(1) : "?"} | ER ${(er * 100).toFixed(0)}% -> ${market}`,
+  );
   return { volatility, market, atrPips, atrRatio, evidence };
 }
 
@@ -288,20 +301,25 @@ export function strategyTech(
 
   // --- Candle patterns (recent 1–3 bars) ---
   let patternBias: ForexScalpDirection = "NONE";
+  let hasReversalPattern = false;
   if (prev.close < prev.open && last.close > last.open && body > avgB * 0.9 && body > bodyOf(prev) * 1.05 && last.close >= prev.open && last.open <= prev.close) {
     patternBias = "BUY";
+    hasReversalPattern = true;
     score += 22;
     evidence.push("Bullish Engulfing M5");
   } else if (prev.close > prev.open && last.close < last.open && body > avgB * 0.9 && body > bodyOf(prev) * 1.05 && last.close <= prev.open && last.open >= prev.close) {
     patternBias = "SELL";
+    hasReversalPattern = true;
     score += 22;
     evidence.push("Bearish Engulfing M5");
   } else if (lW > body * 1.8 && uW < body * 0.6 && isBull(last)) {
     patternBias = "BUY";
+    hasReversalPattern = true;
     score += 16;
     evidence.push("Hammer / rejection nến dưới M5");
   } else if (uW > body * 1.8 && lW < body * 0.6 && isBear(last)) {
     patternBias = "SELL";
+    hasReversalPattern = true;
     score += 16;
     evidence.push("Shooting Star / rejection nến trên M5");
   } else if (
@@ -313,6 +331,7 @@ export function strategyTech(
     last.close > (prev2.open + prev2.close) / 2
   ) {
     patternBias = "BUY";
+    hasReversalPattern = true;
     score += 20;
     evidence.push("Morning Star-like M5");
   } else if (
@@ -324,6 +343,7 @@ export function strategyTech(
     last.close < (prev2.open + prev2.close) / 2
   ) {
     patternBias = "SELL";
+    hasReversalPattern = true;
     score += 20;
     evidence.push("Evening Star-like M5");
   }
@@ -331,26 +351,46 @@ export function strategyTech(
   // --- EMA trend ---
   if (e9 != null && e21 != null) {
     if (e9 > e21 && last.close > e9) {
-      score += patternBias === "SELL" ? 4 : 14;
-      evidence.push("EMA9 > EMA21 + giá trên EMA9");
-      if (patternBias === "NONE") patternBias = "BUY";
+      if (patternBias === "SELL") {
+        score -= 8;
+        riskNotes.push("Xung đột EMA9>EMA21 vs nến giảm");
+      } else {
+        score += 14;
+        evidence.push("EMA9 > EMA21 + giá trên EMA9");
+        if (patternBias === "NONE") patternBias = "BUY";
+      }
     } else if (e9 < e21 && last.close < e9) {
-      score += patternBias === "BUY" ? 4 : 14;
-      evidence.push("EMA9 < EMA21 + giá dưới EMA9");
-      if (patternBias === "NONE") patternBias = "SELL";
+      if (patternBias === "BUY") {
+        score -= 8;
+        riskNotes.push("Xung đột EMA9<EMA21 vs nến tăng");
+      } else {
+        score += 14;
+        evidence.push("EMA9 < EMA21 + giá dưới EMA9");
+        if (patternBias === "NONE") patternBias = "SELL";
+      }
     }
   }
 
   // --- RSI ---
   if (rsiLast != null) {
     if (rsiLast <= 32) {
-      score += patternBias === "SELL" ? 2 : 12;
-      evidence.push(`RSI ${rsiLast.toFixed(0)} quá bán`);
-      if (patternBias === "NONE") patternBias = "BUY";
+      if (patternBias === "SELL") {
+        score -= 6;
+        riskNotes.push(`RSI ${rsiLast.toFixed(0)} quá bán cản nhịp SELL`);
+      } else {
+        score += 12;
+        evidence.push(`RSI ${rsiLast.toFixed(0)} quá bán`);
+        if (patternBias === "NONE") patternBias = "BUY";
+      }
     } else if (rsiLast >= 68) {
-      score += patternBias === "BUY" ? 2 : 12;
-      evidence.push(`RSI ${rsiLast.toFixed(0)} quá mua`);
-      if (patternBias === "NONE") patternBias = "SELL";
+      if (patternBias === "BUY") {
+        score -= 6;
+        riskNotes.push(`RSI ${rsiLast.toFixed(0)} quá mua cản nhịp BUY`);
+      } else {
+        score += 12;
+        evidence.push(`RSI ${rsiLast.toFixed(0)} quá mua`);
+        if (patternBias === "NONE") patternBias = "SELL";
+      }
     } else if (rsiLast >= 55 && (patternBias === "BUY" || regime.market === "TRENDING_UP")) {
       score += 6;
       evidence.push(`RSI ${rsiLast.toFixed(0)} ủng hộ long`);
@@ -363,17 +403,27 @@ export function strategyTech(
   // --- MACD ---
   if (macdRes) {
     if (macdRes.histogram > 0) {
-      score += patternBias === "SELL" ? 3 : 10;
-      evidence.push("MACD histogram +");
-      if (patternBias === "NONE") patternBias = "BUY";
+      if (patternBias === "SELL") {
+        score -= 6;
+        riskNotes.push("MACD dương xung đột SELL");
+      } else {
+        score += 10;
+        evidence.push("MACD histogram +");
+        if (patternBias === "NONE") patternBias = "BUY";
+      }
     } else {
-      score += patternBias === "BUY" ? 3 : 10;
-      evidence.push("MACD histogram −");
-      if (patternBias === "NONE") patternBias = "SELL";
+      if (patternBias === "BUY") {
+        score -= 6;
+        riskNotes.push("MACD âm xung đột BUY");
+      } else {
+        score += 10;
+        evidence.push("MACD histogram −");
+        if (patternBias === "NONE") patternBias = "SELL";
+      }
     }
   }
 
-  // --- Regime alignment ---
+  // --- Regime alignment & chop/anti-chase discipline ---
   if (patternBias === "BUY" && regime.market === "TRENDING_UP") {
     score += 12;
     evidence.push("Khớp TRENDING_UP");
@@ -386,18 +436,29 @@ export function strategyTech(
   } else if (patternBias === "SELL" && regime.market === "TRENDING_UP") {
     score -= 10;
     riskNotes.push("Counter-trend vs TRENDING_UP");
+  } else if (regime.market === "RANGING" && !hasReversalPattern) {
+    score -= 12;
+    riskNotes.push("Thị trường Ranging chop — thiếu nến đảo chiều xác nhận");
+  }
+
+  if (patternBias === "BUY" && rsiLast != null && rsiLast >= 74) {
+    score -= 15;
+    riskNotes.push(`Anti-chase: RSI ${rsiLast.toFixed(0)} >= 74`);
+  } else if (patternBias === "SELL" && rsiLast != null && rsiLast <= 26) {
+    score -= 15;
+    riskNotes.push(`Anti-chase: RSI ${rsiLast.toFixed(0)} <= 26`);
   }
 
   // Soft session penalty
   score = Math.round(score * sessionSoftPenalty);
 
-  if (patternBias === "NONE" || score < 18) return null;
+  if (patternBias === "NONE" || score < 34) return null;
 
   const direction = patternBias;
   const entry = last.close;
   const lv = levelsFromBias(pair, direction, entry, barsM15.length >= 30 ? barsM15 : bars, 1.5);
   const strength = clamp(score, 0, 92);
-  const status: ForexSetupStatus = strength >= 55 ? "TRIGGERED" : "ACTIVE";
+  const status: ForexSetupStatus = strength >= 58 ? "TRIGGERED" : "ACTIVE";
 
   if (sessionSoftPenalty < 1) riskNotes.push("Ngoài phiên chính — mức giá minh họa, giảm size");
   if (regime.volatility === "HIGH_VOLATILITY") riskNotes.push("HIGH_VOLATILITY — siết risk");
