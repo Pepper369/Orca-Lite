@@ -37,6 +37,7 @@ import {
   MarketStructurePanel,
   type StructureTab,
 } from "@/components/forex-market-structure";
+import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
 import {
   EconomicCalendarPanel,
   SentimentPanelCompact,
@@ -70,7 +71,7 @@ const QUICK_PAIRS = [
   "XPTUSD",
 ] as const;
 
-type MobileTab = "chart" | "desk" | "scalp" | "structure" | "news";
+type MobileTab = "chart" | "desk" | "scalp" | "quant" | "structure" | "news";
 
 function FILL({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -363,6 +364,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               ["chart", "Chart"],
               ["desk", "Vị thế"],
               ["scalp", "Scalp"],
+              ["quant", "⚡ Quant"],
               ["structure", "Cấu trúc"],
               ["news", "Tin / Lịch"],
             ] as const
@@ -522,6 +524,17 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             <ForexScalpPanel pair={pair} />
             <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
           </>
+        )}
+        {mobileTab === "quant" && (
+          <QuantTerminalPanel
+            symbol={pair}
+            interval={interval}
+            series={series}
+            currentPrice={price}
+            assetType="forex"
+            tech={tech}
+            digits={digits}
+          />
         )}
         {mobileTab === "structure" && (
           <MarketStructurePanel

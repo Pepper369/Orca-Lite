@@ -5,9 +5,10 @@ import type { CandlePattern, ForexRow, OhlcvBar, TechnicalSnapshot } from "@/lib
 import { fmtNum, Panel, priceDigits } from "@/components/ui";
 import { TechnicalPanel } from "@/components/technical-panel";
 import { MtfBiasPanel } from "@/components/mtf-bias-panel";
+import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
 import { Layers } from "lucide-react";
 
-export type StructureTab = "ms" | "ict" | "smc" | "vsa";
+export type StructureTab = "ms" | "quant" | "ict" | "smc" | "vsa";
 
 export function MarketStructurePanel({
   tab,
@@ -34,6 +35,7 @@ export function MarketStructurePanel({
 
   const tabs: { id: StructureTab; label: string }[] = [
     { id: "ms", label: "Market Structure" },
+    { id: "quant", label: "⚡ Quant Lab" },
     { id: "ict", label: "ICT" },
     { id: "smc", label: "SMC" },
     { id: "vsa", label: "VSA" },
@@ -83,6 +85,20 @@ export function MarketStructurePanel({
                 {structureNotes.narrative}
               </p>
             )}
+          </div>
+        )}
+
+        {tab === "quant" && (
+          <div className="space-y-2">
+            <QuantTerminalPanel
+              symbol={pair}
+              interval={interval}
+              series={series}
+              currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
+              assetType={assetType}
+              tech={tech}
+              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+            />
           </div>
         )}
 

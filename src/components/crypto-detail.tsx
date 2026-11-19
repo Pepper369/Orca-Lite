@@ -38,6 +38,7 @@ import {
   MarketStructurePanel,
   type StructureTab,
 } from "@/components/forex-market-structure";
+import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
 
 interface CryptoDetail {
   symbol: string;
@@ -76,7 +77,7 @@ interface SentimentApi {
 const INTERVALS = ["5m", "15m", "1h", "4h", "1d", "1w"] as const;
 const QUICK_PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"] as const;
 
-type MobileTab = "chart" | "desk" | "scalp" | "structure" | "news";
+type MobileTab = "chart" | "desk" | "scalp" | "quant" | "structure" | "news";
 
 function FILL({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -402,7 +403,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
 
       <div className="xl:hidden">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface-elevated/40 p-1">
-          {([["chart", "Chart"], ["desk", "Order flow"], ["scalp", "Scalp"], ["structure", "Cấu trúc"], ["news", "Tin / Tâm lý"]] as const).map(
+          {([["chart", "Chart"], ["desk", "Order flow"], ["scalp", "Scalp"], ["quant", "⚡ Quant"], ["structure", "Cấu trúc"], ["news", "Tin / Tâm lý"]] as const).map(
             ([id, label]) => (
               <button
                 key={id}
@@ -463,6 +464,17 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
             <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
             <CryptoTradeDesk symbol={sym} mode="leverage" />
           </>
+        )}
+        {mobileTab === "quant" && (
+          <QuantTerminalPanel
+            symbol={sym}
+            interval={interval}
+            series={series}
+            currentPrice={price}
+            assetType="crypto"
+            tech={tech}
+            digits={digits}
+          />
         )}
         {mobileTab === "structure" && (
           <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" />
