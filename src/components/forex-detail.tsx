@@ -38,6 +38,7 @@ import {
   type StructureTab,
 } from "@/components/forex-market-structure";
 import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
+import { IctSmcCockpit } from "@/components/quant/ict-smc-cockpit";
 import {
   EconomicCalendarPanel,
   SentimentPanelCompact,
@@ -71,7 +72,7 @@ const QUICK_PAIRS = [
   "XPTUSD",
 ] as const;
 
-type MobileTab = "chart" | "desk" | "scalp" | "quant" | "structure" | "news";
+type MobileTab = "chart" | "desk" | "scalp" | "ict_smc" | "quant" | "structure" | "news";
 
 function FILL({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -113,6 +114,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
   const [interval, setInterval] = useState<(typeof INTERVALS)[number]>("1h");
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [structureTab, setStructureTab] = useState<StructureTab>("ms");
+  const [rightTab, setRightTab] = useState<"scalp" | "ict_smc" | "quant">("scalp");
 
   const [liveTick, setLiveTick] = useState<{
     price: number;
@@ -364,6 +366,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               ["chart", "Chart"],
               ["desk", "Vị thế"],
               ["scalp", "Scalp"],
+              ["ict_smc", "🎯 ICT/SMC"],
               ["quant", "⚡ Quant"],
               ["structure", "Cấu trúc"],
               ["news", "Tin / Lịch"],
@@ -470,8 +473,59 @@ export function ForexDetailPage({ pair }: { pair: string }) {
         </div>
 
         <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
+          {/* Inner Stage Switcher */}
+          <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface-elevated/40 p-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setRightTab("scalp")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "scalp" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Scalp
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab("ict_smc")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "ict_smc" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              🎯 ICT/SMC
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab("quant")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "quant" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              ⚡ Quant
+            </button>
+          </div>
+
           <FILL className="min-h-0 flex-1">
-            <ForexScalpPanel pair={pair} />
+            {rightTab === "scalp" && <ForexScalpPanel pair={pair} />}
+            {rightTab === "ict_smc" && (
+              <IctSmcCockpit
+                symbol={pair}
+                series={series}
+                currentPrice={price}
+                assetType="forex"
+                digits={digits}
+              />
+            )}
+            {rightTab === "quant" && (
+              <QuantTerminalPanel
+                symbol={pair}
+                interval={interval}
+                series={series}
+                currentPrice={price}
+                assetType="forex"
+                tech={tech}
+                digits={digits}
+              />
+            )}
           </FILL>
           <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
         </div>
@@ -524,6 +578,15 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             <ForexScalpPanel pair={pair} />
             <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
           </>
+        )}
+        {mobileTab === "ict_smc" && (
+          <IctSmcCockpit
+            symbol={pair}
+            series={series}
+            currentPrice={price}
+            assetType="forex"
+            digits={digits}
+          />
         )}
         {mobileTab === "quant" && (
           <QuantTerminalPanel

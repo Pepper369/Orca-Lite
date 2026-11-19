@@ -39,6 +39,7 @@ import {
   type StructureTab,
 } from "@/components/forex-market-structure";
 import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
+import { IctSmcCockpit } from "@/components/quant/ict-smc-cockpit";
 
 interface CryptoDetail {
   symbol: string;
@@ -77,7 +78,7 @@ interface SentimentApi {
 const INTERVALS = ["5m", "15m", "1h", "4h", "1d", "1w"] as const;
 const QUICK_PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"] as const;
 
-type MobileTab = "chart" | "desk" | "scalp" | "quant" | "structure" | "news";
+type MobileTab = "chart" | "desk" | "scalp" | "ict_smc" | "quant" | "structure" | "news";
 
 function FILL({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -131,6 +132,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
       : "1h",
   );
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
+  const [rightTab, setRightTab] = useState<"scalp" | "ict_smc" | "quant">("scalp");
   const [structureTab, setStructureTab] = useState<StructureTab>("ms");
 
   const [liveTicker, setLiveTicker] = useState<{
@@ -403,7 +405,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
 
       <div className="xl:hidden">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface-elevated/40 p-1">
-          {([["chart", "Chart"], ["desk", "Order flow"], ["scalp", "Scalp"], ["quant", "⚡ Quant"], ["structure", "Cấu trúc"], ["news", "Tin / Tâm lý"]] as const).map(
+          {([["chart", "Chart"], ["desk", "Order flow"], ["scalp", "Scalp"], ["ict_smc", "🎯 ICT/SMC"], ["quant", "⚡ Quant"], ["structure", "Cấu trúc"], ["news", "Tin / Tâm lý"]] as const).map(
             ([id, label]) => (
               <button
                 key={id}
@@ -439,8 +441,59 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
           <OrcaChart symbol={sym} assetType="crypto" defaultTimeframe={interval} height={560} title={`${baseAsset}/USDT`} />
         </div>
         <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
+          {/* Inner Stage Switcher */}
+          <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface-elevated/40 p-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setRightTab("scalp")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "scalp" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Scalp
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab("ict_smc")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "ict_smc" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              🎯 ICT/SMC
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab("quant")}
+              className={`flex-1 rounded-md px-2 py-1 text-center text-[10.5px] font-semibold transition-colors ${
+                rightTab === "quant" ? "bg-accent-primary/20 text-accent-primary" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              ⚡ Quant
+            </button>
+          </div>
+
           <FILL className="min-h-0 flex-1">
-            <ScalpPanel symbol={sym} />
+            {rightTab === "scalp" && <ScalpPanel symbol={sym} />}
+            {rightTab === "ict_smc" && (
+              <IctSmcCockpit
+                symbol={sym}
+                series={series}
+                currentPrice={price}
+                assetType="crypto"
+                digits={digits}
+              />
+            )}
+            {rightTab === "quant" && (
+              <QuantTerminalPanel
+                symbol={sym}
+                interval={interval}
+                series={series}
+                currentPrice={price}
+                assetType="crypto"
+                tech={tech}
+                digits={digits}
+              />
+            )}
           </FILL>
           <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
           <CryptoTradeDesk symbol={sym} mode="leverage" />
@@ -464,6 +517,15 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
             <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
             <CryptoTradeDesk symbol={sym} mode="leverage" />
           </>
+        )}
+        {mobileTab === "ict_smc" && (
+          <IctSmcCockpit
+            symbol={sym}
+            series={series}
+            currentPrice={price}
+            assetType="crypto"
+            digits={digits}
+          />
         )}
         {mobileTab === "quant" && (
           <QuantTerminalPanel
