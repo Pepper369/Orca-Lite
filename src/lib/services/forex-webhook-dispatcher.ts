@@ -8,6 +8,7 @@
  */
 
 import type { ForexQuantSignalItem } from "./forex-signals-hub";
+import { isSafeWebhookUrl } from "@/lib/webhook-security";
 
 export interface Mt5EaSignalPayload {
   version: "1.0";
@@ -110,6 +111,17 @@ export async function dispatchForexWebhook(
   targetUrl: string,
   payload: Record<string, unknown>
 ): Promise<WebhookDispatchResult> {
+  const safe = await isSafeWebhookUrl(targetUrl, "generic");
+  if (!safe.ok) {
+    return {
+      success: false,
+      target: targetUrl,
+      status: 403,
+      message: safe.reason ?? "Webhook URL bị chặn bởi bộ lọc SSRF",
+      timestamp: Date.now(),
+    };
+  }
+
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);

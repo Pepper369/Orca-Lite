@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
-import dns from "dns/promises";
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getGlobalDiscordWebhook, postGlobalDiscord } from "@/lib/services/discord-notify";
 import { rateLimit } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/auth";
+import { isDiscordUrl, isSafeWebhookUrl, looksLikeTelegramToken } from "@/lib/webhook-security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,136 +28,6 @@ type Body = {
   color?: number;
   chatId?: string;
 };
-
-function isDiscordUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return (
-      u.protocol === "https:" &&
-      (u.hostname === "discord.com" || u.hostname === "discordapp.com") &&
-      u.pathname.startsWith("/api/webhooks/")
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isSlackUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return (
-      u.protocol === "https:" &&
-      u.hostname === "hooks.slack.com" &&
-      u.pathname.startsWith("/services/")
-    );
-  } catch {
-    return false;
-  }
-}
-
-function looksLikeTelegramToken(s: string): boolean {
-  return /^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(s.trim());
-}
-
-function isPrivateIp(ip: string): boolean {
-  const clean = ip.toLowerCase().replace(/^\[|\]$/g, "");
-
-  // IPv4 Private & Reserved
-  const parts = clean.split(".").map(Number);
-  if (parts.length === 4 && parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)) {
-    const [o1, o2] = parts;
-    if (
-      o1 === 0 || // 0.0.0.0/8
-      o1 === 10 || // 10.0.0.0/8
-      o1 === 127 || // 127.0.0.0/8
-      (o1 === 100 && o2 >= 64 && o2 <= 127) || // 100.64.0.0/10 CGNAT
-      (o1 === 172 && o2 >= 16 && o2 <= 31) || // 172.16.0.0/12
-      (o1 === 169 && o2 === 254) || // 169.254.0.0/16 Link-local / Cloud metadata
-      (o1 === 192 && o2 === 168) || // 192.168.0.0/16
-      o1 >= 224 // 224.0.0.0/4 Multicast & Reserved
-    ) {
-      return true;
-    }
-  }
-
-  // IPv6 Loopback, Link-local, Unique Local, Multicast, IPv4-mapped
-  if (
-    clean === "::1" ||
-    clean === "::" ||
-    clean.startsWith("fc") ||
-    clean.startsWith("fd") ||
-    clean.startsWith("fe80") ||
-    clean.startsWith("ff") ||
-    clean.includes("::ffff:")
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/** Chặn triệt để SSRF: cấm IP nội bộ, dải riêng tư, metadata service, và phân giải DNS chống DNS rebinding */
-async function isSafeWebhookUrl(rawUrl: string, provider: string): Promise<{ ok: boolean; reason?: string }> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return { ok: false, reason: "URL không đúng định dạng" };
-  }
-
-  if (parsed.protocol !== "https:" && (process.env.NODE_ENV === "production" || parsed.protocol !== "http:")) {
-    return { ok: false, reason: "Webhook bắt buộc phải sử dụng giao thức HTTPS" };
-  }
-
-  // Chặn thông tin đăng nhập nhúng
-  if (parsed.username || parsed.password) {
-    return { ok: false, reason: "URL không được chứa credentials" };
-  }
-
-  // Chặn các cổng dịch vụ nội bộ
-  if (parsed.port && parsed.port !== "443" && (process.env.NODE_ENV === "production" || parsed.port !== "80")) {
-    return { ok: false, reason: "Cổng mạng không được phép vì lý do an toàn" };
-  }
-
-  const host = parsed.hostname.toLowerCase();
-
-  // Kiểm tra nhà cung cấp webhook
-  if (provider === "discord" && !isDiscordUrl(rawUrl)) {
-    return { ok: false, reason: "URL không đúng định dạng Webhook Discord (https://discord.com/api/webhooks/...)" };
-  }
-  if (provider === "slack" && !isSlackUrl(rawUrl)) {
-    return { ok: false, reason: "URL không đúng định dạng Webhook Slack (https://hooks.slack.com/services/...)" };
-  }
-
-  // Chặn localhost, loopback, cloud metadata
-  if (
-    host === "localhost" ||
-    host.endsWith(".internal") ||
-    host.endsWith(".local") ||
-    host.endsWith(".localhost") ||
-    host.includes("metadata") ||
-    isPrivateIp(host)
-  ) {
-    return { ok: false, reason: "Địa chỉ đích bị từ chối (SSRF Protection)" };
-  }
-
-  // Phân giải DNS động để kiểm tra tất cả IP đích, ngăn chặn triệt để DNS Rebinding
-  try {
-    const addresses = await dns.lookup(host, { all: true });
-    if (!addresses || addresses.length === 0) {
-      return { ok: false, reason: "Không thể phân giải tên miền webhook" };
-    }
-    for (const record of addresses) {
-      if (isPrivateIp(record.address)) {
-        return { ok: false, reason: "Tên miền phân giải về địa chỉ IP nội bộ không được phép (SSRF Blocked)" };
-      }
-    }
-  } catch {
-    return { ok: false, reason: "Lỗi kết nối phân giải DNS webhook" };
-  }
-
-  return { ok: true };
-}
 
 function discordPayload(b: Body) {
   const fields: { name: string; value: string; inline: boolean }[] = [];

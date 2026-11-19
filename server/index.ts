@@ -31,10 +31,24 @@ app.use("*", async (c, next) => {
   }
   return compress()(c, next);
 });
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => {
+      if (!origin) return "*";
+      if (allowedOrigins.length > 0) {
+        return allowedOrigins.includes(origin) ? origin : allowedOrigins[0]!;
+      }
+      if (process.env.NODE_ENV !== "production") return origin;
+      return origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")
+        ? origin
+        : "";
+    },
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "Accept"],
     maxAge: 86400,
@@ -44,6 +58,23 @@ app.use(
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 app.get("/api/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
+
+// Simple per-IP limiter for local LLM proxy
+const llmHits = new Map<string, { count: number; resetAt: number }>();
+app.use("/v1/*", async (c, next) => {
+  const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const now = Date.now();
+  const cur = llmHits.get(ip);
+  if (!cur || cur.resetAt <= now) {
+    llmHits.set(ip, { count: 1, resetAt: now + 60_000 });
+  } else {
+    cur.count += 1;
+    if (cur.count > 30) {
+      return c.json({ success: false, error: { code: "RATE_LIMITED", message: "Too many LLM proxy requests" } }, 429);
+    }
+  }
+  return next();
+});
 
 // Unified AI Gateway & OpenAI-Compatible Endpoints on Single Port
 app.all("/v1/*", proxyToLlamaServer);
@@ -221,18 +252,20 @@ app.get("/api/v1/agent/verify", async (c) => {
 
 // Universal Next.js Route Resolver with Dynamic Parameter Support
 const apiBaseDir = path.resolve(process.cwd(), "src", "app", "api");
+const apiBasePrefix = apiBaseDir.endsWith(path.sep) ? apiBaseDir : apiBaseDir + path.sep;
 const routeCache = new Map<string, { routeFile: string; paramNames: string[] }>();
 const MAX_ROUTE_CACHE_ENTRIES = 500;
 
 function findRoute(currentDir: string, segments: string[], paramNames: string[]): { routeFile: string; paramNames: string[] } | null {
   const resolvedCurrent = path.resolve(currentDir);
-  if (!resolvedCurrent.startsWith(apiBaseDir)) {
+  if (resolvedCurrent !== apiBaseDir && !resolvedCurrent.startsWith(apiBasePrefix)) {
     return null;
   }
 
   if (segments.length === 0) {
     const directFile = path.join(currentDir, "route.ts");
-    if (fs.existsSync(directFile) && path.resolve(directFile).startsWith(apiBaseDir)) {
+    const resolvedFile = path.resolve(directFile);
+    if (fs.existsSync(directFile) && resolvedFile.startsWith(apiBasePrefix)) {
       return { routeFile: directFile, paramNames };
     }
     return null;
@@ -245,7 +278,7 @@ function findRoute(currentDir: string, segments: string[], paramNames: string[])
 
   // 1. Exact match folder
   const exactDir = path.join(currentDir, segment);
-  if (path.resolve(exactDir).startsWith(apiBaseDir) && fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
+  if (path.resolve(exactDir).startsWith(apiBasePrefix) && fs.existsSync(exactDir) && fs.statSync(exactDir).isDirectory()) {
     const res = findRoute(exactDir, rest, paramNames);
     if (res) return res;
   }
@@ -257,7 +290,7 @@ function findRoute(currentDir: string, segments: string[], paramNames: string[])
       if (entry.isDirectory() && entry.name.startsWith("[") && entry.name.endsWith("]")) {
         const pName = entry.name.slice(1, -1);
         const bracketDir = path.join(currentDir, entry.name);
-        if (path.resolve(bracketDir).startsWith(apiBaseDir)) {
+        if (path.resolve(bracketDir).startsWith(apiBasePrefix)) {
           const res = findRoute(bracketDir, rest, [...paramNames, pName]);
           if (res) return res;
         }

@@ -7,7 +7,6 @@ import { getBiquotePublicOhlc, biquoteIntervalFor } from "../providers/forex";
 import { getVnOhlcv } from "./stocks";
 import { fetchVndDchartHistory } from "../providers/vndirect-dchart";
 import { isVnIndexSymbol } from "../providers/vndirect";
-import { buildSyntheticBars } from "./derivatives-scalp";
 import { validateBars, detectGaps } from "../quality";
 import {
   aggregateCandles,
@@ -256,12 +255,6 @@ export async function getChartHistory(
             const r = await getVnOhlcv(symbol, Math.min(limit, 500));
             bars = r?.bars ?? [];
             source = (r?.meta as { source?: string } | undefined)?.source ?? "vn-ohlcv";
-          }
-
-          if (!bars.length && isDeriv) {
-            // High-precision synthetic scalp bars for derivatives when live feed is off-hours
-            bars = buildSyntheticBars(1300, tf);
-            source = "vsdc-synthetic";
           }
 
           series = {

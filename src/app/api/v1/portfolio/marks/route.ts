@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hubPortfolioMarks, runInDataHub, listAssetTypes } from "@/lib/data-engine";
 import { buildMeta } from "@/lib/freshness";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ type PosIn = { assetType?: string; symbol: string };
  * GET ?symbols=FPT,BTC,EURUSD&types=stock,crypto,forex
  */
 export async function POST(req: NextRequest) {
+  const limited = await rateLimit(req, { name: "portfolio_marks", binding: "RL_AUTH", limit: 40, windowSec: 60 });
+  if (limited) return limited;
   let body: { positions?: PosIn[] } = {};
   try {
     body = (await req.json()) as { positions?: PosIn[] };

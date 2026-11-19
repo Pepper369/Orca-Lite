@@ -2,6 +2,7 @@ import "server-only";
 
 import { putHot, getHot } from "@/lib/hot-snapshot";
 import { postGlobalDiscord } from "@/lib/services/discord-notify";
+import { isSafeWebhookUrl, looksLikeTelegramToken } from "@/lib/webhook-security";
 import {
   getMasterScreenerSnapshot,
   queryScreenerStocks,
@@ -237,29 +238,34 @@ export async function runScreenerAlertMonitor(options?: {
       const tgRes = await postGlobalTelegram(tgText);
       if (tgRes.ok) telegramDispatched++;
 
-      // C. Optional User Custom Webhook (if provided)
+      // C. Optional User Custom Webhook (SSRF-guarded)
       if (options?.webhookUrl) {
         try {
           if (options.provider === "telegram" && options.secret) {
-            await fetch(`https://api.telegram.org/bot${options.webhookUrl}/sendMessage`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: options.secret,
-                text: tgText,
-                parse_mode: "HTML",
-              }),
-              signal: AbortSignal.timeout(6_000),
-            }).catch(() => null);
+            if (looksLikeTelegramToken(options.webhookUrl)) {
+              await fetch(`https://api.telegram.org/bot${options.webhookUrl.trim()}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: options.secret,
+                  text: tgText,
+                  parse_mode: "HTML",
+                }),
+                signal: AbortSignal.timeout(6_000),
+              }).catch(() => null);
+            }
           } else {
-            await fetch(options.webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                content: `${config.emoji} **ORCA ALERT · [${config.nameVi}] · ${item.symbol}**\nGiá: ${(item.price ?? 0).toLocaleString("vi-VN")} đ | RS: ${item.rsRating ?? "N/A"}`,
-              }),
-              signal: AbortSignal.timeout(6_000),
-            }).catch(() => null);
+            const safeCheck = await isSafeWebhookUrl(options.webhookUrl, "discord");
+            if (safeCheck.ok) {
+              await fetch(options.webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  content: `${config.emoji} **ORCA ALERT · [${config.nameVi}] · ${item.symbol}**\nGiá: ${(item.price ?? 0).toLocaleString("vi-VN")} đ | RS: ${item.rsRating ?? "N/A"}`,
+                }),
+                signal: AbortSignal.timeout(6_000),
+              }).catch(() => null);
+            }
           }
         } catch {
           // Non-blocking custom webhook dispatch

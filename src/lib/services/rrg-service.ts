@@ -28,27 +28,29 @@ export async function getRrgData(
     ttlMs: TTL_MS,
     staleMs: STALE_MS,
     producer: async (): Promise<RrgResult> => {
-      // 1. Lấy dữ liệu nến của Benchmark (VNINDEX)
+      // 1. Lấy dữ liệu nến thật của Benchmark (VNINDEX) — không sinh nến giả khi thiếu nguồn
       const benchmarkPack = await getVnOhlcv("VNINDEX", 60, "index");
       const benchmarkBars = benchmarkPack?.bars || [];
 
-      // Fallback synthetic benchmark if empty
+      if (benchmarkBars.length < 20) {
+        return {
+          benchmark: "VNINDEX",
+          asOfDate: new Date().toISOString().split("T")[0],
+          items: [],
+          summary: {
+            leadingCount: 0,
+            weakeningCount: 0,
+            laggingCount: 0,
+            improvingCount: 0,
+          },
+        };
+      }
+
       const benchDates: string[] = [];
       const benchCloses: number[] = [];
-
-      if (benchmarkBars.length >= 20) {
-        for (const b of benchmarkBars) {
-          benchDates.push(new Date(b.time).toISOString().split("T")[0]);
-          benchCloses.push(b.close);
-        }
-      } else {
-        // Fallback dates
-        const now = Date.now();
-        for (let i = 40; i >= 0; i--) {
-          const d = new Date(now - i * 86400 * 1000);
-          benchDates.push(d.toISOString().split("T")[0]);
-          benchCloses.push(1250 + Math.sin(i / 3) * 30 + (40 - i) * 1.5);
-        }
+      for (const b of benchmarkBars) {
+        benchDates.push(new Date(b.time).toISOString().split("T")[0]);
+        benchCloses.push(b.close);
       }
 
       const items: RrgItem[] = [];
@@ -65,16 +67,9 @@ export async function getRrgData(
           const leadSym = sector.symbols[0];
           const pack = ohlcvMap.get(leadSym);
           const bars = pack?.bars || [];
+          if (bars.length < 15) continue;
 
-          let targetPrices: number[] = [];
-          if (bars.length >= 15) {
-            targetPrices = bars.map((b) => b.close);
-          } else {
-            // Synthetic based on sector profile if network fails
-            const offset = (sector.code.charCodeAt(0) % 7) - 3;
-            targetPrices = benchCloses.map((p, idx) => p * 0.08 + offset * 2 + idx * 0.4);
-          }
-
+          const targetPrices = bars.map((b) => b.close);
           const trail = computeRrgTrail(targetPrices, benchCloses, benchDates, trailLength);
           if (!trail.length) continue;
 
@@ -105,16 +100,10 @@ export async function getRrgData(
         for (const sym of vn30Symbols) {
           const pack = ohlcvMap.get(sym);
           const bars = pack?.bars || [];
+          if (bars.length < 15) continue;
+
           const quote = BOOTSTRAP_VN30_QUOTES.find((q) => q.symbol === sym);
-
-          let targetPrices: number[] = [];
-          if (bars.length >= 15) {
-            targetPrices = bars.map((b) => b.close);
-          } else {
-            const basePrice = quote?.price || 50;
-            targetPrices = benchCloses.map((p, idx) => (basePrice * (p / benchCloses[0])) * (1 + Math.sin(idx + sym.charCodeAt(0)) * 0.03));
-          }
-
+          const targetPrices = bars.map((b) => b.close);
           const trail = computeRrgTrail(targetPrices, benchCloses, benchDates, trailLength);
           if (!trail.length) continue;
 
@@ -131,7 +120,6 @@ export async function getRrgData(
             currentRsMomentum: latest.rsMomentum,
             quadrant,
             change5dPct: change5d,
-            marketCapBillion: quote ? Math.round(quote.price * 100) : undefined,
             trail,
           });
         }

@@ -121,8 +121,60 @@ export async function buildDerivativeScalpSignal(
   // Lấy dòng tiền Flow
   const flowSignal = detailRes ? buildFlowForRow(detailRes.data) : null;
 
-  // Lấy hoặc tổng hợp nến cho khung thời gian
-  const bars = buildSyntheticBars(lastPrice, timeframe);
+  // Chỉ dùng nến OHLCV thật (không sinh nến sin giả lập để phát tín hiệu scalping)
+  const { getVnOhlcv } = await import("./stocks-board");
+  const realPack = await getVnOhlcv(sym, 90).catch(() => null);
+  const bars = realPack?.bars ?? [];
+  if (bars.length < 21) {
+    const multiplier = contract.multiplier ?? 100_000;
+    const tickSize = contract.tickSize ?? 0.1;
+    const initialMarginPct = 0.17;
+    const initialMarginPerLotVnd = Math.round(lastPrice * multiplier * initialMarginPct);
+    const effectiveLeverage = Math.round((1 / initialMarginPct) * 10) / 10;
+    return {
+      result: {
+        signal: {
+          symbol: sym,
+          timeframe,
+          direction: "neutral",
+          strength: 0,
+          score: 0,
+          last: lastPrice,
+          spotPrice: spot,
+          basis,
+          basisStatus: basis > 4.5 ? "PREMIUM" : basis < -4.5 ? "DISCOUNT" : "FAIR",
+          vwap: null,
+          ema9: null,
+          ema21: null,
+          rsi7: null,
+          atr: null,
+          flowKind: flowSignal?.kind ?? null,
+          flowConfidence: flowSignal?.confidence ?? null,
+          openInterest: quote?.openInterest ?? null,
+          volume: quote?.volume ?? null,
+          micro: { support: [], resistance: [] },
+          primarySetup: null,
+          marginInfo: {
+            productId: contract.productId,
+            multiplier,
+            tickSize,
+            initialMarginPct,
+            initialMarginPerLotVnd,
+            effectiveLeverage,
+          },
+          evidence: ["Chưa có chuỗi nến intraday thực tế (>= 21 nến) — không sinh tín hiệu scalping giả lập."],
+          riskNotes: ["Đợi dữ liệu OHLCV live trước khi giải ngân."],
+        },
+        quality: "DEGRADED" as QualityStatus,
+      },
+      meta: buildMeta({
+        source: "hnx-vsdc-scalp-engine",
+        sourceTimestampMs: Date.now(),
+        partial: true,
+        note: "Thiếu dữ liệu OHLCV intraday thực tế cho phái sinh",
+      }),
+    };
+  }
   const closes = bars.map((b) => b.close);
 
   // Tính các chỉ báo định lượng

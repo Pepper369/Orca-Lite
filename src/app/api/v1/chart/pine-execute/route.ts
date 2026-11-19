@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChartHistory } from "@/lib/services/chart";
 import { executePineScript } from "@/lib/engines/pine-runner";
+import { rateLimit } from "@/lib/rate-limit";
 import type { OhlcvBar } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
  * Executes user Pine Script v5 against historical candles
  */
 export async function POST(req: NextRequest) {
+  const limited = await rateLimit(req, { name: "pine_execute", binding: "RL_AI", limit: 20, windowSec: 60 });
+  if (limited) return limited;
   try {
     const body = await req.json();
     const symbol = (body.symbol || "SSI").trim().toUpperCase();

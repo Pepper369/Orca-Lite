@@ -1,4 +1,6 @@
-import { ok, badRequest } from "@/lib/envelope";
+import { ok, badRequest, fail } from "@/lib/envelope";
+import { getSessionUser } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   getFollowerAccounts,
   registerFollowerAccount,
@@ -20,6 +22,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "copytrade_accounts_post", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+  if (process.env.NODE_ENV === "production") {
+    const session = await getSessionUser();
+    if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để quản lý tài khoản Copy Trade", 401);
+  }
   try {
     const body = await req.json();
     const { name, platform, accountNumberMasked, balanceUsd, riskMultiplier = 1.0, maxAllowedSlippagePips = 3.0, isActive = true } = body;
@@ -46,6 +54,12 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  const limited = await rateLimit(req, { name: "copytrade_accounts_patch", binding: "RL_AUTH", limit: 30, windowSec: 60 });
+  if (limited) return limited;
+  if (process.env.NODE_ENV === "production") {
+    const session = await getSessionUser();
+    if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để cập nhật tài khoản Copy Trade", 401);
+  }
   try {
     const body = await req.json();
     const { id } = body;

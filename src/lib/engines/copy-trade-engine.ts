@@ -247,7 +247,13 @@ export function toggleFollowerAccount(id: string): FollowerAccount | null {
 export function dispatchSignalToFollowers(signal: MasterTradeSignal, currentMarketPrice?: number): CopyExecutionOrder[] {
   const orders: CopyExecutionOrder[] = [];
   const curPrice = currentMarketPrice ?? signal.entryPrice;
-  const pip = signal.symbol.includes("JPY") ? 0.01 : signal.symbol.startsWith("XAU") ? 0.1 : signal.assetType === "CRYPTO" ? 1.0 : 0.0001;
+  const pip = signal.symbol.includes("JPY")
+    ? 0.01
+    : signal.symbol.startsWith("XAU")
+      ? 0.1
+      : signal.assetType === "CRYPTO"
+        ? (signal.entryPrice < 1 ? 0.0001 : signal.entryPrice < 100 ? 0.01 : 1.0)
+        : 0.0001;
 
   for (const follower of FOLLOWER_ACCOUNTS) {
     if (!follower.isActive) continue;

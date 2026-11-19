@@ -1,4 +1,6 @@
-import { ok, badRequest } from "@/lib/envelope";
+import { ok, badRequest, fail } from "@/lib/envelope";
+import { getSessionUser } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
 import {
@@ -66,6 +68,12 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "copytrade_signals_post", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  if (limited) return limited;
+  if (process.env.NODE_ENV === "production") {
+    const session = await getSessionUser();
+    if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để thực thi phân phối tín hiệu Copy Trade", 401);
+  }
   try {
     const body = await req.json();
     const signal: MasterTradeSignal = body.signal;

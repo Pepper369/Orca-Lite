@@ -1,5 +1,8 @@
-import { ok, badRequest } from "@/lib/envelope";
+import { ok, badRequest, fail } from "@/lib/envelope";
 import { getHot } from "@/lib/hot-snapshot";
+import { getSessionUser } from "@/lib/auth";
+import { cronUnauthorized } from "@/lib/cron-auth";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   runScreenerAlertMonitor,
   ALERT_MONITORED_PRESETS,
@@ -24,6 +27,16 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "screener_alerts", binding: "RL_AUTH", limit: 15, windowSec: 60 });
+  if (limited) return limited;
+
+  if (process.env.NODE_ENV === "production") {
+    const session = await getSessionUser();
+    if (!session && cronUnauthorized(req) !== null) {
+      return fail("UNAUTHENTICATED", "Đăng nhập hoặc cung cấp CRON_SECRET để kích hoạt cảnh báo", 401);
+    }
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const { forceDispatch, webhookUrl, provider, secret } = body;

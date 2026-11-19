@@ -186,15 +186,16 @@ test("Orca Apex Quant Engine incorporates Ribbon Squeeze, Absorption, and Precis
 
 test("Consolidated Screener Presets - Preserves taxonomy and removes duplicate noise", () => {
   const { PRESET_TABS } = require("../../app/screener/screener-constants");
-  // Check that core streamlined presets exist
+  const { resolveCanonicalPreset } = require("../../lib/quant/screener-taxonomy");
+  // Check that core streamlined presets exist (and legacy IDs resolve cleanly to canonical 20)
   const ids = PRESET_TABS.map((t: any) => t.id);
   assert.ok(ids.includes("apex_buy_now"));
-  assert.ok(ids.includes("mtf_confluence"));
-  assert.ok(ids.includes("canslim"));
-  assert.ok(ids.includes("bottom_confluence"));
-  assert.ok(ids.includes("ttm_squeeze"));
+  assert.ok(ids.includes(resolveCanonicalPreset("mtf_confluence")));
+  assert.ok(ids.includes(resolveCanonicalPreset("canslim")));
+  assert.ok(ids.includes(resolveCanonicalPreset("bottom_confluence")));
+  assert.ok(ids.includes(resolveCanonicalPreset("ttm_squeeze")));
 
   // Check that duplicate redundant tabs have been consolidated
-  assert.ok(!ids.includes("mtf_candle_cluster"), "mtf_candle_cluster should be unified into mtf_confluence");
-  assert.ok(!ids.includes("growth"), "growth should be unified into canslim");
+  assert.ok(!ids.includes("mtf_candle_cluster"), "mtf_candle_cluster should be unified into trend_alignment");
+  assert.ok(!ids.includes("growth"), "growth should be unified into garp_growth");
 });

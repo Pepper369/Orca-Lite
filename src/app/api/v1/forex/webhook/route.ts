@@ -1,4 +1,7 @@
-import { ok, badRequest } from "@/lib/envelope";
+import { ok, badRequest, fail } from "@/lib/envelope";
+import { getSessionUser } from "@/lib/auth";
+import { cronUnauthorized } from "@/lib/cron-auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { getForexSignalsHub } from "@/lib/services/forex-signals-hub";
 import {
   buildTelegramAlertMessage,
@@ -13,6 +16,9 @@ export const runtime = "nodejs";
  * FOREX WEBHOOK DISPATCH & PREVIEW API
  */
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "forex_webhook", binding: "RL_AUTH", limit: 15, windowSec: 60 });
+  if (limited) return limited;
+
   try {
     const body = (await req.json()) as { targetUrl?: string; pair?: string; type?: "telegram" | "mt5" };
     const pair = (body.pair ?? "EURUSD").toUpperCase().replace("/", "");
@@ -27,8 +33,14 @@ export async function POST(req: Request) {
     const telegramText = buildTelegramAlertMessage(signal);
     const mt5Payload = buildMt5EaOrder(signal);
 
-    // If targetUrl provided, execute real dispatch
+    // If targetUrl provided, require auth in production before dispatching
     if (body.targetUrl) {
+      if (process.env.NODE_ENV === "production") {
+        const session = await getSessionUser();
+        if (!session && cronUnauthorized(req) !== null) {
+          return fail("UNAUTHENTICATED", "Đăng nhập hoặc cung cấp CRON_SECRET để gửi webhook", 401);
+        }
+      }
       const payloadToSend =
         body.type === "telegram"
           ? { text: telegramText, parse_mode: "Markdown" }

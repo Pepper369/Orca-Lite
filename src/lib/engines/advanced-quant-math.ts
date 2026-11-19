@@ -299,9 +299,9 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   const b = (count * sumXY - sumX * sumY) / denominator;
   const a = (sumY - b * sumX) / count;
 
-  // Stationarity check: b must be negative for mean reversion (AR(1) coeff phi = 1 + b < 1)
-  const isStationary = b < 0;
-  const phi = Math.max(1e-4, 1.0 + b);
+  // Stationarity check: discrete AR(1) coeff phi = 1 + b must lie strictly in (-1, 1), i.e. -2 < b < 0
+  const isStationary = b < 0 && b > -2.0;
+  const phi = isStationary ? Math.max(1e-2, Math.abs(1.0 + b) > 1e-2 ? Math.abs(1.0 + b) : 0.05) : 1.0;
   const theta = isStationary ? -Math.log(phi) / dt : 0;
   const mu = isStationary ? -a / b : series[n - 1];
   const halfLife = theta > 0 ? Number((Math.log(2.0) / theta).toFixed(2)) : Infinity;
@@ -569,6 +569,14 @@ export interface TripleBarrierLevels {
  * Triple-Barrier Method - Marcos López de Prado (AFML)
  * Sets dynamic horizontal profit & loss barriers scaled by volatility, bounded by a time barrier.
  */
+function roundBarrierPrice(p: number): number {
+  if (!Number.isFinite(p) || p <= 0) return p;
+  if (p >= 500) return Math.round(p);
+  if (p >= 10) return Number(p.toFixed(2));
+  if (p >= 0.5) return Number(p.toFixed(4));
+  return Number(p.toFixed(6));
+}
+
 export function calculateTripleBarrierLevels(
   currentPrice: number,
   atrPct: number,
@@ -580,8 +588,8 @@ export function calculateTripleBarrierLevels(
   const targetReturnPct = Number((ptMultiplier * dynamicVolatility).toFixed(1));
   const stopLossReturnPct = Number((slMultiplier * dynamicVolatility).toFixed(1));
 
-  const upperBarrierPrice = Math.round(currentPrice * (1.0 + targetReturnPct / 100));
-  const lowerBarrierPrice = Math.round(currentPrice * (1.0 - stopLossReturnPct / 100));
+  const upperBarrierPrice = roundBarrierPrice(currentPrice * (1.0 + targetReturnPct / 100));
+  const lowerBarrierPrice = roundBarrierPrice(currentPrice * (1.0 - stopLossReturnPct / 100));
   const riskRewardRatio = Number((targetReturnPct / stopLossReturnPct).toFixed(2));
 
   return {
@@ -652,15 +660,15 @@ export function calculateVaRAndCVaR(returns: number[]): RiskMetricsResult {
   const cvar95 = -(tail95.reduce((a, b) => a + b, 0) / tail95.length);
   const cvar99 = -(tail99.reduce((a, b) => a + b, 0) / tail99.length);
 
-  // Cornish-Fisher VaR 95%
-  // z_cf = z + (z^2 - 1) * S / 6 + (z^3 - 3z) * (K - 3) / 24 - (2z^3 - 5z) * S^2 / 36
-  const z95 = normInv(0.95); // ~1.64485
+  // Cornish-Fisher VaR 95% (left-tail quantile z05 = Phi^-1(0.05) ~ -1.64485)
+  // Negative skewness makes zCf more negative, increasing downside crash VaR
+  const z05 = normInv(0.05);
   const zCf =
-    z95 +
-    ((z95 ** 2 - 1) * skewness) / 6.0 +
-    ((z95 ** 3 - 3 * z95) * (kurtosis - 3.0)) / 24.0 -
-    ((2 * z95 ** 3 - 5 * z95) * (skewness ** 2)) / 36.0;
-  const cfVaR95 = -(mean - zCf * std);
+    z05 +
+    ((z05 ** 2 - 1) * skewness) / 6.0 +
+    ((z05 ** 3 - 3 * z05) * (kurtosis - 3.0)) / 24.0 -
+    ((2 * z05 ** 3 - 5 * z05) * (skewness ** 2)) / 36.0;
+  const cfVaR95 = Math.max(0, -(mean + zCf * std));
 
   return {
     var95Pct: Number((histVaR95 * 100).toFixed(2)),

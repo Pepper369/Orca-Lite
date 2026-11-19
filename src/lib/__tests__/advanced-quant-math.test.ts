@@ -118,3 +118,33 @@ test("calculateVaRAndCVaR returns consistent risk measures", () => {
   assert.ok(risk.var95Pct > 0);
   assert.ok(risk.cvar95Pct >= risk.var95Pct, "CVaR (Expected Shortfall) must be >= VaR");
 });
+
+test("calculateVaRAndCVaR increases Cornish-Fisher VaR under negative crash skewness", () => {
+  const crashSkewed = [0.005, 0.004, 0.006, 0.003, 0.005, 0.004, 0.007, 0.003, -0.08, -0.06];
+  const risk = calculateVaRAndCVaR(crashSkewed);
+  assert.ok(risk.skewness < -1.0, "Sample must exhibit negative crash skewness");
+  // Normal 95% VaR ~ 1.645 * std - mean; under negative skew CF VaR must be strictly larger
+  const mean = crashSkewed.reduce((a, b) => a + b, 0) / crashSkewed.length;
+  const std = Math.sqrt(crashSkewed.reduce((s, r) => s + (r - mean) ** 2, 0) / (crashSkewed.length - 1));
+  const normalVaR95Pct = (-mean + 1.64485 * std) * 100;
+  assert.ok(
+    risk.cornishFisherVaR95Pct > normalVaR95Pct,
+    `Expected CF VaR (${risk.cornishFisherVaR95Pct}%) > Normal VaR (${normalVaR95Pct.toFixed(2)}%) under negative skew`
+  );
+});
+
+test("calculateTripleBarrierLevels preserves precision on FX and VN thousand-VND quotes", () => {
+  const fx = calculateTripleBarrierLevels(1.085, 1.0, 2.0, 1.0, 10);
+  assert.ok(fx.upperBarrierPrice > 1.09 && fx.upperBarrierPrice < 1.12, `FX upper precision lost: ${fx.upperBarrierPrice}`);
+  assert.ok(fx.lowerBarrierPrice > 1.05 && fx.lowerBarrierPrice < 1.085, `FX lower precision lost: ${fx.lowerBarrierPrice}`);
+
+  const vnThousand = calculateTripleBarrierLevels(25.4, 2.0, 2.0, 1.0, 10);
+  assert.notEqual(vnThousand.upperBarrierPrice, Math.round(vnThousand.upperBarrierPrice));
+});
+
+test("estimateOrnsteinUhlenbeck rejects alternating over-damped oscillation (b <= -1)", () => {
+  const alternating = [100, 10, 100, 10, 100, 10, 100, 10];
+  const ou = estimateOrnsteinUhlenbeck(alternating);
+  assert.equal(ou.isStationary, false);
+  assert.equal(ou.halfLife, Infinity);
+});

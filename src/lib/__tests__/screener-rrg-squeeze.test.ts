@@ -190,14 +190,13 @@ test("Biên độ 1 & 2 - analyzeMaCandleRow incorporates rrgBonus and squeezeBo
   assert.ok(rowLeading.confluenceTags.some((t) => t.includes("Nổ Volatility Squeeze")));
 });
 
-test("Biên độ 1 & 2 - PRESET_TABS contains sector_leading and ttm_squeeze tabs", () => {
-  const sectorTab = PRESET_TABS.find((t) => t.id === "sector_leading");
-  assert.ok(sectorTab, "sector_leading preset must be registered in PRESET_TABS");
-  assert.equal(sectorTab.category, "core");
-  assert.ok(sectorTab.label.includes("Ngành Dẫn Dắt RRG"));
+test("Biên độ 1 & 2 - PRESET_TABS maps sector_leading and ttm_squeeze via canonical taxonomy", () => {
+  const { resolveCanonicalPreset } = require("../quant/screener-taxonomy");
+  const sectorTab = PRESET_TABS.find((t) => t.id === resolveCanonicalPreset("sector_leading"));
+  assert.ok(sectorTab, "sector_leading must resolve to a canonical tab in PRESET_TABS");
+  assert.equal(sectorTab.category, "price_action");
 
-  const squeezeTab = PRESET_TABS.find((t) => t.id === "ttm_squeeze");
-  assert.ok(squeezeTab, "ttm_squeeze preset must be registered in PRESET_TABS");
+  const squeezeTab = PRESET_TABS.find((t) => t.id === resolveCanonicalPreset("ttm_squeeze"));
+  assert.ok(squeezeTab, "ttm_squeeze must resolve to a canonical tab in PRESET_TABS");
   assert.equal(squeezeTab.category, "price_action");
-  assert.ok(squeezeTab.label.includes("Nén Squeeze (TTM)"));
 });

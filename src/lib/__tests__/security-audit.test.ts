@@ -89,3 +89,18 @@ test("Security Audit: Path Traversal Segment Validation", () => {
   const isSafe = !safeSegments.some((s) => s === ".." || s === "." || s.includes("..") || s.includes("\\") || s.includes("\0"));
   assert.equal(isSafe, true);
 });
+
+test("Security Audit: SSRF Guard blocks internal, metadata, loopback, and non-matching webhook URLs", async () => {
+  const { isSafeWebhookUrl } = await import("../webhook-security");
+  const blockedUrls = [
+    "http://127.0.0.1:8080/admin",
+    "http://169.254.169.254/latest/meta-data/",
+    "https://localhost/internal",
+    "https://user:pass@discord.com/api/webhooks/123/abc",
+    "https://evil.example.com/steal",
+  ];
+  for (const url of blockedUrls) {
+    const res = await isSafeWebhookUrl(url, url.includes("evil") ? "discord" : "generic");
+    assert.equal(res.ok, false, `Expected SSRF block for ${url}`);
+  }
+});
