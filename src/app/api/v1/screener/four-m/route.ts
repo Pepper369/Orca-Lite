@@ -1,4 +1,5 @@
 import { screenFundamental } from "@/lib/services/fundamental-screener";
+import { getMasterScreenerSnapshot, type ScreenerStockItem } from "@/lib/services/screener-snapshot-service";
 import { evaluateFourM, type FourMScore } from "@/lib/engines/four-m";
 import { safeApi } from "@/lib/safe-api";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
@@ -24,10 +25,14 @@ export async function GET(req: Request) {
       maxConcurrent: 3,
     },
     produce: async () => {
-      const fundResult = await screenFundamental({
-        symbols: symbols?.length ? symbols : undefined,
-        sector,
-      });
+      const [fundResult, masterSnap] = await Promise.all([
+        screenFundamental({
+          symbols: symbols?.length ? symbols : undefined,
+          sector,
+          excludeSyntheticFa: true,
+        }),
+        getMasterScreenerSnapshot().catch(() => null),
+      ]);
 
       if (!fundResult || !fundResult.rows) {
         return {
@@ -39,13 +44,17 @@ export async function GET(req: Request) {
         };
       }
 
+      const masterItems = ((masterSnap as { items?: ScreenerStockItem[] } | null)?.items ?? []);
+      const masterMap = new Map<string, ScreenerStockItem>(masterItems.map((it) => [it.symbol, it]));
+
       const scoredRows: FourMScore[] = fundResult.rows.map((r) => {
         const sec = getSecurity(r.symbol);
+        const master = masterMap.get(r.symbol);
         return evaluateFourM({
           symbol: r.symbol,
           name: sec?.name,
           sector: r.sector,
-          price: r.price,
+          price: r.price ?? master?.price ?? null,
           roe: r.roe,
           roic: r.roic,
           grossMargin: r.grossMargin,
@@ -53,9 +62,8 @@ export async function GET(req: Request) {
           currentRatio: r.currentRatio,
           revenueYoyPct: r.revenueYoyPct,
           niYoyPct: r.niYoyPct,
-          // Valuation proxy (if available, or estimated from price / eps)
-          pe: r.price && r.price > 0 && r.roe ? 12 + (20 / (r.roe || 10)) : 14,
-          pb: r.roe ? Math.max(0.8, r.roe / 10) : 1.5,
+          pe: master?.pe ?? null,
+          pb: master?.pb ?? null,
         });
       });
 

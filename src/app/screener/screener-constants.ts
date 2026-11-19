@@ -1,4 +1,5 @@
 import type { ScreenerPreset } from "@/lib/services/screener-snapshot-service";
+import { CANONICAL_PRESETS, resolveCanonicalPreset } from "@/lib/quant/screener-taxonomy";
 
 export interface PresetEdgeStat {
   winRatePct: number;
@@ -333,64 +334,16 @@ export interface PresetTabItem {
   desc: string;
 }
 
-export const PRESET_TABS: PresetTabItem[] = [
-  // Core Orca
-  { id: "all", category: "core", label: "Tất cả", dotColor: "bg-text-muted", desc: "Toàn bộ thị trường niêm yết" },
-  { id: "apex_buy_now", category: "core", label: "Điểm Mua Kích Hoạt", dotColor: "bg-emerald-400", desc: "Kích hoạt điểm mua tức thời: Chạm chuẩn điểm mua / Vùng Vàng + Nổ vol gom hàng Pocket Pivot / Cá mập + Dư địa cản trên >= 5% + R:R >= 2.0x" },
-  { id: "orca_apex_quant", category: "core", label: "Chân Sóng Apex", dotColor: "bg-amber-400", desc: "Đỉnh cao hợp lưu: Đảo chiều chân sóng Wyckoff Spring + Quant OU Z-score + Khóa chặt vùng Sweet Launch Zone (chưa chạy xa đáy) + Dư địa tăng >= 6.5%" },
-  { id: "historical_edge", category: "core", label: "Lợi Thế Lịch Sử", dotColor: "bg-emerald-400", desc: "Bộ lọc tối ưu dựa trên huấn luyện chuỗi giá quá khứ: Tỷ lệ thắng thực nghiệm >= 60%, tích lũy Up/Down Vol >= 1.15x, loại bỏ hoàn toàn bẫy giá" },
-  { id: "orca_master_elite", category: "core", label: "Orca Master 80+", dotColor: "bg-amber-400", desc: "Top siêu phẩm tổng hợp 5 trụ cột (Kỹ thuật + Cá mập + Cơ bản + Điểm mua + Định giá)" },
-  { id: "smart_money_inflow", category: "core", label: "Dòng Tiền Cá Mập", dotColor: "bg-purple-400", desc: "Dấu chân tổ chức: Mua chủ động > 65%, Khối ngoại gom ròng hoặc Pocket Pivot nổ vol" },
-  { id: "near_buy_point", category: "core", label: "Sát Điểm Mua (Buy Zone)", dotColor: "bg-emerald-400", desc: "Cổ phiếu có điểm mua gần giá hiện tại nhất (|Lệch| ≤ 1.5%), R:R ≥ 2.5, rủi ro cắt lỗ cực thấp" },
-  { id: "sector_leading", category: "core", label: "Ngành Dẫn Dắt RRG", dotColor: "bg-emerald-400", desc: "Cổ phiếu thuộc ngành Dẫn dắt (Leading Quadrant RRG) với RS-Ratio & RS-Momentum vượt trội VN-Index" },
-
-  // Price Action & MTF
-  { id: "smc_golden_pocket", category: "price_action", label: "SMC & Golden Pocket (A+)", dotColor: "bg-purple-400", desc: "Hợp lưu đỉnh cao Hạng A+: Quét rũ thanh khoản (Liquidity Sweep/OB) + Rút chân tại Golden Pocket Fibo (0.618-0.65) + Mua chủ động" },
-  { id: "flip_zone_retest", category: "price_action", label: "Retest Flip Zone Cản Cũ", dotColor: "bg-blue-400", desc: "Hợp lưu cấu trúc: Kháng cự cũ bị phá vỡ dứt khoát nay trở thành Hỗ trợ mới (Role Reversal) kèm cạn cung" },
-  { id: "mtf_confluence", category: "price_action", label: "Đồng Thuận H1-D1-W1", dotColor: "bg-emerald-400", desc: "Đồng thuận đa khung tuyệt đối: Cả 3 khung H1 (Giờ) · D1 (Ngày) · W1 (Tuần) cùng tăng kèm cụm nến đảo chiều" },
-  { id: "bottom_confluence", category: "price_action", label: "Tam Hợp Lưu Đáy", dotColor: "bg-cyan-400", desc: "Tam Hợp Lưu Đáy: Hỗ trợ MA/Reclaim MA + Nến đảo chiều tăng + Phân kỳ dương RSI/MACD kép" },
-  { id: "confluence", category: "price_action", label: "Hội Tụ 4 Trụ Cột", dotColor: "bg-amber-400", desc: "Hội tụ 4 trụ cột: Xu hướng + Mẫu hình + Dòng tiền + Cơ bản" },
-  { id: "vsa_no_supply", category: "price_action", label: "Cạn Cung VSA", dotColor: "bg-teal-400", desc: "Dấu hiệu cạn cung (No Supply Test) tại hỗ trợ MA hoặc lực cầu hấp thụ Stopping Volume" },
-  { id: "ttm_squeeze", category: "price_action", label: "Nén Squeeze (TTM) & Ribbon", dotColor: "bg-purple-400", desc: "Độ nén biến động kép: Bollinger nén trong Keltner (TTM) hoặc dải MA Ribbon hội tụ co cụm <= 2.8%" },
-  { id: "vcp", category: "price_action", label: "Mẫu Hình VCP / Cup", dotColor: "bg-blue-400", desc: "Minervini VCP, Cốc tay cầm, Hai đáy" },
-  { id: "breakout", category: "price_action", label: "Bùng Nổ Khối Lượng", dotColor: "bg-purple-400", desc: "Giá tăng > 2% kèm vol lớn vượt đỉnh" },
-  { id: "ma_cross", category: "price_action", label: "Giao Cắt MA Vàng", dotColor: "bg-emerald-400", desc: "Golden Cross & Trật tự MA tăng" },
-  { id: "tight_closes_vdu", category: "price_action", label: "Nén Minervini & Cạn Von", dotColor: "bg-teal-400", desc: "Nén giá phẳng Tight Closes (≤ 1.25%) kết hợp Cạn kiệt thanh khoản VDU (≤ 0.60x MA20) & Wyckoff LPS" },
-  { id: "wyckoff_spring", category: "price_action", label: "Wyckoff Spring Cạn Cung", dotColor: "bg-teal-400", desc: "Wyckoff Spring Type 2/3: Rũ bỏ cạn cung vol thấp + Test thành công + Kéo ngược vượt hỗ trợ" },
-  { id: "vcp_vdu", category: "price_action", label: "Minervini VCP & VDU", dotColor: "bg-blue-400", desc: "Minervini VCP 2.0: Co hẹp độ biến động + Cạn kiệt thanh khoản Volume Dry-Up (≤ 68% MA20)" },
-  { id: "triple_confluence", category: "price_action", label: "Tam Hợp Lưu Vàng", dotColor: "bg-amber-400", desc: "Hợp lưu 3 lớp: Bệ đỡ MA/Fibo Golden Pocket + Nến đảo chiều + Phân kỳ dương RSI/MACD kép" },
-  { id: "swing_divergence", category: "price_action", label: "Swing Đáy & Phân Kỳ", dotColor: "bg-cyan-400", desc: "Chiến lược chân sóng: Nến Swing Đáy (T-0..4) xác nhận kết hợp Phân kỳ dương kép (RSI / MACD) & Cạn cung VDU" },
-
-  // Quant Pro
-  { id: "quant_edge", category: "quant", label: "Ưu Thế Quant Pro", dotColor: "bg-cyan-400", desc: "Top cổ phiếu có ưu thế định lượng thống kê toàn diện (Score >= 62)" },
-  { id: "quant_mean_revert", category: "quant", label: "Mean Reversion OU", dotColor: "bg-emerald-400", desc: "Mô hình Ornstein-Uhlenbeck: Bắt đáy thống kê Z-Score <= -1.4, chu kỳ t½" },
-  { id: "quant_low_beta", category: "quant", label: "Low-Beta Anomaly", dotColor: "bg-blue-400", desc: "Bất thường học thuyết AQR: Beta <= 0.88 & Chất lượng cao" },
-  { id: "quant_asymmetric", category: "quant", label: "Triple-Barrier R/R ≥ 2", dotColor: "bg-amber-400", desc: "Tỷ lệ Lời/Lỗ tối ưu theo mô hình biến động Marcos López de Prado" },
-
-  // Fundamental & CANSLIM
-  { id: "rs_leaders", category: "fundamental", label: "Dẫn Dắt RS 80+ (O'Neil)", dotColor: "bg-amber-400", desc: "Top siêu cổ phiếu có Relative Strength Rating >= 80 (chuẩn William O'Neil)" },
-  { id: "canslim_accel", category: "fundamental", label: "CANSLIM Gia Tốc 2.0", dotColor: "bg-emerald-400", desc: "CANSLIM Pro: EPS & Doanh thu tăng tốc đột biến (≥ 18%) + ROE ≥ 13% + Dẫn dắt RS Rating 75+" },
-  { id: "canslim", category: "fundamental", label: "CANSLIM & Tăng Trưởng", dotColor: "bg-emerald-400", desc: "Tăng trưởng doanh thu, LNST vượt trội > 20% & ROE dẫn dắt" },
-  { id: "piotroski_diamonds", category: "fundamental", label: "Piotroski & Altman Z", dotColor: "bg-cyan-400", desc: "Sức khỏe tài chính xuất sắc: Piotroski F-Score >= 7 và Altman Z'' Vùng An Toàn" },
-  { id: "fa_fortress", category: "fundamental", label: "Pháo Đài Tài Chính", dotColor: "bg-emerald-400", desc: "Pháo đài tiền mặt ròng (Net Cash > Nợ), Phủ lãi vay ICR >= 4.0x, Đòn bẩy an toàn tuyệt đối" },
-  { id: "earnings_quality", category: "fundamental", label: "Dòng Tiền Thực Chất", dotColor: "bg-cyan-400", desc: "Chất lượng lợi nhuận cao: Dòng tiền thuần HĐKD CFO / LNST >= 1.0x & Dòng tiền tự do FCF dương" },
-  { id: "magic_formula", category: "fundamental", label: "Magic Formula (Greenblatt)", dotColor: "bg-amber-400", desc: "Công thức kỳ diệu Joel Greenblatt: Tỷ suất sinh lời vốn đầu tư ROIC >= 15% kết hợp Định giá P/E rẻ" },
-  { id: "consensus_upside", category: "fundamental", label: "Định Giá Hời CTCK", dotColor: "bg-indigo-400", desc: "Upside định giá mục tiêu từ các CTCK hàng đầu (Vietcap, VNDirect...) >= 20% so với thị giá hiện tại" },
-  { id: "value", category: "fundamental", label: "Giá Trị Biên An Toàn", dotColor: "bg-blue-400", desc: "P/E < 11, P/B < 1.3, an toàn vốn" },
-  { id: "dividend", category: "fundamental", label: "Cổ Tức Tiền Mặt Cao", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt > 5%, nợ an toàn" },
-  { id: "beneish_safe", category: "fundamental", label: "Beneish M-Score Chống Gian Lận", dotColor: "bg-emerald-400", desc: "Mô hình Beneish 8 biến số (M-Score < -2.22) & Sloan Accrual: Loại bỏ rủi ro xào nấu sổ sách tài chính" },
-  { id: "buffett_compounder", category: "fundamental", label: "Warren Buffett Compounder", dotColor: "bg-amber-400", desc: "Siêu cổ máy tích lũy Warren Buffett: ROIC >= 15%, con hào kinh tế Moat, Net Cash ròng & FCF dồi dào" },
-  { id: "lynch_fast_grower", category: "fundamental", label: "Peter Lynch Tăng Trưởng", dotColor: "bg-purple-400", desc: "Tăng trưởng thần tốc định giá rẻ: PEG <= 1.0 kết hợp tăng trưởng lợi nhuận EPS hai con số" },
-  { id: "graham_ncav", category: "fundamental", label: "Graham NCAV (Net-Net)", dotColor: "bg-blue-400", desc: "Mua dưới giá trị thanh lý Benjamin Graham: Giá thị trường <= Tài sản lưu động ròng trừ toàn bộ nợ phải trả" },
-  { id: "cash_conversion_cycle", category: "fundamental", label: "Quán Quân Vốn Lưu Động (CCC)", dotColor: "bg-teal-400", desc: "Chu kỳ chuyển đổi tiền mặt CCC siêu ngắn hoặc âm (chiếm dụng vốn đối tác, thu tiền ngay, tồn kho tối ưu)" },
-  { id: "dividend_aristocrat", category: "fundamental", label: "Quý Tộc Cổ Tức Bền Vững", dotColor: "bg-emerald-400", desc: "Cổ tức tiền mặt dồi dào (Tỷ suất >= 5%) với tỷ lệ chi trả Payout Ratio an toàn từ dòng tiền thật" },
-  { id: "super_compounder", category: "fundamental", label: "Super-Compounder (ROIIC)", dotColor: "bg-amber-400", desc: "Tỷ suất sinh lời vốn gia tăng ROIIC >= 25% & ROIC >= 15%: Cỗ máy tự sinh lợi nhuận tái đầu tư đỉnh cao" },
-  { id: "book_tax_clean", category: "fundamental", label: "Thuế Minh Bạch (BTD)", dotColor: "bg-emerald-400", desc: "Sổ sách minh bạch: BTD an toàn, cơ quan thuế thanh tra sạch sẽ, loại trừ triệt để doanh thu ảo" },
-  { id: "mispriced_growth", category: "fundamental", label: "Chiết Khấu Reverse DCF", dotColor: "bg-cyan-400", desc: "Định giá đảo ngược Reverse DCF: Thị trường định giá tăng trưởng thấp trong khi doanh nghiệp bứt phá" },
-  { id: "merton_safe", category: "fundamental", label: "Phòng Thủ Merton (PD ≈ 0)", dotColor: "bg-blue-400", desc: "Mô hình Merton Distance-to-Default: Khoảng cách kiệt quệ tài chính siêu an toàn, cấu trúc nợ vững vàng" },
-];
+export const PRESET_TABS: PresetTabItem[] = CANONICAL_PRESETS.map((p) => ({
+  id: p.id,
+  category: p.category,
+  label: p.label,
+  dotColor: p.dotColor,
+  desc: p.desc,
+}));
 
 export function getPresetCategory(preset: ScreenerPreset): StrategyGroup {
-  const item = PRESET_TABS.find((t) => t.id === preset);
+  const canonical = resolveCanonicalPreset(preset);
+  const item = PRESET_TABS.find((t) => t.id === canonical);
   return item ? item.category : "core";
 }

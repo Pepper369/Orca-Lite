@@ -17,7 +17,7 @@ import {
 
 test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t) => {
   await t.test("Phase 1: Beneish M-Score and Sloan Accrual correctly detect forensic quality", () => {
-    // Normal healthy company: low receivables growth, stable margins, positive CFO
+    // Normal healthy company with complete 2Y BCTC history: low receivables growth, stable margins, positive CFO
     const healthy = computeFundamentalMatrix({
       snap: {
         roic: 16.0,
@@ -29,6 +29,67 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
         totalDebt: 500,
         netProfit: 1200,
         revenue: 10000,
+        totalAssets: 11000,
+        annualHistory: [
+          {
+            period: "2025",
+            year: 2025,
+            quarter: null,
+            revenue: 10000,
+            cogs: 6500,
+            grossProfit: 3500,
+            ebit: 1600,
+            ebitda: 2000,
+            profitBeforeTax: 1500,
+            taxExpense: 300,
+            netProfit: 1200,
+            totalAssets: 11000,
+            currentAssets: 6000,
+            fixedAssets: 3500,
+            receivables: 1200,
+            inventory: 1100,
+            currentLiabilities: 2200,
+            totalLiabilities: 2800,
+            shortTermDebt: 200,
+            longTermDebt: 300,
+            totalDebt: 500,
+            equity: 8200,
+            retainedEarnings: 4000,
+            cash: 3000,
+            ocf: 1500,
+            capex: -400,
+            shares: 200_000_000,
+          },
+          {
+            period: "2024",
+            year: 2024,
+            quarter: null,
+            revenue: 9000,
+            cogs: 5900,
+            grossProfit: 3100,
+            ebit: 1400,
+            ebitda: 1800,
+            profitBeforeTax: 1300,
+            taxExpense: 260,
+            netProfit: 1040,
+            totalAssets: 10000,
+            currentAssets: 5400,
+            fixedAssets: 3400,
+            receivables: 1100,
+            inventory: 1000,
+            currentLiabilities: 2100,
+            totalLiabilities: 2700,
+            shortTermDebt: 250,
+            longTermDebt: 350,
+            totalDebt: 600,
+            equity: 7300,
+            retainedEarnings: 3200,
+            cash: 2500,
+            ocf: 1300,
+            capex: -350,
+            shares: 200_000_000,
+          },
+        ],
         qualityScore: 82,
         healthScore: 85,
       },
@@ -38,7 +99,7 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
     });
 
     assert.ok(healthy.beneishMScore != null);
-    // In healthy earnings, M-Score is typically well below -2.22
+    // In healthy earnings, M-Score is well below -2.22
     assert.equal(healthy.isBeneishSafe, true);
     assert.ok(healthy.beneishMScore < -2.22);
     // Sloan accrual ratio: (Net Profit - CFO) / Total Assets -> should be negative or small
@@ -112,6 +173,10 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
         totalDebt: 1000,
         netProfit: 1400,
         revenue: 11000,
+        cogs: 7000,
+        inventory: 900,
+        receivables: 1000,
+        payables: 1500,
         qualityScore: 80,
         healthScore: 82,
       },
@@ -290,14 +355,17 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
 
   await t.test("Security & Bug Fix: Graham NCAV unit normalization prevents false positives", () => {
     // Case 1: Expensive stock (price = 50.0 thousand VND = 50k VND), ncavPerShare = 20,000 VND
+    // True Graham NCAV = (Current Assets - Total Liabilities) / Shares = (60B - 15B) / 2.25M = 20,000 VND
     // Without normalization, 50.0 <= 20000 * 1.3 would be true (FALSE POSITIVE).
     // With normalization, normNcavPerShare = 20.0, so 50.0 <= 26.0 is false (CORRECT).
     const expensive = computeFundamentalMatrix({
       snap: {
+        currentAssets: 60_000_000_000,
+        totalLiabilities: 15_000_000_000,
         equity: 50_000_000_000,
         totalDebt: 15_000_000_000,
         cash: 10_000_000_000,
-        shares: 2_250_000, // ncavTotal = 35B - 15B = 20B -> ncavPerShare = 20,000 VND
+        shares: 2_250_000,
         netProfit: 5_000_000_000,
       },
       price: 50.0, // 50,000 VND
@@ -308,6 +376,8 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
     // Case 2: Deep discount bargain (price = 15.0 thousand VND = 15k VND), ncavPerShare = 20,000 VND
     const bargain = computeFundamentalMatrix({
       snap: {
+        currentAssets: 60_000_000_000,
+        totalLiabilities: 15_000_000_000,
         equity: 50_000_000_000,
         totalDebt: 15_000_000_000,
         cash: 10_000_000_000,
@@ -318,6 +388,20 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
       marketCapBillion: 33.75,
     });
     assert.equal(bargain.isGrahamNcav, true, "Stock trading well below NCAV must be flagged as Graham Net-Net");
+
+    // Case 3: Missing currentAssets / totalLiabilities must return null NCAV (Truth-in-Data, no equity proxy fabrication)
+    const missingBs = computeFundamentalMatrix({
+      snap: {
+        equity: 50_000_000_000,
+        totalDebt: 15_000_000_000,
+        cash: 10_000_000_000,
+        shares: 2_250_000,
+      },
+      price: 15.0,
+      marketCapBillion: 33.75,
+    });
+    assert.equal(missingBs.ncavPerShare, null, "Missing currentAssets/totalLiabilities must not fabricate NCAV");
+    assert.equal(missingBs.isGrahamNcav, false);
   });
 
   await t.test("Security & Hardening: queryScreenerStocks safely handles prototype pollution in sortKey", async () => {
@@ -370,18 +454,80 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
   });
 
   await t.test("Quantitative FA Phase 1: ROIIC and Super-Compounder classification", () => {
-    // Super compounder: high ROIC + high growth deployment => ROIIC >= 25%
+    // Super compounder from real 2Y annualHistory: ΔNOPAT / ΔIC >= 25%
     const superStock = computeFundamentalMatrix({
       snap: {
+        roe: 24.0,
+        netMargin: 15.0,
         roic: 22.0,
         interestCoverage: 10.0,
         cash: 500,
         totalDebt: 1000,
-        ocfTtm: 1150, // cfoToNetProfit = 0.96 (between 0.85 and 1.1)
+        ocfTtm: 1150, // cfoToNetProfit = 0.96
         fcfTtm: 900,
         netProfit: 1200,
         revenue: 8000,
-        niYoyPct: 25.0, // ROIIC modeled = 22 * 1.25 = 27.5% >= 25%
+        niYoyPct: 25.0,
+        annualHistory: [
+          {
+            period: "2025",
+            year: 2025,
+            quarter: null,
+            revenue: 8000,
+            cogs: 4800,
+            grossProfit: 3200,
+            ebit: 1600,
+            ebitda: 1800,
+            profitBeforeTax: 1500,
+            taxExpense: 300,
+            netProfit: 1200,
+            totalAssets: 8000,
+            currentAssets: 3500,
+            fixedAssets: 4500,
+            receivables: 900,
+            inventory: 700,
+            currentLiabilities: 1500,
+            totalLiabilities: 2500,
+            shortTermDebt: 300,
+            longTermDebt: 700,
+            totalDebt: 1000,
+            equity: 5500,
+            retainedEarnings: 3000,
+            cash: 500,
+            ocf: 1150,
+            capex: -250,
+            shares: 300_000_000,
+          },
+          {
+            period: "2024",
+            year: 2024,
+            quarter: null,
+            revenue: 6400,
+            cogs: 4000,
+            grossProfit: 2400,
+            ebit: 1000,
+            ebitda: 1200,
+            profitBeforeTax: 950,
+            taxExpense: 190,
+            netProfit: 760,
+            totalAssets: 6500,
+            currentAssets: 2800,
+            fixedAssets: 3700,
+            receivables: 750,
+            inventory: 600,
+            currentLiabilities: 1400,
+            totalLiabilities: 2200,
+            shortTermDebt: 300,
+            longTermDebt: 600,
+            totalDebt: 900,
+            equity: 4300,
+            retainedEarnings: 2200,
+            cash: 600,
+            ocf: 900,
+            capex: -200,
+            shares: 300_000_000,
+          },
+        ],
       },
       price: 55.0,
       pe: 15.0,
@@ -393,6 +539,19 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
     assert.equal(superStock.isBuffettCompounder, true);
     assert.ok(superStock.roiic3Y != null && superStock.roiic3Y >= 25.0);
     assert.equal(superStock.faCategory, "BUFFETT_COMPOUNDER");
+
+    // Anti-fabrication: without annualHistory or deltaNopat/deltaIc, ROIIC stays null (no roic*(1+g) guess)
+    const noHistory = computeFundamentalMatrix({
+      snap: {
+        roic: 22.0,
+        netProfit: 1200,
+        niYoyPct: 25.0,
+      },
+      price: 55.0,
+      niYoyPct: 25.0,
+      marketCapBillion: 18000,
+    });
+    assert.equal(noHistory.roiic3Y, null, "Missing multi-period deltas must not fabricate ROIIC");
 
     // Explicit delta NOPAT and delta IC
     const explicitCompounder = computeFundamentalMatrix({
@@ -417,7 +576,7 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
   });
 
   await t.test("Quantitative FA Phase 2: Reverse DCF Implied Growth Solver & Margin of Safety", () => {
-    // Undervalued stock: FCF is high (1,000B), Market Cap is low (10,000B, 10x FCF), Expected growth = 20%
+    // Undervalued stock: FCF is high (1,000B), Market Cap is low (10,000B, 10x FCF), Beta=0.7 -> CAPM WACC ~9.75%
     const undervalued = computeFundamentalMatrix({
       snap: {
         roic: 16.0,
@@ -426,14 +585,13 @@ test("Fundamental Analysis Matrix & Screener Phase 1 & 2 Enhancements", async (t
         interestCoverage: 6.0,
       },
       price: 25.0,
+      beta: 0.7,
       niYoyPct: 20.0,
       marketCapBillion: 10000,
     });
 
     assert.ok(undervalued.impliedGrowthPct != null);
-    // At 10x FCF with WACC=10%, implied growth is modest/negative (~ -3.5%)
     assert.ok(undervalued.impliedGrowthPct < 5.0);
-    // Margin of safety is substantial (Expected 20% - Implied <= 5% => Margin >= 15%)
     assert.ok(undervalued.reverseDcfMarginPct != null && undervalued.reverseDcfMarginPct > 15.0);
 
     // Direct solver validation

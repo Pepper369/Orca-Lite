@@ -1,124 +1,19 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { LayoutGrid, Sparkles } from "lucide-react";
 import { Loading, Panel } from "@/components/ui";
 import { FlatsIcon } from "@/components/screener-icons";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { prefetchApi } from "@/lib/hooks";
-
-type Universe =
-  | "apex-buy-now"
-  | "apex-quant"
-  | "historical-edge"
-  | "buy-point"
-  | "orca-master"
-  | "smart-money"
-  | "multi-source"
-  | "quant-edge"
-  | "confluence"
-  | "stocks"
-  | "oquant-quant"
-  | "miquant-quant"
-  | "ma-cross"
-  | "sector-flow"
-  | "rrg-rotation"
-  | "four-m"
-  | "canslim"
-  | "rs-leaders"
-  | "crypto"
-  | "wyckoff"
-  | "minervini"
-  | "elliott"
-  | "valuation"
-  | "fundamental"
-  | "piotroski"
-  | "candlestick"
-  | "ma-confluence"
-  | "divergence"
-  | "macro-radar"
-  | "systemic-radar"
-  | "alpha-beta"
-  | "fireant-screener";
-
-export type ScreenerGroupId = "growth_trend" | "quant_alpha" | "macro_sector" | "fundamental_val";
-
-const SCREENER_GROUPS: {
-  id: ScreenerGroupId;
-  title: string;
-  badge: string;
-  items: { id: Universe; label: string }[];
-}[] = [
-  {
-    id: "quant_alpha",
-    title: "Định lượng & Dòng tiền",
-    badge: "Quant Edge",
-    items: [
-      { id: "apex-buy-now", label: "Điểm Mua Kích Hoạt" },
-      { id: "apex-quant", label: "Chân Sóng Apex" },
-      { id: "historical-edge", label: "Lợi Thế Lịch Sử (Trained Edge)" },
-      { id: "orca-master", label: "Orca Master (Top 90+)" },
-      { id: "smart-money", label: "Dòng Tiền Cá Mập" },
-      { id: "buy-point", label: "Điểm Mua Tối Ưu (Buy Zone)" },
-      { id: "multi-source", label: "Đa Nguồn Pro (Orca Engine)" },
-      { id: "quant-edge", label: "Ưu Thế Quant (Alpha)" },
-      { id: "confluence", label: "Siêu Hội Tụ (Confluence)" },
-      { id: "fireant-screener", label: "Bộ lọc Kỹ thuật FireAnt (5 Mẫu)" },
-      { id: "oquant-quant", label: "OQuant AI Studio & Bots" },
-      { id: "ma-cross", label: "Đường MA (Golden/Death Cross)" },
-      { id: "divergence", label: "Phân kỳ (Divergence)" },
-      { id: "alpha-beta", label: "Hệ số Alpha / Beta" },
-    ],
-  },
-  {
-    id: "growth_trend",
-    title: "Tăng trưởng & Hành vi giá",
-    badge: "Trend & Patterns",
-    items: [
-      { id: "rs-leaders", label: "RS Leaders (O'Neil 80+)" },
-      { id: "canslim", label: "CANSLIM" },
-      { id: "four-m", label: "Bộ lọc 4M (Phil Town)" },
-      { id: "minervini", label: "Minervini Trend Template" },
-      { id: "wyckoff", label: "Wyckoff VSA" },
-      { id: "elliott", label: "Sóng Elliott" },
-      { id: "candlestick", label: "Mẫu nến đảo chiều" },
-      { id: "ma-confluence", label: "Hợp lưu MA & Nến Đảo Chiều" },
-    ],
-  },
-  {
-    id: "macro_sector",
-    title: "Vĩ mô & Luân chuyển Ngành",
-    badge: "Macro & Flow",
-    items: [
-      { id: "systemic-radar", label: "Radar Rủi ro Pháp lý & Lan tỏa" },
-      { id: "macro-radar", label: "Radar Vĩ Mô & Chu Kỳ" },
-      { id: "rrg-rotation", label: "Vòng xoay RRG Ngành" },
-      { id: "sector-flow", label: "Dòng tiền theo ngành" },
-      { id: "stocks", label: "Cổ phiếu VN Tổng hợp" },
-      { id: "crypto", label: "Tiền mã hóa Crypto" },
-    ],
-  },
-  {
-    id: "fundamental_val",
-    title: "Cơ bản & Định giá",
-    badge: "Valuation & Health",
-    items: [
-      { id: "piotroski", label: "F-Score & Altman Z" },
-      { id: "valuation", label: "Định giá P/E & P/B" },
-      { id: "fundamental", label: "Chỉ số tài chính cơ bản" },
-    ],
-  },
-];
-
-const UNIVERSE_TABS: { id: Universe; label: string }[] = SCREENER_GROUPS.flatMap((g) => g.items);
-
-function parseUniverse(raw: string | null): Universe {
-  const allowed = new Set(UNIVERSE_TABS.map((t) => t.id));
-  if (raw && allowed.has(raw as Universe)) return raw as Universe;
-  return "apex-buy-now";
-}
+import {
+  WORKSPACE_GROUPS,
+  resolveUniverseRoute,
+  type CanonicalWorkspaceId,
+  type WorkspaceGroupDef,
+} from "@/lib/quant/screener-taxonomy";
 
 const PanelFallback = () => <Loading rows={6} />;
 
@@ -153,15 +48,15 @@ const SectorFlowScreener = dynamic(
 );
 const ScreenerBacktestModal = dynamic(
   () => import("@/components/screener-backtest-modal").then((m) => m.ScreenerBacktestModal),
-  { ssr: false }
+  { ssr: false },
 );
 const MacroRadarCard = dynamic(
   () => import("@/components/macro-radar-card").then((m) => m.MacroRadarCard),
-  { ssr: false, loading: PanelFallback }
+  { ssr: false, loading: PanelFallback },
 );
 const FireAntScreenerPanel = dynamic(
   () => import("@/components/screener/fireant-screener-panel").then((m) => m.FireAntScreenerPanel),
-  { ssr: false, loading: PanelFallback }
+  { ssr: false, loading: PanelFallback },
 );
 
 /* Specialized Domain Studios */
@@ -205,18 +100,18 @@ const MaCandleConfluenceScreener = dynamic(
   () => import("@/components/ma-candle-confluence-screener").then((m) => m.MaCandleConfluenceScreener),
   { ssr: false, loading: PanelFallback },
 );
+const FourMScreener = dynamic(
+  () => import("@/components/four-m-screener").then((m) => m.FourMScreener),
+  { ssr: false, loading: PanelFallback },
+);
 
-export const HAS_STUDIO_VIEW = new Set<Universe>([
-  "canslim",
-  "wyckoff",
-  "candlestick",
-  "divergence",
-  "elliott",
-  "minervini",
-  "alpha-beta",
-  "fundamental",
-  "valuation",
-  "ma-confluence",
+const HAS_STUDIO_VIEW = new Set<CanonicalWorkspaceId>([
+  "trend-breakout",
+  "wyckoff-smc",
+  "patterns-candles",
+  "fa-screener",
+  "valuation-studio",
+  "growth-canslim-4m",
 ]);
 
 function SoftPanel({
@@ -246,274 +141,283 @@ function SoftPanel({
   );
 }
 
+function SubTabBar({
+  tabs,
+  active,
+  onSelect,
+}: {
+  tabs: { id: string; label: string }[];
+  active: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-border-subtle bg-panel/70 p-1.5">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => onSelect(t.id)}
+          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+            active === t.id
+              ? "bg-accent-primary text-white font-semibold shadow-xs"
+              : "text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ScreenerInner() {
   const params = useSearchParams();
-  const [universe, setUniverse] = useState<Universe>(() => parseUniverse(params.get("universe")));
+  const initialResolved = useMemo(() => resolveUniverseRoute(params.get("universe")), [params]);
+  const [workspace, setWorkspace] = useState<CanonicalWorkspaceId>(() => initialResolved.workspace);
+  const [subTabMap, setSubTabMap] = useState<Partial<Record<CanonicalWorkspaceId, string>>>(() =>
+    initialResolved.subTab ? { [initialResolved.workspace]: initialResolved.subTab } : {},
+  );
   const [showBacktest, setShowBacktest] = useState(false);
-  const [visited, setVisited] = useState<Set<Universe>>(() => new Set([parseUniverse(params.get("universe"))]));
+  const [visited, setVisited] = useState<Set<CanonicalWorkspaceId>>(() => new Set([initialResolved.workspace]));
   const sector = params.get("sector");
 
-  const initialGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id ?? "quant_alpha";
-  const [selectedGroup, setSelectedGroup] = useState<ScreenerGroupId>(initialGroup);
-  const [studioModeMap, setStudioModeMap] = useState<Partial<Record<Universe, "studio" | "matrix">>>({});
-  const currentViewMode = studioModeMap[universe] ?? "matrix";
+  const initialGroup =
+    WORKSPACE_GROUPS.find((g) => g.items.some((i) => i.id === workspace))?.id ?? "strategy_hub";
+  const [selectedGroup, setSelectedGroup] = useState<WorkspaceGroupDef["id"]>(initialGroup);
+  const [studioModeMap, setStudioModeMap] = useState<Partial<Record<CanonicalWorkspaceId, "studio" | "matrix">>>({});
+  const currentViewMode = studioModeMap[workspace] ?? "matrix";
 
   useEffect(() => {
     setVisited((prev) => {
-      if (prev.has(universe)) return prev;
+      if (prev.has(workspace)) return prev;
       const next = new Set(prev);
-      next.add(universe);
+      next.add(workspace);
       return next;
     });
-  }, [universe]);
+  }, [workspace]);
 
   useEffect(() => {
-    const parentGroup = SCREENER_GROUPS.find((g) => g.items.some((i) => i.id === universe))?.id;
+    const parentGroup = WORKSPACE_GROUPS.find((g) => g.items.some((i) => i.id === workspace))?.id;
     if (parentGroup && parentGroup !== selectedGroup) {
       setSelectedGroup(parentGroup);
     }
-  }, [universe, selectedGroup]);
+  }, [workspace, selectedGroup]);
 
-  const currentGroupItems = SCREENER_GROUPS.find((g) => g.id === selectedGroup)?.items ?? SCREENER_GROUPS[0].items;
+  const currentGroupItems =
+    WORKSPACE_GROUPS.find((g) => g.id === selectedGroup)?.items ?? WORKSPACE_GROUPS[0].items;
 
-  const renderPanel = (u: Universe) => {
-    const isStudio = (studioModeMap[u] ?? "matrix") === "studio";
-    switch (u) {
-      case "apex-buy-now":
+  const renderPanel = (w: CanonicalWorkspaceId) => {
+    const isStudio = (studioModeMap[w] ?? "matrix") === "studio";
+    const sub = subTabMap[w];
+
+    switch (w) {
+      case "master-matrix":
         return (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="apex_buy_now"
+            defaultPreset={initialResolved.workspace === "master-matrix" ? (initialResolved.defaultPreset ?? "apex_buy_now") : "apex_buy_now"}
             defaultView="orca_master"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "apex-quant":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="orca_apex_quant"
-            defaultView="orca_master"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "historical-edge":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="historical_edge"
-            defaultView="orca_master"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "orca-master":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="orca_master_elite"
-            defaultView="orca_master"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "smart-money":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="smart_money_inflow"
-            defaultView="smart_money"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "buy-point":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="near_buy_point"
-            defaultView="buy_point"
             onOpenBacktest={() => setShowBacktest(true)}
           />
         );
       case "multi-source":
         return <MultiSourceScreener />;
-      case "quant-edge":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="quant_edge"
-            defaultView="quant"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "confluence":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="confluence"
-            defaultView="confluence"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "fireant-screener":
-        return <FireAntScreenerPanel />;
-      case "systemic-radar":
-        return <SystemicRiskRadarPanel />;
-      case "macro-radar":
-        return <MacroRadarCard />;
-      case "oquant-quant":
-      case "miquant-quant":
+      case "oquant-studio":
         return <OQuantStudio />;
-      case "ma-cross":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="ma_cross"
-            defaultView="technical"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "sector-flow":
-        return <SectorFlowScreener />;
-      case "rrg-rotation":
-        return <RrgChart />;
-      case "four-m":
-        return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="fa_fortress"
-            defaultView="valuation"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
+      case "fireant-presets":
+        return <FireAntScreenerPanel />;
       case "crypto":
         return <CryptoScreener />;
-      case "alpha-beta":
-        return isStudio ? (
-          <AlphaBetaScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="quant_low_beta"
-            defaultView="quant"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "divergence":
-        return isStudio ? (
-          <DivergenceScreener />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="swing_divergence"
-            defaultView="confluence"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "candlestick":
-        return isStudio ? (
-          <CandlestickScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="mtf_candle_cluster"
-            defaultView="confluence"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "ma-confluence":
-        return isStudio ? (
-          <MaCandleConfluenceScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="triple_confluence"
-            defaultView="confluence"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "wyckoff":
-        return isStudio ? (
-          <WyckoffScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="wyckoff_spring"
-            defaultView="technical"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "canslim":
-        return isStudio ? (
-          <CanslimScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="canslim_accel"
-            defaultView="profitability"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
-        );
-      case "rs-leaders":
+
+      case "trend-breakout": {
+        const tab = sub ?? "minervini";
         return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="rs_leaders"
-            defaultView="technical"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "minervini", label: "Minervini VCP & Tight Closes" },
+                { id: "ma-cross", label: "MA Cross & Xu hướng" },
+                { id: "alpha-beta", label: "Alpha / Beta & Low-Vol" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "trend-breakout": id }))}
+            />
+            {isStudio ? (
+              tab === "alpha-beta" ? (
+                <AlphaBetaScreener defaultSector={sector} />
+              ) : (
+                <MinerviniScreener defaultSector={sector} />
+              )
+            ) : (
+              <VnScreener
+                defaultSector={sector}
+                defaultPreset={tab === "alpha-beta" ? "quant_low_beta" : tab === "ma-cross" ? "trend_alignment" : "volatility_breakout"}
+                defaultView={tab === "alpha-beta" ? "quant" : "technical"}
+                onOpenBacktest={() => setShowBacktest(true)}
+              />
+            )}
+          </div>
         );
-      case "piotroski":
+      }
+
+      case "wyckoff-smc": {
+        const tab = sub ?? "wyckoff";
         return (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="piotroski_diamonds"
-            defaultView="health"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "wyckoff", label: "Wyckoff VSA & Spring" },
+                { id: "elliott", label: "Sóng Elliott" },
+                { id: "divergence", label: "Phân kỳ RSI / MACD" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "wyckoff-smc": id }))}
+            />
+            {isStudio ? (
+              tab === "elliott" ? (
+                <ElliottScreener defaultSector={sector} />
+              ) : tab === "divergence" ? (
+                <DivergenceScreener />
+              ) : (
+                <WyckoffScreener defaultSector={sector} />
+              )
+            ) : (
+              <VnScreener
+                defaultSector={sector}
+                defaultPreset="reversal_confluence"
+                defaultView="confluence"
+                onOpenBacktest={() => setShowBacktest(true)}
+              />
+            )}
+          </div>
         );
-      case "minervini":
-        return isStudio ? (
-          <MinerviniScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="vcp_vdu"
-            defaultView="technical"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
+      }
+
+      case "patterns-candles": {
+        const tab = sub ?? "ma-confluence";
+        return (
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "ma-confluence", label: "Hợp lưu MA & Nến" },
+                { id: "candlestick", label: "Mẫu Nến Đa Khung" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "patterns-candles": id }))}
+            />
+            {isStudio ? (
+              tab === "candlestick" ? (
+                <CandlestickScreener defaultSector={sector} />
+              ) : (
+                <MaCandleConfluenceScreener defaultSector={sector} />
+              )
+            ) : (
+              <VnScreener
+                defaultSector={sector}
+                defaultPreset="trend_alignment"
+                defaultView="confluence"
+                onOpenBacktest={() => setShowBacktest(true)}
+              />
+            )}
+          </div>
         );
-      case "elliott":
-        return isStudio ? (
-          <ElliottScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="bottom_confluence"
-            defaultView="technical"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
+      }
+
+      case "fa-screener": {
+        const tab = sub ?? "fundamental";
+        return (
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "fundamental", label: "Chỉ số Cơ bản BCTC (Truth-in-Data)" },
+                { id: "piotroski", label: "Piotroski F-Score & Altman Z''" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "fa-screener": id }))}
+            />
+            {isStudio ? (
+              <FundamentalScreener defaultSector={sector} />
+            ) : (
+              <VnScreener
+                defaultSector={sector}
+                defaultPreset={tab === "piotroski" ? "piotroski_diamonds" : "fa_fortress"}
+                defaultView="fa_matrix"
+                onOpenBacktest={() => setShowBacktest(true)}
+              />
+            )}
+          </div>
         );
-      case "valuation":
+      }
+
+      case "valuation-studio":
         return isStudio ? (
           <ValuationScreener defaultSector={sector} />
         ) : (
           <VnScreener
             defaultSector={sector}
-            defaultPreset="value"
+            defaultPreset="deep_value"
             defaultView="valuation"
             onOpenBacktest={() => setShowBacktest(true)}
           />
         );
-      case "fundamental":
-        return isStudio ? (
-          <FundamentalScreener defaultSector={sector} />
-        ) : (
-          <VnScreener
-            defaultSector={sector}
-            defaultPreset="fa_fortress"
-            defaultView="health"
-            onOpenBacktest={() => setShowBacktest(true)}
-          />
+
+      case "growth-canslim-4m": {
+        const tab = sub ?? "canslim";
+        return (
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "canslim", label: "CANSLIM O'Neil & GARP" },
+                { id: "four-m", label: "4M Phil Town & Compounder" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "growth-canslim-4m": id }))}
+            />
+            {isStudio ? (
+              tab === "four-m" ? (
+                <FourMScreener defaultSector={sector} />
+              ) : (
+                <CanslimScreener defaultSector={sector} />
+              )
+            ) : (
+              <VnScreener
+                defaultSector={sector}
+                defaultPreset={tab === "four-m" ? "buffett_compounder" : "garp_growth"}
+                defaultView="profitability"
+                onOpenBacktest={() => setShowBacktest(true)}
+              />
+            )}
+          </div>
         );
+      }
+
+      case "macro-sector-flow": {
+        const tab = sub ?? "sector-flow";
+        return (
+          <div>
+            <SubTabBar
+              tabs={[
+                { id: "sector-flow", label: "Dòng tiền Ngành" },
+                { id: "rrg-rotation", label: "Vòng xoay RRG" },
+                { id: "macro-radar", label: "Radar Vĩ mô & Chu kỳ" },
+                { id: "systemic-radar", label: "Radar Rủi ro Hệ thống" },
+              ]}
+              active={tab}
+              onSelect={(id) => setSubTabMap((p) => ({ ...p, "macro-sector-flow": id }))}
+            />
+            {tab === "rrg-rotation" ? (
+              <RrgChart />
+            ) : tab === "macro-radar" ? (
+              <MacroRadarCard />
+            ) : tab === "systemic-radar" ? (
+              <SystemicRiskRadarPanel />
+            ) : (
+              <SectorFlowScreener />
+            )}
+          </div>
+        );
+      }
+
       default:
         return <VnScreener defaultSector={sector} onOpenBacktest={() => setShowBacktest(true)} />;
     }
@@ -526,11 +430,10 @@ function ScreenerInner() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <h1 className="flex items-center gap-2 text-lg font-semibold">
-                <FlatsIcon /> Bộ lọc tài sản
+                <FlatsIcon /> Bộ lọc tài sản · FA 2.0
               </h1>
               <p className="mt-1 text-[12px] text-text-muted">
-                Ưu tiên thị trường chứng khoán Việt Nam — chạy hoàn toàn trên dữ liệu thật mới nhất, không minh họa bằng dữ
-                liệu giả.
+                12 không gian lọc tinh gọn · 20 chiến lược trực giao · Dữ liệu BCTC đa kỳ thật & chuẩn hóa theo ngành.
               </p>
             </div>
             <button
@@ -541,9 +444,10 @@ function ScreenerInner() {
               Backtest Mô Phỏng (OQuant)
             </button>
           </div>
+
           {/* Tier 1: 4 Strategy Groups */}
           <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-border-subtle/80">
-            {SCREENER_GROUPS.map((g) => {
+            {WORKSPACE_GROUPS.map((g) => {
               const active = selectedGroup === g.id;
               return (
                 <button
@@ -551,8 +455,8 @@ function ScreenerInner() {
                   type="button"
                   onClick={() => {
                     setSelectedGroup(g.id);
-                    if (!g.items.some((item) => item.id === universe)) {
-                      setUniverse(g.items[0].id);
+                    if (!g.items.some((item) => item.id === workspace)) {
+                      setWorkspace(g.items[0].id);
                     }
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -570,23 +474,22 @@ function ScreenerInner() {
             })}
           </div>
 
-          {/* Tier 2: Sub-filters in selected group */}
+          {/* Tier 2: Consolidated Workspaces (12 total) */}
           <div className="seg-scroll mt-2">
-            <div className="seg" role="tablist" aria-label="Chọn bộ lọc chi tiết">
+            <div className="seg" role="tablist" aria-label="Chọn không gian bộ lọc">
               {currentGroupItems.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
-                  aria-selected={universe === tab.id}
-                  data-active={universe === tab.id}
-                  onClick={() => setUniverse(tab.id)}
+                  aria-selected={workspace === tab.id}
+                  data-active={workspace === tab.id}
+                  onClick={() => setWorkspace(tab.id)}
                   onMouseEnter={() => {
-                    if (tab.id === "ma-cross") prefetchApi("/api/v1/screener/ma-cross", 10_000);
-                    else if (tab.id === "fundamental") prefetchApi("/api/v1/screener/fundamental", 12_000);
-                    else if (tab.id === "valuation") prefetchApi("/api/v1/screener/valuation", 12_000);
-                    else if (tab.id === "canslim") prefetchApi("/api/v1/screener/canslim?minScore=50&minPass=3&limit=40", 12_000);
-                    else if (tab.id === "wyckoff") prefetchApi("/api/v1/screener/wyckoff?phase=all&setup=all&limit=40", 12_000);
+                    if (tab.id === "fa-screener") prefetchApi("/api/v1/screener/fundamental", 12_000);
+                    else if (tab.id === "valuation-studio") prefetchApi("/api/v1/screener/valuation", 12_000);
+                    else if (tab.id === "growth-canslim-4m") prefetchApi("/api/v1/screener/canslim?minScore=50&minPass=3&limit=40", 12_000);
+                    else if (tab.id === "wyckoff-smc") prefetchApi("/api/v1/screener/wyckoff?phase=all&setup=all&limit=40", 12_000);
                     else if (tab.id === "crypto") prefetchApi("/api/v1/crypto/markets?limit=120", 8_000);
                   }}
                 >
@@ -595,36 +498,20 @@ function ScreenerInner() {
               ))}
             </div>
           </div>
-          <p className="mt-1.5 hidden text-[10px] text-text-muted sm:block md:hidden">
-            Vuốt ngang để xem thêm bộ lọc (Định giá P, Chỉ số cơ bản…)
-          </p>
-          <p className="mt-1.5 text-[10px] text-text-muted sm:hidden">← Vuốt ngang để chọn thêm bộ lọc →</p>
 
-          {/* Studio vs Matrix Dual View Switcher for Specialized Universes */}
-          {HAS_STUDIO_VIEW.has(universe) && (
+          {/* Studio vs Matrix Dual View Switcher */}
+          {HAS_STUDIO_VIEW.has(workspace) && (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-3 pt-3 border-t border-border-subtle/80 text-xs">
               <div className="flex items-center gap-2 text-text-secondary text-xs">
                 <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
                 <span>
-                  Chế độ xem: <strong>Studio Chuyên Sâu</strong> (Giao diện trường phái đặc thù) hoặc <strong>Bảng Ma Trận</strong> (Toàn diện đa chỉ số).
+                  Chế độ xem: <strong>Bảng Ma Trận</strong> (Đa chỉ số tốc độ cao) hoặc <strong>Studio Chuyên Sâu</strong> (Trường phái đặc thù).
                 </span>
               </div>
               <div className="inline-flex self-start sm:self-auto rounded-lg border border-border-subtle bg-surface-elevated/90 p-0.5 text-xs font-medium shadow-xs">
                 <button
                   type="button"
-                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [universe]: "studio" }))}
-                  className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-                    currentViewMode === "studio"
-                      ? "bg-accent-primary text-black font-semibold shadow-xs"
-                      : "text-text-muted hover:text-text-primary hover:bg-surface-base/50"
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Studio Chuyên Sâu</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [universe]: "matrix" }))}
+                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [workspace]: "matrix" }))}
                   className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
                     currentViewMode === "matrix"
                       ? "bg-accent-primary text-black font-semibold shadow-xs"
@@ -634,20 +521,32 @@ function ScreenerInner() {
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span>Bảng Ma Trận</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setStudioModeMap((prev) => ({ ...prev, [workspace]: "studio" }))}
+                  className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                    currentViewMode === "studio"
+                      ? "bg-accent-primary text-black font-semibold shadow-xs"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-base/50"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Studio Chuyên Sâu</span>
+                </button>
               </div>
             </div>
           )}
         </div>
       </Panel>
       <div className="screener-keep-alive-views">
-        {Array.from(visited).map((u) => (
+        {Array.from(visited).map((w) => (
           <div
-            key={u}
-            style={{ display: u === universe ? "block" : "none" }}
-            aria-hidden={u !== universe}
+            key={w}
+            style={{ display: w === workspace ? "block" : "none" }}
+            aria-hidden={w !== workspace}
           >
-            <SoftPanel name={u} resetKey={`${u}:${studioModeMap[u] ?? "studio"}`}>
-              {renderPanel(u)}
+            <SoftPanel name={w} resetKey={`${w}:${studioModeMap[w] ?? "matrix"}`}>
+              {renderPanel(w)}
             </SoftPanel>
           </div>
         ))}

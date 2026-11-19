@@ -27,6 +27,8 @@ type Row = {
   healthScore: number | null;
   reportDate: string | null;
   score: number;
+  faProvenance?: "LIVE_BCTC" | "CACHED_BCTC" | "SEED_CALIBRATED" | "SECTOR_FALLBACK" | "MISSING";
+  industryTrack?: "FINANCIAL_BANK_SEC_INS" | "REAL_ESTATE" | "NON_FINANCIAL";
 };
 type Data = { rows: Row[]; scanned: number; skipped: number; withData?: number };
 
@@ -327,7 +329,7 @@ export function FundamentalScreener({ defaultSector }: { defaultSector: string |
                   <th className="py-2 text-right">Nợ/VCSH</th>
                   <th className="py-2 text-right">CR</th>
                   <th className="py-2 text-right">LN YoY</th>
-                  <th className="py-2 text-right">Cov</th>
+                  <th className="py-2 text-right">Cov / Nguồn</th>
                 </tr>
               </thead>
               <tbody>
@@ -338,7 +340,12 @@ export function FundamentalScreener({ defaultSector }: { defaultSector: string |
                         {row.symbol}
                       </Link>
                     </td>
-                    <td className="py-2 pr-3 text-[11px] text-text-muted">{row.sector ?? "—"}</td>
+                    <td className="py-2 pr-3 text-[11px] text-text-muted">
+                      <span>{row.sector ?? "—"}</span>
+                      {row.industryTrack === "FINANCIAL_BANK_SEC_INS" && (
+                        <span className="ml-1 rounded bg-cyan-500/15 px-1 py-0.5 text-[9px] text-cyan-300">TC</span>
+                      )}
+                    </td>
                     <td className="num py-2 text-right font-semibold text-accent">{row.score}</td>
                     <td className="num py-2 text-right">{row.price?.toFixed(2) ?? "—"}</td>
                     <td className="num py-2 text-right">{percent(row.roe)}</td>
@@ -350,7 +357,18 @@ export function FundamentalScreener({ defaultSector }: { defaultSector: string |
                     <td className="num py-2 text-right">{num(row.currentRatio)}</td>
                     <td className="num py-2 text-right">{percent(row.niYoyPct)}</td>
                     <td className="num py-2 text-right">
-                      {row.coverage > 0 ? `${Math.round(row.coverage * 100)}%` : "—"}
+                      <span>{row.coverage > 0 ? `${Math.round(row.coverage * 100)}%` : "—"}</span>
+                      {row.faProvenance && (
+                        <span className="ml-1 rounded bg-surface-elevated px-1 py-0.5 text-[9px] text-text-muted">
+                          {row.faProvenance === "LIVE_BCTC"
+                            ? "Live"
+                            : row.faProvenance === "CACHED_BCTC"
+                              ? "Cache"
+                              : row.faProvenance === "SEED_CALIBRATED"
+                                ? "Seed"
+                                : "N/A"}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

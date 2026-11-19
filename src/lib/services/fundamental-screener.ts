@@ -12,6 +12,7 @@ import { resolveListedEquityUniverse, listedEquityUniverseSync } from "../financ
 import { WORKERS_BUDGET, clampUniverse, resolveSnapshotConcurrency } from "../data-engine/workers-budget";
 import { readLatestMarketScan } from "./market-screener-snapshots";
 import { getMasterScreenerSnapshot, type ScreenerStockItem } from "./screener-snapshot-service";
+import { resolveIndustryEvalTrack, type FaProvenance, type IndustryEvalTrack } from "../financial/fa-core";
 
 function exchangeOf(symbol: string): string | null {
   return getSecurity(symbol)?.exchange ?? null;
@@ -43,6 +44,8 @@ export type FundamentalScreenRow = {
   healthScore: number | null;
   reportDate: string | null;
   score: number;
+  faProvenance?: FaProvenance;
+  industryTrack?: IndustryEvalTrack;
   // Cross-Pillar Technical Consistency Guard
   techStatus?: "SAFE" | "CAUTION" | "BLOCKED";
   isTechnicalApproved?: boolean;
@@ -84,6 +87,7 @@ export type FundamentalFilterOpts = {
   maxPrice?: number;
   limit?: number;
   techGuardOnly?: boolean;
+  excludeSyntheticFa?: boolean;
 };
 
 function bandScore(v: number | null, bands: [number, number][]): number | null {
@@ -102,18 +106,23 @@ function sanePct(v: number | null, maxAbs = 120): number | null {
 function computeScreenScore(s: FundamentalSnapshot): number {
   if (s.coverage < 0.15 && s.roe == null && s.roa == null) return 0;
 
+  const track = s.industryTrack ?? resolveIndustryEvalTrack(s.symbol);
+  const isFinancial = track === "FINANCIAL_BANK_SEC_INS";
+
   const roe = sanePct(s.roe);
-  const roic = sanePct(s.roic);
+  const roa = sanePct(s.roa);
+  const roic = isFinancial ? null : sanePct(s.roic);
   const nm = sanePct(s.netMargin, 80);
-  const gm = sanePct(s.grossMargin, 95);
+  const gm = isFinancial ? null : sanePct(s.grossMargin, 95);
 
   const parts: { w: number; s: number }[] = [];
   const roeS = bandScore(roe, [[22, 95], [15, 85], [10, 70], [5, 50], [0, 35]]);
+  const roaS = bandScore(roa, isFinancial ? [[2.2, 95], [1.5, 85], [1.0, 70], [0.5, 50]] : [[12, 95], [7, 80], [4, 65], [1, 45]]);
   const roicS = bandScore(roic, [[18, 95], [12, 85], [8, 70], [4, 50], [0, 35]]);
-  const nmS = bandScore(nm, [[20, 95], [12, 85], [7, 70], [3, 55], [0, 40]]);
+  const nmS = bandScore(nm, isFinancial ? [[35, 95], [25, 85], [15, 70], [8, 50]] : [[20, 95], [12, 85], [7, 70], [3, 55], [0, 40]]);
   const gmS = bandScore(gm, [[40, 90], [25, 75], [15, 60], [8, 45]]);
   const deS =
-    s.debtEquity == null || !Number.isFinite(s.debtEquity)
+    isFinancial || s.debtEquity == null || !Number.isFinite(s.debtEquity)
       ? null
       : s.debtEquity < 0
         ? 10
@@ -126,7 +135,7 @@ function computeScreenScore(s: FundamentalSnapshot): number {
               : s.debtEquity < 2.5
                 ? 35
                 : 20;
-  const crS = bandScore(s.currentRatio, [[2, 90], [1.5, 75], [1.1, 60], [0.8, 40]]);
+  const crS = isFinancial ? null : bandScore(s.currentRatio, [[2, 90], [1.5, 75], [1.1, 60], [0.8, 40]]);
   const covS = s.coverage >= 0.7 ? 90 : s.coverage >= 0.4 ? 65 : s.coverage > 0.2 ? 45 : 25;
 
   const niYoy = sanePct(s.niYoyPct, 200);
@@ -143,14 +152,22 @@ function computeScreenScore(s: FundamentalSnapshot): number {
               ? 35
               : 20;
 
-  if (roeS != null) parts.push({ w: 0.26, s: roeS });
-  if (roicS != null) parts.push({ w: 0.2, s: roicS });
-  if (nmS != null) parts.push({ w: 0.16, s: nmS });
-  if (gmS != null) parts.push({ w: 0.08, s: gmS });
-  if (deS != null) parts.push({ w: 0.12, s: deS });
-  if (crS != null) parts.push({ w: 0.05, s: crS });
-  if (covS != null) parts.push({ w: 0.07, s: covS });
-  if (growthS != null) parts.push({ w: 0.06, s: growthS });
+  if (isFinancial) {
+    if (roeS != null) parts.push({ w: 0.34, s: roeS });
+    if (roaS != null) parts.push({ w: 0.20, s: roaS });
+    if (nmS != null) parts.push({ w: 0.20, s: nmS });
+    if (growthS != null) parts.push({ w: 0.16, s: growthS });
+    if (covS != null) parts.push({ w: 0.10, s: covS });
+  } else {
+    if (roeS != null) parts.push({ w: 0.26, s: roeS });
+    if (roicS != null) parts.push({ w: 0.2, s: roicS });
+    if (nmS != null) parts.push({ w: 0.16, s: nmS });
+    if (gmS != null) parts.push({ w: 0.08, s: gmS });
+    if (deS != null) parts.push({ w: 0.12, s: deS });
+    if (crS != null) parts.push({ w: 0.05, s: crS });
+    if (covS != null) parts.push({ w: 0.07, s: covS });
+    if (growthS != null) parts.push({ w: 0.06, s: growthS });
+  }
 
   if (!parts.length) return 0;
   const wSum = parts.reduce((a, p) => a + p.w, 0);
@@ -207,6 +224,12 @@ function passesFilters(row: FundamentalScreenRow, f: FundamentalFilterOpts): boo
     return false;
   if (f.requirePositiveFcf && (row.fcfTtm == null || row.fcfTtm <= 0)) return false;
   if (f.techGuardOnly && row.techStatus === "BLOCKED") return false;
+  if (
+    f.excludeSyntheticFa &&
+    (row.faProvenance === "SECTOR_FALLBACK" || row.faProvenance === "MISSING")
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -237,6 +260,8 @@ function toRow(s: FundamentalSnapshot, price: number | null): FundamentalScreenR
     healthScore: s.healthScore,
     reportDate: s.reportDate,
     score: computeScreenScore(s),
+    faProvenance: s.faProvenance ?? (s.hasHealth ? "LIVE_BCTC" : "MISSING"),
+    industryTrack: s.industryTrack ?? resolveIndustryEvalTrack(s.symbol),
   };
 }
 

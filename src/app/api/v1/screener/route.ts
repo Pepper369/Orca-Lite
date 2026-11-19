@@ -1,4 +1,6 @@
 import { screenCrypto } from "@/lib/services/crypto";
+import { queryScreenerStocks } from "@/lib/services/screener-snapshot-service";
+import { resolveCanonicalPreset } from "@/lib/quant/screener-taxonomy";
 import { safeApi } from "@/lib/safe-api";
 
 export const dynamic = "force-dynamic";
@@ -6,27 +8,38 @@ export const runtime = "nodejs";
 export const maxDuration = 20;
 
 /**
- * Multi-asset screener. Crypto universe is screened against live Binance data.
+ * Multi-asset screener router.
+ * - `universe=crypto`: Live Binance crypto markets.
+ * - `universe!=crypto`: Delegates to unified VN Stocks Screener Pro engine.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const universe = url.searchParams.get("universe") ?? "crypto";
 
   if (universe !== "crypto") {
+    const preset = resolveCanonicalPreset(url.searchParams.get("preset") ?? universe);
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
+    const sector = url.searchParams.get("sector") ?? undefined;
     return safeApi({
-      label: "screener-vn",
-      produce: async () => null,
+      label: "screener-vn-unified",
+      guard: { wallMs: 18_000, maxSubrequests: 20, maxConcurrent: 4 },
+      produce: async () => {
+        const res = await queryScreenerStocks({ preset, sector, limit });
+        return {
+          data: { universe, preset, rows: res.items, total: res.total },
+          meta: res.meta,
+        };
+      },
       fallback: async () => ({
-        data: { universe, rows: [] },
+        data: { universe, rows: [], total: 0 },
         meta: {
           source: "vnstock-shell",
           partial: true,
-          note: "Dùng /api/v1/screener/fundamental|valuation|candlestick… cho cổ phiếu VN",
+          note: "VN Screener đang phục hồi — dùng /api/v1/stocks/screener cho đầy đủ tham số",
         },
       }),
       unavailableSource: "vnstock",
-      unavailableNote:
-        "Screener cổ phiếu Việt Nam: dùng các endpoint /api/v1/screener/* chuyên biệt.",
+      unavailableNote: "Screener cổ phiếu Việt Nam tạm gián đoạn.",
     });
   }
 

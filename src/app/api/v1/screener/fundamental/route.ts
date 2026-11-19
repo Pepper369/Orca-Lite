@@ -66,6 +66,7 @@ export async function GET(req: Request) {
     minPrice: num(url.searchParams.get("minPrice")),
     maxPrice: num(url.searchParams.get("maxPrice")),
     limit: num(url.searchParams.get("limit")),
+    excludeSyntheticFa: flag(url.searchParams.get("excludeSyntheticFa")) ?? true,
   };
 
   return safeApi({

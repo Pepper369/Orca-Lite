@@ -28,12 +28,15 @@ export interface MatrixFilterState {
   mtfOnly?: boolean;
   minOrcaMasterScore?: string;
 
-  // Tier 4: Fundamental Moat
+  // Tier 4: Fundamental Moat & FA 2.0
   faProfileCombo?: string;
   netCashOnly?: boolean;
   minPiotroskiScore?: string;
   minRoic?: string;
   maxPeg?: string;
+  bookTaxSafeOnly?: boolean;
+  superCompounderOnly?: boolean;
+  minReverseDcfMargin?: string;
 }
 
 interface ScreenerMatrixToolbarProps {
@@ -87,6 +90,9 @@ export function ScreenerMatrixToolbar({
     filters.minPiotroskiScore === "7",
     filters.minRoic === "15",
     filters.maxPeg === "1.0",
+    Boolean(filters.bookTaxSafeOnly),
+    Boolean(filters.superCompounderOnly),
+    Boolean(filters.minReverseDcfMargin),
   ].filter(Boolean).length;
 
   const totalActive = tier1Active + tier2Active + tier3Active + tier4Active;
@@ -537,6 +543,45 @@ export function ScreenerMatrixToolbar({
                 }`}
               >
                 Định giá tăng trưởng rẻ (PEG &lt; 1.0)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onToggle("bookTaxSafeOnly", !filters.bookTaxSafeOnly)}
+                className={`px-2.5 py-1 rounded border transition-all ${
+                  filters.bookTaxSafeOnly
+                    ? "bg-accent-primary text-white border-accent-primary font-semibold"
+                    : "bg-surface-elevated text-text-secondary border-border-subtle hover:text-text-primary"
+                }`}
+              >
+                BCTC &amp; Thuế sạch (BTD)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onToggle("superCompounderOnly", !filters.superCompounderOnly)}
+                className={`px-2.5 py-1 rounded border transition-all ${
+                  filters.superCompounderOnly
+                    ? "bg-accent-primary text-white border-accent-primary font-semibold"
+                    : "bg-surface-elevated text-text-secondary border-border-subtle hover:text-text-primary"
+                }`}
+              >
+                Super Compounder (ROIIC ≥ 25%)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const next = filters.minReverseDcfMargin === "8" ? "" : "8";
+                  onToggle("minReverseDcfMargin", next);
+                }}
+                className={`px-2.5 py-1 rounded border transition-all ${
+                  filters.minReverseDcfMargin === "8"
+                    ? "bg-accent-primary text-white border-accent-primary font-semibold"
+                    : "bg-surface-elevated text-text-secondary border-border-subtle hover:text-text-primary"
+                }`}
+              >
+                Reverse DCF Chiết khấu (≥ 8%)
               </button>
             </div>
           )}

@@ -1,51 +1,43 @@
 import type { FundamentalSnapshot } from "../financial/snapshots";
+import { resolveIndustryEvalTrack, safeDiv, type IndustryEvalTrack } from "../financial/fa-core";
 
 /**
  * Piotroski F-Score (0 - 9) & Altman Z''-Score (Emerging Market Variant) Engine
  *
- * Joseph Piotroski's 9-point criteria evaluates fundamental momentum across 3 core pillars:
- * 1. Profitability (ROA, CFO, delta ROA, Accruals CFO > Net Income) -> 4 points
- * 2. Leverage, Liquidity and Source of Funds (delta Debt, delta Current Ratio, Dilution) -> 3 points
- * 3. Operating Efficiency (delta Gross Margin, delta Asset Turnover) -> 2 points
- *
- * Altman Z''-Score (Edward Altman 1993 for Emerging Markets & non-US firms):
- * Z'' = 6.56*X1 + 3.26*X2 + 6.72*X3 + 1.05*X4
- * Where:
- * X1 = Working Capital / Total Assets
- * X2 = Retained Earnings / Total Assets
- * X3 = EBIT / Total Assets
- * X4 = Book Value Equity / Total Liabilities
- *
- * Zones:
- * Z'' > 2.60 : SAFE (Vùng an toàn)
- * 1.10 - 2.60 : GREY (Vùng xám)
- * < 1.10 : DISTRESS (Vùng nguy hiểm)
+ * Upgraded FA 2.0 Rules:
+ * 1. Multi-period deltas (ΔROA, ΔLTD/Assets, ΔCurrentRatio, ΔShares, ΔGrossMargin, ΔAssetTurnover)
+ *    computed directly from `snap.annualHistory` [t, t-1] when available.
+ * 2. No free points from `?? 0`: missing inputs leave the criterion `false` and lower `criteriaEvaluated`.
+ * 3. Financial-sector exemption: Banks, Securities, and Insurance firms receive `EXEMPT_FINANCIAL`
+ *    on Altman Z'' rather than distorted balance-sheet distress scores.
  */
 
 export interface PiotroskiResult {
   fScore: number; // 0 - 9
+  criteriaEvaluated: number; // 0 - 9 criteria with real data
+  isMultiPeriod: boolean;
   rating: "EXCELLENT" | "GOOD" | "AVERAGE" | "WEAK";
   criteria: {
     // 1. Profitability
-    positiveRoa: boolean; // ROA > 0
-    positiveCfo: boolean; // Cash flow from operations > 0
-    increasingRoa: boolean; // ROA increased vs prior period
-    cashQuality: boolean; // CFO > Net Income (high accrual quality)
+    positiveRoa: boolean;
+    positiveCfo: boolean;
+    increasingRoa: boolean;
+    cashQuality: boolean;
     // 2. Leverage & Liquidity
-    lowerLeverage: boolean; // Long term debt / Equity decreased or prudent
-    higherLiquidity: boolean; // Current ratio improved or healthy (> 1.2)
-    noDilution: boolean; // No equity dilution / shares stable
+    lowerLeverage: boolean;
+    higherLiquidity: boolean;
+    noDilution: boolean;
     // 3. Operating Efficiency
-    higherGrossMargin: boolean; // Gross margin improved
-    higherTurnover: boolean; // Revenue growth outpaces assets
+    higherGrossMargin: boolean;
+    higherTurnover: boolean;
   };
   summaryVi: string;
 }
 
 export interface AltmanZResult {
   zScore: number | null;
-  zone: "SAFE" | "GREY" | "DISTRESS";
-  zoneVi: "An Toàn" | "Vùng Xám" | "Nguy Cơ Cao";
+  zone: "SAFE" | "GREY" | "DISTRESS" | "EXEMPT_FINANCIAL" | "INSUFFICIENT_DATA";
+  zoneVi: "An Toàn" | "Vùng Xám" | "Nguy Cơ Cao" | "Miễn trừ (Tài chính)" | "Thiếu dữ liệu BCTC";
   descriptionVi: string;
   x1_workingCapitalAssets: number | null;
   x2_retainedEarningsAssets: number | null;
@@ -56,61 +48,158 @@ export interface AltmanZResult {
 export interface FundamentalHealthMetrics {
   piotroski: PiotroskiResult;
   altman: AltmanZResult;
+  industryTrack: IndustryEvalTrack;
 }
 
 /**
  * Calculates Piotroski F-Score (0 - 9) deterministically from FundamentalSnapshot.
  */
 export function calculatePiotroskiScore(snap: FundamentalSnapshot): PiotroskiResult {
-  const roa = snap.roa ?? 0;
-  const netProfit = snap.netProfit ?? 0;
-  const ocf = snap.ocfTtm ?? 0;
-  const niYoy = snap.niYoyPct ?? 0;
-  const revYoy = snap.revenueYoyPct ?? 0;
-  const grossMargin = snap.grossMargin ?? 0;
-  const currentRatio = snap.currentRatio ?? 0;
-  const debtEquity = snap.debtEquity ?? 0;
+  const track = snap.industryTrack ?? resolveIndustryEvalTrack(snap.symbol);
+  const isFinancial = track === "FINANCIAL_BANK_SEC_INS";
+  const hist = snap.annualHistory ?? [];
+  const curr = hist[0];
+  const prev = hist[1];
+  const isMultiPeriod = Boolean(curr && prev);
 
-  // Criteria 1: ROA > 0
-  const positiveRoa = roa > 0 || netProfit > 0;
+  let criteriaEvaluated = 0;
 
-  // Criteria 2: CFO > 0
-  const positiveCfo = ocf > 0;
+  // 1. ROA > 0
+  let positiveRoa = false;
+  if (snap.roa != null && Number.isFinite(snap.roa)) {
+    criteriaEvaluated++;
+    positiveRoa = snap.roa > 0;
+  } else if (snap.netProfit != null && Number.isFinite(snap.netProfit)) {
+    criteriaEvaluated++;
+    positiveRoa = snap.netProfit > 0;
+  }
 
-  // Criteria 3: Delta ROA > 0 (Proxy: Net Income YoY growth > 0)
-  const increasingRoa = niYoy > 0;
+  // 2. CFO > 0 (Banks/Financials: operating cash flow can swing with deposits/margin loans, still tracked if available)
+  let positiveCfo = false;
+  if (snap.ocfTtm != null && Number.isFinite(snap.ocfTtm)) {
+    criteriaEvaluated++;
+    positiveCfo = snap.ocfTtm > 0;
+  }
 
-  // Criteria 4: CFO > Net Profit (Cash earnings exceed accounting income)
-  const cashQuality = ocf > 0 && (netProfit <= 0 || ocf >= netProfit * 0.85);
+  // 3. ΔROA > 0
+  let increasingRoa = false;
+  const roaCurr = curr ? safeDiv(curr.netProfit, curr.totalAssets) : null;
+  const roaPrev = prev ? safeDiv(prev.netProfit, prev.totalAssets) : null;
+  if (roaCurr != null && roaPrev != null) {
+    criteriaEvaluated++;
+    increasingRoa = roaCurr > roaPrev;
+  } else if (snap.niYoyPct != null && Number.isFinite(snap.niYoyPct)) {
+    criteriaEvaluated++;
+    increasingRoa = snap.niYoyPct > 0;
+  }
 
-  // Criteria 5: Lower or prudent Leverage (D/E <= 1.2 or low debt)
-  const lowerLeverage = debtEquity <= 1.2 || (snap.totalDebt ?? 0) === 0;
+  // 4. Cash Quality: CFO > Net Profit (accruals quality)
+  let cashQuality = false;
+  if (snap.ocfTtm != null && Number.isFinite(snap.ocfTtm) && snap.netProfit != null && Number.isFinite(snap.netProfit)) {
+    criteriaEvaluated++;
+    cashQuality = snap.ocfTtm > 0 && (snap.netProfit <= 0 || snap.ocfTtm >= snap.netProfit);
+  }
 
-  // Criteria 6: Higher or safe liquidity (Current Ratio >= 1.2)
-  const higherLiquidity = currentRatio >= 1.2;
+  // 5. Lower or prudent leverage (NEVER award free point when debt data is missing)
+  let lowerLeverage = false;
+  const ltdCurr = curr ? safeDiv(curr.longTermDebt ?? curr.totalDebt, curr.totalAssets) : null;
+  const ltdPrev = prev ? safeDiv(prev.longTermDebt ?? prev.totalDebt, prev.totalAssets) : null;
+  if (ltdCurr != null && ltdPrev != null) {
+    criteriaEvaluated++;
+    lowerLeverage = ltdCurr <= ltdPrev;
+  } else if (snap.totalDebt != null && Number.isFinite(snap.totalDebt) && snap.totalDebt === 0) {
+    criteriaEvaluated++;
+    lowerLeverage = true;
+  } else if (snap.debtEquity != null && Number.isFinite(snap.debtEquity)) {
+    criteriaEvaluated++;
+    lowerLeverage = isFinancial ? snap.debtEquity >= 0 : snap.debtEquity >= 0 && snap.debtEquity <= 1.2;
+  }
 
-  // Criteria 7: No significant share dilution (proxy: shares exist and coverage >= 1)
-  const noDilution = (snap.shares ?? 0) > 0;
+  // 6. Higher Liquidity (Financials: Equity/Assets >= 7% capital adequacy proxy)
+  let higherLiquidity = false;
+  if (isFinancial) {
+    const eqAssetsCurr =
+      curr != null
+        ? safeDiv(curr.equity, curr.totalAssets)
+        : safeDiv(snap.equity, snap.totalAssets);
+    const eqAssetsPrev = prev != null ? safeDiv(prev.equity, prev.totalAssets) : null;
+    if (eqAssetsCurr != null) {
+      criteriaEvaluated++;
+      higherLiquidity = eqAssetsPrev != null ? eqAssetsCurr >= eqAssetsPrev - 0.005 : eqAssetsCurr >= 0.07;
+    }
+  } else {
+    const crCurr = curr ? safeDiv(curr.currentAssets, curr.currentLiabilities) : null;
+    const crPrev = prev ? safeDiv(prev.currentAssets, prev.currentLiabilities) : null;
+    if (crCurr != null && crPrev != null) {
+      criteriaEvaluated++;
+      higherLiquidity = crCurr >= crPrev;
+    } else if (snap.currentRatio != null && Number.isFinite(snap.currentRatio)) {
+      criteriaEvaluated++;
+      higherLiquidity = snap.currentRatio >= 1.2;
+    }
+  }
 
-  // Criteria 8: Higher or solid Gross Margin (Gross Margin > 15% or positive revenue growth)
-  const higherGrossMargin = grossMargin >= 15 || revYoy > 0;
+  // 7. No significant equity dilution
+  let noDilution = false;
+  if (curr?.shares != null && prev?.shares != null && curr.shares > 0 && prev.shares > 0) {
+    criteriaEvaluated++;
+    noDilution = curr.shares <= prev.shares * 1.01;
+  } else if (snap.shares != null && snap.shares > 0 && snap.coverage >= 0.4) {
+    criteriaEvaluated++;
+    noDilution = true;
+  }
 
-  // Criteria 9: Higher Asset Turnover (Revenue YoY > 0 and Net Margin > 5%)
-  const higherTurnover = revYoy > 0 && (snap.netMargin ?? 0) > 0;
+  // 8. Higher Gross Margin (Financials: Operating/Net Margin expansion)
+  let higherGrossMargin = false;
+  if (isFinancial) {
+    const nmCurr = curr ? safeDiv(curr.netProfit, curr.revenue) : null;
+    const nmPrev = prev ? safeDiv(prev.netProfit, prev.revenue) : null;
+    if (nmCurr != null && nmPrev != null) {
+      criteriaEvaluated++;
+      higherGrossMargin = nmCurr >= nmPrev;
+    } else if (snap.netMargin != null && Number.isFinite(snap.netMargin)) {
+      criteriaEvaluated++;
+      higherGrossMargin = snap.netMargin >= 20;
+    }
+  } else {
+    const gmCurr = curr ? safeDiv(curr.grossProfit, curr.revenue) : null;
+    const gmPrev = prev ? safeDiv(prev.grossProfit, prev.revenue) : null;
+    if (gmCurr != null && gmPrev != null) {
+      criteriaEvaluated++;
+      higherGrossMargin = gmCurr >= gmPrev;
+    } else if (snap.grossMargin != null && Number.isFinite(snap.grossMargin)) {
+      criteriaEvaluated++;
+      higherGrossMargin = snap.grossMargin >= 15 && (snap.revenueYoyPct == null || snap.revenueYoyPct > 0);
+    }
+  }
 
-  let fScore = 0;
-  if (positiveRoa) fScore++;
-  if (positiveCfo) fScore++;
-  if (increasingRoa) fScore++;
-  if (cashQuality) fScore++;
-  if (lowerLeverage) fScore++;
-  if (higherLiquidity) fScore++;
-  if (noDilution) fScore++;
-  if (higherGrossMargin) fScore++;
-  if (higherTurnover) fScore++;
+  // 9. Higher Asset Turnover (Δ(Revenue / Assets) > 0)
+  let higherTurnover = false;
+  const atCurr = curr ? safeDiv(curr.revenue, curr.totalAssets) : null;
+  const atPrev = prev ? safeDiv(prev.revenue, prev.totalAssets) : null;
+  if (atCurr != null && atPrev != null) {
+    criteriaEvaluated++;
+    higherTurnover = atCurr > atPrev;
+  } else if (snap.revenueYoyPct != null && snap.netMargin != null) {
+    criteriaEvaluated++;
+    higherTurnover = snap.revenueYoyPct > 0 && snap.netMargin > 0;
+  }
+
+  const checks = [
+    positiveRoa,
+    positiveCfo,
+    increasingRoa,
+    cashQuality,
+    lowerLeverage,
+    higherLiquidity,
+    noDilution,
+    higherGrossMargin,
+    higherTurnover,
+  ];
+  const fScore = checks.reduce((acc, pass) => acc + (pass ? 1 : 0), 0);
 
   let rating: PiotroskiResult["rating"] = "WEAK";
-  let summaryVi = "Sức khỏe tài chính yếu, cần cẩn trọng rủi ro dòng tiền.";
+  let summaryVi = "Sức khỏe tài chính yếu hoặc thiếu dữ liệu xác thực, cần cẩn trọng rủi ro dòng tiền.";
   if (fScore >= 8) {
     rating = "EXCELLENT";
     summaryVi = "Cực kỳ xuất sắc (Kim Cương): Dòng tiền dồi dào, biên lợi nhuận mở rộng, đòn bẩy an toàn.";
@@ -124,6 +213,8 @@ export function calculatePiotroskiScore(snap: FundamentalSnapshot): PiotroskiRes
 
   return {
     fScore,
+    criteriaEvaluated,
+    isMultiPeriod,
     rating,
     criteria: {
       positiveRoa,
@@ -141,32 +232,81 @@ export function calculatePiotroskiScore(snap: FundamentalSnapshot): PiotroskiRes
 }
 
 /**
- * Calculates Edward Altman's Z''-Score for Emerging Markets.
+ * Calculates Edward Altman's Z''-Score for Emerging Markets (non-financial firms only).
  * Formula: Z'' = 6.56*X1 + 3.26*X2 + 6.72*X3 + 1.05*X4
  */
 export function calculateAltmanZScore(snap: FundamentalSnapshot): AltmanZResult {
-  const equity = snap.equity ?? 0;
-  const debt = snap.totalDebt ?? 0;
-  const cash = snap.cash ?? 0;
-  const netProfit = snap.netProfit ?? 0;
-  const ebitda = snap.ebitdaTtm ?? netProfit * 1.25;
+  const track = snap.industryTrack ?? resolveIndustryEvalTrack(snap.symbol);
+  if (track === "FINANCIAL_BANK_SEC_INS") {
+    return {
+      zScore: null,
+      zone: "EXEMPT_FINANCIAL",
+      zoneVi: "Miễn trừ (Tài chính)",
+      descriptionVi: "Ngân hàng/Chứng khoán/Bảo hiểm không áp dụng mô hình Altman Z'' (đòn bẩy tiền gửi đặc thù).",
+      x1_workingCapitalAssets: null,
+      x2_retainedEarningsAssets: null,
+      x3_ebitAssets: null,
+      x4_equityLiabilities: null,
+    };
+  }
 
-  // Approximate total assets if not directly given: Equity + Total Debt
-  const totalAssets = Math.max(1_000_000, equity + debt);
-  const totalLiabilities = Math.max(1_000_000, debt);
+  const equity = snap.equity;
+  const totalLiabilities = snap.totalLiabilities ?? snap.totalDebt;
+  const totalAssets =
+    snap.totalAssets ??
+    (equity != null && totalLiabilities != null ? equity + totalLiabilities : null);
 
-  // X1: Working Capital / Total Assets (proxied by Cash & Liquid assets vs Total Assets)
-  const workingCapital = Math.max(0, cash - debt * 0.4);
+  if (
+    equity == null ||
+    totalAssets == null ||
+    totalLiabilities == null ||
+    totalAssets <= 0 ||
+    totalLiabilities <= 0
+  ) {
+    return {
+      zScore: null,
+      zone: "INSUFFICIENT_DATA",
+      zoneVi: "Thiếu dữ liệu BCTC",
+      descriptionVi: "Thiếu Tổng tài sản, Tổng nợ phải trả hoặc VCSH để tính Altman Z''-Score chính xác.",
+      x1_workingCapitalAssets: null,
+      x2_retainedEarningsAssets: null,
+      x3_ebitAssets: null,
+      x4_equityLiabilities: null,
+    };
+  }
+
+  // X1: Working Capital / Total Assets (prefer true CA - CL; bounded liquid proxy only when cash & debt exist)
+  let workingCapital: number | null = null;
+  if (snap.currentAssets != null && snap.currentLiabilities != null) {
+    workingCapital = snap.currentAssets - snap.currentLiabilities;
+  } else if (snap.cash != null && snap.totalDebt != null) {
+    workingCapital = snap.cash - snap.totalDebt * 0.4;
+  }
+
+  // X2: Retained Earnings / Total Assets (fallback to netProfit only when RE absent)
+  const retained = snap.retainedEarnings ?? snap.netProfit;
+
+  // X3: EBIT / Total Assets
+  const ebit =
+    snap.ebit ??
+    (snap.ebitdaTtm != null ? snap.ebitdaTtm * 0.8 : null);
+
+  if (workingCapital == null || retained == null || ebit == null) {
+    return {
+      zScore: null,
+      zone: "INSUFFICIENT_DATA",
+      zoneVi: "Thiếu dữ liệu BCTC",
+      descriptionVi: "Thiếu cấu phần Vốn lưu động, LN giữ lại hoặc EBIT để tính Altman Z''-Score.",
+      x1_workingCapitalAssets: null,
+      x2_retainedEarningsAssets: null,
+      x3_ebitAssets: null,
+      x4_equityLiabilities: null,
+    };
+  }
+
   const x1 = Math.min(1.0, Math.max(-0.5, workingCapital / totalAssets));
-
-  // X2: Retained Earnings / Total Assets (proxied by Net Profit over Assets, annualized)
-  const x2 = Math.min(1.0, Math.max(-0.5, netProfit / totalAssets));
-
-  // X3: EBIT / Total Assets (proxied by EBITDA * 0.8 / Total Assets)
-  const ebit = ebitda * 0.8;
+  const x2 = Math.min(1.0, Math.max(-0.5, retained / totalAssets));
   const x3 = Math.min(1.0, Math.max(-0.5, ebit / totalAssets));
-
-  // X4: Book Value of Equity / Total Liabilities
   const x4 = Math.min(10.0, Math.max(0, equity / totalLiabilities));
 
   const zScoreRaw = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4;
@@ -202,8 +342,10 @@ export function calculateAltmanZScore(snap: FundamentalSnapshot): AltmanZResult 
  * Combined Fundamental Health Analyzer (Piotroski + Altman).
  */
 export function computePiotroskiAltman(snap: FundamentalSnapshot): FundamentalHealthMetrics {
+  const industryTrack = snap.industryTrack ?? resolveIndustryEvalTrack(snap.symbol);
   return {
     piotroski: calculatePiotroskiScore(snap),
     altman: calculateAltmanZScore(snap),
+    industryTrack,
   };
 }

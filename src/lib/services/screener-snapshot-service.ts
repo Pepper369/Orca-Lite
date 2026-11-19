@@ -11,10 +11,7 @@ import { getVietcapCompany, type VietcapProfile } from "../providers/vietcap";
 import { sectorOf, getSecurity, type VnExchange, VN_SECURITIES } from "../vn/master";
 import { VN100 } from "../vn/vn100";
 import { BOOTSTRAP_VN30_QUOTES } from "../bootstrap-data";
-import {
-  INSTITUTIONAL_FUNDAMENTAL_SEEDS,
-  getSectorBaselineFundamentals,
-} from "./institutional-fundamental-seeds";
+import { INSTITUTIONAL_FUNDAMENTAL_SEEDS } from "./institutional-fundamental-seeds";
 import { mapPool } from "../financial/snapshots";
 import type { Meta, Quote } from "../types";
 
@@ -89,8 +86,27 @@ import {
   QUANT_FA_BIT,
   QuantFaVectorStore,
 } from "../engines/fundamental-quant-matrix";
+import {
+  evaluateBankValuation,
+  evaluateRealEstateValuation,
+} from "../engines/industry-specific-valuation";
+import {
+  CANONICAL_PRESETS,
+  FA_BIT,
+  PRESET_ALIASES,
+  resolveCanonicalPreset,
+  type CanonicalScreenerPreset,
+} from "../quant/screener-taxonomy";
+import {
+  computeRealizedEquityVolatility,
+  computeSectorPercentileMap,
+  resolveIndustryEvalTrack,
+  type FaProvenance,
+  type IndustryEvalTrack,
+} from "../financial/fa-core";
+import { readLatestMarketScan } from "./market-screener-snapshots";
 
-export { QuantFaVectorStore, QUANT_FA_BIT };
+export { QuantFaVectorStore, QUANT_FA_BIT, FA_BIT, PRESET_ALIASES, resolveCanonicalPreset };
 
 export type ScreenerPreset =
   | "all"
@@ -141,7 +157,13 @@ export type ScreenerPreset =
   | "super_compounder"
   | "book_tax_clean"
   | "mispriced_growth"
-  | "merton_safe";
+  | "merton_safe"
+  | "reversal_confluence"
+  | "smc_structure"
+  | "volatility_breakout"
+  | "trend_alignment"
+  | "garp_growth"
+  | "deep_value";
 
 export const SCREENER_BIT = {
   SWEET_ZONE: 1 << 0,
@@ -208,7 +230,7 @@ export type ScreenerStockItem = {
   piotroskiFScore: number | null;
   piotroskiRating?: "EXCELLENT" | "GOOD" | "AVERAGE" | "WEAK";
   altmanZScore: number | null;
-  altmanZone?: "SAFE" | "GREY" | "DISTRESS";
+  altmanZone?: "SAFE" | "GREY" | "DISTRESS" | "EXEMPT_FINANCIAL" | "INSUFFICIENT_DATA";
   // MA Technical Momentum
   ma10: number | null;
   ma20: number | null;
@@ -411,11 +433,23 @@ export type ScreenerStockItem = {
   reverseDcfMarginPct?: number | null;
   mertonDistanceToDefault?: number | null;
   mertonPdPct?: number | null;
-  isMertonSafe?: boolean;
+  isMertonSafe?: boolean | null;
   sectorPePercentile?: number | null;
+  sectorPbPercentile?: number | null;
+  sectorEvEbitdaPercentile?: number | null;
   sectorRoePercentile?: number | null;
+  sectorRoicPercentile?: number | null;
+  sectorNetMarginPercentile?: number | null;
   industryRankVi?: string | null;
+  faProvenance?: FaProvenance;
+  faCoverage?: number;
+  industryTrack?: IndustryEvalTrack;
+  bankFairPbGordon?: number | null;
+  rnavUpsidePct?: number | null;
+  reverseDcfBasis?: "EV_FCFF" | "MCAP_FCFE" | "UNAVAILABLE";
+  waccUsedPct?: number | null;
   bitFlags?: number;
+  faBitFlags?: number;
   quantFaBitFlags?: number;
 };
 
@@ -535,6 +569,10 @@ export type ScreenerFilterParams = {
   minReverseDcfMargin?: number;
   mertonSafeOnly?: boolean;
   minMertonDd?: number;
+  // FA 2.0 Truth-in-Data & Multi-Factor Sector Percentiles
+  excludeSyntheticFa?: boolean;
+  minSectorRoicPercentile?: number;
+  maxSectorPbPercentile?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -1521,6 +1559,8 @@ function detectPresets(item: {
   dividendPayoutRatio?: number | null;
   inflectionDelta?: number | null;
   isQuarterlyInflection?: boolean | null;
+  faProvenance?: FaProvenance;
+  industryTrack?: IndustryEvalTrack;
   bookTaxDifference?: number | null;
   isBookTaxSafe?: boolean | null;
   cashRealizationRatio?: number | null;
@@ -1533,6 +1573,9 @@ function detectPresets(item: {
   isMertonSafe?: boolean | null;
 }): ScreenerPreset[] {
   const passes: ScreenerPreset[] = ["all"];
+  const hasAuthenticFa =
+    item.faProvenance == null ||
+    (item.faProvenance !== "SECTOR_FALLBACK" && item.faProvenance !== "MISSING");
 
   // 00. Điểm Mua Kích Hoạt Tức Thời (Real-Time Actionable Buy Trigger)
   const isTriggerPriceValid =
@@ -1681,11 +1724,15 @@ function detectPresets(item: {
     passes.push("rs_leaders");
   }
 
-  // 0f. Kim Cương Cơ Bản (Piotroski F-Score >= 6 + Altman Z Vùng An Toàn / Vùng Xám)
+  // 0f. Kim Cương Cơ Bản (Piotroski F-Score >= 6 + Altman Z Vùng An Toàn / Xám / Miễn trừ Tài chính)
   if (
+    hasAuthenticFa &&
     item.piotroskiFScore != null &&
     item.piotroskiFScore >= 6 &&
-    (item.altmanZone === "SAFE" || item.altmanZone === "GREY" || (item.altmanZScore != null && item.altmanZScore >= 1.8))
+    (item.altmanZone === "SAFE" ||
+      item.altmanZone === "GREY" ||
+      item.altmanZone === "EXEMPT_FINANCIAL" ||
+      (item.altmanZScore != null && item.altmanZScore >= 1.8))
   ) {
     passes.push("piotroski_diamonds");
   }
@@ -1871,25 +1918,28 @@ function detectPresets(item: {
 
   // 13. Pháo Đài Tài Chính (FA Fortress)
   if (
-    item.faCategory === "FORTRESS" ||
-    (item.isNetCash && (item.interestCoverage == null || item.interestCoverage >= 4.0) && (item.debtEquity == null || item.debtEquity <= 1.0))
+    hasAuthenticFa &&
+    (item.faCategory === "FORTRESS" ||
+      (item.isNetCash && (item.interestCoverage == null || item.interestCoverage >= 4.0) && (item.debtEquity == null || item.debtEquity <= 1.0)))
   ) {
     passes.push("fa_fortress");
   }
 
-  // 14. Dòng Tiền Thực Chất (Earnings Quality: CFO/LNST >= 1.0 & FCF dương)
+  // 14. Dòng Tiền Thực Chất (Earnings Quality: CFO/LNST >= 0.95 & FCF dương)
   if (
-    item.faCategory === "CASH_MACHINE" ||
-    (item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.95 && (item.fcfTtm == null || item.fcfTtm > 0))
+    hasAuthenticFa &&
+    (item.faCategory === "CASH_MACHINE" ||
+      (item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.95 && (item.fcfTtm == null || item.fcfTtm > 0)))
   ) {
     passes.push("earnings_quality");
   }
 
   // 15. Magic Formula (Joel Greenblatt: ROIC >= 15% & P/E rẻ)
   if (
-    item.faCategory === "MOAT_QUALITY" ||
-    (item.magicFormulaScore != null && item.magicFormulaScore >= 72) ||
-    ((item.roic != null && item.roic >= 15) && (item.pe != null && item.pe <= 14))
+    hasAuthenticFa &&
+    (item.faCategory === "MOAT_QUALITY" ||
+      (item.magicFormulaScore != null && item.magicFormulaScore >= 72) ||
+      (item.roic != null && item.roic >= 15 && item.pe != null && item.pe > 0 && item.pe <= 14))
   ) {
     passes.push("magic_formula");
   }
@@ -1997,26 +2047,29 @@ function detectPresets(item: {
 
   // 23. Beneish M-Score Chống Gian Lận BCTC (M-Score < -2.22 & Sloan Accrual Sạch)
   if (
-    item.isBeneishSafe === true ||
-    (item.beneishMScore != null && item.beneishMScore < -2.22)
+    hasAuthenticFa &&
+    (item.isBeneishSafe === true ||
+      (item.beneishMScore != null && item.beneishMScore < -2.22))
   ) {
     passes.push("beneish_safe");
   }
 
   // 24. Siêu Cổ Máy Tích Lũy Warren Buffett (Buffett Compounder: ROIC >= 15%, Net Cash & FCF Vững Bền)
   if (
-    item.isBuffettCompounder === true ||
-    item.faCategory === "BUFFETT_COMPOUNDER" ||
-    (item.buffettScore != null && item.buffettScore >= 75)
+    hasAuthenticFa &&
+    (item.isBuffettCompounder === true ||
+      item.faCategory === "BUFFETT_COMPOUNDER" ||
+      (item.buffettScore != null && item.buffettScore >= 75))
   ) {
     passes.push("buffett_compounder");
   }
 
   // 25. Cổ Phiếu Tăng Trưởng Thần Tốc Peter Lynch (PEG <= 1.0 & EPS Tăng Trưởng Cao)
   if (
-    item.isLynchFastGrower === true ||
-    item.faCategory === "LYNCH_GROWTH" ||
-    (item.peg != null && item.peg > 0 && item.peg <= 1.0 && ((item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15)))
+    hasAuthenticFa &&
+    (item.isLynchFastGrower === true ||
+      item.faCategory === "LYNCH_GROWTH" ||
+      (item.peg != null && item.peg > 0 && item.peg <= 1.0 && ((item.niYoyPct != null && item.niYoyPct >= 15) || (item.revenueYoyPct != null && item.revenueYoyPct >= 15))))
   ) {
     passes.push("lynch_fast_grower");
   }
@@ -2026,43 +2079,48 @@ function detectPresets(item: {
     ? item.ncavPerShare / 1000
     : item.ncavPerShare;
   if (
-    item.isGrahamNcav === true ||
-    item.faCategory === "GRAHAM_NET_NET" ||
-    (normNcav != null && item.price != null && item.price > 0 && item.price <= normNcav * 1.05)
+    hasAuthenticFa &&
+    (item.isGrahamNcav === true ||
+      item.faCategory === "GRAHAM_NET_NET" ||
+      (normNcav != null && normNcav > 0 && item.price != null && item.price > 0 && item.price <= normNcav * 1.05))
   ) {
     passes.push("graham_ncav");
   }
 
   // 27. Quán Quân Vốn Lưu Động & Chu Kỳ Tiền Mặt CCC (Chiếm Dụng Vốn Lành Mạnh)
   if (
-    item.isWorkingCapitalChampion === true ||
-    item.faCategory === "WORKING_CAPITAL" ||
-    (item.cashConversionCycleDays != null && item.cashConversionCycleDays <= 60 && item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.8)
+    hasAuthenticFa &&
+    (item.isWorkingCapitalChampion === true ||
+      item.faCategory === "WORKING_CAPITAL" ||
+      (item.cashConversionCycleDays != null && item.cashConversionCycleDays <= 60 && item.cfoToNetProfit != null && item.cfoToNetProfit >= 0.8))
   ) {
     passes.push("cash_conversion_cycle");
   }
 
   // 28. Quý Tộc Cổ Tức Bền Vững (Dividend Aristocrat: Tỷ Suất >= 5% & Payout Ratio An Toàn)
   if (
-    item.isDividendAristocrat === true ||
-    item.faCategory === "DIVIDEND_ARISTOCRAT" ||
-    (item.dividendYield != null && item.dividendYield >= 5.0 && (item.dividendPayoutRatio == null || (item.dividendPayoutRatio >= 20 && item.dividendPayoutRatio <= 85)))
+    hasAuthenticFa &&
+    (item.isDividendAristocrat === true ||
+      item.faCategory === "DIVIDEND_ARISTOCRAT" ||
+      (item.dividendYield != null && item.dividendYield >= 5.0 && (item.dividendPayoutRatio == null || (item.dividendPayoutRatio >= 20 && item.dividendPayoutRatio <= 85))))
   ) {
     passes.push("dividend_aristocrat");
   }
 
   // 29. Super-Compounder (ROIIC >= 25% & ROIC >= 15% & Vốn Gia Tăng Xuất Sắc)
   if (
-    item.isSuperCompounder === true ||
-    ((item.roiic3Y != null && item.roiic3Y >= 25.0) && (item.roic != null && item.roic >= 15.0))
+    hasAuthenticFa &&
+    (item.isSuperCompounder === true ||
+      (item.roiic3Y != null && item.roiic3Y >= 25.0 && item.roic != null && item.roic >= 15.0))
   ) {
     passes.push("super_compounder");
   }
 
   // 30. Book-Tax Clean (BTD Minh Bạch & Beneish Chống Gian Lận BCTC)
   if (
+    hasAuthenticFa &&
     item.isBookTaxSafe === true &&
-    (item.isBeneishSafe === true || item.beneishMScore == null || item.beneishMScore < -2.0) &&
+    (item.isBeneishSafe === true || (item.beneishMScore != null && item.beneishMScore < -2.0)) &&
     (item.cashRealizationRatio == null || item.cashRealizationRatio >= 0.75)
   ) {
     passes.push("book_tax_clean");
@@ -2070,20 +2128,34 @@ function detectPresets(item: {
 
   // 31. Mispriced Growth (Reverse DCF Chiết Khấu Ngược Hời & ROIC Cao)
   if (
-    (item.reverseDcfMarginPct != null && item.reverseDcfMarginPct >= 8.0) &&
-    (item.impliedGrowthPct != null && item.impliedGrowthPct <= 15.0) &&
-    (item.roic != null && item.roic >= 12.0)
+    hasAuthenticFa &&
+    item.reverseDcfMarginPct != null &&
+    item.reverseDcfMarginPct >= 8.0 &&
+    item.impliedGrowthPct != null &&
+    item.impliedGrowthPct <= 15.0 &&
+    item.roic != null &&
+    item.roic >= 12.0
   ) {
     passes.push("mispriced_growth");
   }
 
   // 32. Merton Safe (Khoảng Cách Vỡ Nợ Distance-to-Default Siêu Xa & Net Cash)
   if (
-    item.isMertonSafe === true ||
-    (item.mertonDistanceToDefault != null && item.mertonDistanceToDefault >= 2.5) ||
-    (item.isNetCash === true && (item.interestCoverage == null || item.interestCoverage >= 3.5))
+    hasAuthenticFa &&
+    (item.isMertonSafe === true ||
+      (item.mertonDistanceToDefault != null && item.mertonDistanceToDefault >= 2.5) ||
+      (item.isNetCash === true && (item.interestCoverage == null || item.interestCoverage >= 3.5)))
   ) {
     passes.push("merton_safe");
+  }
+
+  // 33. Consolidated Canonical Archetypes (FA 2.0 & Orthogonal Screener Taxonomy)
+  const passSet = new Set<ScreenerPreset>(passes);
+  for (const meta of CANONICAL_PRESETS) {
+    if (meta.id === "all" || passSet.has(meta.id)) continue;
+    if (meta.absorbs.some((legacy) => passSet.has(legacy))) {
+      passes.push(meta.id);
+    }
   }
 
   return passes;
@@ -2328,12 +2400,63 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         failoverCount: 0,
       }));
 
-      const fundTask = Promise.race([
-        getFundamentalSnapshots(symbols, { concurrency: 6 }),
-        new Promise<{ snapshots: FundamentalSnapshot[] }>((resolve) =>
-          setTimeout(() => resolve({ snapshots: [] }), 1_500),
-        ),
-      ]).catch(() => ({ snapshots: [] }));
+      const fundTask = (async (): Promise<{ snapshots: FundamentalSnapshot[]; prewarmedMap: Map<string, FundamentalSnapshot> }> => {
+        const prewarmedMap = new Map<string, FundamentalSnapshot>();
+        try {
+          const marketScan = await readLatestMarketScan<any>("fundamental").catch(() => null);
+          for (const r of marketScan?.rows ?? []) {
+            if (!r?.symbol) continue;
+            prewarmedMap.set(String(r.symbol).toUpperCase(), {
+              symbol: String(r.symbol).toUpperCase(),
+              reportDate: r.reportDate ?? null,
+              roe: r.roe ?? null,
+              roa: r.roa ?? null,
+              ros: r.ros ?? null,
+              roic: r.roic ?? null,
+              grossMargin: r.grossMargin ?? null,
+              netMargin: r.netMargin ?? null,
+              operatingMargin: r.operatingMargin ?? null,
+              debtEquity: r.debtEquity ?? null,
+              currentRatio: r.currentRatio ?? null,
+              quickRatio: r.quickRatio ?? null,
+              interestCoverage: r.interestCoverage ?? null,
+              netDebtToEbitda: r.netDebtToEbitda ?? null,
+              fcfTtm: r.fcfTtm ?? null,
+              ocfTtm: r.ocfTtm ?? null,
+              revenue: null,
+              netProfit: null,
+              equity: null,
+              totalDebt: null,
+              cash: null,
+              shares: null,
+              epsTtm: null,
+              ebitdaTtm: null,
+              revenueYoyPct: r.revenueYoyPct ?? null,
+              niYoyPct: r.niYoyPct ?? null,
+              revenueQoqPct: null,
+              niQoqPct: null,
+              coverage: r.coverage ?? 0.5,
+              qualityScore: r.qualityScore ?? null,
+              healthScore: r.healthScore ?? null,
+              hasGrowth: r.revenueYoyPct != null || r.niYoyPct != null,
+              hasHealth: (r.coverage ?? 0) > 0,
+              faProvenance: "CACHED_BCTC",
+              industryTrack: resolveIndustryEvalTrack(String(r.symbol)),
+            });
+          }
+        } catch {
+          /* prewarmed scan optional */
+        }
+
+        const live = await Promise.race([
+          getFundamentalSnapshots(symbols, { concurrency: 8, persist: false }),
+          new Promise<{ snapshots: FundamentalSnapshot[] }>((resolve) =>
+            setTimeout(() => resolve({ snapshots: [] }), 4_500),
+          ),
+        ]).catch(() => ({ snapshots: [] }));
+
+        return { snapshots: live.snapshots ?? [], prewarmedMap };
+      })();
 
       const ohlcvTask = batchVnOhlcv([...symbols, "VNINDEX"], {
         bars: 120,
@@ -2368,6 +2491,11 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       }
 
       const fundMap = new Map<string, FundamentalSnapshot>();
+      if ("prewarmedMap" in fundResult && fundResult.prewarmedMap) {
+        for (const [k, snap] of fundResult.prewarmedMap.entries()) {
+          fundMap.set(k, snap);
+        }
+      }
       for (const f of fundResult.snapshots ?? []) {
         fundMap.set(f.symbol.toUpperCase(), f);
       }
@@ -2463,7 +2591,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         piotroskiFScore: number | null;
         piotroskiRating?: "EXCELLENT" | "GOOD" | "AVERAGE" | "WEAK";
         altmanZScore: number | null;
-        altmanZone?: "SAFE" | "GREY" | "DISTRESS";
+        altmanZone?: "SAFE" | "GREY" | "DISTRESS" | "EXEMPT_FINANCIAL" | "INSUFFICIENT_DATA";
+        faProvenance: FaProvenance;
+        faCoverage: number;
+        industryTrack: IndustryEvalTrack;
+        bankFairPbGordon: number | null;
+        rnavUpsidePct: number | null;
         techFeatures: ReturnType<typeof analyzeTechFeatures>;
         quantFeatures: ReturnType<typeof analyzeQuantFeatures>;
         vcpDepths: number[] | null;
@@ -2561,19 +2694,23 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           change = Number(((price * changePercent) / 100).toFixed(2));
         }
 
-        // Resolve P/E: Tier 1 (VNDirect) -> Tier 2 (Computed from EPS TTM) -> Tier 3 (Industry Norm)
+        const seed = INSTITUTIONAL_FUNDAMENTAL_SEEDS.get(sym);
+        const industryTrack = f?.industryTrack ?? resolveIndustryEvalTrack(sec?.sector ?? sym);
+        const faProvenance: FaProvenance = f
+          ? (f.faProvenance ?? "LIVE_BCTC")
+          : seed
+            ? "SEED_CALIBRATED"
+            : "MISSING";
+        const faCoverage = f ? f.coverage : seed ? 0.65 : 0;
+
+        // Resolve P/E: Tier 1 (VNDirect) -> Tier 2 (Computed from EPS TTM). Never invent hardcoded norms.
         let pe = v?.pe ?? null;
         if (pe == null && f?.epsTtm && price && f.epsTtm > 0) {
           pe = Number((price / (f.epsTtm / 1000)).toFixed(2));
           failoverCount++;
         }
-        if (pe == null && price) {
-          const secTax = sec?.sector ?? sectorOf(sym);
-          pe = secTax === "Ngân hàng" ? 8.8 : secTax === "Chứng khoán" ? 14.2 : secTax === "Thép" ? 10.5 : secTax === "Công nghệ" ? 19.5 : 12.0;
-          failoverCount++;
-        }
 
-        // Resolve P/B: Tier 1 (VNDirect) -> Tier 2 (Computed from Equity / Shares) -> Tier 3 (Industry Norm)
+        // Resolve P/B: Tier 1 (VNDirect) -> Tier 2 (Computed from Equity / Shares). Never invent hardcoded norms.
         let pb = v?.pb ?? null;
         if (pb == null && f?.equity && f?.shares && price && f.shares > 0) {
           const bvps = (f.equity / f.shares) / 1000;
@@ -2582,64 +2719,53 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             failoverCount++;
           }
         }
-        if (pb == null && price) {
-          pb = (sec?.sector ?? sectorOf(sym)) === "Ngân hàng" ? 1.35 : 1.65;
-          failoverCount++;
-        }
 
         const ps = v?.ps ?? null;
-        const evEbitda = v?.evEbitda ?? null;
-
-        const seed = INSTITUTIONAL_FUNDAMENTAL_SEEDS.get(sym);
-        const sectorDefault = getSectorBaselineFundamentals(sec?.sector ?? sectorOf(sym));
+        const evEbitda = industryTrack === "FINANCIAL_BANK_SEC_INS" ? null : v?.evEbitda ?? null;
 
         const dividendYield = v?.dividendYield != null
           ? Number((v.dividendYield * 100).toFixed(2))
-          : (seed?.dividendYield ?? sectorDefault.dividendYield);
+          : (seed?.dividendYield ?? null);
 
-        // Resolve Market Cap: Tier 1 (VNDirect) -> Tier 2 (Vietcap) -> Tier 3 (Price * Shares) -> Tier 4 (Estimated)
+        // Resolve Market Cap: Tier 1 (VNDirect) -> Tier 2 (Vietcap) -> Tier 3 (Price * Shares)
         let marketCapRaw = v?.marketCap ?? (vc?.marketCap != null ? vc.marketCap : null);
         if (marketCapRaw == null && (f?.shares ?? vc?.sharesOutstanding) && price) {
           const shares = f?.shares ?? vc?.sharesOutstanding!;
           marketCapRaw = price * 1000 * shares;
           failoverCount++;
         }
-        if (marketCapRaw == null && price) {
-          marketCapRaw = price * 1000 * 350_000_000;
-          failoverCount++;
-        }
         const marketCap = marketCapRaw != null ? Math.round(marketCapRaw / 1_000_000_000) : null; // in Billion VND
 
         const roe = f?.roe != null
           ? Number(f.roe.toFixed(2))
-          : (v?.roe != null ? Number((v.roe * 100).toFixed(2)) : (seed?.roe ?? sectorDefault.roe));
+          : (v?.roe != null ? Number((v.roe * 100).toFixed(2)) : (seed?.roe ?? null));
         const roa = f?.roa != null
           ? Number(f.roa.toFixed(2))
-          : (v?.roa != null ? Number((v.roa * 100).toFixed(2)) : (seed?.roa ?? sectorDefault.roa));
+          : (v?.roa != null ? Number((v.roa * 100).toFixed(2)) : (seed?.roa ?? null));
         const grossMargin = f?.grossMargin != null
           ? Number(f.grossMargin.toFixed(2))
-          : (seed?.grossMargin ?? sectorDefault.grossMargin);
+          : (seed?.grossMargin ?? null);
         const netMargin = f?.netMargin != null
           ? Number(f.netMargin.toFixed(2))
-          : (seed?.netMargin ?? sectorDefault.netMargin);
+          : (seed?.netMargin ?? null);
         const debtEquity = f?.debtEquity != null
           ? Number(f.debtEquity.toFixed(2))
-          : (seed ? seed.debtEquity : sectorDefault.debtEquity);
+          : (seed ? seed.debtEquity : null);
         const currentRatio = f?.currentRatio != null
           ? Number(f.currentRatio.toFixed(2))
-          : (seed?.currentRatio ?? sectorDefault.currentRatio);
+          : (seed?.currentRatio ?? null);
         const revenueYoyPct = f?.revenueYoyPct != null
           ? Number(f.revenueYoyPct.toFixed(2))
-          : (seed?.revenueYoyPct ?? sectorDefault.revenueYoyPct);
+          : (seed?.revenueYoyPct ?? null);
         const niYoyPct = f?.niYoyPct != null
           ? Number(f.niYoyPct.toFixed(2))
-          : (seed?.niYoyPct ?? sectorDefault.niYoyPct);
-        const fcfTtm = f?.fcfTtm
+          : (seed?.niYoyPct ?? null);
+        const fcfTtm = f?.fcfTtm != null
           ? Math.round(f.fcfTtm / 1_000_000_000)
-          : (seed?.cfoToNetProfit && marketCap ? Math.round(marketCap * 0.04) : null); // in Billion VND
+          : null; // in Billion VND
 
-        const qualityScore = f?.qualityScore ?? (seed ? seed.fScore * 10 + 10 : 75);
-        const healthScore = f?.healthScore ?? (seed ? Math.min(95, Math.round(seed.altmanZScore * 22)) : 75);
+        const qualityScore = f?.qualityScore ?? (seed ? seed.fScore * 10 + 10 : 50);
+        const healthScore = f?.healthScore ?? (seed ? Math.min(95, Math.round(seed.altmanZScore * 22)) : 50);
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
@@ -2692,16 +2818,27 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const rsTrend = rsInfo?.rsTrend;
         const isMarketLeader = rsRating != null ? rsRating >= 80 : (rsRating20 != null && rsRating20 > 5);
 
-        // Fundamental Health: Piotroski F-Score (0 - 9) & Altman Z''-Score
+        // Fundamental Health: Piotroski F-Score (0 - 9) & Altman Z''-Score (Financials Exempt)
         const fundHealth = f ? computePiotroskiAltman(f) : null;
-        const piotroskiFScore = fundHealth?.piotroski.fScore ?? seed?.fScore ?? sectorDefault.fScore;
-        const piotroskiRating = fundHealth?.piotroski.rating ?? (piotroskiFScore >= 8 ? "EXCELLENT" : piotroskiFScore >= 6 ? "GOOD" : "AVERAGE");
-        const altmanZScore = fundHealth?.altman.zScore ?? seed?.altmanZScore ?? sectorDefault.altmanZScore;
-        const altmanZone = fundHealth?.altman.zone ?? seed?.altmanZone ?? (altmanZScore >= 2.6 ? "SAFE" : altmanZScore >= 1.8 ? "GREY" : "DISTRESS");
+        const piotroskiFScore = fundHealth?.piotroski.fScore ?? seed?.fScore ?? null;
+        const piotroskiRating = fundHealth?.piotroski.rating ?? (piotroskiFScore != null ? (piotroskiFScore >= 8 ? "EXCELLENT" : piotroskiFScore >= 6 ? "GOOD" : piotroskiFScore >= 4 ? "AVERAGE" : "WEAK") : undefined);
+        const altmanZScore =
+          industryTrack === "FINANCIAL_BANK_SEC_INS"
+            ? null
+            : fundHealth?.altman.zScore ?? seed?.altmanZScore ?? null;
+        const altmanZone =
+          industryTrack === "FINANCIAL_BANK_SEC_INS"
+            ? "EXEMPT_FINANCIAL"
+            : fundHealth?.altman.zone ??
+              seed?.altmanZone ??
+              (altmanZScore != null ? (altmanZScore >= 2.6 ? "SAFE" : altmanZScore >= 1.1 ? "GREY" : "DISTRESS") : "INSUFFICIENT_DATA");
 
-        // Fundamental Quant Matrix (ROIC, ICR, CFO/LNST, PEG, Consensus Target Upside, Magic Formula)
+        const realizedVolAnnual = computeRealizedEquityVolatility(parsed.ohlcvBars, 90);
+
+        // Fundamental Quant Matrix (True Multi-Period Forensic, Reverse DCF, Realized-Vol Merton DD)
         const faMatrix = computeFundamentalMatrix({
           snap: f,
+          symbol: sym,
           price,
           pe,
           pb,
@@ -2710,12 +2847,43 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           revenueYoyPct,
           marketCapBillion: marketCap,
           beta: quantFeatures.beta ?? beta,
+          realizedVolAnnual,
+          industryTrack,
           vietcapProfile: vc,
         });
 
-        // Enrich fundamental matrix if live snapshot was delayed
+        // Industry-specific Banking Gordon P/B & Real Estate RNAV
+        let bankFairPbGordon: number | null = null;
+        let rnavUpsidePct: number | null = null;
+        if (f && (sec?.sector ?? sectorOf(sym)) === "Ngân hàng") {
+          const bankRes = evaluateBankValuation({
+            symbol: sym,
+            currentPrice: price,
+            sharesOutstanding: f.shares,
+            bookEquity: f.equity,
+            netIncome: f.netProfit,
+            totalAssets: f.totalAssets,
+          });
+          bankFairPbGordon = bankRes.fairPbGordon;
+        } else if (f && industryTrack === "REAL_ESTATE") {
+          const reRes = evaluateRealEstateValuation({
+            symbol: sym,
+            currentPrice: price,
+            sharesOutstanding: f.shares,
+            bookEquity: f.equity,
+            totalAssets: f.totalAssets,
+            totalLiabilities: f.totalLiabilities,
+            inventory: f.inventory,
+            cash: f.cash,
+            shortTermDebt: f.shortTermDebt,
+            longTermDebt: f.longTermDebt,
+          });
+          rnavUpsidePct = reRes.upsideRnavPct;
+        }
+
+        // Enrich fundamental matrix from calibrated seed ONLY when live snapshot unavailable (never fabricate ROIIC)
         if (!f && seed) {
-          if (faMatrix.roic == null && seed.roic != null) {
+          if (faMatrix.roic == null && seed.roic != null && industryTrack !== "FINANCIAL_BANK_SEC_INS") {
             faMatrix.roic = seed.roic;
             faMatrix.isHighRoic = seed.roic >= 15.0;
           }
@@ -2727,13 +2895,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             faMatrix.cfoToNetProfit = seed.cfoToNetProfit;
             faMatrix.isQualityEarnings = seed.cfoToNetProfit >= 0.8;
           }
-          if (faMatrix.peg == null && pe != null && niYoyPct != null && niYoyPct > 0) {
+          if (faMatrix.peg == null && pe != null && niYoyPct != null && niYoyPct > 5.0) {
             faMatrix.peg = Number((pe / niYoyPct).toFixed(2));
             faMatrix.isUndervaluedGrowth = faMatrix.peg <= 1.0;
-          }
-          if (faMatrix.roiic3Y == null && seed.roic != null) {
-            faMatrix.roiic3Y = seed.roic;
-            faMatrix.isSuperCompounder = seed.roic >= 25.0;
           }
         }
 
@@ -2855,6 +3019,11 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           piotroskiRating,
           altmanZScore,
           altmanZone,
+          faProvenance,
+          faCoverage,
+          industryTrack,
+          bankFairPbGordon,
+          rnavUpsidePct,
           techFeatures,
           quantFeatures,
           vcpDepths,
@@ -2888,10 +3057,14 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       // 4b. Multi-factor Universe Orca Master Composite percentile ranking (1 - 99)
       const orcaMasterMap = calculateUniverseOrcaMaster(orcaInputs);
 
-      // 4c. Multi-factor Industry Sector Relative Percentile Ranking (ROE & P/E)
+      // 4c. Multi-factor Industry Sector Relative Percentile Ranking (6-Axis: P/E, P/B, EV/EBITDA, ROE, ROIC, Net Margin)
       type SectorRankMetrics = {
         sectorPePercentile: number | null;
+        sectorPbPercentile: number | null;
+        sectorEvEbitdaPercentile: number | null;
         sectorRoePercentile: number | null;
+        sectorRoicPercentile: number | null;
+        sectorNetMarginPercentile: number | null;
         industryRankVi: string | null;
       };
       const sectorRankMap = new Map<string, SectorRankMetrics>();
@@ -2909,30 +3082,49 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       }
 
       for (const [secName, grp] of sectorGroups.entries()) {
-        const withRoe = grp.filter((x) => x.roe != null && Number.isFinite(x.roe)).sort((a, b) => (b.roe ?? 0) - (a.roe ?? 0));
-        const withPe = grp.filter((x) => x.pe != null && x.pe > 0 && Number.isFinite(x.pe)).sort((a, b) => (a.pe ?? 0) - (b.pe ?? 0));
-
-        const roeRankMap = new Map<string, number>();
-        for (let r = 0; r < withRoe.length; r++) {
-          const pct = Math.round(((withRoe.length - r) / Math.max(1, withRoe.length)) * 100);
-          roeRankMap.set(withRoe[r].sym, pct);
-        }
-
-        const peRankMap = new Map<string, number>();
-        for (let r = 0; r < withPe.length; r++) {
-          const pct = Math.round(((withPe.length - r) / Math.max(1, withPe.length)) * 100);
-          peRankMap.set(withPe[r].sym, pct);
-        }
+        const roeRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.roe })),
+          { higherIsBetter: true },
+        );
+        const roicRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.faMatrix.roic })),
+          { higherIsBetter: true },
+        );
+        const nmRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.netMargin })),
+          { higherIsBetter: true },
+        );
+        const peRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.pe })),
+          { higherIsBetter: false, requirePositive: true },
+        );
+        const pbRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.pb })),
+          { higherIsBetter: false, requirePositive: true },
+        );
+        const evRankMap = computeSectorPercentileMap(
+          grp.map((x) => ({ key: x.sym, value: x.evEbitda })),
+          { higherIsBetter: false, requirePositive: true },
+        );
 
         for (let i = 0; i < grp.length; i++) {
           const e = grp[i];
           const roePct = roeRankMap.get(e.sym) ?? null;
+          const roicPct = roicRankMap.get(e.sym) ?? null;
+          const nmPct = nmRankMap.get(e.sym) ?? null;
           const pePct = peRankMap.get(e.sym) ?? null;
+          const pbPct = pbRankMap.get(e.sym) ?? null;
+          const evPct = evRankMap.get(e.sym) ?? null;
+
           let rankLabel: string | null = null;
           if (roePct != null && roePct >= 80) {
             rankLabel = `Top 20% ROE ${secName}`;
+          } else if (roicPct != null && roicPct >= 80) {
+            rankLabel = `Top 20% ROIC ${secName}`;
           } else if (pePct != null && pePct >= 80) {
             rankLabel = `P/E Rẻ Top 20% ${secName}`;
+          } else if (pbPct != null && pbPct >= 80) {
+            rankLabel = `P/B Rẻ Top 20% ${secName}`;
           } else if (e.faMatrix.isBuffettCompounder) {
             rankLabel = `Compounder ${secName}`;
           } else if (e.faMatrix.isNetCash) {
@@ -2940,8 +3132,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           }
 
           sectorRankMap.set(e.sym, {
-            sectorRoePercentile: roePct,
             sectorPePercentile: pePct,
+            sectorPbPercentile: pbPct,
+            sectorEvEbitdaPercentile: evPct,
+            sectorRoePercentile: roePct,
+            sectorRoicPercentile: roicPct,
+            sectorNetMarginPercentile: nmPct,
             industryRankVi: rankLabel,
           });
         }
@@ -2955,7 +3151,11 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const orcaMasterStrengthVi = orcaRes?.primaryStrengthVi ?? null;
         const secRanks = sectorRankMap.get(entry.sym);
         const sectorPePercentile = secRanks?.sectorPePercentile ?? null;
+        const sectorPbPercentile = secRanks?.sectorPbPercentile ?? null;
+        const sectorEvEbitdaPercentile = secRanks?.sectorEvEbitdaPercentile ?? null;
         const sectorRoePercentile = secRanks?.sectorRoePercentile ?? null;
+        const sectorRoicPercentile = secRanks?.sectorRoicPercentile ?? null;
+        const sectorNetMarginPercentile = secRanks?.sectorNetMarginPercentile ?? null;
         const industryRankVi = secRanks?.industryRankVi ?? null;
 
         const presetsPassed = detectPresets({
@@ -3063,6 +3263,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           dividendPayoutRatio: entry.faMatrix.dividendPayoutRatio,
           inflectionDelta: entry.faMatrix.inflectionDelta,
           isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
+          faProvenance: entry.faProvenance,
+          industryTrack: entry.industryTrack,
           bookTaxDifference: entry.faMatrix.bookTaxDifference,
           isBookTaxSafe: entry.faMatrix.isBookTaxSafe,
           cashRealizationRatio: entry.faMatrix.cashRealizationRatio,
@@ -3460,10 +3662,51 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           mertonDistanceToDefault: entry.faMatrix.mertonDistanceToDefault,
           mertonPdPct: entry.faMatrix.mertonPdPct,
           isMertonSafe: entry.faMatrix.isMertonSafe,
-          // Industry Sector Relative Percentiles (Phase 3)
+          // Industry Sector Relative Percentiles (6-Axis FA 2.0)
           sectorPePercentile,
+          sectorPbPercentile,
+          sectorEvEbitdaPercentile,
           sectorRoePercentile,
+          sectorRoicPercentile,
+          sectorNetMarginPercentile,
           industryRankVi,
+          faProvenance: entry.faProvenance,
+          faCoverage: entry.faCoverage,
+          industryTrack: entry.industryTrack,
+          bankFairPbGordon: entry.bankFairPbGordon,
+          rnavUpsidePct: entry.rnavUpsidePct,
+          reverseDcfBasis: entry.faMatrix.reverseDcfBasis,
+          waccUsedPct: entry.faMatrix.waccUsedPct,
+          faBitFlags: (() => {
+            let fBit = 0;
+            const hasAuth = entry.faProvenance !== "SECTOR_FALLBACK" && entry.faProvenance !== "MISSING";
+            if (hasAuth) fBit |= FA_BIT.VERIFIED_BCTC;
+            if (entry.industryTrack === "FINANCIAL_BANK_SEC_INS") fBit |= FA_BIT.EXEMPT_FINANCIAL;
+            if (entry.industryTrack === "REAL_ESTATE") fBit |= FA_BIT.REAL_ESTATE_TRACK;
+            if ((entry.sec?.sector ?? sectorOf(entry.sym)) === "Ngân hàng") fBit |= FA_BIT.BANKING_TRACK;
+            if (entry.faMatrix.isNetCash) fBit |= FA_BIT.NET_CASH;
+            if (entry.faMatrix.isSafeDebt) fBit |= FA_BIT.SAFE_DEBT;
+            if (entry.faMatrix.isMertonSafe === true) fBit |= FA_BIT.MERTON_SAFE;
+            if (entry.faMatrix.isQualityEarnings) fBit |= FA_BIT.QUALITY_EARNINGS;
+            if (entry.faMatrix.isBeneishSafe) fBit |= FA_BIT.BENEISH_SAFE;
+            if (entry.faMatrix.isBookTaxSafe === true) fBit |= FA_BIT.BOOK_TAX_CLEAN;
+            if (entry.faMatrix.isHighRoic) fBit |= FA_BIT.HIGH_ROIC;
+            if (entry.faMatrix.isSuperCompounder) fBit |= FA_BIT.SUPER_COMPOUNDER;
+            if (entry.faMatrix.isBuffettCompounder) fBit |= FA_BIT.BUFFETT_COMPOUNDER;
+            if (entry.faMatrix.isLynchFastGrower) fBit |= FA_BIT.GARP_GROWTH;
+            if (entry.faMatrix.magicFormulaScore >= 72 || entry.faMatrix.isGrahamNcav) fBit |= FA_BIT.DEEP_VALUE;
+            if (entry.faMatrix.isDividendAristocrat) fBit |= FA_BIT.DIVIDEND_ARISTOCRAT;
+            if (entry.faMatrix.isWorkingCapitalChampion) fBit |= FA_BIT.WORKING_CAP_CHAMP;
+            if ((entry.piotroskiFScore ?? 0) >= 7) fBit |= FA_BIT.PIOTROSKI_STRONG;
+            if (entry.faMatrix.isQuarterlyInflection) fBit |= FA_BIT.QUARTERLY_INFLECTION;
+            if (entry.faMatrix.isConsensusDiscount) fBit |= FA_BIT.CONSENSUS_UPSIDE;
+            if ((entry.faMatrix.reverseDcfMarginPct ?? -999) >= 8.0 && (entry.faMatrix.impliedGrowthPct ?? 999) <= 15.0) fBit |= FA_BIT.MISPRICED_GROWTH;
+            if (entry.faMatrix.isGrahamNcav) fBit |= FA_BIT.GRAHAM_NCAV;
+            if ((sectorPePercentile ?? 0) >= 75) fBit |= FA_BIT.LOW_SECTOR_PE;
+            if ((sectorRoePercentile ?? 0) >= 75) fBit |= FA_BIT.HIGH_SECTOR_ROE;
+            if ((sectorRoicPercentile ?? 0) >= 75) fBit |= FA_BIT.HIGH_SECTOR_ROIC;
+            return fBit;
+          })(),
           quantFaBitFlags: (() => {
             let b = 0;
             if (entry.faMatrix.isSuperCompounder) b |= QUANT_FA_BIT.SUPER_COMPOUNDER;
@@ -3571,6 +3814,12 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         book_tax_clean: 0,
         mispriced_growth: 0,
         merton_safe: 0,
+        reversal_confluence: 0,
+        smc_structure: 0,
+        volatility_breakout: 0,
+        trend_alignment: 0,
+        garp_growth: 0,
+        deep_value: 0,
       };
 
       const sectorSet = new Set<string>();
@@ -3664,6 +3913,12 @@ function buildSnapshotOutput(
     book_tax_clean: 0,
     mispriced_growth: 0,
     merton_safe: 0,
+    reversal_confluence: 0,
+    smc_structure: 0,
+    volatility_breakout: 0,
+    trend_alignment: 0,
+    garp_growth: 0,
+    deep_value: 0,
   };
 
   const output: MasterSnapshotPayload = {
@@ -3701,7 +3956,7 @@ function buildSnapshotOutput(
 
 async function executeProducer(): Promise<MasterSnapshotPayload> {
   try {
-    const res = await cached("screener:master:snapshot:v2", {
+    const res = await cached("screener:master:snapshot:v3", {
       ttlMs: 2 * 60_000, // 2 minutes fresh cache
       staleMs: 30 * 60_000, // 30 minutes stale serve while refreshing
       producer: produceMasterScreenerSnapshotInternal,
@@ -3719,16 +3974,47 @@ async function executeProducer(): Promise<MasterSnapshotPayload> {
   return buildSnapshotOutput(directData, false, false);
 }
 
+const FA_STRICT_PRESETS = new Set<string>([
+  "fa_fortress",
+  "earnings_quality",
+  "buffett_compounder",
+  "garp_growth",
+  "deep_value",
+  "piotroski_diamonds",
+  "dividend_aristocrat",
+  "consensus_upside",
+  "magic_formula",
+  "beneish_safe",
+  "lynch_fast_grower",
+  "graham_ncav",
+  "cash_conversion_cycle",
+  "super_compounder",
+  "book_tax_clean",
+  "mispriced_growth",
+  "merton_safe",
+]);
+
+let cachedVectorStore: { version: number; store: QuantFaVectorStore } | null = null;
+function getVectorStoreForSnapshot(version: number, items: ScreenerStockItem[]): QuantFaVectorStore {
+  if (cachedVectorStore && cachedVectorStore.version === version) {
+    return cachedVectorStore.store;
+  }
+  const store = new QuantFaVectorStore(items);
+  cachedVectorStore = { version, store };
+  return store;
+}
+
 /**
  * Filter, sort, and paginate stocks from the master screener snapshot.
- * Highly optimized with single-pass predicate evaluation and sub-millisecond query cache.
+ * Highly optimized with Dual-Register Bitmask (SCREENER_BIT + FA_BIT),
+ * TypedArray Vector Store (QuantFaVectorStore), and sub-millisecond query cache.
  */
 export async function queryScreenerStocks(params: ScreenerFilterParams): Promise<ScreenerResponseData> {
   const snapshot = await getMasterScreenerSnapshot();
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.mertonSafeOnly ?? ""}:${params.minMertonDd ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.minSectorRoicPercentile ?? ""}:${params.maxSectorPbPercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.mertonSafeOnly ?? ""}:${params.minMertonDd ?? ""}:${params.excludeSyntheticFa ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -3753,6 +4039,30 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     maxDe, minQualityScore, minRevenueYoy, minNiYoy,
     minQuantScore, maxOuZScore, minRiskReward,
   } = params;
+
+  const hasAnyFaFilter = Boolean(
+    (hasPreset && FA_STRICT_PRESETS.has(presetTarget)) ||
+      params.faProfile && params.faProfile !== "ALL" ||
+      params.minPiotroskiScore != null ||
+      params.minRoic != null ||
+      params.minRoiic != null ||
+      params.minInterestCoverage != null ||
+      params.minCfoToNp != null ||
+      params.netCashOnly ||
+      params.beneishSafeOnly ||
+      params.buffettCompounderOnly ||
+      params.lynchGrowerOnly ||
+      params.grahamNcavOnly ||
+      params.workingCapOnly ||
+      params.dividendAristocratOnly ||
+      params.superCompounderOnly ||
+      params.bookTaxSafeOnly ||
+      params.mertonSafeOnly ||
+      params.minReverseDcfMargin != null ||
+      params.maxImpliedGrowth != null ||
+      params.minMertonDd != null,
+  );
+  const excludeSyntheticFa = params.excludeSyntheticFa ?? hasAnyFaFilter;
 
   let requiredBitMask = 0;
   if (params.sweetZoneOnly) requiredBitMask |= SCREENER_BIT.SWEET_ZONE;
@@ -3788,11 +4098,48 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.preset === "cash_conversion_cycle" || params.workingCapOnly) requiredBitMask |= SCREENER_BIT.WORKING_CAP_CCC;
   if (params.preset === "dividend_aristocrat" || params.dividendAristocratOnly) requiredBitMask |= SCREENER_BIT.DIVIDEND_ARISTOCRAT;
 
-  const filtered: ScreenerStockItem[] = [];
-  const n = allItems.length;
+  let requiredFaBitMask = 0;
+  if (excludeSyntheticFa) requiredFaBitMask |= FA_BIT.VERIFIED_BCTC;
+  if (params.superCompounderOnly) requiredFaBitMask |= FA_BIT.SUPER_COMPOUNDER;
+  if (params.bookTaxSafeOnly) requiredFaBitMask |= FA_BIT.BOOK_TAX_CLEAN;
+  if (params.mertonSafeOnly) requiredFaBitMask |= FA_BIT.MERTON_SAFE;
+  if (params.beneishSafeOnly) requiredFaBitMask |= FA_BIT.BENEISH_SAFE;
+  if (params.buffettCompounderOnly) requiredFaBitMask |= FA_BIT.BUFFETT_COMPOUNDER;
+  if (params.netCashOnly) requiredFaBitMask |= FA_BIT.NET_CASH;
+  if (params.quarterlyInflectionOnly) requiredFaBitMask |= FA_BIT.QUARTERLY_INFLECTION;
 
-  for (let i = 0; i < n; i++) {
-    const x = allItems[i];
+  // Vectorized TypedArray pre-selection when FA numeric ranges are queried
+  let candidateIndices: number[] | null = null;
+  if (
+    params.minRoic != null ||
+    params.minRoiic != null ||
+    params.maxImpliedGrowth != null ||
+    params.minReverseDcfMargin != null ||
+    params.minMertonDd != null
+  ) {
+    const vectorStore = getVectorStoreForSnapshot(version, allItems);
+    candidateIndices = vectorStore.filterByRange({
+      minRoic: params.minRoic,
+      minRoiic: params.minRoiic,
+      maxImpliedGrowth: params.maxImpliedGrowth,
+      minReverseDcfMargin: params.minReverseDcfMargin,
+      minMertonDd: params.minMertonDd,
+    });
+  }
+
+  const filtered: ScreenerStockItem[] = [];
+  const totalCandidates = candidateIndices ? candidateIndices.length : allItems.length;
+
+  for (let idx = 0; idx < totalCandidates; idx++) {
+    const x = candidateIndices ? allItems[candidateIndices[idx]!]! : allItems[idx]!;
+
+    // Truth-in-Data Provenance Guard
+    if (
+      excludeSyntheticFa &&
+      (x.faProvenance === "SECTOR_FALLBACK" || x.faProvenance === "MISSING")
+    ) {
+      continue;
+    }
 
     // Discrete category checks (fail fast)
     if (hasPreset && !x.presetsPassed.includes(presetTarget)) continue;
@@ -3800,7 +4147,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (hasSector && x.sector !== sectorTarget) continue;
     if (hasMaSignal && x.maSignal !== maSignalTarget) continue;
 
-    // Bitmask fast-rejection: 1 CPU instruction tests up to 25 boolean filters simultaneously
+    // Dual-register bitmask fast-rejection
+    if (requiredFaBitMask !== 0 && x.faBitFlags != null) {
+      if ((x.faBitFlags & requiredFaBitMask) !== requiredFaBitMask) continue;
+    }
+
     if (requiredBitMask !== 0) {
       if (x.bitFlags != null) {
         if ((x.bitFlags & requiredBitMask) !== requiredBitMask) continue;
@@ -3833,19 +4184,6 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
         if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
         if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
-        if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
-        if (params.minSectorRoePercentile != null && (x.sectorRoePercentile == null || x.sectorRoePercentile < params.minSectorRoePercentile)) continue;
-        if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
-        if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
-        if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
-    // Quantitative FA Optimization Filters (Phase 1 & 2)
-    if (params.superCompounderOnly && !x.isSuperCompounder) continue;
-    if (params.bookTaxSafeOnly && !x.isBookTaxSafe) continue;
-    if (params.minRoiic != null && (x.roiic3Y == null || x.roiic3Y < params.minRoiic)) continue;
-    if (params.maxImpliedGrowth != null && (x.impliedGrowthPct == null || x.impliedGrowthPct > params.maxImpliedGrowth)) continue;
-    if (params.minReverseDcfMargin != null && (x.reverseDcfMarginPct == null || x.reverseDcfMarginPct < params.minReverseDcfMargin)) continue;
-    if (params.mertonSafeOnly && !x.isMertonSafe) continue;
-    if (params.minMertonDd != null && (x.mertonDistanceToDefault == null || x.mertonDistanceToDefault < params.minMertonDd)) continue;
       }
     }
 
@@ -4002,6 +4340,8 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
     if (params.minSectorRoePercentile != null && (x.sectorRoePercentile == null || x.sectorRoePercentile < params.minSectorRoePercentile)) continue;
     if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
+    if (params.minSectorRoicPercentile != null && (x.sectorRoicPercentile == null || x.sectorRoicPercentile < params.minSectorRoicPercentile)) continue;
+    if (params.maxSectorPbPercentile != null && (x.sectorPbPercentile == null || x.sectorPbPercentile > params.maxSectorPbPercentile)) continue;
     if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
     if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
     // Quantitative FA Optimization Filters (Phase 1 & 2)

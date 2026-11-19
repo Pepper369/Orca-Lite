@@ -1,17 +1,28 @@
 /**
- * Fundamental Quant Matrix Engine (Orca-Lite FA)
- * Deterministic quantitative fundamental analysis:
- * 1. Earnings Quality & Accruals Analysis (CFO / Net Profit conversion & FCF Yield)
- * 2. Capital Efficiency & Economic Moat (ROIC & DuPont 3-Way)
- * 3. Financial Fortress & Solvency (Interest Coverage Ratio ICR & Net Cash)
- * 4. Growth at Reasonable Price (PEG Ratio)
- * 5. Consensus Upside & CTCK Target Price Margin of Safety
- * 6. Joel Greenblatt's Magic Formula Percentile Score
- * 7. FA Master Classification & Health Rating
+ * Fundamental Quant Matrix Engine (Orca-Lite FA 2.0)
+ *
+ * Deterministic, Truth-in-Data quantitative fundamental analysis:
+ * 1. Earnings Quality & Accruals Analysis (CFO / Net Profit, FCF Yield, Cash Realization OCF/EBITDA)
+ * 2. Capital Efficiency & Economic Moat (ROIC, Multi-Year ROIIC ΔNOPAT/ΔIC, DuPont)
+ * 3. Financial Fortress & Solvency (ICR, Net Cash, Realized-Vol Merton Distance-to-Default)
+ * 4. Forensic Accounting (8-Var Beneish M-Score, Sloan Accruals, Book-Tax Difference)
+ * 5. Working Capital (True DIO + DSO - DPO Cash Conversion Cycle & Graham NCAV)
+ * 6. Enterprise-Consistent Reverse DCF (CAPM WACC & EV/FCFF or MarketCap/FCFE)
+ * 7. Industry-Aware FA Master Classification
  */
 
 import type { FundamentalSnapshot } from "../financial/snapshots";
 import type { VietcapProfile } from "../providers/vietcap";
+import {
+  computeDynamicWacc,
+  computeInvestedCapital,
+  computeNopat,
+  normalizeRatioPct,
+  normalizeToBillionVnd,
+  resolveIndustryEvalTrack,
+  safeDiv,
+  type IndustryEvalTrack,
+} from "../financial/fa-core";
 
 export type FaCategory =
   | "FORTRESS"
@@ -29,44 +40,47 @@ export type FaCategory =
   | "STANDARD";
 
 export interface FundamentalMatrixResult {
+  industryTrack: IndustryEvalTrack;
+
   // 1. Dòng tiền & Chất lượng Lợi nhuận
-  cfoToNetProfit: number | null; // CFO / Net Profit (>= 1.0 = Tiền mặt thực chất)
+  cfoToNetProfit: number | null;
   isQualityEarnings: boolean;
-  ocfBillion: number | null; // in Billion VND
-  fcfBillion: number | null; // in Billion VND
-  fcfYieldPct: number | null; // FCF / Market Cap (%)
+  ocfBillion: number | null;
+  fcfBillion: number | null;
+  fcfYieldPct: number | null;
 
   // 2. Hiệu quả Vốn & Moat
-  roic: number | null; // Return on Invested Capital (%)
-  isHighRoic: boolean; // ROIC >= 15%
+  roic: number | null;
+  isHighRoic: boolean;
   dupontDrive: "MARGIN" | "TURNOVER" | "LEVERAGE" | "BALANCED";
 
   // 3. Đòn bẩy & Sức bền Tài chính
-  interestCoverage: number | null; // EBIT / Interest (>= 4.0x = Siêu an toàn)
+  interestCoverage: number | null;
   isSafeDebt: boolean;
-  isNetCash: boolean; // Tiền mặt > Tổng nợ vay
+  isNetCash: boolean;
   netDebtToEbitda: number | null;
 
   // 4. Định giá & Tăng trưởng
-  peg: number | null; // P/E / NI YoY% (< 1.0 = Hời Peter Lynch)
+  peg: number | null;
   isUndervaluedGrowth: boolean;
 
   // 5. Định giá Đồng thuận CTCK
   consensusTargetPrice: number | null;
-  consensusUpsidePct: number | null; // % upside tới giá mục tiêu
-  isConsensusDiscount: boolean; // Upside >= 20%
+  consensusUpsidePct: number | null;
+  isConsensusDiscount: boolean;
 
   // 6. Magic Formula Greenblatt Score (1 - 99)
   magicFormulaScore: number;
 
   // 7. Forensic Accounting & Chống gian lận (Beneish M-Score & Sloan Accruals)
   beneishMScore: number | null;
-  isBeneishSafe: boolean; // M-Score < -2.22
-  sloanAccrualRatio: number | null; // (Net Income - CFO) / Total Assets
+  beneishVarsAvailable: number;
+  isBeneishSafe: boolean;
+  sloanAccrualRatio: number | null;
 
-  // 8. Warren Buffett Compounder (Siêu tích lũy vốn)
+  // 8. Warren Buffett Compounder
   isBuffettCompounder: boolean;
-  buffettScore: number; // 0 - 100
+  buffettScore: number;
 
   // 9. Peter Lynch Fast Grower
   isLynchFastGrower: boolean;
@@ -75,11 +89,14 @@ export interface FundamentalMatrixResult {
   isGrahamNcav: boolean;
   ncavPerShare: number | null;
 
-  // 11. Working Capital & Cash Conversion Cycle (CCC)
+  // 11. Working Capital & Cash Conversion Cycle (CCC = DIO + DSO - DPO)
   cashConversionCycleDays: number | null;
+  dioDays: number | null;
+  dsoDays: number | null;
+  dpoDays: number | null;
   isWorkingCapitalChampion: boolean;
 
-  // 12. Dividend Aristocrat (Quý tộc cổ tức)
+  // 12. Dividend Aristocrat
   isDividendAristocrat: boolean;
   dividendPayoutRatio: number | null;
 
@@ -87,23 +104,25 @@ export interface FundamentalMatrixResult {
   inflectionDelta: number | null;
   isQuarterlyInflection: boolean;
 
-  // 14. Forensic Book-Tax Difference & Cash Realization (Phase 1)
-  bookTaxDifference: number | null; // Pretax Income - (Tax Expense / 0.20) / Total Assets
-  isBookTaxSafe: boolean; // BTD <= 0.04 & BTD >= -0.08
-  cashRealizationRatio: number | null; // OCF / EBITDA (>= 0.85 = xuất sắc)
+  // 14. Forensic Book-Tax Difference & Cash Realization
+  bookTaxDifference: number | null;
+  isBookTaxSafe: boolean | null;
+  cashRealizationRatio: number | null;
 
-  // 15. Return on Incremental Invested Capital & Super Compounder (Phase 1)
-  roiic3Y: number | null; // ROIIC (%)
-  isSuperCompounder: boolean; // ROIIC >= 25% & ROIC >= 15% & Safe Debt
+  // 15. Return on Incremental Invested Capital & Super Compounder
+  roiic3Y: number | null;
+  isSuperCompounder: boolean;
 
-  // 16. Reverse DCF & Implied Growth Solver (Phase 2)
-  impliedGrowthPct: number | null; // Tốc độ tăng trưởng FCF định giá ngụ ý (%)
-  reverseDcfMarginPct: number | null; // Biên độ an toàn chiết khấu định giá (%)
+  // 16. Reverse DCF & Implied Growth Solver
+  impliedGrowthPct: number | null;
+  reverseDcfMarginPct: number | null;
+  reverseDcfBasis: "EV_FCFF" | "MCAP_FCFE" | "UNAVAILABLE";
+  waccUsedPct: number | null;
 
-  // 17. Merton Distance-to-Default & Xác suất vỡ nợ (Phase 3)
-  mertonDistanceToDefault: number | null; // Khoảng cách tới ngưỡng vỡ nợ (DD)
-  mertonPdPct: number | null; // Xác suất vỡ nợ ngụ ý thị trường (%)
-  isMertonSafe: boolean; // DD >= 2.5 & PD < 0.15% (hoặc Net Cash)
+  // 17. Merton Distance-to-Default & Xác suất vỡ nợ
+  mertonDistanceToDefault: number | null;
+  mertonPdPct: number | null;
+  isMertonSafe: boolean | null;
 
   // 18. Phân hạng Sức khỏe FA Tổng hợp
   faCategory: FaCategory;
@@ -111,41 +130,34 @@ export interface FundamentalMatrixResult {
   faSummaryVi: string;
 }
 
+/**
+ * Forensic Book-Tax Difference: (Pretax Income - TaxExpense / 0.20) / Total Assets.
+ * Truth-in-Data: Never fabricates pretax/tax or totalAssets=1000 when absent.
+ */
 export function calculateBookTaxDifference(
   snap?: Partial<FundamentalSnapshot> | null,
-  totalAssetsFallback?: number
-): { bookTaxDifference: number | null; isBookTaxSafe: boolean } {
-  if (!snap) return { bookTaxDifference: null, isBookTaxSafe: true };
-  const rawPretax = snap.pretaxIncome;
-  const rawTax = snap.taxExpense;
-  const rawNetProfit = snap.netProfit ?? 0;
+  totalAssetsFallback?: number | null,
+): { bookTaxDifference: number | null; isBookTaxSafe: boolean | null } {
+  if (!snap) return { bookTaxDifference: null, isBookTaxSafe: null };
 
-  let pretaxBillion: number | null = null;
-  let taxBillion: number | null = null;
+  const pretaxBillion = normalizeToBillionVnd(snap.pretaxIncome);
+  const taxBillion = normalizeToBillionVnd(snap.taxExpense);
+  const assetsBillion =
+    normalizeToBillionVnd(snap.totalAssets) ??
+    (totalAssetsFallback != null && Number.isFinite(totalAssetsFallback) && totalAssetsFallback > 0
+      ? normalizeToBillionVnd(totalAssetsFallback)
+      : null);
 
-  if (rawPretax != null && rawTax != null) {
-    pretaxBillion = Math.abs(rawPretax) > 100_000_000 ? rawPretax / 1_000_000_000 : rawPretax;
-    taxBillion = Math.abs(rawTax) > 100_000_000 ? rawTax / 1_000_000_000 : rawTax;
-  } else if (rawNetProfit !== 0) {
-    const npBillion = Math.abs(rawNetProfit) > 100_000_000 ? rawNetProfit / 1_000_000_000 : rawNetProfit;
-    pretaxBillion = npBillion / 0.8;
-    taxBillion = pretaxBillion * 0.2;
+  if (
+    pretaxBillion == null ||
+    taxBillion == null ||
+    assetsBillion == null ||
+    assetsBillion <= 0
+  ) {
+    return { bookTaxDifference: null, isBookTaxSafe: null };
   }
 
-  if (pretaxBillion == null || taxBillion == null) {
-    return { bookTaxDifference: null, isBookTaxSafe: true };
-  }
-
-  const rawTotalAssets = snap.totalAssets;
-  let assetsBillion =
-    rawTotalAssets != null
-      ? Math.abs(rawTotalAssets) > 100_000_000
-        ? rawTotalAssets / 1_000_000_000
-        : rawTotalAssets
-      : totalAssetsFallback ?? 1000;
-  if (assetsBillion <= 0) assetsBillion = 1000;
-
-  // Corporate income tax standard rate in Vietnam is 20%
+  // Vietnam corporate income tax statutory rate = 20%
   const btd = (pretaxBillion - taxBillion / 0.2) / assetsBillion;
   const bookTaxDifference = Number(btd.toFixed(3));
   const isBookTaxSafe = bookTaxDifference <= 0.04 && bookTaxDifference >= -0.08;
@@ -153,96 +165,122 @@ export function calculateBookTaxDifference(
   return { bookTaxDifference, isBookTaxSafe };
 }
 
+/**
+ * Operating Cash Flow / EBITDA. Returns null when genuine EBITDA > 0 is unavailable.
+ */
 export function calculateCashRealizationRatio(
   snap?: Partial<FundamentalSnapshot> | null,
-  ocfBillion?: number | null
+  ocfBillion?: number | null,
 ): number | null {
   if (!snap) return null;
-  const rawEbitda = snap.ebitdaTtm;
-  let ebitdaBillion: number | null = null;
-  if (rawEbitda != null && rawEbitda !== 0) {
-    ebitdaBillion = Math.abs(rawEbitda) > 100_000_000 ? rawEbitda / 1_000_000_000 : rawEbitda;
-  } else if (snap.netProfit != null && snap.netProfit > 0) {
-    const npBillion = Math.abs(snap.netProfit) > 100_000_000 ? snap.netProfit / 1_000_000_000 : snap.netProfit;
-    ebitdaBillion = npBillion * 1.25;
-  }
-
-  const ocf =
-    ocfBillion ??
-    (snap.ocfTtm != null
-      ? Math.abs(snap.ocfTtm) > 100_000_000
-        ? snap.ocfTtm / 1_000_000_000
-        : snap.ocfTtm
-      : null);
+  const ebitdaBillion = normalizeToBillionVnd(snap.ebitdaTtm);
+  const ocf = ocfBillion ?? normalizeToBillionVnd(snap.ocfTtm);
 
   if (ocf == null || ebitdaBillion == null || ebitdaBillion <= 0) return null;
   return Number((ocf / ebitdaBillion).toFixed(2));
 }
 
+/**
+ * True Return on Incremental Invested Capital (ROIIC = ΔNOPAT / ΔInvestedCapital).
+ * Uses precomputed `roiic3Y`, explicit `deltaNopat/deltaIc`, or `annualHistory`.
+ * Never fabricates `roic * (1 + growth)` when incremental capital data is absent.
+ */
 export function calculateRoiic(params: {
   snap?: Partial<FundamentalSnapshot> | null;
   roic: number | null;
-  niYoyPct: number | null;
+  niYoyPct?: number | null;
 }): { roiic3Y: number | null; isSuperCompounder: boolean } {
-  const { snap, roic, niYoyPct } = params;
+  const { snap, roic } = params;
   let roiic3Y: number | null = null;
 
   if (snap?.roiic3Y != null && Number.isFinite(snap.roiic3Y)) {
     roiic3Y = Number(snap.roiic3Y.toFixed(1));
-  } else if (snap?.deltaNopat != null && snap?.deltaIc != null && snap.deltaIc > 0) {
-    roiic3Y = Number(((snap.deltaNopat / snap.deltaIc) * 100).toFixed(1));
-  } else if (roic != null && Number.isFinite(roic)) {
-    const growth = niYoyPct != null ? Math.max(-50, Math.min(100, niYoyPct)) : 10;
-    const modeled = roic * (1 + growth / 100);
-    roiic3Y = Number(Math.max(-50, Math.min(100, modeled)).toFixed(1));
+  } else if (
+    snap?.deltaNopat != null &&
+    snap?.deltaIc != null &&
+    Number.isFinite(snap.deltaNopat) &&
+    Number.isFinite(snap.deltaIc) &&
+    snap.deltaIc > 0
+  ) {
+    roiic3Y = Number(Math.max(-100, Math.min(200, (snap.deltaNopat / snap.deltaIc) * 100)).toFixed(1));
+  } else if (snap?.annualHistory && snap.annualHistory.length >= 2) {
+    const newest = snap.annualHistory[0]!;
+    const oldest = snap.annualHistory[Math.min(snap.annualHistory.length - 1, 3)]!;
+    const nopatNew = computeNopat(newest.ebit, newest.profitBeforeTax, newest.taxExpense);
+    const nopatOld = computeNopat(oldest.ebit, oldest.profitBeforeTax, oldest.taxExpense);
+    const icNew = computeInvestedCapital(newest.totalDebt, newest.equity, newest.cash);
+    const icOld = computeInvestedCapital(oldest.totalDebt, oldest.equity, oldest.cash);
+    if (nopatNew != null && nopatOld != null && icNew != null && icOld != null) {
+      const dIc = icNew - icOld;
+      if (dIc > 0 && Math.abs(dIc) >= Math.max(1, icOld * 0.05)) {
+        roiic3Y = Number(Math.max(-100, Math.min(200, ((nopatNew - nopatOld) / dIc) * 100)).toFixed(1));
+      }
+    }
   }
 
   const isSuperCompounder = Boolean(
     roiic3Y != null &&
     roiic3Y >= 25.0 &&
     roic != null &&
-    roic >= 15.0
+    roic >= 15.0,
   );
 
   return { roiic3Y, isSuperCompounder };
 }
 
+/**
+ * Enterprise-Consistent Reverse DCF Implied Growth Solver.
+ * - Rejects negative/missing FCF rather than masking with `netProfit * 0.85`.
+ * - Uses Enterprise Value = MarketCap + NetDebt when debt & cash exist (FCFF basis).
+ * - Uses dynamic CAPM WACC when explicit `wacc` is omitted.
+ */
 export function solveReverseDcfImpliedGrowth(params: {
   fcfBillion: number | null;
-  netProfitBillion: number | null;
+  netProfitBillion?: number | null;
   marketCapBillion: number | null;
+  totalDebtBillion?: number | null;
+  cashBillion?: number | null;
+  beta?: number | null;
   wacc?: number;
   terminalGrowth?: number;
   expectedGrowth?: number | null;
-}): { impliedGrowthPct: number | null; reverseDcfMarginPct: number | null } {
-  const { fcfBillion, netProfitBillion, marketCapBillion } = params;
-  if (marketCapBillion == null || marketCapBillion <= 0) {
-    return { impliedGrowthPct: null, reverseDcfMarginPct: null };
+}): {
+  impliedGrowthPct: number | null;
+  reverseDcfMarginPct: number | null;
+  basis: "EV_FCFF" | "MCAP_FCFE" | "UNAVAILABLE";
+  waccUsedPct: number | null;
+} {
+  const { fcfBillion, marketCapBillion, totalDebtBillion, cashBillion } = params;
+  if (marketCapBillion == null || marketCapBillion <= 0 || fcfBillion == null || fcfBillion <= 0) {
+    return { impliedGrowthPct: null, reverseDcfMarginPct: null, basis: "UNAVAILABLE", waccUsedPct: null };
   }
 
-  const baseCf =
-    fcfBillion != null && fcfBillion > 0
-      ? fcfBillion
-      : netProfitBillion != null && netProfitBillion > 0
-        ? netProfitBillion * 0.85
-        : null;
-
-  if (baseCf == null || baseCf <= 0) {
-    return { impliedGrowthPct: null, reverseDcfMarginPct: null };
+  let targetVal = marketCapBillion;
+  let basis: "EV_FCFF" | "MCAP_FCFE" = "MCAP_FCFE";
+  if (totalDebtBillion != null && cashBillion != null && Number.isFinite(totalDebtBillion) && Number.isFinite(cashBillion)) {
+    const ev = marketCapBillion + totalDebtBillion - cashBillion;
+    if (ev > 0) {
+      targetVal = ev;
+      basis = "EV_FCFF";
+    }
   }
 
-  const w = params.wacc ?? 0.1; // 10.0% WACC
-  const gT = params.terminalGrowth ?? 0.03; // 3.0% perpetual growth
+  const debtToCap =
+    totalDebtBillion != null && totalDebtBillion > 0
+      ? totalDebtBillion / (marketCapBillion + totalDebtBillion)
+      : 0;
+  const w = params.wacc ?? computeDynamicWacc({ beta: params.beta, debtToCapital: debtToCap });
+  const gT = Math.min(params.terminalGrowth ?? 0.03, w - 0.015);
   const years = 5;
 
   function dcfVal(g: number): number {
     let pvForecast = 0;
-    let cf_t = baseCf!;
+    let cf_t = fcfBillion!;
     for (let t = 1; t <= years; t++) {
       cf_t *= 1 + g;
       pvForecast += cf_t / Math.pow(1 + w, t);
     }
-    const terminalVal = (cf_t * (1 + gT)) / (w - gT);
+    const terminalVal = (cf_t * (1 + gT)) / Math.max(0.01, w - gT);
     const pvTerminal = terminalVal / Math.pow(1 + w, years);
     return pvForecast + pvTerminal;
   }
@@ -253,15 +291,15 @@ export function solveReverseDcfImpliedGrowth(params: {
   const valHigh = dcfVal(high);
 
   let impliedG: number;
-  if (marketCapBillion <= valLow) {
+  if (targetVal <= valLow) {
     impliedG = low;
-  } else if (marketCapBillion >= valHigh) {
+  } else if (targetVal >= valHigh) {
     impliedG = high;
   } else {
     for (let i = 0; i < 24; i++) {
       const mid = (low + high) / 2;
       const v = dcfVal(mid);
-      if (v < marketCapBillion) {
+      if (v < targetVal) {
         low = mid;
       } else {
         high = mid;
@@ -271,33 +309,45 @@ export function solveReverseDcfImpliedGrowth(params: {
   }
 
   const impliedGrowthPct = Number((impliedG * 100).toFixed(1));
-  const expG = params.expectedGrowth ?? 12.0;
-  const reverseDcfMarginPct = Number((expG - impliedGrowthPct).toFixed(1));
+  const expG = params.expectedGrowth;
+  const reverseDcfMarginPct = expG != null && Number.isFinite(expG)
+    ? Number((expG - impliedGrowthPct).toFixed(1))
+    : null;
 
-  return { impliedGrowthPct, reverseDcfMarginPct };
+  return {
+    impliedGrowthPct,
+    reverseDcfMarginPct,
+    basis,
+    waccUsedPct: Number((w * 100).toFixed(1)),
+  };
 }
 
+/**
+ * Merton Distance-to-Default using realized OHLCV equity volatility (when available).
+ * Exempts Financial institutions (`BANKING | SECURITIES | INSURANCE`).
+ */
 export function calculateMertonDistanceToDefault(params: {
   marketCapBillion?: number | null;
   totalDebt?: number | null;
   cash?: number | null;
   beta?: number | null;
+  realizedVolAnnual?: number | null;
   isNetCash?: boolean;
+  industryTrack?: IndustryEvalTrack;
 }): {
   mertonDistanceToDefault: number | null;
   mertonPdPct: number | null;
-  isMertonSafe: boolean;
+  isMertonSafe: boolean | null;
 } {
-  const { marketCapBillion, totalDebt, cash, beta, isNetCash } = params;
+  if (params.industryTrack === "FINANCIAL_BANK_SEC_INS") {
+    return { mertonDistanceToDefault: null, mertonPdPct: null, isMertonSafe: null };
+  }
 
-  const debtBillion = totalDebt != null
-    ? (Math.abs(totalDebt) > 100_000_000 ? totalDebt / 1_000_000_000 : totalDebt)
-    : 0;
-  const cashBillion = cash != null
-    ? (Math.abs(cash) > 100_000_000 ? cash / 1_000_000_000 : cash)
-    : 0;
+  const { marketCapBillion, totalDebt, cash, beta, realizedVolAnnual, isNetCash } = params;
+  const debtBillion = normalizeToBillionVnd(totalDebt) ?? 0;
+  const cashBillion = normalizeToBillionVnd(cash) ?? 0;
 
-  if (isNetCash || debtBillion <= 0 || (cashBillion > 0 && cashBillion >= debtBillion)) {
+  if (isNetCash || (totalDebt != null && debtBillion <= 0) || (cashBillion > 0 && cashBillion >= debtBillion && debtBillion > 0)) {
     return {
       mertonDistanceToDefault: 8.0,
       mertonPdPct: 0.001,
@@ -305,20 +355,24 @@ export function calculateMertonDistanceToDefault(params: {
     };
   }
 
-  if (marketCapBillion == null || marketCapBillion <= 0) {
+  if (marketCapBillion == null || marketCapBillion <= 0 || totalDebt == null) {
     return {
       mertonDistanceToDefault: null,
       mertonPdPct: null,
-      isMertonSafe: debtBillion <= 0,
+      isMertonSafe: null,
     };
   }
 
   const va = marketCapBillion + debtBillion;
   const d = Math.max(0.1, debtBillion);
-  const rawBeta = beta != null && Number.isFinite(beta) ? beta : 1.0;
-  const sigmaE = Math.max(0.18, Math.min(0.65, rawBeta * 0.25));
-  const sigmaA = Math.max(0.08, Math.min(0.50, sigmaE * (marketCapBillion / va)));
-  const r = 0.045;
+  const sigmaE =
+    realizedVolAnnual != null && Number.isFinite(realizedVolAnnual) && realizedVolAnnual > 0
+      ? Math.max(0.15, Math.min(0.95, realizedVolAnnual))
+      : beta != null && Number.isFinite(beta)
+        ? Math.max(0.18, Math.min(0.75, beta * 0.28))
+        : 0.32;
+  const sigmaA = Math.max(0.08, Math.min(0.60, sigmaE * (marketCapBillion / va)));
+  const r = 0.055; // VN 10Y risk-free baseline
   const T = 1.0;
 
   const numerator = Math.log(va / d) + (r - 0.5 * sigmaA * sigmaA) * T;
@@ -327,7 +381,7 @@ export function calculateMertonDistanceToDefault(params: {
   const mertonDistanceToDefault = Number(Math.max(-5.0, Math.min(10.0, rawDD)).toFixed(2));
 
   function stdNormCdf(x: number): number {
-    const b1 = 0.319381530;
+    const b1 = 0.31938153;
     const b2 = -0.356563782;
     const b3 = 1.781477937;
     const b4 = -1.821255978;
@@ -337,12 +391,10 @@ export function calculateMertonDistanceToDefault(params: {
 
     if (x >= 0.0) {
       const t = 1.0 / (1.0 + p * x);
-      return (1.0 - c * Math.exp(-x * x / 2.0) * t *
-        (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1));
+      return 1.0 - c * Math.exp((-x * x) / 2.0) * t * (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1);
     } else {
       const t = 1.0 / (1.0 - p * x);
-      return (c * Math.exp(-x * x / 2.0) * t *
-        (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1));
+      return c * Math.exp((-x * x) / 2.0) * t * (t * (t * (t * (t * b5 + b4) + b3) + b2) + b1);
     }
   }
 
@@ -368,6 +420,9 @@ export const QUANT_FA_BIT = {
   SAFE_DEBT: 1 << 7,
 } as const;
 
+/**
+ * Vectorized TypedArray store using `NaN` as missing-value sentinel (no `-999` collision).
+ */
 export class QuantFaVectorStore {
   readonly capacity: number;
   readonly symbols: string[];
@@ -380,17 +435,19 @@ export class QuantFaVectorStore {
   readonly mertonDD: Float32Array;
   readonly bitFlags: Uint32Array;
 
-  constructor(items: Array<{
-    symbol: string;
-    roic?: number | null;
-    roiic3Y?: number | null;
-    bookTaxDifference?: number | null;
-    cashRealizationRatio?: number | null;
-    impliedGrowthPct?: number | null;
-    reverseDcfMarginPct?: number | null;
-    mertonDistanceToDefault?: number | null;
-    quantFaBitFlags?: number | null;
-  }>) {
+  constructor(
+    items: Array<{
+      symbol: string;
+      roic?: number | null;
+      roiic3Y?: number | null;
+      bookTaxDifference?: number | null;
+      cashRealizationRatio?: number | null;
+      impliedGrowthPct?: number | null;
+      reverseDcfMarginPct?: number | null;
+      mertonDistanceToDefault?: number | null;
+      quantFaBitFlags?: number | null;
+    }>,
+  ) {
     const size = items.length;
     this.capacity = size;
     this.symbols = new Array(size);
@@ -404,15 +461,15 @@ export class QuantFaVectorStore {
     this.bitFlags = new Uint32Array(size);
 
     for (let i = 0; i < size; i++) {
-      const it = items[i];
+      const it = items[i]!;
       this.symbols[i] = it.symbol;
-      this.roic[i] = it.roic ?? -999;
-      this.roiic3Y[i] = it.roiic3Y ?? -999;
-      this.bookTaxDiff[i] = it.bookTaxDifference ?? -999;
-      this.cashRealizationRatio[i] = it.cashRealizationRatio ?? -999;
-      this.impliedGrowth[i] = it.impliedGrowthPct ?? -999;
-      this.reverseDcfMargin[i] = it.reverseDcfMarginPct ?? -999;
-      this.mertonDD[i] = it.mertonDistanceToDefault ?? -999;
+      this.roic[i] = it.roic ?? Number.NaN;
+      this.roiic3Y[i] = it.roiic3Y ?? Number.NaN;
+      this.bookTaxDiff[i] = it.bookTaxDifference ?? Number.NaN;
+      this.cashRealizationRatio[i] = it.cashRealizationRatio ?? Number.NaN;
+      this.impliedGrowth[i] = it.impliedGrowthPct ?? Number.NaN;
+      this.reverseDcfMargin[i] = it.reverseDcfMarginPct ?? Number.NaN;
+      this.mertonDD[i] = it.mertonDistanceToDefault ?? Number.NaN;
       this.bitFlags[i] = it.quantFaBitFlags ?? 0;
     }
   }
@@ -422,7 +479,7 @@ export class QuantFaVectorStore {
     const flags = this.bitFlags;
     const len = flags.length;
     for (let i = 0; i < len; i++) {
-      if ((flags[i] & requiredMask) === requiredMask) {
+      if ((flags[i]! & requiredMask) === requiredMask) {
         res.push(i);
       }
     }
@@ -430,18 +487,37 @@ export class QuantFaVectorStore {
   }
 
   filterByRange(params: {
+    minRoic?: number;
     minRoiic?: number;
+    maxImpliedGrowth?: number;
     minReverseDcfMargin?: number;
     minMertonDd?: number;
   }): number[] {
     const res: number[] = [];
     const len = this.capacity;
-    const { minRoiic, minReverseDcfMargin, minMertonDd } = params;
+    const { minRoic, minRoiic, maxImpliedGrowth, minReverseDcfMargin, minMertonDd } = params;
 
     for (let i = 0; i < len; i++) {
-      if (minRoiic != null && (this.roiic3Y[i] === -999 || this.roiic3Y[i] < minRoiic)) continue;
-      if (minReverseDcfMargin != null && (this.reverseDcfMargin[i] === -999 || this.reverseDcfMargin[i] < minReverseDcfMargin)) continue;
-      if (minMertonDd != null && (this.mertonDD[i] === -999 || this.mertonDD[i] < minMertonDd)) continue;
+      if (minRoic != null) {
+        const v = this.roic[i]!;
+        if (Number.isNaN(v) || v < minRoic) continue;
+      }
+      if (minRoiic != null) {
+        const v = this.roiic3Y[i]!;
+        if (Number.isNaN(v) || v < minRoiic) continue;
+      }
+      if (maxImpliedGrowth != null) {
+        const v = this.impliedGrowth[i]!;
+        if (Number.isNaN(v) || v > maxImpliedGrowth) continue;
+      }
+      if (minReverseDcfMargin != null) {
+        const v = this.reverseDcfMargin[i]!;
+        if (Number.isNaN(v) || v < minReverseDcfMargin) continue;
+      }
+      if (minMertonDd != null) {
+        const v = this.mertonDD[i]!;
+        if (Number.isNaN(v) || v < minMertonDd) continue;
+      }
       res.push(i);
     }
     return res;
@@ -450,6 +526,7 @@ export class QuantFaVectorStore {
 
 export function computeFundamentalMatrix(params: {
   snap?: Partial<FundamentalSnapshot> | null;
+  symbol?: string;
   price?: number | null;
   pe?: number | null;
   pb?: number | null;
@@ -458,27 +535,27 @@ export function computeFundamentalMatrix(params: {
   revenueYoyPct?: number | null;
   marketCapBillion?: number | null;
   beta?: number | null;
+  realizedVolAnnual?: number | null;
+  industryTrack?: IndustryEvalTrack;
   vietcapProfile?: VietcapProfile | null;
 }): FundamentalMatrixResult {
-  const { snap, price, pe, pb, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
+  const { snap, price, pe, dividendYield, niYoyPct, revenueYoyPct, marketCapBillion, vietcapProfile } = params;
+  const industryTrack =
+    params.industryTrack ??
+    snap?.industryTrack ??
+    resolveIndustryEvalTrack(params.symbol ?? snap?.symbol);
+  const isFinancial = industryTrack === "FINANCIAL_BANK_SEC_INS";
   const effectiveRevenueYoy = revenueYoyPct ?? snap?.revenueYoyPct ?? null;
+  const effectiveNiYoy = niYoyPct ?? snap?.niYoyPct ?? null;
 
-  // 1. Dòng tiền & Chất lượng Lợi nhuận
+  // 1. Cash Flow & Earnings Quality
   let cfoToNetProfit: number | null = null;
   if (snap?.ocfTtm != null && snap.netProfit != null && snap.netProfit > 0) {
     cfoToNetProfit = Number((snap.ocfTtm / snap.netProfit).toFixed(2));
   }
 
-  const ocfBillion = snap?.ocfTtm
-    ? Math.abs(snap.ocfTtm) > 100_000_000
-      ? Math.round(snap.ocfTtm / 1_000_000_000)
-      : Math.round(snap.ocfTtm)
-    : null;
-  const fcfBillion = snap?.fcfTtm
-    ? Math.abs(snap.fcfTtm) > 100_000_000
-      ? Math.round(snap.fcfTtm / 1_000_000_000)
-      : Math.round(snap.fcfTtm)
-    : null;
+  const ocfBillion = snap?.ocfTtm != null ? Math.round(normalizeToBillionVnd(snap.ocfTtm)!) : null;
+  const fcfBillion = snap?.fcfTtm != null ? Math.round(normalizeToBillionVnd(snap.fcfTtm)!) : null;
 
   let fcfYieldPct: number | null = null;
   if (fcfBillion != null && marketCapBillion != null && marketCapBillion > 0) {
@@ -486,277 +563,360 @@ export function computeFundamentalMatrix(params: {
   }
 
   const isQualityEarnings = Boolean(
-    cfoToNetProfit != null && cfoToNetProfit >= 0.8 && (fcfBillion == null || fcfBillion > 0)
+    cfoToNetProfit != null && cfoToNetProfit >= 0.8 && (fcfBillion == null || fcfBillion > 0),
   );
 
-  // 2. Hiệu quả Vốn & Moat (ROIC)
+  // 2. Capital Efficiency & Moat (ROIC)
   let roic: number | null = null;
-  if (snap?.roic != null && Number.isFinite(snap.roic)) {
-    // If provider gives decimal (0.18 = 18%), normalize to percentage
-    roic = Math.abs(snap.roic) <= 1.0 ? Number((snap.roic * 100).toFixed(1)) : Number(snap.roic.toFixed(1));
-  } else if (snap?.roe != null && snap.debtEquity != null) {
-    // Proxy approximation if explicit roic is missing
-    const de = snap.debtEquity;
-    roic = Number((snap.roe / (1 + de * 0.7)).toFixed(1));
+  if (!isFinancial) {
+    if (snap?.roic != null && Number.isFinite(snap.roic)) {
+      roic = Number(normalizeRatioPct(snap.roic)!.toFixed(1));
+    } else if (snap?.roe != null && snap.debtEquity != null && snap.debtEquity >= 0) {
+      roic = Number((snap.roe / (1 + snap.debtEquity * 0.7)).toFixed(1));
+    }
   }
-
   const isHighRoic = roic != null && roic >= 15.0;
 
   const netMargin =
     snap?.netMargin != null
       ? snap.netMargin
-      : snap?.netProfit && snap?.revenue && snap.revenue > 0
+      : snap?.netProfit != null && snap?.revenue != null && snap.revenue > 0
         ? (snap.netProfit / snap.revenue) * 100
-        : 0;
-  const roe = snap?.roe != null ? snap.roe : roic != null ? roic : 15;
+        : null;
+  const roe = snap?.roe ?? roic ?? null;
 
   let dupontDrive: FundamentalMatrixResult["dupontDrive"] = "BALANCED";
-  const de = snap?.debtEquity ?? 1.0;
-  if (netMargin >= 18 && de <= 1.2) {
+  const de = snap?.debtEquity ?? null;
+  if (netMargin != null && netMargin >= 18 && (de == null || de <= 1.2)) {
     dupontDrive = "MARGIN";
-  } else if (de > 2.2) {
+  } else if (de != null && de > 2.2) {
     dupontDrive = "LEVERAGE";
-  } else if (roe >= 18 && netMargin < 10) {
+  } else if (roe != null && roe >= 18 && netMargin != null && netMargin < 10) {
     dupontDrive = "TURNOVER";
   }
 
-  // 3. Đòn bẩy & Sức bền Tài chính
+  // 3. Leverage & Solvency
   const interestCoverage = snap?.interestCoverage != null ? Number(snap.interestCoverage.toFixed(1)) : null;
-  const isNetCash = Boolean(snap?.cash != null && snap.totalDebt != null && snap.cash > snap.totalDebt);
-  const netDebtToEbitda = snap?.netDebtToEbitda != null ? Number(snap.netDebtToEbitda.toFixed(2)) : null;
+  const isNetCash = Boolean(
+    !isFinancial && snap?.cash != null && snap.totalDebt != null && snap.cash > snap.totalDebt,
+  );
+  const netDebtToEbitda =
+    !isFinancial && snap?.netDebtToEbitda != null ? Number(snap.netDebtToEbitda.toFixed(2)) : null;
 
-  const isSafeDebt =
-    isNetCash ||
-    interestCoverage == null ||
-    interestCoverage >= 3.5 ||
-    (netDebtToEbitda != null && netDebtToEbitda <= 2.0);
+  const isSafeDebt = isFinancial
+    ? Boolean(roe != null && roe >= 8)
+    : Boolean(
+        isNetCash ||
+          (interestCoverage != null && interestCoverage >= 3.5) ||
+          (netDebtToEbitda != null && netDebtToEbitda <= 2.0) ||
+          (interestCoverage == null && netDebtToEbitda == null && de != null && de >= 0 && de <= 1.2),
+      );
 
-  // 4. Định giá & Tăng trưởng (PEG)
+  // 4. Growth at Reasonable Price (PEG)
   let peg: number | null = null;
-  if (pe != null && pe > 0 && niYoyPct != null && niYoyPct > 5.0) {
-    peg = Number((pe / niYoyPct).toFixed(2));
+  if (pe != null && pe > 0 && effectiveNiYoy != null && effectiveNiYoy > 5.0) {
+    peg = Number((pe / effectiveNiYoy).toFixed(2));
   }
   const isUndervaluedGrowth = peg != null && peg > 0 && peg <= 1.0;
 
-  // 5. Định giá Đồng thuận CTCK
+  // 5. Consensus Target Upside
   const targetRaw = vietcapProfile?.targetPrice ?? null;
-  // Handle price unit difference (VND vs thousand VND)
   let consensusTargetPrice: number | null = null;
   let consensusUpsidePct: number | null = null;
-
   if (targetRaw && targetRaw > 0 && price && price > 0) {
-    // Standardize to match price unit
     let normTarget = targetRaw;
     if (price < 1000 && targetRaw > 1000) normTarget = targetRaw / 1000;
     else if (price > 1000 && targetRaw < 1000) normTarget = targetRaw * 1000;
-
     consensusTargetPrice = Number(normTarget.toFixed(2));
     consensusUpsidePct = Number((((consensusTargetPrice - price) / price) * 100).toFixed(1));
   }
   const isConsensusDiscount = consensusUpsidePct != null && consensusUpsidePct >= 20.0;
 
-  // 6. Magic Formula Greenblatt Score (1 - 99)
+  // 6. Greenblatt Magic Formula (1 - 99)
   let mfScore = 50;
-  if (roic != null) {
-    if (roic >= 25) mfScore += 25;
-    else if (roic >= 18) mfScore += 18;
-    else if (roic >= 12) mfScore += 10;
-    else if (roic < 5) mfScore -= 15;
+  const yieldMetric = isFinancial ? roe : roic;
+  if (yieldMetric != null) {
+    if (yieldMetric >= 25) mfScore += 25;
+    else if (yieldMetric >= 18) mfScore += 18;
+    else if (yieldMetric >= 12) mfScore += 10;
+    else if (yieldMetric < 5) mfScore -= 15;
   }
   if (pe != null && pe > 0) {
-    // Earnings Yield proxy
     const ey = (1 / pe) * 100;
-    if (ey >= 15) mfScore += 25; // P/E <= 6.6
-    else if (ey >= 10) mfScore += 18; // P/E <= 10
-    else if (ey >= 6.5) mfScore += 10; // P/E <= 15
-    else if (ey < 4) mfScore -= 15; // P/E > 25
+    if (ey >= 15) mfScore += 25;
+    else if (ey >= 10) mfScore += 18;
+    else if (ey >= 6.5) mfScore += 10;
+    else if (ey < 4) mfScore -= 15;
   }
   if (isQualityEarnings) mfScore += 8;
   if (isNetCash) mfScore += 6;
   const magicFormulaScore = Math.max(1, Math.min(99, Math.round(mfScore)));
 
-  // 7. Forensic Accounting & Chống gian lận (Beneish M-Score & Sloan Accruals)
-  // Ensure consistent scale for Sloan accrual ratio (normalize to billion VND if in full VND)
-  const rawNetProfit = snap?.netProfit ?? 0;
-  const rawOcf = snap?.ocfTtm ?? 0;
-  const rawEquity = snap?.equity ?? 1000;
-  const netProfitBillion = Math.abs(rawNetProfit) > 100_000_000 ? rawNetProfit / 1_000_000_000 : rawNetProfit;
-  const ocfRatioBillion = Math.abs(rawOcf) > 100_000_000 ? rawOcf / 1_000_000_000 : rawOcf;
-  const equityBillion = Math.abs(rawEquity) > 100_000_000 ? rawEquity / 1_000_000_000 : rawEquity;
+  // 7. Forensic Accounting (True 8-Var Beneish M-Score & Sloan Accruals)
+  const netProfitBillion = normalizeToBillionVnd(snap?.netProfit);
+  const ocfNormBillion = normalizeToBillionVnd(snap?.ocfTtm);
+  const assetsNormBillion =
+    normalizeToBillionVnd(snap?.totalAssets) ??
+    (snap?.equity != null && snap?.debtEquity != null
+      ? Math.max(1, normalizeToBillionVnd(snap.equity)! * (1 + Math.max(0, snap.debtEquity)))
+      : null);
 
-  const totalAssetsApprox = Math.max(1, equityBillion * (1 + (snap?.debtEquity ?? 1)));
-  const sloanAccrualRatio = Number(((netProfitBillion - ocfRatioBillion) / totalAssetsApprox).toFixed(3));
+  let sloanAccrualRatio: number | null = null;
+  if (netProfitBillion != null && ocfNormBillion != null && assetsNormBillion != null && assetsNormBillion > 0) {
+    sloanAccrualRatio = Number(((netProfitBillion - ocfNormBillion) / assetsNormBillion).toFixed(3));
+  }
 
-  const dsri = cfoToNetProfit != null && cfoToNetProfit < 0.6 ? 1.25 : cfoToNetProfit != null && cfoToNetProfit >= 1.0 ? 0.92 : 1.0;
-  const gmi = (snap?.grossMargin != null && snap.grossMargin >= 20) ? 0.95 : 1.15;
-  const aqi = 1.0;
-  const sgi = 1 + Math.max(-0.4, Math.min(1.2, (effectiveRevenueYoy ?? 0) / 100));
-  const depi = 1.0;
-  const sgai = 1.0;
-  const lvgi = (snap?.debtEquity != null && snap.debtEquity > 2.0) ? 1.2 : 0.98;
-  const tata = Math.max(-0.4, Math.min(0.4, sloanAccrualRatio));
+  let beneishMScore: number | null = null;
+  let beneishVarsAvailable = 0;
+  const hist = snap?.annualHistory ?? [];
+  const curr = hist[0];
+  const prev = hist[1];
 
-  const rawMScore = -4.84 + 0.920 * dsri + 0.528 * gmi + 0.404 * aqi + 0.892 * sgi + 0.115 * depi - 0.172 * sgai + 4.037 * tata + 0.0327 * lvgi;
-  const beneishMScore = Number(rawMScore.toFixed(2));
-  const isBeneishSafe = beneishMScore < -2.22;
+  if (!isFinancial && curr && prev) {
+    const revC = curr.revenue;
+    const revP = prev.revenue;
+    const dsri =
+      curr.receivables != null && prev.receivables != null && revC && revP
+        ? safeDiv(curr.receivables / revC, prev.receivables / revP)
+        : null;
+    const gmC = curr.grossProfit != null && revC ? curr.grossProfit / revC : null;
+    const gmP = prev.grossProfit != null && revP ? prev.grossProfit / revP : null;
+    const gmi = gmC != null && gmP != null && gmC > 0 ? gmP / gmC : null;
+    const nonCurrC =
+      curr.totalAssets && curr.currentAssets != null && curr.fixedAssets != null
+        ? 1 - (curr.currentAssets + curr.fixedAssets) / curr.totalAssets
+        : null;
+    const nonCurrP =
+      prev.totalAssets && prev.currentAssets != null && prev.fixedAssets != null
+        ? 1 - (prev.currentAssets + prev.fixedAssets) / prev.totalAssets
+        : null;
+    const aqi = nonCurrC != null && nonCurrP != null && nonCurrP !== 0 ? nonCurrC / nonCurrP : null;
+    const sgi = revC != null && revP != null && revP > 0 ? revC / revP : null;
+    const levC = curr.totalDebt != null && curr.totalAssets ? curr.totalDebt / curr.totalAssets : null;
+    const levP = prev.totalDebt != null && prev.totalAssets ? prev.totalDebt / prev.totalAssets : null;
+    const lvgi = levC != null && levP != null && levP > 0 ? levC / levP : null;
+    const tata =
+      curr.netProfit != null && curr.ocf != null && curr.totalAssets
+        ? (curr.netProfit - curr.ocf) / curr.totalAssets
+        : sloanAccrualRatio;
 
-  // 8. Warren Buffett Compounder (Siêu tích lũy vốn) & ROIIC
-  // 14. Forensic Book-Tax Difference & Cash Realization (Phase 1)
-  const { bookTaxDifference, isBookTaxSafe } = calculateBookTaxDifference(snap, totalAssetsApprox);
+    const components = [dsri, gmi, aqi, sgi, lvgi, tata];
+    beneishVarsAvailable = components.filter((v) => v != null && Number.isFinite(v)).length;
+
+    if (beneishVarsAvailable >= 3 && tata != null) {
+      const clampIdx = (v: number | null, fallback = 1.0) =>
+        v != null && Number.isFinite(v) ? Math.max(0.4, Math.min(2.5, v)) : fallback;
+      const rawM =
+        -4.84 +
+        0.92 * clampIdx(dsri) +
+        0.528 * clampIdx(gmi) +
+        0.404 * clampIdx(aqi) +
+        0.892 * clampIdx(sgi) +
+        0.115 * 1.0 - // DEPI neutral when depreciation schedule unavailable
+        0.172 * 1.0 + // SGAI neutral when SG&A split unavailable
+        4.679 * Math.max(-0.4, Math.min(0.4, tata)) -
+        0.327 * clampIdx(lvgi);
+      beneishMScore = Number(rawM.toFixed(2));
+    }
+  }
+  const isBeneishSafe = beneishMScore != null && beneishMScore < -2.22;
+
+  // 14. Book-Tax Difference & Cash Realization
+  const { bookTaxDifference, isBookTaxSafe } = calculateBookTaxDifference(snap, snap?.totalAssets);
   const cashRealizationRatio = calculateCashRealizationRatio(snap, ocfBillion);
 
-  // 15. Return on Incremental Invested Capital & Super Compounder (Phase 1)
-  const roiicRes = calculateRoiic({ snap, roic, niYoyPct });
+  // 15. Multi-Year ROIIC & Super-Compounder
+  const roiicRes = calculateRoiic({ snap, roic, niYoyPct: effectiveNiYoy });
   const roiic3Y = roiicRes.roiic3Y;
   const isSuperCompounder = Boolean(
     roiicRes.isSuperCompounder &&
-    isSafeDebt &&
-    (cfoToNetProfit == null || cfoToNetProfit >= 0.8)
+      isSafeDebt &&
+      (cfoToNetProfit == null || cfoToNetProfit >= 0.8),
   );
 
-  // 16. Reverse DCF & Implied Growth Solver (Phase 2)
-  const expectedGrowthBenchmark = Math.max(5.0, Math.min(35.0, niYoyPct ?? effectiveRevenueYoy ?? 12.0));
-  const { impliedGrowthPct, reverseDcfMarginPct } = solveReverseDcfImpliedGrowth({
+  // 16. Reverse DCF & Implied Growth Solver
+  const expectedGrowthBenchmark =
+    effectiveNiYoy ?? effectiveRevenueYoy ?? (roe != null ? Math.max(5, Math.min(25, roe * 0.65)) : null);
+  const totalDebtBillion = normalizeToBillionVnd(snap?.totalDebt);
+  const cashBillion = normalizeToBillionVnd(snap?.cash);
+  const betaVal = params.beta ?? (vietcapProfile as { beta?: number | null } | null)?.beta ?? null;
+
+  const rDcf = solveReverseDcfImpliedGrowth({
     fcfBillion,
     netProfitBillion,
     marketCapBillion,
+    totalDebtBillion,
+    cashBillion,
+    beta: betaVal,
     expectedGrowth: expectedGrowthBenchmark,
   });
 
-  // 17. Merton Distance-to-Default & Xác suất vỡ nợ (Phase 3)
+  // 17. Merton Distance-to-Default
   const mertonRes = calculateMertonDistanceToDefault({
     marketCapBillion,
     totalDebt: snap?.totalDebt,
     cash: snap?.cash,
-    beta: params.beta ?? (vietcapProfile as { beta?: number | null } | null)?.beta ?? null,
+    beta: betaVal,
+    realizedVolAnnual: params.realizedVolAnnual,
     isNetCash,
+    industryTrack,
   });
-  const mertonDistanceToDefault = mertonRes.mertonDistanceToDefault;
-  const mertonPdPct = mertonRes.mertonPdPct;
-  const isMertonSafe = mertonRes.isMertonSafe;
 
+  // 8. Buffett Compounder
   const isBuffettCompounder = Boolean(
     isHighRoic &&
-    roe >= 18 &&
-    (netMargin >= 12 || (snap?.grossMargin ?? 0) >= 22) &&
-    (isNetCash || isSafeDebt) &&
-    (cfoToNetProfit == null || cfoToNetProfit >= 0.85) &&
-    (effectiveRevenueYoy == null || effectiveRevenueYoy >= 6)
+      roe != null &&
+      roe >= 18 &&
+      ((netMargin != null && netMargin >= 12) || (snap?.grossMargin != null && snap.grossMargin >= 22)) &&
+      (isNetCash || isSafeDebt) &&
+      (cfoToNetProfit == null || cfoToNetProfit >= 0.85) &&
+      (effectiveRevenueYoy == null || effectiveRevenueYoy >= 6),
   );
   let bScore = 40;
   if (roic != null && roic >= 20) bScore += 25;
   else if (roic != null && roic >= 15) bScore += 15;
-  if (roe >= 20) bScore += 20;
+  if (roe != null && roe >= 20) bScore += 20;
   if (isNetCash) bScore += 15;
   if (isQualityEarnings) bScore += 10;
-  if (netMargin >= 15) bScore += 10;
+  if (netMargin != null && netMargin >= 15) bScore += 10;
   if (isSuperCompounder) bScore += 10;
   const buffettScore = Math.min(99, bScore);
 
   // 9. Peter Lynch Fast Grower
-  const growthRate = Math.max(niYoyPct ?? 0, snap?.niQoqPct ?? 0);
+  const growthRate = Math.max(effectiveNiYoy ?? 0, snap?.niQoqPct ?? 0);
   const isLynchFastGrower = Boolean(
     growthRate >= 20 &&
-    peg != null &&
-    peg > 0 &&
-    peg <= 0.85 &&
-    (snap?.debtEquity == null || snap.debtEquity <= 1.0) &&
-    (effectiveRevenueYoy == null || effectiveRevenueYoy >= 10)
+      peg != null &&
+      peg > 0 &&
+      peg <= 0.85 &&
+      (de == null || de <= 1.0) &&
+      (effectiveRevenueYoy == null || effectiveRevenueYoy >= 10),
   );
 
-  // 10. Benjamin Graham Net-Net (NCAV)
-  const cashVal = snap?.cash ?? 0;
-  const totalDebtVal = snap?.totalDebt ?? 0;
-  const currentAssetsEst = (snap?.equity ?? 0) * 0.7 + cashVal;
-  const ncavTotal = currentAssetsEst - totalDebtVal;
+  // 10. True Benjamin Graham Net-Net (NCAV = (Current Assets - Total Liabilities) / Shares)
+  let normNcavPerShare: number | null = null;
   const sharesVal = snap?.shares ?? 0;
-  const rawNcavPerShare = sharesVal > 0 ? Number((ncavTotal / sharesVal).toFixed(2)) : null;
-  // Normalize ncavPerShare to match price unit (thousand VND vs full VND)
-  let normNcavPerShare = rawNcavPerShare;
-  if (normNcavPerShare != null && price != null && price > 0) {
-    if (price < 500 && normNcavPerShare > 500) {
-      normNcavPerShare = normNcavPerShare / 1000;
-    } else if (price > 500 && normNcavPerShare < 500) {
-      normNcavPerShare = normNcavPerShare * 1000;
+  const ca =
+    snap?.currentAssets ??
+    (snap?.cash != null && snap?.receivables != null && snap?.inventory != null
+      ? snap.cash + snap.receivables + snap.inventory
+      : null);
+  const tl = snap?.totalLiabilities ?? null;
+  if (!isFinancial && ca != null && tl != null && sharesVal > 0) {
+    const ncavTotal = ca - tl;
+    let rawNcavPs = Number((ncavTotal / sharesVal).toFixed(2));
+    if (price != null && price > 0) {
+      if (price < 500 && rawNcavPs > 500) rawNcavPs /= 1000;
+      else if (price > 500 && rawNcavPs < 500) rawNcavPs *= 1000;
     }
+    normNcavPerShare = Number(rawNcavPs.toFixed(2));
   }
   const isGrahamNcav = Boolean(
-    (marketCapBillion != null && ncavTotal > 0 && marketCapBillion <= (ncavTotal / 1_000_000_000) * 1.3) ||
-    (normNcavPerShare != null && price != null && price > 0 && price <= normNcavPerShare * 1.3 && rawNetProfit > 0)
+    normNcavPerShare != null &&
+      normNcavPerShare > 0 &&
+      price != null &&
+      price > 0 &&
+      price <= normNcavPerShare * 1.1 &&
+      (netProfitBillion == null || netProfitBillion > 0),
   );
-  const ncavPerShare = normNcavPerShare ?? rawNcavPerShare;
 
-  // 11. Working Capital & Cash Conversion Cycle (CCC)
-  const effectiveCurrentRatio = snap?.currentRatio ?? (isNetCash ? 1.5 : null);
+  // 11. Working Capital & True Cash Conversion Cycle (CCC = DIO + DSO - DPO)
+  let dioDays: number | null = null;
+  let dsoDays: number | null = null;
+  let dpoDays: number | null = null;
+  let cashConversionCycleDays: number | null = null;
+  if (!isFinancial && snap?.revenue != null && snap.revenue > 0) {
+    const cogs =
+      snap.cogs ??
+      (snap.grossMargin != null ? snap.revenue * (1 - snap.grossMargin / 100) : null);
+    if (snap.inventory != null && cogs != null && cogs > 0) {
+      dioDays = Math.round((snap.inventory / cogs) * 365);
+    }
+    if (snap.receivables != null) {
+      dsoDays = Math.round((snap.receivables / snap.revenue) * 365);
+    }
+    if (snap.payables != null && cogs != null && cogs > 0) {
+      dpoDays = Math.round((snap.payables / cogs) * 365);
+    }
+    if (dioDays != null || dsoDays != null) {
+      cashConversionCycleDays = (dioDays ?? 0) + (dsoDays ?? 0) - (dpoDays ?? 0);
+    }
+  }
   const isWorkingCapitalChampion = Boolean(
-    effectiveCurrentRatio != null &&
-    effectiveCurrentRatio >= 1.25 &&
-    (snap?.quickRatio == null || snap.quickRatio >= 0.85) &&
-    cfoToNetProfit != null &&
-    cfoToNetProfit >= 1.0
+    !isFinancial &&
+      snap?.currentRatio != null &&
+      snap.currentRatio >= 1.25 &&
+      (snap.quickRatio == null || snap.quickRatio >= 0.85) &&
+      cfoToNetProfit != null &&
+      cfoToNetProfit >= 1.0 &&
+      (cashConversionCycleDays == null || cashConversionCycleDays <= 65),
   );
-  const cashConversionCycleDays = isWorkingCapitalChampion
-    ? Math.max(15, Math.round(55 - (cfoToNetProfit ?? 1) * 15))
-    : Math.round(75 + (snap?.debtEquity ?? 1) * 10);
 
   // 12. Dividend Aristocrat
   const isDividendAristocrat = Boolean(
     dividendYield != null &&
-    dividendYield >= 5.5 &&
-    (pe == null || pe <= 16) &&
-    isSafeDebt &&
-    (cfoToNetProfit == null || cfoToNetProfit >= 0.8)
+      dividendYield >= 5.5 &&
+      (pe == null || pe <= 16) &&
+      isSafeDebt &&
+      (cfoToNetProfit == null || cfoToNetProfit >= 0.8),
   );
   const dividendPayoutRatio =
     dividendYield != null && pe != null && pe > 0
       ? Number(Math.min(100, Math.max(0, dividendYield * pe)).toFixed(1))
       : null;
 
-  // 13. Điểm uốn tăng trưởng quý (Quarterly Inflection)
+  // 13. Quarterly Inflection
   let inflectionDelta: number | null = null;
-  if (snap?.niQoqPct != null && niYoyPct != null) {
-    inflectionDelta = Number((snap.niQoqPct - niYoyPct).toFixed(1));
+  if (snap?.niQoqPct != null && effectiveNiYoy != null) {
+    inflectionDelta = Number((snap.niQoqPct - effectiveNiYoy).toFixed(1));
   }
   const isQuarterlyInflection = Boolean(
-    inflectionDelta != null && inflectionDelta >= 15.0 && (snap?.niQoqPct ?? 0) >= 20.0
+    inflectionDelta != null && inflectionDelta >= 15.0 && (snap?.niQoqPct ?? 0) >= 20.0,
   );
 
-  // 14. Phân hạng Sức khỏe FA Tổng hợp
+  // 14. Master FA Health Category
   let faCategory: FaCategory = "STANDARD";
   let faBadgeVi = "Cơ Bản Chuẩn";
   let faSummaryVi = "Chỉ số tài chính nằm trong ngưỡng cân bằng.";
 
-  const isAltmanDistress = snap?.coverage != null && snap.coverage > 0 && (snap.debtEquity ?? 0) > 3.0;
-  const isDangerousDebt = (interestCoverage != null && interestCoverage < 1.3) || (snap?.debtEquity != null && snap.debtEquity > 3.5);
+  const isAltmanDistress = !isFinancial && snap?.coverage != null && snap.coverage > 0 && (de ?? 0) > 3.0;
+  const isDangerousDebt =
+    !isFinancial &&
+    ((interestCoverage != null && interestCoverage < 1.3) || (de != null && de > 3.5));
 
-  if (isDangerousDebt || isAltmanDistress || beneishMScore >= -1.78 || (bookTaxDifference != null && bookTaxDifference > 0.08)) {
+  if (
+    isDangerousDebt ||
+    isAltmanDistress ||
+    (beneishMScore != null && beneishMScore >= -1.78) ||
+    (bookTaxDifference != null && bookTaxDifference > 0.08)
+  ) {
     faCategory = "HIGH_RISK";
     faBadgeVi = "Cảnh Báo Rủi Ro";
-    faSummaryVi = `Đòn bẩy nợ cao (D/E ${snap?.debtEquity?.toFixed(1) ?? "—"}) hoặc nguy cơ biến dạng BCTC (M-Score ${beneishMScore}${bookTaxDifference != null && bookTaxDifference > 0.08 ? `, BTD ${bookTaxDifference}` : ""}).`;
-  } else if (isNetCash && (interestCoverage == null || interestCoverage >= 4.0) && roe >= 12) {
+    faSummaryVi = `Đòn bẩy nợ cao hoặc tín hiệu biến dạng BCTC (${beneishMScore != null ? `M-Score ${beneishMScore}` : ""}${bookTaxDifference != null && bookTaxDifference > 0.08 ? `, BTD ${bookTaxDifference}` : ""}).`;
+  } else if (isNetCash && (interestCoverage == null || interestCoverage >= 4.0) && (roe ?? 0) >= 12) {
     faCategory = "FORTRESS";
     faBadgeVi = "Pháo Đài Tiền Mặt";
     faSummaryVi = "Doanh nghiệp tiền mặt ròng dồi dào, không áp lực nợ vay, sức đề kháng kinh tế cực mạnh.";
-  } else if (isQualityEarnings && cfoToNetProfit != null && cfoToNetProfit >= 1.1 && netMargin >= 10) {
+  } else if (isQualityEarnings && cfoToNetProfit != null && cfoToNetProfit >= 1.1 && (netMargin ?? 0) >= 10) {
     faCategory = "CASH_MACHINE";
     faBadgeVi = "Cỗ Máy Sinh Tiền";
     faSummaryVi = `Dòng tiền thuần HĐKD gấp ${cfoToNetProfit}x Lợi nhuận ròng, tiền thật về két dồi dào.`;
-  } else if (isBuffettCompounder && isHighRoic && roe >= 20) {
+  } else if (isBuffettCompounder && isHighRoic && (roe ?? 0) >= 20) {
     faCategory = "BUFFETT_COMPOUNDER";
     faBadgeVi = "Siêu Tích Lũy Vốn";
-    faSummaryVi = `Doanh nghiệp siêu tích lũy vốn tự thân (Compounder), ROIC ${roic}%, ROIIC ${roiic3Y ?? roic}%, lợi thế con hào kinh tế Moat rộng.`;
-  } else if (isHighRoic && roe >= 16 && isSafeDebt) {
+    faSummaryVi = `Compounder ROIC ${roic}%, ROIIC ${roiic3Y ?? "—"}%, con hào kinh tế bền vững.`;
+  } else if (isHighRoic && (roe ?? 0) >= 16 && isSafeDebt) {
     faCategory = "MOAT_QUALITY";
     faBadgeVi = "Con Hào Kinh Tế";
-    faSummaryVi = `ROIC ${roic}% vượt trội chi phí vốn WACC, lợi thế cạnh tranh độc quyền bền vững.`;
+    faSummaryVi = `ROIC ${roic}% vượt trội chi phí vốn WACC, lợi thế cạnh tranh bền vững.`;
   } else if (isLynchFastGrower) {
     faCategory = "LYNCH_GROWTH";
     faBadgeVi = "Tăng Trưởng Peter Lynch";
-    faSummaryVi = `Tăng trưởng LN +${growthRate}% với PEG chỉ ${peg}x (< 0.85) theo chuẩn Peter Lynch Fast Grower.`;
+    faSummaryVi = `Tăng trưởng LN +${growthRate}% với PEG chỉ ${peg}x (< 0.85).`;
   } else if (isGrahamNcav) {
     faCategory = "GRAHAM_NET_NET";
     faBadgeVi = "Net-Net Benjamin Graham";
-    faSummaryVi = "Thị giá tiệm cận hoặc dưới tài sản lưu động ròng trừ toàn bộ nợ (NCAV), biên an toàn cực cao.";
+    faSummaryVi = "Thị giá dưới tài sản ngắn hạn trừ toàn bộ nợ phải trả (NCAV).";
   } else if (isDividendAristocrat && dividendYield != null && dividendYield >= 6.5) {
     faCategory = "DIVIDEND_ARISTOCRAT";
     faBadgeVi = "Quý Tộc Cổ Tức";
@@ -764,11 +924,11 @@ export function computeFundamentalMatrix(params: {
   } else if (isWorkingCapitalChampion && (snap?.currentRatio ?? 0) >= 1.8) {
     faCategory = "WORKING_CAPITAL";
     faBadgeVi = "Tối Ưu Vốn Lưu Động";
-    faSummaryVi = `Quản trị vốn lưu động xuất sắc, chu kỳ tiền mặt CCC chỉ ${cashConversionCycleDays} ngày.`;
-  } else if (isUndervaluedGrowth && (niYoyPct ?? 0) >= 20) {
+    faSummaryVi = `Quản trị vốn lưu động xuất sắc, chu kỳ tiền mặt CCC ${cashConversionCycleDays ?? "—"} ngày.`;
+  } else if (isUndervaluedGrowth && (effectiveNiYoy ?? 0) >= 20) {
     faCategory = "UNDERVALUED_GROWTH";
     faBadgeVi = "Tăng Trưởng Hời";
-    faSummaryVi = `Tăng trưởng LN +${niYoyPct}% với PEG chỉ ${peg}x (< 1.0) theo chuẩn Peter Lynch.`;
+    faSummaryVi = `Tăng trưởng LN +${effectiveNiYoy}% với PEG chỉ ${peg}x (< 1.0).`;
   } else if (isConsensusDiscount) {
     faCategory = "CONSENSUS_UPSIDE";
     faBadgeVi = "Biên An Toàn CTCK";
@@ -776,10 +936,11 @@ export function computeFundamentalMatrix(params: {
   } else if (dividendYield != null && dividendYield >= 6.0 && (pe == null || pe <= 12) && isSafeDebt) {
     faCategory = "VALUE_DIVIDEND";
     faBadgeVi = "Cổ Tức & Giá Trị";
-    faSummaryVi = `Cổ tức tiền mặt cao (${dividendYield}%), định giá an toàn phòng thủ.`;
+    faSummaryVi = `Cổ tức tiền mặt cao (${dividendYield}%), định giá phòng thủ an toàn.`;
   }
 
   return {
+    industryTrack,
     cfoToNetProfit,
     isQualityEarnings,
     ocfBillion,
@@ -799,14 +960,18 @@ export function computeFundamentalMatrix(params: {
     isConsensusDiscount,
     magicFormulaScore,
     beneishMScore,
+    beneishVarsAvailable,
     isBeneishSafe,
     sloanAccrualRatio,
     isBuffettCompounder,
     buffettScore,
     isLynchFastGrower,
     isGrahamNcav,
-    ncavPerShare,
+    ncavPerShare: normNcavPerShare,
     cashConversionCycleDays,
+    dioDays,
+    dsoDays,
+    dpoDays,
     isWorkingCapitalChampion,
     isDividendAristocrat,
     dividendPayoutRatio,
@@ -817,11 +982,13 @@ export function computeFundamentalMatrix(params: {
     cashRealizationRatio,
     roiic3Y,
     isSuperCompounder,
-    impliedGrowthPct,
-    reverseDcfMarginPct,
-    mertonDistanceToDefault,
-    mertonPdPct,
-    isMertonSafe,
+    impliedGrowthPct: rDcf.impliedGrowthPct,
+    reverseDcfMarginPct: rDcf.reverseDcfMarginPct,
+    reverseDcfBasis: rDcf.basis,
+    waccUsedPct: rDcf.waccUsedPct,
+    mertonDistanceToDefault: mertonRes.mertonDistanceToDefault,
+    mertonPdPct: mertonRes.mertonPdPct,
+    isMertonSafe: mertonRes.isMertonSafe,
     faCategory,
     faBadgeVi,
     faSummaryVi,

@@ -128,8 +128,24 @@ export async function GET(req: Request) {
     quarterlyInflectionOnly: url.searchParams.get("quarterlyInflectionOnly") === "true" ? true : undefined,
     minSectorRoePercentile: num(url.searchParams.get("minSectorRoePercentile"), 0, 100),
     maxSectorPePercentile: num(url.searchParams.get("maxSectorPePercentile"), 0, 100),
+    minSectorRoicPercentile: num(url.searchParams.get("minSectorRoicPercentile"), 0, 100),
+    maxSectorPbPercentile: num(url.searchParams.get("maxSectorPbPercentile"), 0, 100),
     maxCccDays: num(url.searchParams.get("maxCccDays"), 0, 1000),
     minBuffettScore: num(url.searchParams.get("minBuffettScore"), 0, 100),
+    // Quantitative FA Phase 1-3 & Truth-in-Data Params (Previously unparsed!)
+    superCompounderOnly: url.searchParams.get("superCompounderOnly") === "true" ? true : undefined,
+    bookTaxSafeOnly: url.searchParams.get("bookTaxSafeOnly") === "true" ? true : undefined,
+    minRoiic: num(url.searchParams.get("minRoiic")),
+    maxImpliedGrowth: num(url.searchParams.get("maxImpliedGrowth")),
+    minReverseDcfMargin: num(url.searchParams.get("minReverseDcfMargin")),
+    mertonSafeOnly: url.searchParams.get("mertonSafeOnly") === "true" ? true : undefined,
+    minMertonDd: num(url.searchParams.get("minMertonDd")),
+    excludeSyntheticFa:
+      url.searchParams.get("excludeSyntheticFa") === "false"
+        ? false
+        : url.searchParams.get("excludeSyntheticFa") === "true"
+          ? true
+          : undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: (url.searchParams.get("sort") ?? "marketCap").slice(0, 40).replace(/[^a-zA-Z0-9_]/g, ""),
     order: (url.searchParams.get("order")

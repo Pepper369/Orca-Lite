@@ -2,6 +2,13 @@ import { OhlcvBar } from "../types";
 import { estimateOrnsteinUhlenbeck } from "./advanced-quant-math";
 import { trainHistoricalPriceAction } from "./historical-price-action-trainer";
 import { evaluateApexQuant } from "./orca-apex-quant-engine";
+import {
+  runCausalFaBacktest,
+  type CausalFaObservation,
+  type FaBacktestStrategy,
+  type FaPriceBar,
+} from "./fa-backtest-harness";
+import { sectorOf } from "../vn/master";
 
 export type StrategyType =
   | "apex_buy_now"
@@ -13,7 +20,11 @@ export type StrategyType =
   | "breakout"
   | "canslim"
   | "ma_cross"
-  | "value";
+  | "value"
+  | "piotroski_diamonds"
+  | "buffett_compounder"
+  | "earnings_quality"
+  | "deep_value";
 
 export type MarketRegimeType =
   | "all"
@@ -215,6 +226,22 @@ export const STRATEGY_METADATA: Record<StrategyType, { name: string; desc: strin
   quant_edge: {
     name: "Ưu Thế Quant Mean Reversion (Ornstein-Uhlenbeck & Triple-Barrier)",
     desc: "Mô hình định lượng OU: Bắt đáy thống kê khi độ lệch Z-Score <= -1.4, chu kỳ bán rã t½ trong khoảng 2-35 phiên và giá có nến xác nhận bật tăng.",
+  },
+  piotroski_diamonds: {
+    name: "Piotroski F-Score & Altman Safe (Point-in-Time Causal)",
+    desc: "Kiểm thử nhân quả FA với độ trễ công bố BCTC (45d quý / 90d năm): F-Score đa kỳ >= 6 kết hợp an toàn tài chính Altman Z'' (miễn trừ Ngân hàng/CK).",
+  },
+  buffett_compounder: {
+    name: "Buffett Moat Compounder (ROIC & Cash Quality)",
+    desc: "Kiểm thử nhân quả danh mục Moat bền vững: ROIC cao, ROE >= 18%, dòng tiền CFO/LNST khỏe và xếp hạng trung hòa ngành.",
+  },
+  earnings_quality: {
+    name: "Forensic Earnings Quality (Beneish + BTD + CFO/NI)",
+    desc: "Lọc nhân quả chất lượng lợi nhuận thực: CFO/LNST >= 0.9, không lệch thuế-sổ sách (BTD) và an toàn Beneish M-Score.",
+  },
+  deep_value: {
+    name: "Deep Value & Reverse DCF Margin of Safety",
+    desc: "Lọc định giá rẻ kèm dòng tiền tự do FCF Yield / NCAV và biên an toàn Reverse DCF WACC CAPM.",
   },
 };
 
@@ -463,6 +490,7 @@ function simulatePortfolioTimeline(
 
 export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<ScreenerBacktestResult> {
   const validStrategies: StrategyType[] = [
+    "apex_buy_now",
     "orca_apex_quant",
     "price_action_trained",
     "orca_master",
@@ -472,6 +500,10 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
     "canslim",
     "ma_cross",
     "value",
+    "piotroski_diamonds",
+    "buffett_compounder",
+    "earnings_quality",
+    "deep_value",
   ];
   const strategy: StrategyType = validStrategies.includes(req.strategy as StrategyType)
     ? (req.strategy as StrategyType)
@@ -512,8 +544,96 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
 
   const allTrades: BacktestTrade[] = [];
 
-  // 2. Scan signals and simulate trades for each symbol
-  for (const { symbol, bars } of validEntries) {
+  const faStrategies = new Set<string>([
+    "piotroski_diamonds",
+    "buffett_compounder",
+    "earnings_quality",
+    "deep_value",
+  ]);
+
+  if (faStrategies.has(strategy)) {
+    const { getFundamentalSnapshots } = await import("../financial/snapshots");
+    const snapMap = await getFundamentalSnapshots(validEntries.map((e) => e.symbol));
+    const obsBySym: Record<string, CausalFaObservation[]> = {};
+    const pricesBySym: Record<string, FaPriceBar[]> = {};
+    const rebalanceSet = new Set<string>();
+
+    for (const { symbol, bars } of validEntries) {
+      pricesBySym[symbol] = bars.map((b) => ({
+        date: formatBarDate(b.time),
+        close: b.close,
+      }));
+      for (let idx = 50; idx < bars.length; idx += Math.max(20, holdingDays)) {
+        rebalanceSet.add(formatBarDate(bars[idx]!.time));
+      }
+      const snap = snapMap[symbol];
+      if (!snap) continue;
+      const obs: CausalFaObservation[] = [];
+      const annualHist = snap.annualHistory ?? [];
+      for (const slice of annualHist) {
+        if (!slice.year) continue;
+        obs.push({
+          symbol,
+          sector: sectorOf(symbol) ?? "Khác",
+          periodEndDate: `${slice.year}-12-31`,
+          periodType: "annual",
+          snapshot: {
+            ...snap,
+            revenue: slice.revenue ?? snap.revenue,
+            netProfit: slice.netProfit ?? snap.netProfit,
+            totalAssets: slice.totalAssets ?? snap.totalAssets,
+            currentAssets: slice.currentAssets ?? snap.currentAssets,
+            currentLiabilities: slice.currentLiabilities ?? snap.currentLiabilities,
+            totalLiabilities: slice.totalLiabilities ?? snap.totalLiabilities,
+            totalDebt: slice.totalDebt ?? snap.totalDebt,
+            equity: slice.equity ?? snap.equity,
+            retainedEarnings: slice.retainedEarnings ?? snap.retainedEarnings,
+            ocfTtm: slice.ocf ?? snap.ocfTtm,
+            ebit: slice.ebit ?? snap.ebit,
+            ebitdaTtm: slice.ebitda ?? snap.ebitdaTtm,
+            pretaxIncome: slice.profitBeforeTax ?? snap.pretaxIncome,
+            taxExpense: slice.taxExpense ?? snap.taxExpense,
+            cash: slice.cash ?? snap.cash,
+            shares: slice.shares ?? snap.shares,
+          },
+        });
+      }
+      if (obs.length === 0 && snap.reportDate) {
+        obs.push({
+          symbol,
+          sector: sectorOf(symbol) ?? "Khác",
+          periodEndDate: snap.reportDate.slice(0, 10),
+          periodType: "quarterly",
+          snapshot: snap,
+        });
+      }
+      if (obs.length > 0) obsBySym[symbol] = obs;
+    }
+
+    const faReport = runCausalFaBacktest(obsBySym, pricesBySym, {
+      strategy: strategy as FaBacktestStrategy,
+      rebalanceDates: Array.from(rebalanceSet).sort(),
+      holdingBars: holdingDays,
+      topK: 5,
+    });
+
+    for (const tr of faReport.trades) {
+      allTrades.push({
+        id: `${tr.symbol}-${tr.rebalanceDate}-${tr.exitDate}`,
+        symbol: tr.symbol,
+        entryDate: tr.rebalanceDate,
+        entryPrice: tr.entryPrice,
+        exitDate: tr.exitDate,
+        exitPrice: tr.exitPrice,
+        returnPct: tr.netReturnPct,
+        holdingDays,
+        outcome: tr.netReturnPct >= 0 ? "WIN" : "LOSS",
+        exitReason: "TIME_EXIT",
+      });
+    }
+  } else {
+    // 2. Scan signals and simulate trades for each symbol
+    for (const { symbol, bars } of validEntries) {
     const closes = bars.map(b => b.close);
     const highs = bars.map(b => b.high);
     const volumes = bars.map(b => b.volume);
@@ -725,6 +845,7 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         }
       }
     }
+  }
   }
 
   // Sort trades by entry date

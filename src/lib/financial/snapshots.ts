@@ -4,14 +4,51 @@ import { cached } from "../cache";
 import { getFinancialPackage } from "./service";
 import { hubFinancialPackage } from "../data-engine";
 import { persistFinancialPackageAsync } from "./persist";
-import type { FinancialPackage } from "./types";
+import type { FinancialPackage, NormalizedPeriod } from "./types";
 import type { FinancialHealthResult } from "../engines/fundamental";
 import type { GrowthSnapshot } from "./types";
+import {
+  computeInvestedCapital,
+  computeNopat,
+  resolveIndustryEvalTrack,
+  type FaProvenance,
+  type IndustryEvalTrack,
+} from "./fa-core";
 
 /**
  * Bulk fundamental snapshots — shared layer for screeners (Fundamental, CANSLIM, Valuation).
  * Default concurrency is Workers-safe (WORKERS_BUDGET.snapshotConcurrency).
  */
+
+export type FaPeriodSlice = {
+  period: string;
+  year: number | null;
+  quarter: number | null;
+  revenue: number | null;
+  cogs: number | null;
+  grossProfit: number | null;
+  ebit: number | null;
+  ebitda: number | null;
+  profitBeforeTax: number | null;
+  taxExpense: number | null;
+  netProfit: number | null;
+  totalAssets: number | null;
+  currentAssets: number | null;
+  fixedAssets: number | null;
+  receivables: number | null;
+  inventory: number | null;
+  currentLiabilities: number | null;
+  totalLiabilities: number | null;
+  shortTermDebt: number | null;
+  longTermDebt: number | null;
+  totalDebt: number | null;
+  equity: number | null;
+  retainedEarnings: number | null;
+  cash: number | null;
+  ocf: number | null;
+  capex: number | null;
+  shares: number | null;
+};
 
 export type FundamentalSnapshot = {
   symbol: string;
@@ -41,9 +78,25 @@ export type FundamentalSnapshot = {
   pretaxIncome?: number | null;
   taxExpense?: number | null;
   totalAssets?: number | null;
+  currentAssets?: number | null;
+  currentLiabilities?: number | null;
+  totalLiabilities?: number | null;
+  retainedEarnings?: number | null;
+  inventory?: number | null;
+  receivables?: number | null;
+  payables?: number | null;
+  fixedAssets?: number | null;
+  cogs?: number | null;
+  ebit?: number | null;
+  shortTermDebt?: number | null;
+  longTermDebt?: number | null;
   roiic3Y?: number | null;
   deltaNopat?: number | null;
   deltaIc?: number | null;
+  annualHistory?: FaPeriodSlice[];
+  quarterlyHistory?: FaPeriodSlice[];
+  faProvenance?: FaProvenance;
+  industryTrack?: IndustryEvalTrack;
   revenueYoyPct: number | null;
   niYoyPct: number | null;
   revenueQoqPct: number | null;
@@ -103,6 +156,69 @@ export function normalizeSymbols(input: string[] | undefined, fallback: string[]
   ].slice(0, Math.min(max, 1000));
 }
 
+function toPeriodSlice(p: NormalizedPeriod, sharesFallback: number | null): FaPeriodSlice {
+  const m = p.metrics ?? {};
+  const std = m.shortTermDebt ?? null;
+  const ltd = m.longTermDebt ?? null;
+  const totalDebt = std != null && ltd != null ? std + ltd : std ?? ltd ?? null;
+  return {
+    period: p.period,
+    year: p.year ?? null,
+    quarter: p.quarter ?? null,
+    revenue: m.netRevenue ?? m.revenue ?? null,
+    cogs: m.cogs ?? null,
+    grossProfit: m.grossProfit ?? null,
+    ebit: m.ebit ?? m.operatingProfit ?? null,
+    ebitda: m.ebitda ?? null,
+    profitBeforeTax: m.profitBeforeTax ?? null,
+    taxExpense: m.taxExpense ?? null,
+    netProfit: m.netIncome ?? m.netIncomeParent ?? null,
+    totalAssets: m.totalAssets ?? null,
+    currentAssets: m.currentAssets ?? null,
+    fixedAssets: m.fixedAssets ?? null,
+    receivables: m.receivables ?? null,
+    inventory: m.inventory ?? null,
+    currentLiabilities: m.currentLiabilities ?? null,
+    totalLiabilities: m.totalLiabilities ?? null,
+    shortTermDebt: std,
+    longTermDebt: ltd,
+    totalDebt,
+    equity: m.equity ?? null,
+    retainedEarnings: m.retainedEarnings ?? null,
+    cash: m.cash ?? null,
+    ocf: m.operatingCashFlow ?? null,
+    capex: m.capex ?? null,
+    shares: sharesFallback,
+  };
+}
+
+function extractHistory(periods: NormalizedPeriod[] | undefined, sharesFallback: number | null): {
+  annualHistory: FaPeriodSlice[];
+  quarterlyHistory: FaPeriodSlice[];
+} {
+  if (!periods?.length) return { annualHistory: [], quarterlyHistory: [] };
+  const annualMap = new Map<number, FaPeriodSlice>();
+  const quarterMap = new Map<string, FaPeriodSlice>();
+
+  for (const p of periods) {
+    if (p.periodType === "year" && p.year != null && !annualMap.has(p.year)) {
+      annualMap.set(p.year, toPeriodSlice(p, sharesFallback));
+    } else if (p.periodType === "quarter" && p.year != null && p.quarter != null) {
+      const k = `${p.year}-Q${p.quarter}`;
+      if (!quarterMap.has(k)) quarterMap.set(k, toPeriodSlice(p, sharesFallback));
+    }
+  }
+
+  const annualHistory = [...annualMap.values()]
+    .sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
+    .slice(0, 4);
+  const quarterlyHistory = [...quarterMap.values()]
+    .sort((a, b) => ((b.year ?? 0) * 10 + (b.quarter ?? 0)) - ((a.year ?? 0) * 10 + (a.quarter ?? 0)))
+    .slice(0, 8);
+
+  return { annualHistory, quarterlyHistory };
+}
+
 export function buildSnapshotFromBundle(b: PackageBundle): FundamentalSnapshot {
   const h = b.health;
   const g = b.growth;
@@ -111,6 +227,38 @@ export function buildSnapshotFromBundle(b: PackageBundle): FundamentalSnapshot {
   const lev = h.groups.leverage;
   const cf = h.groups.cashflow;
   const a = h.anchors;
+  const headMetrics = (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics;
+  const { annualHistory, quarterlyHistory } = extractHistory(b.pkg.periods, a.shares ?? null);
+
+  // Compute genuine multi-year ROIIC (2Y-3Y window) when annual history supports it
+  let deltaNopat: number | null = null;
+  let deltaIc: number | null = null;
+  let roiic3Y: number | null = null;
+  if (annualHistory.length >= 2) {
+    const newest = annualHistory[0]!;
+    const oldest = annualHistory[Math.min(annualHistory.length - 1, 3)]!;
+    const nopatNew = computeNopat(newest.ebit, newest.profitBeforeTax, newest.taxExpense);
+    const nopatOld = computeNopat(oldest.ebit, oldest.profitBeforeTax, oldest.taxExpense);
+    const icNew = computeInvestedCapital(newest.totalDebt, newest.equity, newest.cash);
+    const icOld = computeInvestedCapital(oldest.totalDebt, oldest.equity, oldest.cash);
+    if (nopatNew != null && nopatOld != null && icNew != null && icOld != null) {
+      const dNopat = nopatNew - nopatOld;
+      const dIc = icNew - icOld;
+      // Denominator stability guard: |deltaIc| >= 5% of base invested capital
+      if (Math.abs(dIc) >= Math.max(1, icOld * 0.05) && dIc > 0) {
+        deltaNopat = dNopat;
+        deltaIc = dIc;
+        roiic3Y = Number(Math.max(-100, Math.min(200, (dNopat / dIc) * 100)).toFixed(1));
+      }
+    }
+  }
+
+  const currentLiabilities = headMetrics?.currentLiabilities ?? null;
+  const shortTermDebt = headMetrics?.shortTermDebt ?? null;
+  const payablesProxy =
+    currentLiabilities != null && shortTermDebt != null && currentLiabilities >= shortTermDebt
+      ? currentLiabilities - shortTermDebt
+      : null;
 
   return {
     symbol: b.symbol,
@@ -137,9 +285,28 @@ export function buildSnapshotFromBundle(b: PackageBundle): FundamentalSnapshot {
     shares: a.shares,
     epsTtm: a.epsTtm,
     ebitdaTtm: a.ebitdaTtm,
-    pretaxIncome: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.profitBeforeTax ?? null,
-    taxExpense: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.taxExpense ?? null,
-    totalAssets: (b.pkg.ttm ?? b.pkg.periods?.[0])?.metrics?.totalAssets ?? null,
+    pretaxIncome: headMetrics?.profitBeforeTax ?? null,
+    taxExpense: headMetrics?.taxExpense ?? null,
+    totalAssets: headMetrics?.totalAssets ?? null,
+    currentAssets: headMetrics?.currentAssets ?? null,
+    currentLiabilities,
+    totalLiabilities: headMetrics?.totalLiabilities ?? null,
+    retainedEarnings: headMetrics?.retainedEarnings ?? null,
+    inventory: headMetrics?.inventory ?? null,
+    receivables: headMetrics?.receivables ?? null,
+    payables: payablesProxy,
+    fixedAssets: headMetrics?.fixedAssets ?? null,
+    cogs: headMetrics?.cogs ?? null,
+    ebit: headMetrics?.ebit ?? headMetrics?.operatingProfit ?? null,
+    shortTermDebt,
+    longTermDebt: headMetrics?.longTermDebt ?? null,
+    roiic3Y,
+    deltaNopat,
+    deltaIc,
+    annualHistory,
+    quarterlyHistory,
+    faProvenance: h.coverage > 0 ? "LIVE_BCTC" : "MISSING",
+    industryTrack: resolveIndustryEvalTrack(b.symbol),
     revenueYoyPct: growthOf(g, "revenue", "yoy") ?? growthOf(g, "netRevenue", "yoy"),
     niYoyPct: growthOf(g, "netIncome", "yoy") ?? growthOf(g, "netIncomeParent", "yoy"),
     revenueQoqPct: growthOf(g, "revenue", "qoq") ?? growthOf(g, "netRevenue", "qoq"),
@@ -197,7 +364,7 @@ export async function getFundamentalSnapshots(
 
   const entries = [...packages.entries()];
   const snapshots = (await mapPool(entries, Math.max(1, Math.min(4, opts?.concurrency ?? WORKERS_BUDGET.snapshotConcurrency)), async ([symbol, bundle]) => {
-    const key = `fin:snap:v3:${symbol}`;
+    const key = `fin:snap:v4:${symbol}`;
     try {
       const res = await cached(key, {
         ttlMs: 18 * 3_600_000,

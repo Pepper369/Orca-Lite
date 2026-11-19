@@ -1330,6 +1330,9 @@ export function VnScreener({
   const [maxCccDays, setMaxCccDays] = useState("");
   const [minBuffettScore, setMinBuffettScore] = useState("");
   const [minSectorRoePercentile, setMinSectorRoePercentile] = useState("");
+  const [bookTaxSafeOnly, setBookTaxSafeOnly] = useState(false);
+  const [superCompounderOnly, setSuperCompounderOnly] = useState(false);
+  const [minReverseDcfMargin, setMinReverseDcfMargin] = useState("");
 
   const handleBuyPositionChange = (val: string) => {
     setBuyPositionCombo(val);
@@ -1482,6 +1485,9 @@ export function VnScreener({
     maxCccDays: "",
     minBuffettScore: "",
     minSectorRoePercentile: "",
+    bookTaxSafeOnly: false,
+    superCompounderOnly: false,
+    minReverseDcfMargin: "",
   });
 
   // Synchronize when parent changes preset/view/sector
@@ -1603,6 +1609,9 @@ export function VnScreener({
     if (applied.maxCccDays) p.set("maxCccDays", applied.maxCccDays);
     if (applied.minBuffettScore) p.set("minBuffettScore", applied.minBuffettScore);
     if (applied.minSectorRoePercentile) p.set("minSectorRoePercentile", applied.minSectorRoePercentile);
+    if (applied.bookTaxSafeOnly) p.set("bookTaxSafeOnly", "true");
+    if (applied.superCompounderOnly) p.set("superCompounderOnly", "true");
+    if (applied.minReverseDcfMargin) p.set("minReverseDcfMargin", applied.minReverseDcfMargin);
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -1680,6 +1689,9 @@ export function VnScreener({
       maxCccDays,
       minBuffettScore,
       minSectorRoePercentile,
+      bookTaxSafeOnly,
+      superCompounderOnly,
+      minReverseDcfMargin,
     });
     void mutate();
   }, [
@@ -1739,6 +1751,9 @@ export function VnScreener({
     maxCccDays,
     minBuffettScore,
     minSectorRoePercentile,
+    bookTaxSafeOnly,
+    superCompounderOnly,
+    minReverseDcfMargin,
     mutate,
   ]);
 
@@ -1776,6 +1791,9 @@ export function VnScreener({
     if (key === "maxCccDays") setMaxCccDays(val as string);
     if (key === "minBuffettScore") setMinBuffettScore(val as string);
     if (key === "minSectorRoePercentile") setMinSectorRoePercentile(val as string);
+    if (key === "bookTaxSafeOnly") setBookTaxSafeOnly(Boolean(val));
+    if (key === "superCompounderOnly") setSuperCompounderOnly(Boolean(val));
+    if (key === "minReverseDcfMargin") setMinReverseDcfMargin(val as string);
 
     setApplied((prev) => ({ ...prev, [key]: val }));
   }, []);
@@ -1814,6 +1832,9 @@ export function VnScreener({
     setMaxCccDays("");
     setMinBuffettScore("");
     setMinSectorRoePercentile("");
+    setBookTaxSafeOnly(false);
+    setSuperCompounderOnly(false);
+    setMinReverseDcfMargin("");
 
     setApplied((prev) => ({
       ...prev,
@@ -1850,6 +1871,9 @@ export function VnScreener({
       maxCccDays: "",
       minBuffettScore: "",
       minSectorRoePercentile: "",
+      bookTaxSafeOnly: false,
+      superCompounderOnly: false,
+      minReverseDcfMargin: "",
     }));
   }, []);
 
@@ -1913,6 +1937,9 @@ export function VnScreener({
     setMaxCccDays("");
     setMinBuffettScore("");
     setMinSectorRoePercentile("");
+    setBookTaxSafeOnly(false);
+    setSuperCompounderOnly(false);
+    setMinReverseDcfMargin("");
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1975,6 +2002,9 @@ export function VnScreener({
       maxCccDays: "",
       minBuffettScore: "",
       minSectorRoePercentile: "",
+      bookTaxSafeOnly: false,
+      superCompounderOnly: false,
+      minReverseDcfMargin: "",
     });
     void mutate();
   }, [mutate]);
@@ -2016,35 +2046,49 @@ export function VnScreener({
       setViewTab("buy_point");
       setSortKey("absBuyDiff");
       setSortOrder("asc");
-    } else if (p === "mtf_confluence" || p === "smc_golden_pocket" || p === "flip_zone_retest") {
-      setViewTab("confluence");
-      setSortKey("confluenceScore");
-      setSortOrder("desc");
-    } else if (p === "confluence" || p === "bottom_confluence") {
+    } else if (
+      p === "mtf_confluence" ||
+      p === "smc_golden_pocket" ||
+      p === "flip_zone_retest" ||
+      p === "smc_structure" ||
+      p === "reversal_confluence" ||
+      p === "confluence" ||
+      p === "bottom_confluence"
+    ) {
       setViewTab("confluence");
       setSortKey("confluenceScore");
       setSortOrder("desc");
     } else if (p === "mtf_candle_cluster") {
       setSortKey("mtfCandleScore");
       setSortOrder("desc");
-    } else if (p === "vsa_no_supply") {
-      setSortKey("volume");
+    } else if (p === "vsa_no_supply" || p === "volatility_breakout" || p === "trend_alignment") {
+      setViewTab("overview");
+      setSortKey("rsRating");
       setSortOrder("desc");
     } else if (p === "quant_edge" || p === "quant_mean_revert" || p === "quant_low_beta" || p === "quant_asymmetric") {
       setViewTab("quant");
       setSortKey("quantEdgeScore");
       setSortOrder("desc");
-    } else if (p === "buffett_compounder" || p === "beneish_safe") {
+    } else if (
+      p === "buffett_compounder" ||
+      p === "super_compounder" ||
+      p === "beneish_safe" ||
+      p === "earnings_quality"
+    ) {
       setViewTab("fa_matrix");
       setSortKey("buffettScore");
       setSortOrder("desc");
-    } else if (p === "lynch_fast_grower") {
+    } else if (p === "piotroski_diamonds") {
+      setViewTab("fa_matrix");
+      setSortKey("piotroskiFScore");
+      setSortOrder("desc");
+    } else if (p === "lynch_fast_grower" || p === "garp_growth") {
       setViewTab("fa_matrix");
       setSortKey("peg");
       setSortOrder("asc");
-    } else if (p === "graham_ncav") {
+    } else if (p === "graham_ncav" || p === "deep_value") {
       setViewTab("fa_matrix");
-      setSortKey("price");
+      setSortKey("pe");
       setSortOrder("asc");
     } else if (p === "cash_conversion_cycle") {
       setViewTab("fa_matrix");
@@ -2267,10 +2311,10 @@ export function VnScreener({
     { id: "all", label: "Tất cả" },
     { id: "apex_buy_now", label: "Điểm mua bứt phá" },
     { id: "near_buy_point", label: "Sát điểm mua an toàn" },
-    { id: "canslim", label: "Tăng trưởng & Vượt đỉnh" },
+    { id: "garp_growth", label: "Tăng trưởng GARP" },
     { id: "smart_money_inflow", label: "Dòng tiền cá mập" },
-    { id: "value", label: "Định giá rẻ & Giá trị" },
-    { id: "dividend", label: "Cổ tức cao" },
+    { id: "deep_value", label: "Định giá rẻ & Giá trị" },
+    { id: "dividend_aristocrat", label: "Cổ tức cao" },
   ];
 
   return (

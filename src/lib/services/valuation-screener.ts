@@ -7,6 +7,7 @@ import { getFundamentalSnapshots, mapPool, normalizeSymbols, type FundamentalSna
 import { sectorOf, getSecurity } from "../vn/master";
 import { WORKERS_BUDGET, resolveSnapshotConcurrency } from "../data-engine/workers-budget";
 import { getMasterScreenerSnapshot, type ScreenerStockItem } from "./screener-snapshot-service";
+import { resolveIndustryEvalTrack, type FaProvenance, type IndustryEvalTrack } from "../financial/fa-core";
 
 function exchangeOf(symbol: string): string | null {
   return getSecurity(symbol)?.exchange ?? null;
@@ -31,6 +32,8 @@ export type ValuationScreenRow = {
   reportDate: string | null;
   sourceNote: string;
   score: number;
+  faProvenance?: FaProvenance;
+  industryTrack?: IndustryEvalTrack;
   // Cross-Pillar Technical Consistency Guard
   techStatus?: "SAFE" | "CAUTION" | "BLOCKED";
   isTechnicalApproved?: boolean;
@@ -154,13 +157,15 @@ function mergeValuation(
     }
   }
 
-  const netDebtToEbitda = snap?.netDebtToEbitda ?? null;
+  const track = resolveIndustryEvalTrack(symbol);
+  const isFinancial = track === "FINANCIAL_BANK_SEC_INS";
+  const netDebtToEbitda = isFinancial ? null : snap?.netDebtToEbitda ?? null;
 
   // Reject nonsense multiples (data glitches)
   if (pe != null && (pe < 1 || pe > 80)) pe = null;
   if (pb != null && (pb < 0.15 || pb > 25)) pb = null;
   if (ps != null && (ps < 0.05 || ps > 40)) ps = null;
-  if (evEbitda != null && (evEbitda < 0.5 || evEbitda > 50)) evEbitda = null;
+  if (evEbitda != null && (isFinancial || evEbitda < 0.5 || evEbitda > 50)) evEbitda = null;
   if (peg != null && (peg < 0 || peg > 8)) peg = null;
 
   let score = 0;
@@ -171,19 +176,30 @@ function mergeValuation(
       parts += 1;
     }
   };
-  add(pe != null && pe > 0 && pe < 12, 25);
-  add(pe != null && pe >= 12 && pe < 18, 15);
-  add(pb != null && pb > 0 && pb < 1.5, 15);
-  add(pb != null && pb >= 1.5 && pb < 2.5, 8);
-  add(evEbitda != null && evEbitda > 0 && evEbitda < 8, 15);
-  add(peg != null && peg > 0 && peg < 1, 15);
-  add(peg != null && peg >= 1 && peg < 1.5, 8);
-  add(fcfYieldPct != null && fcfYieldPct >= 5, 15);
-  add(fcfYieldPct != null && fcfYieldPct >= 2 && fcfYieldPct < 5, 8);
-  add(netDebtToEbitda != null && netDebtToEbitda < 2, 10);
+  if (isFinancial) {
+    // Financials (Bank/Securities/Insurance) prioritize P/B, P/E, ROE-adjusted value & Dividend Yield
+    add(pe != null && pe > 0 && pe < 10, 30);
+    add(pe != null && pe >= 10 && pe < 15, 18);
+    add(pb != null && pb > 0 && pb < 1.3, 35);
+    add(pb != null && pb >= 1.3 && pb < 2.0, 20);
+    add(peg != null && peg > 0 && peg < 1.0, 15);
+    const dy = yieldRatioToPct(ratios?.dividendYield);
+    add(dy != null && dy >= 4.0, 12);
+  } else {
+    add(pe != null && pe > 0 && pe < 12, 25);
+    add(pe != null && pe >= 12 && pe < 18, 15);
+    add(pb != null && pb > 0 && pb < 1.5, 15);
+    add(pb != null && pb >= 1.5 && pb < 2.5, 8);
+    add(evEbitda != null && evEbitda > 0 && evEbitda < 8, 15);
+    add(peg != null && peg > 0 && peg < 1, 15);
+    add(peg != null && peg >= 1 && peg < 1.5, 8);
+    add(fcfYieldPct != null && fcfYieldPct >= 5, 15);
+    add(fcfYieldPct != null && fcfYieldPct >= 2 && fcfYieldPct < 5, 8);
+    add(netDebtToEbitda != null && netDebtToEbitda < 2, 10);
+  }
   const metricsHit = [pe, pb, ps, evEbitda].filter((x) => x != null).length;
   if (metricsHit >= 3) score += 8;
-  else if (metricsHit === 1) score = Math.round(score * 0.75);
+  else if (metricsHit === 1 && !isFinancial) score = Math.round(score * 0.75);
   if (parts === 0) score = metricsHit * 10;
 
   return {
@@ -204,7 +220,7 @@ function mergeValuation(
     ps,
     evEbitda,
     peg,
-    fcfYieldPct,
+    fcfYieldPct: isFinancial ? null : fcfYieldPct,
     dividendYieldPct: yieldRatioToPct(ratios?.dividendYield),
     netDebtToEbitda,
     eps,
@@ -212,6 +228,8 @@ function mergeValuation(
     reportDate: ratios?.reportDate ?? snap?.reportDate ?? null,
     sourceNote: notes.join("+") || "—",
     score: Math.min(100, score),
+    faProvenance: snap?.faProvenance ?? (ratios ? "LIVE_BCTC" : "MISSING"),
+    industryTrack: track,
   };
 }
 
