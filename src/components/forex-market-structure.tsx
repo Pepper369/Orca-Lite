@@ -6,6 +6,7 @@ import { fmtNum, Panel, priceDigits } from "@/components/ui";
 import { TechnicalPanel } from "@/components/technical-panel";
 import { MtfBiasPanel } from "@/components/mtf-bias-panel";
 import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
+import { IctSmcCockpit } from "@/components/quant/ict-smc-cockpit";
 import { Layers } from "lucide-react";
 
 export type StructureTab = "ms" | "quant" | "ict" | "smc" | "vsa";
@@ -36,8 +37,8 @@ export function MarketStructurePanel({
   const tabs: { id: StructureTab; label: string }[] = [
     { id: "ms", label: "Market Structure" },
     { id: "quant", label: "⚡ Quant Lab" },
-    { id: "ict", label: "ICT" },
-    { id: "smc", label: "SMC" },
+    { id: "ict", label: "ICT Liquidity" },
+    { id: "smc", label: "SMC Hunter" },
     { id: "vsa", label: "VSA" },
   ];
 
@@ -103,39 +104,27 @@ export function MarketStructurePanel({
         )}
 
         {tab === "ict" && (
-          <div className="space-y-2 text-[11px]">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-md border border-border-subtle/60 bg-surface-elevated/30 px-2.5 py-2">
-                <div className="text-[9px] uppercase tracking-wider text-text-muted">Premium / Discount</div>
-                <div className="mt-0.5 font-semibold text-text-primary">{structureNotes.pd}</div>
-              </div>
-              <div className="rounded-md border border-border-subtle/60 bg-surface-elevated/30 px-2.5 py-2">
-                <div className="text-[9px] uppercase tracking-wider text-text-muted">Dealing Range</div>
-                <div className="mt-0.5 num font-semibold text-text-primary">{structureNotes.range}</div>
-              </div>
-            </div>
-            <ul className="space-y-1 text-text-secondary">
-              {structureNotes.ictPoints.map((p, i) => (
-                <li key={i} className="flex gap-1.5">
-                  <span className="text-accent-primary">▸</span>
-                  <span>{p}</span>
-                </li>
-              ))}
-            </ul>
+          <div className="space-y-3">
+            <IctSmcCockpit
+              symbol={pair}
+              series={series}
+              currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
+              assetType={assetType}
+              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+            />
             <MtfBiasPanel symbol={pair} assetType={assetType} chartTimeframe={interval} />
           </div>
         )}
 
         {tab === "smc" && (
-          <div className="space-y-2 text-[11px]">
-            <ul className="space-y-1 text-text-secondary">
-              {structureNotes.smcPoints.map((p, i) => (
-                <li key={i} className="flex gap-1.5">
-                  <span className="text-accent-primary">▸</span>
-                  <span>{p}</span>
-                </li>
-              ))}
-            </ul>
+          <div className="space-y-3">
+            <IctSmcCockpit
+              symbol={pair}
+              series={series}
+              currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
+              assetType={assetType}
+              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+            />
             <TechnicalPanel tech={tech} patterns={patterns} ticker={cur} variant="stacked" />
           </div>
         )}
