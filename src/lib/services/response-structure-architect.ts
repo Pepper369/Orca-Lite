@@ -141,8 +141,8 @@ export function parseScreeningCriteria(query: string): ParsedScreeningCriteria {
       humanSummary.push(`Nợ/Vốn CSH (D/E) ≤ ${val}`);
     }
   } else if (/(?:nợ thấp|ít nợ|không nợ|sạch nợ|nợ an toàn|bảo thủ)/i.test(q)) {
-    res.debtEquityMax = 1.2;
-    humanSummary.push("Nợ/Vốn CSH (D/E) ≤ 1.2 (Cơ cấu vốn lành mạnh)");
+    res.debtEquityMax = 0.8;
+    humanSummary.push("Nợ/Vốn CSH (D/E) ≤ 0.8 (Cơ cấu vốn lành mạnh)");
   }
 
   // 7. Piotroski F-Score

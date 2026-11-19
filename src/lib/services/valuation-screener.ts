@@ -8,6 +8,7 @@ import { sectorOf, getSecurity } from "../vn/master";
 import { WORKERS_BUDGET, resolveSnapshotConcurrency } from "../data-engine/workers-budget";
 import { getMasterScreenerSnapshot, type ScreenerStockItem } from "./screener-snapshot-service";
 import { resolveIndustryEvalTrack, type FaProvenance, type IndustryEvalTrack } from "../financial/fa-core";
+import { evaluateBankValuation, evaluateRealEstateValuation } from "../engines/industry-specific-valuation";
 
 function exchangeOf(symbol: string): string | null {
   return getSecurity(symbol)?.exchange ?? null;
@@ -34,6 +35,8 @@ export type ValuationScreenRow = {
   score: number;
   faProvenance?: FaProvenance;
   industryTrack?: IndustryEvalTrack;
+  bankFairPbGordon?: number | null;
+  rnavUpsidePct?: number | null;
   // Cross-Pillar Technical Consistency Guard
   techStatus?: "SAFE" | "CAUTION" | "BLOCKED";
   isTechnicalApproved?: boolean;
@@ -63,6 +66,7 @@ export type ValuationFilterOpts = {
   maxPrice?: number;
   limit?: number;
   techGuardOnly?: boolean;
+  excludeSyntheticFa?: boolean;
 };
 
 export const DEFAULT_SYMBOLS =
@@ -202,9 +206,36 @@ function mergeValuation(
   else if (metricsHit === 1 && !isFinancial) score = Math.round(score * 0.75);
   if (parts === 0) score = metricsHit * 10;
 
+  let bankFairPbGordon: number | null = null;
+  let rnavUpsidePct: number | null = null;
+  const secName = sectorOf(symbol);
+  if (snap && secName === "Ngân hàng") {
+    bankFairPbGordon = evaluateBankValuation({
+      symbol,
+      currentPrice: price,
+      sharesOutstanding: snap.shares,
+      bookEquity: snap.equity,
+      netIncome: snap.netProfit,
+      totalAssets: snap.totalAssets,
+    }).fairPbGordon;
+  } else if (snap && track === "REAL_ESTATE") {
+    rnavUpsidePct = evaluateRealEstateValuation({
+      symbol,
+      currentPrice: price,
+      sharesOutstanding: snap.shares,
+      bookEquity: snap.equity,
+      totalAssets: snap.totalAssets,
+      totalLiabilities: snap.totalLiabilities,
+      inventory: snap.inventory,
+      cash: snap.cash,
+      shortTermDebt: snap.shortTermDebt,
+      longTermDebt: snap.longTermDebt,
+    }).upsideRnavPct;
+  }
+
   return {
     symbol,
-    sector: sectorOf(symbol),
+    sector: secName,
     exchange: exchangeOf(symbol),
     price,
     marketCap: (() => {
@@ -230,10 +261,18 @@ function mergeValuation(
     score: Math.min(100, score),
     faProvenance: snap?.faProvenance ?? (ratios ? "LIVE_BCTC" : "MISSING"),
     industryTrack: track,
+    bankFairPbGordon,
+    rnavUpsidePct,
   };
 }
 
 function passes(row: ValuationScreenRow, f: ValuationFilterOpts): boolean {
+  if (
+    f.excludeSyntheticFa &&
+    (row.faProvenance === "SECTOR_FALLBACK" || row.faProvenance === "MISSING")
+  ) {
+    return false;
+  }
   if (f.sector && row.sector !== f.sector) return false;
   if (f.exchange) {
     const ex = String(f.exchange).toUpperCase();

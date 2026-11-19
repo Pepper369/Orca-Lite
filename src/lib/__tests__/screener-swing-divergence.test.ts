@@ -140,11 +140,14 @@ test("Chân Sóng Alpha - SCREENER_BIT constants integrity for Swing Low & Fresh
   assert.equal(mask & SCREENER_BIT.DUAL_BULL_DIV, SCREENER_BIT.DUAL_BULL_DIV);
 });
 
-test("Chân Sóng Alpha - PRESET_TABS & PRESET_EDGE_BENCHMARKS contain swing_divergence", () => {
-  const tab = PRESET_TABS.find((t) => t.id === "swing_divergence");
-  assert.ok(tab, "PRESET_TABS must include swing_divergence");
+import { resolveCanonicalPreset } from "../quant/screener-taxonomy";
+
+test("Chân Sóng Alpha - PRESET_TABS & PRESET_EDGE_BENCHMARKS map swing_divergence via canonical taxonomy", () => {
+  const canonicalId = resolveCanonicalPreset("swing_divergence");
+  assert.equal(canonicalId, "reversal_confluence");
+  const tab = PRESET_TABS.find((t) => t.id === canonicalId);
+  assert.ok(tab, "PRESET_TABS must include canonical reversal_confluence tab for swing_divergence");
   assert.equal(tab.category, "price_action");
-  assert.ok(tab.label.includes("Swing Đáy"));
 
   const benchmark = PRESET_EDGE_BENCHMARKS.swing_divergence;
   assert.ok(benchmark, "PRESET_EDGE_BENCHMARKS must include swing_divergence");

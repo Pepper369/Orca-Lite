@@ -5,8 +5,10 @@ import {
   computeAvgBalance,
   computeDynamicWacc,
   computeRealizedEquityVolatility,
+  computeSectorPercentileMap,
   resolveIndustryEvalTrack,
 } from "../financial/fa-core";
+import { evaluateFourM } from "../engines/four-m";
 import { computePiotroskiAltman } from "../engines/piotroski-altman";
 import {
   computeFundamentalMatrix,
@@ -341,4 +343,39 @@ test("FA Backtest Harness: Enforces filing lag causality & Calibration/Holdout s
   }
   assert.ok(report.calibrationMetrics.rebalances >= 1);
   assert.ok(report.holdoutMetrics.rebalances >= 1);
+});
+
+test("Four-M Engine evaluates Banks without grossMargin/D-E/ROIC penalties", () => {
+  const bankFourM = evaluateFourM({
+    symbol: "VCB",
+    sector: "Ngân hàng",
+    roe: 21.5,
+    roic: null,
+    grossMargin: null,
+    debtEquity: null,
+    currentRatio: null,
+    revenueYoyPct: 14,
+    niYoyPct: 16,
+    pe: 11.5,
+    pb: 2.1,
+  });
+
+  assert.equal(bankFourM.m1MeaningPass, true);
+  assert.equal(bankFourM.m2MoatPass, true);
+  assert.equal(bankFourM.m3ManagementPass, true);
+  assert.ok(bankFourM.totalScore >= 80, `Expected high-quality bank 4M score >= 80, got ${bankFourM.totalScore}`);
+});
+
+test("Sector Valuation Percentiles preserve ascending rank (cheapest P/E has lowest percentile <= 25)", () => {
+  const pePct = computeSectorPercentileMap(
+    [
+      { key: "CHEAP", value: 7.5 },
+      { key: "FAIR", value: 12.0 },
+      { key: "PRICEY", value: 24.0 },
+      { key: "BUBBLE", value: 40.0 },
+    ],
+    { higherIsBetter: true, requirePositive: true },
+  );
+  assert.equal(pePct.get("CHEAP"), 25);
+  assert.equal(pePct.get("BUBBLE"), 100);
 });

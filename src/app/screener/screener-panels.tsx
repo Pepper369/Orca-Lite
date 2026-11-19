@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { useMarketStream } from "@/lib/hooks/use-market-stream";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
+import { resolveCanonicalPreset } from "@/lib/quant/screener-taxonomy";
 import type { CryptoMarketRow, IndexQuote } from "@/lib/types";
 import {
   Badge,
@@ -1391,41 +1392,34 @@ export function VnScreener({
     }
   };
 
-  // Sort state
-  const initialSortKey =
-    defaultPreset === "near_buy_point" || defaultView === "buy_point"
-      ? "absBuyDiff"
-      : defaultPreset === "apex_buy_now"
-      ? "buyTriggerScore"
-      : defaultPreset === "orca_apex_quant"
-      ? "apexQuantScore"
-      : defaultPreset === "historical_edge"
-      ? "historicalEdgeScore"
-      : defaultPreset === "orca_master_elite" || defaultView === "orca_master"
-      ? "orcaMasterScore"
-      : defaultPreset === "smart_money_inflow" || defaultView === "smart_money" || defaultPreset === "wyckoff_spring"
-      ? "smartMoneyScore"
-      : defaultPreset === "canslim_accel"
-      ? "rsRating"
-      : defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu" || defaultPreset === "swing_divergence"
-      ? "confluenceScore"
-      : defaultPreset === "buffett_compounder" || defaultView === "fa_matrix"
-      ? "buffettScore"
-      : defaultPreset === "lynch_fast_grower"
-      ? "peg"
-      : defaultPreset === "graham_ncav"
-      ? "ncavPerShare"
-      : defaultPreset === "cash_conversion_cycle"
-      ? "cashConversionCycleDays"
-      : "marketCap";
+  // Sort state (resolve legacy presets through canonical taxonomy)
+  const resolvedDefaultPreset = resolveCanonicalPreset(defaultPreset);
+  const resolveSortForPreset = (canon: string, view: string): string => {
+    if (canon === "near_buy_point" || view === "buy_point") return "absBuyDiff";
+    if (canon === "apex_buy_now") return "buyTriggerScore";
+    if (canon === "orca_apex_quant") return "apexQuantScore";
+    if (canon === "historical_edge") return "historicalEdgeScore";
+    if (canon === "orca_master_elite" || view === "orca_master") return "orcaMasterScore";
+    if (canon === "smart_money_inflow" || view === "smart_money" || canon === "smc_structure") return "smartMoneyScore";
+    if (canon === "garp_growth") return "rsRating";
+    if (canon === "reversal_confluence" || view === "confluence") return "confluenceScore";
+    if (canon === "volatility_breakout" || canon === "trend_alignment") return "rsRating";
+    if (canon === "piotroski_diamonds") return "piotroskiFScore";
+    if (canon === "buffett_compounder" || canon === "earnings_quality" || canon === "fa_fortress" || view === "fa_matrix") return "buffettScore";
+    if (canon === "deep_value") return "pe";
+    if (canon === "dividend_aristocrat") return "dividendYield";
+    return "marketCap";
+  };
+
+  const initialSortKey = resolveSortForPreset(resolvedDefaultPreset, defaultView);
   const [sortKey, setSortKey] = useState<string>(initialSortKey);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">(
-    initialSortKey === "absBuyDiff" ? "asc" : "desc",
+    initialSortKey === "absBuyDiff" || initialSortKey === "pe" ? "asc" : "desc",
   );
 
   // Applied params
   const [applied, setApplied] = useState({
-    preset: defaultPreset,
+    preset: resolvedDefaultPreset as ScreenerPreset,
     exchange: "ALL",
     sector: defaultSector ?? "",
     q: "",
@@ -1490,40 +1484,19 @@ export function VnScreener({
     minReverseDcfMargin: "",
   });
 
-  // Synchronize when parent changes preset/view/sector
+  // Synchronize when parent changes preset/view/sector (resolving legacy presets to canonical IDs)
   useEffect(() => {
-    setPreset(defaultPreset);
-    setActiveStrategyGroup(getPresetCategory(defaultPreset));
+    const canon = resolveCanonicalPreset(defaultPreset);
+    setPreset(canon);
+    setActiveStrategyGroup(getPresetCategory(canon));
     setViewTab(defaultView);
     setSector(defaultSector ?? "");
-    if (defaultPreset === "near_buy_point" || defaultView === "buy_point") {
-      setSortKey("absBuyDiff");
-      setSortOrder("asc");
-    } else if (defaultPreset === "apex_buy_now") {
-      setSortKey("buyTriggerScore");
-      setSortOrder("desc");
-    } else if (defaultPreset === "orca_apex_quant") {
-      setSortKey("apexQuantScore");
-      setSortOrder("desc");
-    } else if (defaultPreset === "historical_edge") {
-      setSortKey("historicalEdgeScore");
-      setSortOrder("desc");
-    } else if (defaultPreset === "orca_master_elite" || defaultView === "orca_master") {
-      setSortKey("orcaMasterScore");
-      setSortOrder("desc");
-    } else if (defaultPreset === "smart_money_inflow" || defaultView === "smart_money" || defaultPreset === "wyckoff_spring") {
-      setSortKey("smartMoneyScore");
-      setSortOrder("desc");
-    } else if (defaultPreset === "canslim_accel") {
-      setSortKey("rsRating");
-      setSortOrder("desc");
-    } else if (defaultPreset === "confluence" || defaultView === "confluence" || defaultPreset === "triple_confluence" || defaultPreset === "vcp_vdu" || defaultPreset === "swing_divergence") {
-      setSortKey("confluenceScore");
-      setSortOrder("desc");
-    }
+    const nextSort = resolveSortForPreset(canon, defaultView);
+    setSortKey(nextSort);
+    setSortOrder(nextSort === "absBuyDiff" || nextSort === "pe" ? "asc" : "desc");
     setApplied((prev) => ({
       ...prev,
-      preset: defaultPreset,
+      preset: canon,
       sector: defaultSector ?? "",
     }));
   }, [defaultPreset, defaultView, defaultSector]);
@@ -2500,25 +2473,21 @@ export function VnScreener({
           </div>
         )}
 
-        {/* Statistical Win-Rate & Edge Banner (Sprint 3) */}
+        {/* Canonical Strategy Summary & Backtest Launch (Truth-in-Data: no static fabricated win-rates) */}
         {(() => {
           const edge = PRESET_EDGE_BENCHMARKS[preset];
-          if (!edge) return null;
+          const tabMeta = PRESET_TABS.find((t) => t.id === resolveCanonicalPreset(preset));
+          const summaryText = edge?.tagline ?? tabMeta?.desc;
+          if (!summaryText) return null;
           return (
             <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-gradient-to-r from-emerald-500/10 via-amber-500/5 to-transparent border-b border-border-subtle text-[11.5px]">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold shadow-xs">
-                  <span className="size-2 rounded-full bg-emerald-400" />
-                  Win-rate: {edge.winRatePct}%
+                <span className="inline-flex items-center gap-1.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-semibold">
+                  <span className="size-1.5 rounded-full bg-emerald-400" />
+                  {tabMeta?.label ?? "Chiến lược lọc"}
                 </span>
-                <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[11px] font-semibold">
-                  Profit Factor: {edge.profitFactor}x
-                </span>
-                <span className="inline-flex items-center gap-1 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 text-[11px] font-semibold">
-                  R:R: {edge.riskReward}x
-                </span>
-                <span className="text-text-secondary hidden md:inline">
-                  {edge.tagline} ({edge.sampleTrades} lệnh kiểm thử)
+                <span className="text-text-secondary">
+                  {summaryText}
                 </span>
               </div>
               <button
@@ -2757,7 +2726,7 @@ export function VnScreener({
               <Field label="ROE Top Ngành (%)" value={minSectorRoePercentile} onChange={setMinSectorRoePercentile} small placeholder="75" />
             </div>
 
-            {/* Row 3: Actionable Precision Switches */}
+            {/* Row 3: Actionable Precision Switches (unique filters not duplicated in MatrixToolbar) */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line/40 text-[11px]">
               <div className="flex items-center gap-4 flex-wrap">
                 <span className="text-[10px] uppercase font-bold text-text-muted">Kích hoạt Nhanh:</span>
@@ -2769,42 +2738,6 @@ export function VnScreener({
                     className="rounded accent-emerald-500"
                   />
                   <span className="font-semibold">Đồng Thuận 3 Khung H1·D1·W1 (BĐ5)</span>
-                </label>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
-                  <input
-                    type="checkbox"
-                    checked={maReclaimOnly}
-                    onChange={(e) => setMaReclaimOnly(e.target.checked)}
-                    className="rounded accent-cyan-500"
-                  />
-                  <span className="font-semibold">Quét Rũ Reclaim Spring MA (BĐ3)</span>
-                </label>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-teal-300 hover:text-teal-200 select-none">
-                  <input
-                    type="checkbox"
-                    checked={tightClosesOnly}
-                    onChange={(e) => setTightClosesOnly(e.target.checked)}
-                    className="rounded accent-teal-500"
-                  />
-                  <span className="font-semibold">Nén Giá Phẳng Minervini</span>
-                </label>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-400 hover:text-cyan-300 select-none">
-                  <input
-                    type="checkbox"
-                    checked={vduOnly}
-                    onChange={(e) => setVduOnly(e.target.checked)}
-                    className="rounded accent-cyan-400"
-                  />
-                  <span className="font-semibold">Cạn Kiệt Von (VDU nền)</span>
-                </label>
-                <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
-                  <input
-                    type="checkbox"
-                    checked={netCashOnly}
-                    onChange={(e) => setNetCashOnly(e.target.checked)}
-                    className="rounded accent-amber-500"
-                  />
-                  <span className="font-semibold">Pháo Đài Tiền Mặt (Net Cash)</span>
                 </label>
                 <label className="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-emerald-200 select-none">
                   <input

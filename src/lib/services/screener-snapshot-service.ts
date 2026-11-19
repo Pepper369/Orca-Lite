@@ -644,37 +644,6 @@ export function parseBarArrays(bars?: { open?: number; high?: number; low?: numb
 }
 
 /**
- * Resilient synthetic bars generator for zero-failure technical analysis.
- * Generates 60 realistic historical bars when upstream OHLCV is delayed or throttled.
- */
-function generateResilientBars(
-  sym: string,
-  price: number | null,
-): { time: number; open: number; high: number; low: number; close: number; volume: number }[] {
-  const basePrice = price && price > 0 ? price : 25.0;
-  const bars: { time: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
-  const now = Date.now();
-  const dayMs = 86_400_000;
-  let seed = 0;
-  for (let i = 0; i < sym.length; i++) seed = (seed * 31 + sym.charCodeAt(i)) >>> 0;
-
-  let current = basePrice * 0.94;
-  for (let i = 60; i >= 0; i--) {
-    const t = now - i * dayMs;
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    const factor = ((seed % 1000) / 1000) * 0.024 - 0.010;
-    current = Math.max(1.0, current * (1 + factor));
-    const open = +(current * 0.997).toFixed(2);
-    const high = +(current * 1.008).toFixed(2);
-    const low = +(current * 0.992).toFixed(2);
-    const close = i === 0 && price && price > 0 ? price : +current.toFixed(2);
-    const volume = 250_000 + (seed % 350_000);
-    bars.push({ time: t, open, high, low, close, volume });
-  }
-  return bars;
-}
-
-/**
  * Synchronize the historical daily bars with real-time intraday quote session.
  * Prevents analyzing on yesterday's stale EOD close and prevents chasing late breakouts.
  */
@@ -685,7 +654,7 @@ function syncLatestRealtimeBar(
   currentVolume: number | null
 ): { time: number; open: number; high: number; low: number; close: number; volume: number }[] {
   if (!rawBars || rawBars.length === 0) {
-    return generateResilientBars("RESILIENT", currentPrice ?? 25.0);
+    return [];
   }
 
   const p = currentPrice && currentPrice > 0 ? currentPrice : (rawBars[rawBars.length - 1]?.close ?? 25.0);
@@ -1755,7 +1724,7 @@ function detectPresets(item: {
   const roeGood = item.roe != null && item.roe >= 12;
   const growthGood = (item.niYoyPct != null && item.niYoyPct >= 10) || (item.revenueYoyPct != null && item.revenueYoyPct >= 10);
   const priceHealthy = item.price != null && item.price >= 6;
-  if (!isTechnicalSell && roeGood && (growthGood || (item.changePercent != null && item.changePercent > -1.0)) && priceHealthy) {
+  if (hasAuthenticFa && !isTechnicalSell && roeGood && (growthGood || (item.changePercent != null && item.changePercent > -1.0)) && priceHealthy) {
     passes.push("canslim");
   }
 
@@ -1763,14 +1732,14 @@ function detectPresets(item: {
   const divGood = item.dividendYield != null && item.dividendYield >= 4.0;
   const deSafe = item.debtEquity == null || item.debtEquity <= 2.0;
   const peFair = item.pe == null || (item.pe > 0 && item.pe <= 18);
-  if (divGood && deSafe && peFair) {
+  if (hasAuthenticFa && divGood && deSafe && peFair) {
     passes.push("dividend");
   }
 
   // 4. High Growth
   const niHigh = item.niYoyPct != null && item.niYoyPct >= 15;
   const revHigh = item.revenueYoyPct != null && item.revenueYoyPct >= 12;
-  if ((niHigh || revHigh) && (item.roe == null || item.roe >= 10)) {
+  if (hasAuthenticFa && (niHigh || revHigh) && (item.roe == null || item.roe >= 10)) {
     passes.push("growth");
   }
 
@@ -1778,7 +1747,7 @@ function detectPresets(item: {
   const peCheap = item.pe != null && item.pe > 0 && item.pe <= 13.5;
   const pbCheap = item.pb != null && item.pb > 0 && item.pb <= 1.5;
   const roePositive = item.roe == null || item.roe >= 7.0;
-  if (peCheap && pbCheap && roePositive) {
+  if (hasAuthenticFa && peCheap && pbCheap && roePositive) {
     passes.push("value");
   }
 
@@ -1946,8 +1915,9 @@ function detectPresets(item: {
 
   // 16. Định Giá Hời CTCK (Consensus Upside >= 20%)
   if (
-    item.faCategory === "CONSENSUS_UPSIDE" ||
-    (item.consensusUpsidePct != null && item.consensusUpsidePct >= 20.0)
+    hasAuthenticFa &&
+    (item.faCategory === "CONSENSUS_UPSIDE" ||
+      (item.consensusUpsidePct != null && item.consensusUpsidePct >= 20.0))
   ) {
     passes.push("consensus_upside");
   }
@@ -2503,11 +2473,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       const { valMap, vietcapMap } = valResult;
       let failoverCount = valResult.failoverCount;
 
-      // Index benchmark performance for RS Rating (resilient with synthetic fallback)
-      let indexBars = ohlcvMap.get("VNINDEX")?.bars ?? [];
-      if (!indexBars.length || indexBars.length < 20) {
-        indexBars = generateResilientBars("VNINDEX", 1285.0);
-      }
+      // Index benchmark performance for RS Rating (no synthetic fallback)
+      const indexBars = ohlcvMap.get("VNINDEX")?.bars ?? [];
       let indexPerf20: number | null = null;
       if (indexBars.length >= 20) {
         const i0 = indexBars[indexBars.length - 20].close;
@@ -2648,12 +2615,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             failoverCount++;
           }
         }
-        if (!price) {
-          price = 20.0;
-          failoverCount++;
-        }
         // Normalize price scale: standardize to thousand VND (e.g. 53.9 for 53,900đ)
-        if (price > 500) {
+        if (price != null && price > 500) {
           price = Number((price / 1000).toFixed(2));
         }
 
@@ -2664,7 +2627,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             volume = lastBar.volume;
           } else {
             const bq = BOOTSTRAP_VN30_QUOTES.find((b) => b.symbol === sym);
-            volume = bq?.volume ?? 150_000;
+            volume = bq?.volume ?? null;
           }
         }
 
@@ -2684,13 +2647,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             if (bq) {
               change = bq.change;
               changePercent = bq.changePercent;
-            } else {
-              changePercent = 0.5;
-              change = price ? Number(((price * 0.5) / 100).toFixed(2)) : 0.1;
             }
           }
         }
-        if (change == null && price && changePercent != null) {
+        if (change == null && price != null && changePercent != null) {
           change = Number(((price * changePercent) / 100).toFixed(2));
         }
 
@@ -2764,8 +2724,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           ? Math.round(f.fcfTtm / 1_000_000_000)
           : null; // in Billion VND
 
-        const qualityScore = f?.qualityScore ?? (seed ? seed.fScore * 10 + 10 : 50);
-        const healthScore = f?.healthScore ?? (seed ? Math.min(95, Math.round(seed.altmanZScore * 22)) : 50);
+        const qualityScore = f?.qualityScore ?? (seed ? seed.fScore * 10 + 10 : null);
+        const healthScore = f?.healthScore ?? (seed ? Math.min(95, Math.round(seed.altmanZScore * 22)) : null);
 
         const compositeScore = calculateCompositeScore(qualityScore, roe, netMargin, pe, pb, debtEquity);
 
@@ -2774,9 +2734,11 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const foreignAccumulating = foreignNetVal != null && foreignNetVal > 0.5;
 
         const rawBars = ohlcvMap.get(sym)?.bars;
-        const baseBars = (rawBars && rawBars.length >= 15) ? rawBars : (price ? generateResilientBars(sym, price) : rawBars);
-        // Real-time multi-timeframe bar stitching with intraday quote to prevent stale signals
-        const effectiveBars = syncLatestRealtimeBar(baseBars, q, price, volume);
+        // Real-time multi-timeframe bar stitching ONLY on real OHLCV history (never synthesize random walks)
+        const effectiveBars =
+          rawBars && rawBars.length > 0
+            ? syncLatestRealtimeBar(rawBars, q, price, volume)
+            : [];
         const parsed = parseBarArrays(effectiveBars);
 
         let rsRating20: number | null = null;
@@ -3096,15 +3058,15 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         );
         const peRankMap = computeSectorPercentileMap(
           grp.map((x) => ({ key: x.sym, value: x.pe })),
-          { higherIsBetter: false, requirePositive: true },
+          { higherIsBetter: true, requirePositive: true },
         );
         const pbRankMap = computeSectorPercentileMap(
           grp.map((x) => ({ key: x.sym, value: x.pb })),
-          { higherIsBetter: false, requirePositive: true },
+          { higherIsBetter: true, requirePositive: true },
         );
         const evRankMap = computeSectorPercentileMap(
           grp.map((x) => ({ key: x.sym, value: x.evEbitda })),
-          { higherIsBetter: false, requirePositive: true },
+          { higherIsBetter: true, requirePositive: true },
         );
 
         for (let i = 0; i < grp.length; i++) {
@@ -3121,9 +3083,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             rankLabel = `Top 20% ROE ${secName}`;
           } else if (roicPct != null && roicPct >= 80) {
             rankLabel = `Top 20% ROIC ${secName}`;
-          } else if (pePct != null && pePct >= 80) {
+          } else if (pePct != null && pePct <= 20) {
             rankLabel = `P/E Rẻ Top 20% ${secName}`;
-          } else if (pbPct != null && pbPct >= 80) {
+          } else if (pbPct != null && pbPct <= 20) {
             rankLabel = `P/B Rẻ Top 20% ${secName}`;
           } else if (e.faMatrix.isBuffettCompounder) {
             rankLabel = `Compounder ${secName}`;
@@ -3702,7 +3664,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             if (entry.faMatrix.isConsensusDiscount) fBit |= FA_BIT.CONSENSUS_UPSIDE;
             if ((entry.faMatrix.reverseDcfMarginPct ?? -999) >= 8.0 && (entry.faMatrix.impliedGrowthPct ?? 999) <= 15.0) fBit |= FA_BIT.MISPRICED_GROWTH;
             if (entry.faMatrix.isGrahamNcav) fBit |= FA_BIT.GRAHAM_NCAV;
-            if ((sectorPePercentile ?? 0) >= 75) fBit |= FA_BIT.LOW_SECTOR_PE;
+            if (sectorPePercentile != null && sectorPePercentile > 0 && sectorPePercentile <= 25) fBit |= FA_BIT.LOW_SECTOR_PE;
             if ((sectorRoePercentile ?? 0) >= 75) fBit |= FA_BIT.HIGH_SECTOR_ROE;
             if ((sectorRoicPercentile ?? 0) >= 75) fBit |= FA_BIT.HIGH_SECTOR_ROIC;
             return fBit;
@@ -4105,6 +4067,10 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   if (params.mertonSafeOnly) requiredFaBitMask |= FA_BIT.MERTON_SAFE;
   if (params.beneishSafeOnly) requiredFaBitMask |= FA_BIT.BENEISH_SAFE;
   if (params.buffettCompounderOnly) requiredFaBitMask |= FA_BIT.BUFFETT_COMPOUNDER;
+  if (params.lynchGrowerOnly) requiredFaBitMask |= FA_BIT.GARP_GROWTH;
+  if (params.grahamNcavOnly) requiredFaBitMask |= FA_BIT.GRAHAM_NCAV;
+  if (params.workingCapOnly) requiredFaBitMask |= FA_BIT.WORKING_CAP_CHAMP;
+  if (params.dividendAristocratOnly) requiredFaBitMask |= FA_BIT.DIVIDEND_ARISTOCRAT;
   if (params.netCashOnly) requiredFaBitMask |= FA_BIT.NET_CASH;
   if (params.quarterlyInflectionOnly) requiredFaBitMask |= FA_BIT.QUARTERLY_INFLECTION;
 
@@ -4147,9 +4113,23 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (hasSector && x.sector !== sectorTarget) continue;
     if (hasMaSignal && x.maSignal !== maSignalTarget) continue;
 
-    // Dual-register bitmask fast-rejection
-    if (requiredFaBitMask !== 0 && x.faBitFlags != null) {
-      if ((x.faBitFlags & requiredFaBitMask) !== requiredFaBitMask) continue;
+    // Dual-register bitmask fast-rejection (with explicit fallback when faBitFlags is absent)
+    if (requiredFaBitMask !== 0) {
+      if (x.faBitFlags != null) {
+        if ((x.faBitFlags & requiredFaBitMask) !== requiredFaBitMask) continue;
+      } else {
+        if (params.superCompounderOnly && !x.isSuperCompounder) continue;
+        if (params.bookTaxSafeOnly && !x.isBookTaxSafe) continue;
+        if (params.mertonSafeOnly && !x.isMertonSafe) continue;
+        if (params.beneishSafeOnly && !x.isBeneishSafe) continue;
+        if (params.buffettCompounderOnly && !x.isBuffettCompounder) continue;
+        if (params.lynchGrowerOnly && !x.isLynchFastGrower) continue;
+        if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
+        if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
+        if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
+        if (params.netCashOnly && !x.isNetCash) continue;
+        if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
+      }
     }
 
     if (requiredBitMask !== 0) {

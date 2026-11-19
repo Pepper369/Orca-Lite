@@ -35,7 +35,16 @@ tags: [fundamental-analysis, screener, truth-in-data, vector-store, backtest, sp
 
 - `npx tsc --noEmit`: passed (`exit 0`).
 - `npm run lint` (`eslint .`): passed (`exit 0`).
-- `npm run build` (`vite build`): built cleanly in `2.82s`.
-- `npx tsx --conditions=react-server --test` across all 7 FA & Screener suites (`fundamental-quant-matrix.test.ts`, `piotroski-altman.test.ts`, `screener-fa-enhancements.test.ts`, `fundamental-ratio-regressions.test.ts`, `stock-detail-screener-sync.test.ts`, `fa-core-and-provenance.test.ts`, `screener-consolidation-parity.test.ts`): `43/43` tests passed, `0` failed.
+- `npm run build` (`vite build`): built cleanly in `2.79s` (`2295 modules transformed`).
+- `npx tsx --conditions=react-server --test` across all 11 Screener/FA/NLP suites (`fundamental-quant-matrix.test.ts`, `piotroski-altman.test.ts`, `screener-fa-enhancements.test.ts`, `fundamental-ratio-regressions.test.ts`, `stock-detail-screener-sync.test.ts`, `fa-core-and-provenance.test.ts`, `screener-consolidation-parity.test.ts`, `screener-apex-buy-now.test.ts`, `screener-enhanced-specialized.test.ts`, `screener-swing-divergence.test.ts`, `fast-screener-hub.test.ts`): **62/62 passed, 0 failed**.
 - `npx vitest run src/lib/engines/__tests__/ict-smc-liquidity-engine.test.ts src/lib/engines/__tests__/quant-reversal-pace.test.ts`: `2/2` files, `7/7` tests passed.
-- Unrelated pre-existing failure noted separately: `src/lib/services/__tests__/fast-screener-hub.test.ts` fails 1 natural-language parser assertion (`debtEquityMax: 1.2 !== 0.8` in untouched `response-structure-architect.ts`, `4/5` passing).
+
+## Audit Pass 2 Fixes (Residual Bugs Eliminated)
+
+1. **Valuation Percentile Inversion (`sectorPePercentile` / `sectorPbPercentile` / `sectorEvEbitdaPercentile`)**: Switched `peRankMap`, `pbRankMap`, `evRankMap` back to `{ higherIsBetter: true, requirePositive: true }` (`1` = cheapest P/E, `100` = highest P/E), fixed `"P/E Rẻ Top 20%"` / `FA_BIT.LOW_SECTOR_PE` (`<= 20` / `<= 25`), so `maxSectorPePercentile <= threshold` genuinely returns low-multiple value stocks rather than bubble-multiple stocks.
+2. **Removed Remaining Synthetic Fallbacks in `screener-snapshot-service.ts`**: Deleted `generateResilientBars()` random-walk bar synthesis, removed fake `price = 20.0`, `volume = 150_000`, `changePercent = 0.5%`, `qualityScore = 50`, `healthScore = 50`, and `VNINDEX` synthetic benchmark bars; gated `canslim`, `dividend`, `growth`, `value`, `consensus_upside` presets behind `hasAuthenticFa`.
+3. **Closed `FA_BIT` Fallback Gap**: Mapped `lynchGrowerOnly`, `grahamNcavOnly`, `workingCapOnly`, `dividendAristocratOnly` into `requiredFaBitMask` and added an explicit `else` branch in `queryScreenerStocks()` when `x.faBitFlags == null`.
+4. **Industry-Aware `evaluateFourM` & `valuation-screener.ts`**: Exempted `FINANCIAL_BANK_SEC_INS` from COGS `grossMargin` / `D/E` / `currentRatio` / `ROIC` penalties in `four-m.ts`, removed the 7-sector Meaning bias, added `excludeSyntheticFa` (default `true`) to `/api/v1/screener/valuation` & `valuation-screener.ts`, and attached `bankFairPbGordon` / `rnavUpsidePct`.
+5. **UI Consolidation & Honest Strategy Banners (`screener-panels.tsx`)**: Normalized `defaultPreset` via `resolveCanonicalPreset()`, replaced static hardcoded `Win-rate / sampleTrades` numbers in the banner with strategy thesis + backtest action trigger, and deduplicated 4 overlapping Row-3 checkboxes already present in `ScreenerMatrixToolbar`.
+6. **NLP Debt Consistency**: Aligned `"nợ thấp"` parser in `response-structure-architect.ts` to `debtEquityMax = 0.8` (`fast-screener-hub.test.ts` 5/5 green).
+

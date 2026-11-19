@@ -8,6 +8,7 @@ import {
   PRESET_TABS,
   PRESET_EDGE_BENCHMARKS,
 } from "../../app/screener/screener-constants";
+import { resolveCanonicalPreset } from "../quant/screener-taxonomy";
 
 test("Enhanced Specialized Screeners - Bitmask Constants Integrity", () => {
   assert.equal(typeof SCREENER_BIT.WYCKOFF_SPRING_TEST, "number");
@@ -23,10 +24,10 @@ test("Enhanced Specialized Screeners - Bitmask Constants Integrity", () => {
 
 test("Enhanced Specialized Screeners - Preset Tabs and Benchmarks Registration", () => {
   const tabIds = new Set(PRESET_TABS.map((t) => t.id));
-  assert.ok(tabIds.has("wyckoff_spring"), "Must register wyckoff_spring tab");
-  assert.ok(tabIds.has("vcp_vdu"), "Must register vcp_vdu tab");
-  assert.ok(tabIds.has("canslim_accel"), "Must register canslim_accel tab");
-  assert.ok(tabIds.has("triple_confluence"), "Must register triple_confluence tab");
+  assert.ok(tabIds.has(resolveCanonicalPreset("wyckoff_spring")), "Must register canonical tab for wyckoff_spring");
+  assert.ok(tabIds.has(resolveCanonicalPreset("vcp_vdu")), "Must register canonical tab for vcp_vdu");
+  assert.ok(tabIds.has(resolveCanonicalPreset("canslim_accel")), "Must register canonical tab for canslim_accel");
+  assert.ok(tabIds.has(resolveCanonicalPreset("triple_confluence")), "Must register canonical tab for triple_confluence");
 
   assert.ok(PRESET_EDGE_BENCHMARKS.wyckoff_spring, "Must define benchmark for wyckoff_spring");
   assert.ok(PRESET_EDGE_BENCHMARKS.vcp_vdu, "Must define benchmark for vcp_vdu");
