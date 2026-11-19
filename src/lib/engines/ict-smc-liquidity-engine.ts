@@ -122,7 +122,7 @@ export function analyzeIctSmcLiquidity(params: {
   symbol: string;
   bars: OhlcvBar[];
   currentPrice?: number | null;
-  assetType?: "FOREX" | "CRYPTO";
+  assetType?: "FOREX" | "CRYPTO" | "STOCK";
   pipSize?: number;
 }): IctSmcAnalysisResult {
   const {
@@ -138,7 +138,13 @@ export function analyzeIctSmcLiquidity(params: {
   const isForex = assetType === "FOREX";
   const pipSize =
     inputPipSize ??
-    (isForex ? (symbol.toUpperCase().includes("JPY") ? 0.01 : 0.0001) : currentPrice * 0.0001);
+    (assetType === "FOREX"
+      ? symbol.toUpperCase().includes("JPY")
+        ? 0.01
+        : 0.0001
+      : assetType === "STOCK"
+      ? Math.max(0.05, currentPrice * 0.002)
+      : currentPrice * 0.0001);
 
   if (n < 25) {
     return createEmptyResult(symbol, currentPrice);

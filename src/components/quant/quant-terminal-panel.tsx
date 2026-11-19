@@ -38,7 +38,7 @@ interface QuantTerminalPanelProps {
   interval: string;
   series: OhlcvBar[];
   currentPrice?: number | null;
-  assetType?: "forex" | "crypto";
+  assetType?: "forex" | "crypto" | "stock";
   tech?: TechnicalSnapshot | null;
   digits?: number;
 }
@@ -67,7 +67,13 @@ export function QuantTerminalPanel({
   const lastBar = series[series.length - 1];
   const price = currentPrice ?? lastBar?.close ?? 1.0;
   const isForex = assetType === "forex";
-  const pipSize = isForex ? (symbol.includes("JPY") ? 0.01 : 0.0001) : price * 0.0001;
+  const pipSize = isForex
+    ? symbol.includes("JPY")
+      ? 0.01
+      : 0.0001
+    : assetType === "stock"
+    ? Math.max(0.05, price * 0.002)
+    : price * 0.0001;
 
   // Run Quantitative Engines
   const quantAnalysis = useMemo(() => {

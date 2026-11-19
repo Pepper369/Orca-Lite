@@ -276,9 +276,33 @@ const StockEntryStrategyCard = dynamic(
   }
 );
 
+const IctSmcCockpit = dynamic(
+  () => import("@/components/quant/ict-smc-cockpit").then((m) => m.IctSmcCockpit),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="ICT & SMC Liquidity Suite">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
+
+const QuantTerminalPanel = dynamic(
+  () => import("@/components/quant/quant-terminal-panel").then((m) => m.QuantTerminalPanel),
+  {
+    ssr: false,
+    loading: () => (
+      <Panel title="Quantitative Trading Lab">
+        <Loading rows={4} />
+      </Panel>
+    ),
+  }
+);
 
 const FIREANT_TABS = [
   { id: "overview", label: "Tổng quan & Kỹ thuật", icon: TrendingUp },
+  { id: "quant_ict", label: "⚡ ICT, SMC & Quant Lab", icon: Zap },
   { id: "financials", label: "Báo cáo Tài chính", icon: FileSpreadsheet },
   { id: "valuation", label: "Định giá & AI Quant", icon: Calculator },
   { id: "shareholders", label: "Cổ đông & Ban LĐ", icon: Users },
@@ -509,7 +533,7 @@ export function StockDetailClient({
 }) {
   const symbol = (rawSymbol ?? "").toUpperCase();
   const [activeTab, setActiveTab] = useState<FireantTabId>("overview");
-  const [microTab, setMicroTab] = useState<"orderbook" | "flow" | "decision">("orderbook");
+  const [microTab, setMicroTab] = useState<"orderbook" | "flow" | "decision" | "ict_smc">("orderbook");
 
   const { res, data, meta: apiMeta, isLoading, isValidating, mutate } = useApi<VnStockDetail>(
     symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}` : null,
@@ -679,6 +703,14 @@ export function StockDetailClient({
             >
               Kế hoạch Entry
             </button>
+            <button
+              type="button"
+              data-active={microTab === "ict_smc"}
+              onClick={() => setMicroTab("ict_smc")}
+              className="fireant-micro-tab-btn"
+            >
+              ⚡ ICT &amp; SMC
+            </button>
           </div>
 
           <div className="flex-1 p-2 sm:p-2.5 overflow-y-auto max-h-[500px]">
@@ -705,6 +737,19 @@ export function StockDetailClient({
                     quote={detail.quote}
                     technical={detail.technical}
                     screenerSync={detail.screenerSync}
+                  />
+                </ErrorBoundary>
+              </div>
+            )}
+            {microTab === "ict_smc" && (
+              <div className="space-y-2.5">
+                <ErrorBoundary name="micro-ict-smc" resetKey={detail.symbol}>
+                  <IctSmcCockpit
+                    symbol={detail.symbol}
+                    series={detail.bars}
+                    currentPrice={detail.quote?.price}
+                    assetType="stock"
+                    digits={2}
                   />
                 </ErrorBoundary>
               </div>
@@ -774,6 +819,31 @@ export function StockDetailClient({
                   <BusinessGoalsPanel symbol={detail.symbol} />
                 </ErrorBoundary>
               </div>
+            </div>
+          )}
+
+          {activeTab === "quant_ict" && (
+            <div className="space-y-3.5">
+              <ErrorBoundary name="stock-ict-smc" resetKey={detail.symbol}>
+                <IctSmcCockpit
+                  symbol={detail.symbol}
+                  series={detail.bars}
+                  currentPrice={detail.quote?.price}
+                  assetType="stock"
+                  digits={2}
+                />
+              </ErrorBoundary>
+              <ErrorBoundary name="stock-quant-terminal" resetKey={detail.symbol}>
+                <QuantTerminalPanel
+                  symbol={detail.symbol}
+                  interval="1d"
+                  series={detail.bars}
+                  currentPrice={detail.quote?.price}
+                  assetType="stock"
+                  tech={detail.technical}
+                  digits={2}
+                />
+              </ErrorBoundary>
             </div>
           )}
 

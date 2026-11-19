@@ -27,7 +27,7 @@ interface IctSmcCockpitProps {
   symbol: string;
   series: OhlcvBar[];
   currentPrice?: number | null;
-  assetType?: "forex" | "crypto";
+  assetType?: "forex" | "crypto" | "stock";
   digits?: number;
 }
 
@@ -43,7 +43,7 @@ export function IctSmcCockpit({
       symbol,
       bars: series,
       currentPrice,
-      assetType: assetType === "crypto" ? "CRYPTO" : "FOREX",
+      assetType: assetType === "crypto" ? "CRYPTO" : assetType === "stock" ? "STOCK" : "FOREX",
     });
   }, [symbol, series, currentPrice, assetType]);
 
