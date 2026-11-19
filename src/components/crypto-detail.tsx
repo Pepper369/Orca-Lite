@@ -19,9 +19,14 @@ import {
   Loading,
   MetaLine,
   Panel,
-  priceDigits,
   Unavailable,
 } from "@/components/ui";
+import { getPriceDecimals } from "@/lib/engines/asset-precision";
+import type { PrecisionTradeSetup } from "@/lib/engines/fx-crypto-precision-engine";
+import {
+  buildPrecisionChartLevels,
+  PrecisionSetupStrip,
+} from "@/components/quant/precision-setup-strip";
 import { OrcaChart } from "@/components/orca-chart";
 import { ScalpPanel } from "@/components/scalp-panel";
 import { CryptoTradeDesk } from "@/components/crypto-trade-desk";
@@ -134,6 +139,8 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [rightTab, setRightTab] = useState<"scalp" | "ict_smc" | "quant">("scalp");
   const [structureTab, setStructureTab] = useState<StructureTab>("ms");
+  const [scalpTf, setScalpTf] = useState<"1m" | "5m" | "15m">("5m");
+  const [showPrecisionOnChart, setShowPrecisionOnChart] = useState(true);
 
   const [liveTicker, setLiveTicker] = useState<{
     price: number;
@@ -261,6 +268,19 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
     return Math.min(...series.slice(-48).map((b) => b.low));
   }, [series]);
 
+  const sym = data?.symbol || pair;
+  const { data: scalpData, isLoading: scalpLoading } = useApi<{
+    signal?: { precision?: PrecisionTradeSetup | null };
+  }>(`/api/v1/crypto/${encodeURIComponent(sym)}/scalp?tf=${scalpTf}`, {
+    refreshInterval: 15_000,
+    keepPreviousData: true,
+  });
+  const precision = scalpData?.signal?.precision ?? null;
+  const chartExtraLevels = useMemo(
+    () => buildPrecisionChartLevels(precision, showPrecisionOnChart),
+    [precision, showPrecisionOnChart],
+  );
+
   if (!price && isLoading) return <Loading rows={12} />;
 
   if (price == null || !Number.isFinite(price)) {
@@ -286,10 +306,9 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
     );
   }
 
-  const sym = data?.symbol || pair;
   const tech = data?.technical ?? null;
   const patterns = data?.patterns ?? [];
-  const digits = priceDigits(price);
+  const digits = getPriceDecimals(price, sym, "CRYPTO");
   const chg = currentTicker?.changePercent ?? null;
   const rMin = currentTicker?.low ?? seriesLow ?? price;
   const rMax = currentTicker?.high ?? seriesHigh ?? price;
@@ -403,6 +422,21 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
         </div>
       </div>
 
+      <PrecisionSetupStrip
+        symbol={sym}
+        assetType="crypto"
+        precision={precision}
+        digits={digits}
+        isLoading={scalpLoading && !scalpData}
+        showOnChart={showPrecisionOnChart}
+        onToggleChart={() => setShowPrecisionOnChart((v) => !v)}
+        onInspectGates={() => {
+          setRightTab("quant");
+          setMobileTab("quant");
+        }}
+        sourceLabel={`Binance ${scalpTf.toUpperCase()}+15M+1H + L2 DOM + Funding`}
+      />
+
       <div className="xl:hidden">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface-elevated/40 p-1">
           {([["chart", "Chart"], ["desk", "Order flow"], ["scalp", "Scalp"], ["ict_smc", "🎯 ICT/SMC"], ["quant", "⚡ Quant"], ["structure", "Cấu trúc"], ["news", "Tin / Tâm lý"]] as const).map(
@@ -438,7 +472,14 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
           />
         </div>
         <div className="xl:col-span-6 flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-primary">
-          <OrcaChart symbol={sym} assetType="crypto" defaultTimeframe={interval} height={560} title={`${baseAsset}/USDT`} />
+          <OrcaChart
+            symbol={sym}
+            assetType="crypto"
+            defaultTimeframe={interval}
+            height={560}
+            title={`${baseAsset}/USDT`}
+            extraLevels={chartExtraLevels}
+          />
         </div>
         <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
           {/* Inner Stage Switcher */}
@@ -473,7 +514,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
           </div>
 
           <FILL className="min-h-0 flex-1">
-            {rightTab === "scalp" && <ScalpPanel symbol={sym} />}
+            {rightTab === "scalp" && <ScalpPanel symbol={sym} tf={scalpTf} onTfChange={setScalpTf} />}
             {rightTab === "ict_smc" && (
               <IctSmcCockpit
                 symbol={sym}
@@ -492,6 +533,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
                 assetType="crypto"
                 tech={tech}
                 digits={digits}
+                serverPrecision={precision}
               />
             )}
           </FILL>
@@ -502,7 +544,14 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
 
       <div className="space-y-2 xl:hidden">
         {mobileTab === "chart" && (
-          <OrcaChart symbol={sym} assetType="crypto" defaultTimeframe={interval} height={400} title={`${baseAsset}/USDT`} />
+          <OrcaChart
+            symbol={sym}
+            assetType="crypto"
+            defaultTimeframe={interval}
+            height={400}
+            title={`${baseAsset}/USDT`}
+            extraLevels={chartExtraLevels}
+          />
         )}
         {mobileTab === "desk" && (
           <>
@@ -513,7 +562,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
         )}
         {mobileTab === "scalp" && (
           <>
-            <ScalpPanel symbol={sym} />
+            <ScalpPanel symbol={sym} tf={scalpTf} onTfChange={setScalpTf} />
             <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
             <CryptoTradeDesk symbol={sym} mode="leverage" />
           </>
@@ -536,10 +585,11 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
             assetType="crypto"
             tech={tech}
             digits={digits}
+            serverPrecision={precision}
           />
         )}
         {mobileTab === "structure" && (
-          <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" />
+          <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" serverPrecision={precision} />
         )}
         {mobileTab === "news" && (
           <div className="space-y-2">
@@ -552,7 +602,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
 
       <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
         <div className="xl:col-span-7 flex min-h-[300px] flex-col">
-          <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" />
+          <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" serverPrecision={precision} />
         </div>
         <div className="xl:col-span-5 flex min-h-[300px] flex-col gap-2">
           <DerivativesStrip fundingRate={fundingRate} oi={data?.openInterest?.openInterest ?? null} vol={t?.quoteVolume ?? null} />

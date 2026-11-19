@@ -29,7 +29,12 @@ import {
   buildMtfConfluenceMatrix,
   estimateClvOrderFlowImbalance,
   getAssetPipSize,
+  getPriceDecimals,
 } from "@/lib/engines/asset-precision";
+import {
+  evaluatePrecisionTradeSetup,
+  type PrecisionTradeSetup,
+} from "@/lib/engines/fx-crypto-precision-engine";
 import { estimateOrnsteinUhlenbeck } from "@/lib/engines/advanced-quant-math";
 import { detectDivergences } from "@/lib/engines/divergence";
 import { ReversalPaceMeter } from "@/components/scalp/reversal-pace-meter";
@@ -42,6 +47,7 @@ interface QuantTerminalPanelProps {
   assetType?: "forex" | "crypto" | "stock";
   tech?: TechnicalSnapshot | null;
   digits?: number;
+  serverPrecision?: PrecisionTradeSetup | null;
 }
 
 export function QuantTerminalPanel({
@@ -51,7 +57,8 @@ export function QuantTerminalPanel({
   currentPrice,
   assetType = "forex",
   tech,
-  digits = assetType === "forex" ? 5 : 2,
+  digits: digitsProp,
+  serverPrecision,
 }: QuantTerminalPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<"overview" | "gates" | "pace" | "ou_divergence">("overview");
 
@@ -61,6 +68,7 @@ export function QuantTerminalPanel({
   const isForex = assetType === "forex";
   const precisionAssetType = isForex ? "FOREX" : assetType === "stock" ? "STOCK" : "CRYPTO";
   const pipSize = getAssetPipSize(symbol, precisionAssetType, price);
+  const digits = digitsProp ?? getPriceDecimals(price, symbol, precisionAssetType);
 
   // Run Quantitative Engines
   const quantAnalysis = useMemo(() => {
@@ -131,6 +139,17 @@ export function QuantTerminalPanel({
       maxSignals: 4,
     });
 
+    // 6. 7-Gate Precision Setup Engine (causal series evaluation for Forex/Crypto)
+    const localPrecision =
+      assetType !== "stock" && series.length >= 30
+        ? evaluatePrecisionTradeSetup({
+            symbol,
+            assetType: isForex ? "FOREX" : "CRYPTO",
+            barsExecution: series,
+            orderBookImbalance: realImbalance,
+          })
+        : null;
+
     return {
       ouResult,
       highWinrate,
@@ -139,8 +158,9 @@ export function QuantTerminalPanel({
       mtfRows,
       dominantTrend,
       mtfConfluencePct,
+      localPrecision,
     };
-  }, [series, price, pipSize, isForex, precisionAssetType, symbol, interval, lastBar]);
+  }, [series, price, pipSize, isForex, precisionAssetType, assetType, symbol, interval, lastBar]);
 
   if (!quantAnalysis) {
     return (
@@ -150,8 +170,18 @@ export function QuantTerminalPanel({
     );
   }
 
-  const { ouResult, highWinrate, paceResolution, divergences, mtfRows, dominantTrend, mtfConfluencePct } =
-    quantAnalysis;
+  const {
+    ouResult,
+    highWinrate,
+    paceResolution,
+    divergences,
+    mtfRows,
+    dominantTrend,
+    mtfConfluencePct,
+    localPrecision,
+  } = quantAnalysis;
+  const activePrecision = serverPrecision ?? localPrecision;
+  const isNoTradePrec = !activePrecision || activePrecision.grade === "NO_TRADE";
 
   return (
     <div className="space-y-3 font-mono text-xs">
@@ -163,17 +193,59 @@ export function QuantTerminalPanel({
               <Cpu className="size-4 animate-pulse" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-bold text-sm text-foreground">Quantitative Trading Lab</span>
-                <Badge tone={highWinrate.isHighWinrateVerified ? "bull" : "warn"} className="text-[10px]">
-                  {highWinrate.isHighWinrateVerified ? "SIÊU TÍN HIỆU WINRATE CAO" : "TÍN HIỆU TIÊU CHUẨN"}
-                </Badge>
-                <Badge tone="accent" className="text-[10px]">
-                  Score: {highWinrate.winrateScore}%
-                </Badge>
+                {activePrecision ? (
+                  <>
+                    <Badge
+                      tone={
+                        activePrecision.grade === "A+" || activePrecision.grade === "A"
+                          ? "bull"
+                          : activePrecision.grade === "B"
+                            ? "warn"
+                            : "neutral"
+                      }
+                      className="text-[10px]"
+                    >
+                      {activePrecision.grade === "A+"
+                        ? "A+ SNIPER"
+                        : activePrecision.grade === "NO_TRADE"
+                          ? "WAIT / LỌC"
+                          : `GRADE ${activePrecision.grade}`}
+                    </Badge>
+                    <Badge
+                      tone={
+                        activePrecision.action === "BUY"
+                          ? "bull"
+                          : activePrecision.action === "SELL"
+                            ? "down"
+                            : "neutral"
+                      }
+                      className="text-[10px]"
+                    >
+                      {activePrecision.action} · Win {activePrecision.calibratedWinRatePct}%
+                    </Badge>
+                    {!isNoTradePrec && (
+                      <Badge tone="accent" className="text-[10px]">
+                        E[R] {activePrecision.expectancyR >= 0 ? `+${activePrecision.expectancyR}R` : `${activePrecision.expectancyR}R`} · Size {activePrecision.recommendedSizeMultiplier}x
+                      </Badge>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Badge tone={highWinrate.isHighWinrateVerified ? "bull" : "warn"} className="text-[10px]">
+                      {highWinrate.isHighWinrateVerified ? "SIÊU TÍN HIỆU WINRATE CAO" : "TÍN HIỆU TIÊU CHUẨN"}
+                    </Badge>
+                    <Badge tone="accent" className="text-[10px]">
+                      Score: {highWinrate.winrateScore}%
+                    </Badge>
+                  </>
+                )}
               </div>
               <span className="text-[10px] text-muted-foreground">
-                Đa khung thời gian · 6 Cổng Confluence · Mô hình Late Resolution 0x50f7 · Ornstein-Uhlenbeck
+                {activePrecision
+                  ? "Đa khung thời gian · 7 Cổng Precision Engine · Late Resolution 0x50f7 · Ornstein-Uhlenbeck"
+                  : "Đa khung thời gian · 6 Cổng Confluence · Mô hình Late Resolution 0x50f7 · Ornstein-Uhlenbeck"}
               </span>
             </div>
           </div>
@@ -200,7 +272,7 @@ export function QuantTerminalPanel({
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              6 Cổng Winrate
+              {activePrecision ? "7 Cổng Precision" : "6 Cổng Winrate"}
             </button>
             <button
               type="button"
@@ -361,6 +433,93 @@ export function QuantTerminalPanel({
 
         {activeSubTab === "gates" && (
           <div className="space-y-3">
+            {activePrecision && (
+              <div className="space-y-2.5 rounded-xl border border-border/50 bg-surface-muted/20 p-3">
+                <div className="flex flex-wrap justify-between items-center gap-2 text-[11px]">
+                  <span className="font-semibold text-foreground flex items-center gap-1.5">
+                    <ShieldCheck className="size-4 text-accent-primary" /> Thẩm định 7 Cổng Precision Engine
+                  </span>
+                  <span className="text-muted-foreground font-bold">
+                    Pass {activePrecision.gatesPassed.length} /{" "}
+                    {Math.max(1, activePrecision.gatesPassed.length + activePrecision.gatesFailed.length)} cổng
+                  </span>
+                </div>
+
+                {/* Regime & Friction Telemetry */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+                  <div className="p-2 rounded border border-border/40 bg-surface-elevated/40">
+                    <span className="text-muted-foreground">Regime:</span>
+                    <div className="font-bold text-foreground">{activePrecision.regime.state.replace(/_/g, " ")}</div>
+                    <span className="text-[9px] text-muted-foreground">
+                      ADX {activePrecision.regime.adx14.toFixed(1)} · ER {activePrecision.regime.efficiencyRatio.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded border border-border/40 bg-surface-elevated/40">
+                    <span className="text-muted-foreground">Xác suất &amp; E[R]:</span>
+                    <div className="font-bold text-foreground">
+                      {activePrecision.calibratedWinRatePct}% ·{" "}
+                      {activePrecision.expectancyR >= 0
+                        ? `+${activePrecision.expectancyR}R`
+                        : `${activePrecision.expectancyR}R`}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground">Friction: {activePrecision.frictionR}R</span>
+                  </div>
+                  <div className="p-2 rounded border border-border/40 bg-surface-elevated/40">
+                    <span className="text-muted-foreground">Entry / Mode:</span>
+                    <div className="font-bold text-sky-400">
+                      {activePrecision.entry != null ? fmtNum(activePrecision.entry, digits) : "WAIT"}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground">{activePrecision.entryMode}</span>
+                  </div>
+                  <div className="p-2 rounded border border-border/40 bg-surface-elevated/40">
+                    <span className="text-muted-foreground">SL Cấu trúc / Net R:R:</span>
+                    <div className="font-bold text-negative">
+                      {activePrecision.stopLoss != null ? fmtNum(activePrecision.stopLoss, digits) : "—"}
+                    </div>
+                    <span className="text-[9px] text-muted-foreground">
+                      Net 1:{activePrecision.netRiskReward ?? "—"} · Size {activePrecision.recommendedSizeMultiplier}x
+                    </span>
+                  </div>
+                </div>
+
+                {isNoTradePrec && activePrecision.vetoReasons.length > 0 && (
+                  <div className="p-2.5 rounded-lg border border-warning/40 bg-warning/10 flex items-start gap-2 text-[11px]">
+                    <ShieldAlert className="size-4 text-warning shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-warning">Lý do lọc (Veto): </span>
+                      <span className="text-foreground">{activePrecision.vetoReasons.join(" · ")}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-[10.5px]">
+                  {activePrecision.gatesPassed.map((gate, idx) => (
+                    <div
+                      key={`pp-${idx}`}
+                      className="p-2 rounded-lg border border-positive/30 bg-positive/5 flex items-start gap-1.5"
+                    >
+                      <CheckCircle2 className="size-3.5 text-positive shrink-0 mt-0.5" />
+                      <span className="font-medium text-foreground">{gate}</span>
+                    </div>
+                  ))}
+                  {activePrecision.gatesFailed.map((gate, idx) => (
+                    <div
+                      key={`pf-${idx}`}
+                      className="p-2 rounded-lg border border-negative/30 bg-negative/5 flex items-start gap-1.5"
+                    >
+                      <XCircle className="size-3.5 text-negative shrink-0 mt-0.5" />
+                      <span className="font-medium text-foreground">{gate}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-2 rounded-lg border border-border/40 bg-surface-muted/40 text-[10.5px] leading-relaxed">
+                  <span className="font-bold text-foreground">Tổng kết Precision Engine: </span>
+                  <span className="text-muted-foreground">{activePrecision.summaryVi}</span>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-between items-center text-[11px]">
               <span className="font-semibold text-foreground flex items-center gap-1.5">
                 <ShieldCheck className="size-4 text-positive" /> Thẩm định 6 Cổng Confluence Thể chế (Institutional Gate)

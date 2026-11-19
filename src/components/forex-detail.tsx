@@ -19,9 +19,14 @@ import {
   FreshnessDot,
   Loading,
   MetaLine,
-  priceDigits,
   Unavailable,
 } from "@/components/ui";
+import { getPriceDecimals } from "@/lib/engines/asset-precision";
+import type { PrecisionTradeSetup } from "@/lib/engines/fx-crypto-precision-engine";
+import {
+  buildPrecisionChartLevels,
+  PrecisionSetupStrip,
+} from "@/components/quant/precision-setup-strip";
 import { OrcaChart } from "@/components/orca-chart";
 import { ForexScalpPanel } from "@/components/forex-scalp-panel";
 import { ForexTradeDesk } from "@/components/forex-trade-desk";
@@ -115,6 +120,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [structureTab, setStructureTab] = useState<StructureTab>("ms");
   const [rightTab, setRightTab] = useState<"scalp" | "ict_smc" | "quant">("scalp");
+  const [showPrecisionOnChart, setShowPrecisionOnChart] = useState(true);
 
   const [liveTick, setLiveTick] = useState<{
     price: number;
@@ -215,6 +221,18 @@ export function ForexDetailPage({ pair }: { pair: string }) {
 
   const orderFlow = useMemo(() => deriveOrderFlow(series), [series]);
 
+  const { data: scalpData, isLoading: scalpLoading } = useApi<{
+    signal?: { precision?: PrecisionTradeSetup | null };
+  }>(`/api/v1/forex/${encodeURIComponent(pair)}/scalp`, {
+    refreshInterval: 45_000,
+    keepPreviousData: true,
+  });
+  const precision = scalpData?.signal?.precision ?? null;
+  const chartExtraLevels = useMemo(
+    () => buildPrecisionChartLevels(precision, showPrecisionOnChart),
+    [precision, showPrecisionOnChart],
+  );
+
   if (!price && isLoading) return <Loading rows={12} />;
   if (price == null) {
     return (
@@ -242,7 +260,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
   const chg = cur?.changePercent ?? null;
   const tech = data?.technical ?? null;
   const patterns = data?.patterns ?? [];
-  const digits = priceDigits(price ?? 1);
+  const digits = getPriceDecimals(price ?? 1, pair, "FOREX");
   const sessions = sessionLabel();
   const rangePos =
     price != null && seriesHigh != null && seriesLow != null && seriesHigh > seriesLow
@@ -359,6 +377,21 @@ export function ForexDetailPage({ pair }: { pair: string }) {
         </div>
       </div>
 
+      <PrecisionSetupStrip
+        symbol={pair}
+        assetType="forex"
+        precision={precision}
+        digits={digits}
+        isLoading={scalpLoading && !scalpData}
+        showOnChart={showPrecisionOnChart}
+        onToggleChart={() => setShowPrecisionOnChart((v) => !v)}
+        onInspectGates={() => {
+          setRightTab("quant");
+          setMobileTab("quant");
+        }}
+        sourceLabel="M15→M5→H1 + Macro Shield + CSM"
+      />
+
       <div className="xl:hidden">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-border-subtle bg-surface-elevated/40 p-1">
           {(
@@ -395,6 +428,8 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               quote={quote}
               price={price}
               changePercent={chg}
+              setupGrade={precision?.grade ?? null}
+              recommendedSizeMultiplier={precision?.recommendedSizeMultiplier ?? null}
             />
           </FILL>
           <OrderFlowPanel flow={orderFlow} />
@@ -469,6 +504,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             defaultTimeframe={interval}
             height={tech ? 520 : 560}
             title={`${base}/${quote}`}
+            extraLevels={chartExtraLevels}
           />
         </div>
 
@@ -524,6 +560,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
                 assetType="forex"
                 tech={tech}
                 digits={digits}
+                serverPrecision={precision}
               />
             )}
           </FILL>
@@ -550,6 +587,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               defaultTimeframe={interval}
               height={400}
               title={`${base}/${quote}`}
+              extraLevels={chartExtraLevels}
             />
           </>
         )}
@@ -561,6 +599,8 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               quote={quote}
               price={price}
               changePercent={chg}
+              setupGrade={precision?.grade ?? null}
+              recommendedSizeMultiplier={precision?.recommendedSizeMultiplier ?? null}
             />
             <OrderFlowPanel flow={orderFlow} />
             <LiquidityZonesPanel
@@ -597,6 +637,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             assetType="forex"
             tech={tech}
             digits={digits}
+            serverPrecision={precision}
           />
         )}
         {mobileTab === "structure" && (
@@ -609,6 +650,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             patterns={patterns}
             cur={cur}
             series={series}
+            serverPrecision={precision}
           />
         )}
         {mobileTab === "news" && (
@@ -631,6 +673,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
             patterns={patterns}
             cur={cur}
             series={series}
+            serverPrecision={precision}
           />
         </div>
 

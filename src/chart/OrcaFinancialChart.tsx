@@ -295,12 +295,18 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       mgr.rebuildIndicators(data.indicators ?? null, vis);
       mgr.rebuildSrLines(data.indicators ?? null, vis.srLevels);
       if (data.markers?.length) mgr.applyMarkers(data.markers);
-      if (extraLevels?.length) mgr.rebuildExtraLevels(extraLevels);
+      mgr.rebuildExtraLevels(extraLevelsRef.current ?? []);
       chart.timeScale().fitContent();
     } catch {
       /* safety */
     }
-  }, [data, tf, prefs.volume, prefs.indicators, extraLevels, engineReady, isValidating]);
+  }, [data, tf, prefs.volume, prefs.indicators, engineReady, isValidating]);
+
+  useEffect(() => {
+    const mgr = mgrRef.current;
+    if (!engineReady || !mgr) return;
+    mgr.rebuildExtraLevels(extraLevels ?? []);
+  }, [extraLevels, engineReady]);
 
   useEffect(() => {
     const mgr = mgrRef.current;

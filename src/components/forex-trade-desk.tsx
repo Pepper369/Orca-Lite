@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { Badge, fmtNum, Panel } from "@/components/ui";
+import { getAssetPipSize, getPriceDecimals } from "@/lib/engines/asset-precision";
+import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import { DollarSign, Globe, Calculator, ArrowUpRight, ArrowDownRight, Clock, ShieldCheck } from "lucide-react";
 
 interface Props {
@@ -10,6 +12,8 @@ interface Props {
   quote: string;
   price: number | null;
   changePercent: number | null;
+  setupGrade?: SetupGrade | null;
+  recommendedSizeMultiplier?: number | null;
 }
 
 const LOT_SIZES = [
@@ -18,18 +22,34 @@ const LOT_SIZES = [
   { label: "1.00 Standard", units: 100_000, value: 1.0 },
 ] as const;
 
-export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Props) {
+export function ForexTradeDesk({
+  pair,
+  base,
+  quote,
+  price,
+  changePercent,
+  setupGrade,
+  recommendedSizeMultiplier,
+}: Props) {
   const [lot, setLot] = useState<number>(0.1);
   const [leverage, setLeverage] = useState<number>(100);
 
   const curPrice = price ?? 1.0;
-  const isJpy = quote.toUpperCase() === "JPY";
-  const pipDigits = isJpy ? 2 : 4;
-  const pipFactor = isJpy ? 0.01 : 0.0001;
+  const upperPair = pair.toUpperCase();
+  const isGold = upperPair.startsWith("XAU");
+  const isSilver = upperPair.startsWith("XAG");
+  const isOil = upperPair.includes("OIL");
+  const pipFactor = getAssetPipSize(pair, "FOREX", curPrice);
+  const priceDecimals = getPriceDecimals(curPrice, pair, "FOREX");
+  const contractUnitsPerLot = isGold ? 100 : isSilver ? 5_000 : isOil ? 1_000 : 100_000;
+  const unitLabel = isGold || isSilver ? "oz" : isOil ? "bbl" : "đơn vị";
 
-  // Approximate institutional spread (typically 0.6 - 1.8 pips for majors)
+  // Approximate institutional spread (pips)
   const spreadPips = useMemo(() => {
     const p = pair.toUpperCase();
+    if (p.startsWith("XAU")) return 2.0;
+    if (p.startsWith("XAG")) return 2.5;
+    if (p.includes("OIL")) return 3.0;
     if (p.includes("EURUSD")) return 0.8;
     if (p.includes("GBPUSD")) return 1.1;
     if (p.includes("USDJPY")) return 0.9;
@@ -45,7 +65,7 @@ export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Prop
 
   // Pip value in USD for selected lot size
   const pipValueUsd = useMemo(() => {
-    const units = lot * 100_000;
+    const units = lot * contractUnitsPerLot;
     if (quote.toUpperCase() === "USD") {
       return units * pipFactor;
     }
@@ -53,13 +73,13 @@ export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Prop
       return (units * pipFactor) / curPrice;
     }
     return (units * pipFactor) / (curPrice || 1);
-  }, [lot, base, quote, curPrice, pipFactor]);
+  }, [lot, contractUnitsPerLot, base, quote, curPrice, pipFactor]);
 
   // Margin required in USD at selected leverage
   const marginRequired = useMemo(() => {
-    const contractValueUsd = lot * 100_000 * (base.toUpperCase() === "USD" ? 1 : curPrice);
+    const contractValueUsd = lot * contractUnitsPerLot * (base.toUpperCase() === "USD" ? 1 : curPrice);
     return contractValueUsd / leverage;
-  }, [lot, base, curPrice, leverage]);
+  }, [lot, contractUnitsPerLot, base, curPrice, leverage]);
 
   // Global Session status (UTC based)
   const sessions = useMemo(() => {
@@ -98,7 +118,7 @@ export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Prop
               <span>Bán ra</span>
             </div>
             <div className="num mt-0.5 text-[15px] font-bold text-text-primary">
-              {bidPrice.toFixed(pipDigits + 1)}
+              {fmtNum(bidPrice, priceDecimals)}
             </div>
             <div className="text-[9px] text-text-muted">Khớp lệnh thị trường SELL</div>
           </div>
@@ -111,7 +131,7 @@ export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Prop
               <span>Mua vào</span>
             </div>
             <div className="num mt-0.5 text-[15px] font-bold text-text-primary">
-              {askPrice.toFixed(pipDigits + 1)}
+              {fmtNum(askPrice, priceDecimals)}
             </div>
             <div className="text-[9px] text-text-muted">Khớp lệnh thị trường BUY</div>
           </div>
@@ -133,11 +153,26 @@ export function ForexTradeDesk({ pair, base, quote, price, changePercent }: Prop
           </div>
         </div>
 
+        {setupGrade && (
+          <div className="flex items-center justify-between rounded-md border border-border-subtle/70 bg-surface-elevated/40 px-2 py-1 text-[10px]">
+            <span className="text-text-muted">Precision Sizing:</span>
+            {setupGrade === "NO_TRADE" ? (
+              <span className="font-semibold text-warning">WAIT / LỌC · Chưa khuyến nghị mở vị thế</span>
+            ) : (
+              <span className="font-semibold text-positive">
+                Grade {setupGrade} · Khuyến nghị {recommendedSizeMultiplier ?? 1}x size
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Position Size / Lot Selector */}
         <div className="panel-inset p-2 space-y-1.5">
           <div className="flex items-center justify-between text-[9.5px]">
             <span className="font-semibold uppercase tracking-wider text-text-muted">Khối lượng vào lệnh (Lots)</span>
-            <span className="num font-bold text-accent-primary">{(lot * 100_000).toLocaleString()} đơn vị</span>
+            <span className="num font-bold text-accent-primary">
+              {(lot * contractUnitsPerLot).toLocaleString()} {unitLabel}
+            </span>
           </div>
 
           <div className="grid grid-cols-3 gap-1">

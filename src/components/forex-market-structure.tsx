@@ -7,6 +7,8 @@ import { TechnicalPanel } from "@/components/technical-panel";
 import { MtfBiasPanel } from "@/components/mtf-bias-panel";
 import { QuantTerminalPanel } from "@/components/quant/quant-terminal-panel";
 import { IctSmcCockpit } from "@/components/quant/ict-smc-cockpit";
+import { getPriceDecimals } from "@/lib/engines/asset-precision";
+import type { PrecisionTradeSetup } from "@/lib/engines/fx-crypto-precision-engine";
 import { Layers } from "lucide-react";
 
 export type StructureTab = "ms" | "quant" | "ict" | "smc" | "vsa";
@@ -21,6 +23,7 @@ export function MarketStructurePanel({
   cur,
   series,
   assetType = "forex",
+  serverPrecision,
 }: {
   tab: StructureTab;
   onTab: (t: StructureTab) => void;
@@ -31,8 +34,11 @@ export function MarketStructurePanel({
   cur: ForexRow | { price?: number | null; changePercent?: number | null; high?: number | null; low?: number | null } | null;
   series: OhlcvBar[];
   assetType?: "forex" | "crypto";
+  serverPrecision?: PrecisionTradeSetup | null;
 }) {
   const structureNotes = useMemo(() => buildStructureNotes(series, tech), [series, tech]);
+  const refPrice = (cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close) ?? 1;
+  const resolvedDigits = getPriceDecimals(refPrice, pair, assetType === "forex" ? "FOREX" : "CRYPTO");
 
   const tabs: { id: StructureTab; label: string }[] = [
     { id: "ms", label: "Market Structure" },
@@ -98,7 +104,8 @@ export function MarketStructurePanel({
               currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
               assetType={assetType}
               tech={tech}
-              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+              digits={resolvedDigits}
+              serverPrecision={serverPrecision}
             />
           </div>
         )}
@@ -110,7 +117,7 @@ export function MarketStructurePanel({
               series={series}
               currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
               assetType={assetType}
-              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+              digits={resolvedDigits}
             />
             <MtfBiasPanel symbol={pair} assetType={assetType} chartTimeframe={interval} />
           </div>
@@ -123,7 +130,7 @@ export function MarketStructurePanel({
               series={series}
               currentPrice={cur && "price" in cur && cur.price != null ? cur.price : series[series.length - 1]?.close}
               assetType={assetType}
-              digits={assetType === "forex" ? (pair.includes("JPY") ? 3 : 5) : 2}
+              digits={resolvedDigits}
             />
             <TechnicalPanel tech={tech} patterns={patterns} ticker={cur} variant="stacked" />
           </div>

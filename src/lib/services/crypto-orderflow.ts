@@ -1,7 +1,10 @@
 import "server-only";
 import { buildMeta } from "../freshness";
 import * as binance from "../providers/binance";
-import { analyzeScalp } from "../engines/scalp";
+import { analyzeScalpMulti } from "../engines/scalp";
+import { evaluateCryptoShield } from "../engines/crypto-news-shield";
+import type { SetupGrade } from "../engines/fx-crypto-precision-engine";
+import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import type { Meta } from "../types";
 
 export interface OrderFlowLevel {
@@ -49,9 +52,17 @@ export interface CryptoOrderFlow {
     direction: "BUY" | "SELL" | "NEUTRAL";
     confidencePct: number;
     strength: number;
+    grade?: SetupGrade;
+    expectancyR?: number;
+    entryMode?: string;
     entry: number | null;
     stopLoss: number | null;
     takeProfit: number | null;
+    tp1?: number | null;
+    tp2?: number | null;
+    tp3?: number | null;
+    netRiskReward?: number | null;
+    vetoReasons?: string[];
     evidence: string[];
   };
   leveragePlans: LeveragePlan[];
@@ -105,11 +116,15 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return null;
 
   try {
-    const [book, trades, klines, ticker] = await Promise.all([
+    const [book, trades, klines, klines15m, klines1h, ticker, funding, calendarEvents] = await Promise.all([
       binance.getOrderBook(symbol, 20),
       binance.getAggTrades(symbol, 100),
       binance.getKlines(symbol, "5m", 120).catch(() => null),
+      binance.getKlines(symbol, "15m", 100).catch(() => null),
+      binance.getKlines(symbol, "1h", 60).catch(() => null),
       binance.getSpotTicker(symbol).catch(() => null),
+      binance.getFundingRate(symbol).catch(() => null),
+      getGlobalMacroShieldEvents().catch(() => []),
     ]);
 
     let bidTotal = 0;
@@ -157,18 +172,65 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
     let direction: "BUY" | "SELL" | "NEUTRAL" = "NEUTRAL";
     let confidencePct = 40;
     let strength = 0;
+    let grade: SetupGrade | undefined;
+    let expectancyR: number | undefined;
+    let entryMode: string | undefined;
     let entry: number | null = mid;
     let stopLoss: number | null = null;
     let takeProfit: number | null = null;
+    let tp1: number | null = null;
+    let tp2: number | null = null;
+    let tp3: number | null = null;
+    let netRiskReward: number | null = null;
+    let vetoReasons: string[] | undefined;
     const evidence: string[] = [];
 
+    let hasPrecision = false;
     if (klines && klines.length >= 60) {
-      const scalp = analyzeScalp(klines, {
-        timeframe: "5m",
+      const kLen = klines.length;
+      const recent5mPct =
+        kLen >= 2 && klines[kLen - 2]!.close > 0
+          ? ((klines[kLen - 1]!.close - klines[kLen - 2]!.close) / klines[kLen - 2]!.close) * 100
+          : 0;
+      const shield = evaluateCryptoShield({
         symbol,
-        quoteVolume24h: ticker ? Number(ticker.quoteVolume) : null,
+        fundingRate: funding?.fundingRate ?? 0.0001,
+        recentPriceChangePct5m: recent5mPct,
+        calendarEvents,
       });
-      if (scalp) {
+
+      const scalp = analyzeScalpMulti({
+        symbol,
+        barsM15: klines15m && klines15m.length >= 30 ? klines15m : klines,
+        barsM5: klines,
+        barsH1: klines1h && klines1h.length >= 20 ? klines1h : null,
+        quoteVolume24h: ticker ? Number(ticker.quoteVolume) : null,
+        fundingRate: funding?.fundingRate ?? null,
+        spreadPct: spreadBps / 100,
+        orderBookImbalance: Math.round(imbalance * 100),
+        isLockout: shield.isLockout,
+        lockoutReason: shield.warningMessage,
+      });
+
+      if (scalp?.precision) {
+        hasPrecision = true;
+        const p = scalp.precision;
+        grade = p.grade;
+        expectancyR = p.expectancyR;
+        entryMode = p.entryMode;
+        vetoReasons = p.vetoReasons;
+        netRiskReward = p.netRiskReward;
+        tp1 = p.tp1;
+        tp2 = p.tp2;
+        tp3 = p.tp3;
+        strength = scalp.strength;
+        direction = p.grade === "NO_TRADE" ? "NEUTRAL" : p.direction;
+        confidencePct = p.calibratedWinRatePct;
+        entry = p.entry ?? scalp.primarySetup?.entry ?? mid;
+        stopLoss = p.stopLoss ?? scalp.primarySetup?.stopLoss ?? scalp.invalidation;
+        takeProfit = p.tp2 ?? scalp.primarySetup?.takeProfit ?? null;
+        evidence.push(...(scalp.evidence ?? []).slice(0, 3));
+      } else if (scalp) {
         strength = scalp.strength;
         if (scalp.direction === "watch-long") direction = "BUY";
         else if (scalp.direction === "watch-short") direction = "SELL";
@@ -195,7 +257,7 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
       }
     }
 
-    if (direction === "NEUTRAL") {
+    if (!hasPrecision && direction === "NEUTRAL") {
       if (imbalance > 0.25 && flowBias === "buy") {
         direction = "BUY";
         confidencePct = Math.round(35 + imbalance * 40);
@@ -233,9 +295,17 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
         direction,
         confidencePct,
         strength,
+        grade,
+        expectancyR,
+        entryMode,
         entry,
         stopLoss,
         takeProfit,
+        tp1,
+        tp2,
+        tp3,
+        netRiskReward,
+        vetoReasons,
         evidence,
       },
       leveragePlans,

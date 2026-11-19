@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useApi } from "@/lib/hooks";
-import { Badge, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, priceDigits, Unavailable } from "@/components/ui";
-import { BookOpen, Activity, Gauge, ArrowUpRight, ArrowDownRight, Zap } from "lucide-react";
+import { Badge, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
+import { getPriceDecimals } from "@/lib/engines/asset-precision";
+import { BookOpen, Activity, Gauge, ArrowUpRight, ArrowDownRight, ShieldAlert, Zap } from "lucide-react";
 import type { Meta } from "@/lib/types";
 
 interface Level {
@@ -51,9 +52,17 @@ interface OrderFlowData {
     direction: "BUY" | "SELL" | "NEUTRAL";
     confidencePct: number;
     strength: number;
+    grade?: "A+" | "A" | "B" | "NO_TRADE";
+    expectancyR?: number;
+    entryMode?: string;
     entry: number | null;
     stopLoss: number | null;
     takeProfit: number | null;
+    tp1?: number | null;
+    tp2?: number | null;
+    tp3?: number | null;
+    netRiskReward?: number | null;
+    vetoReasons?: string[];
     evidence: string[];
   };
   leveragePlans: LeveragePlan[];
@@ -157,10 +166,54 @@ function DeskBody({
   meta: Meta | null;
   mode?: "all" | "orderflow" | "leverage";
 }) {
-  const digits = priceDigits(data.mid);
+  const [slMode, setSlMode] = useState<"structural" | "leverage">("structural");
+  const digits = getPriceDecimals(data.mid, data.symbol, "CRYPTO");
   const maxQty = Math.max(...data.bids.map((b) => b.qty), ...data.asks.map((a) => a.qty), 1e-12);
   const sig = data.signal;
   const sigTone = sig.direction === "BUY" ? "up" : sig.direction === "SELL" ? "down" : "neutral";
+
+  const hasStructuralPlan =
+    sig.entry != null &&
+    sig.stopLoss != null &&
+    (sig.tp2 ?? sig.takeProfit) != null &&
+    sig.direction !== "NEUTRAL";
+  const effectivePlan = useMemo(() => {
+    if (slMode === "structural" && hasStructuralPlan && sig.entry != null && sig.stopLoss != null) {
+      const e = sig.entry;
+      const sl = sig.stopLoss;
+      const tp2 = (sig.tp2 ?? sig.takeProfit)!;
+      const isLong = sig.direction !== "SELL";
+      const stopDist = Math.abs(e - sl);
+      const rewardDist = Math.abs(tp2 - e);
+      const liq =
+        leverage <= 1
+          ? null
+          : isLong
+            ? e * (1 - 0.9 / leverage)
+            : e * (1 + 0.9 / leverage);
+      return {
+        leverage,
+        entry: e,
+        stopLoss: sl,
+        takeProfit: tp2,
+        stopDistancePct: e > 0 ? (stopDist / e) * 100 : 0,
+        rewardDistancePct: e > 0 ? (rewardDist / e) * 100 : 0,
+        liquidationEst: liq,
+        riskReward: sig.netRiskReward ?? (stopDist > 0 ? Number((rewardDist / stopDist).toFixed(2)) : 0),
+        tp1: sig.tp1 ?? e + (tp2 - e) * 0.55,
+        tp2,
+        tp3: sig.tp3 ?? e + (tp2 - e) * 1.5,
+        note: `SL Cấu trúc Precision (${sig.grade ?? "B"}) · giữ nguyên khi chỉnh đòn bẩy`,
+      };
+    }
+    if (!plan) return null;
+    return {
+      ...plan,
+      tp1: plan.entry + (plan.takeProfit - plan.entry) * 0.6,
+      tp2: plan.takeProfit,
+      tp3: plan.entry + (plan.takeProfit - plan.entry) * 1.6,
+    };
+  }, [slMode, hasStructuralPlan, sig, plan, leverage]);
 
   const totalTaker = Math.max(1, data.buyVolumeQuote + data.sellVolumeQuote);
   const buyTakerPct = Math.round((data.buyVolumeQuote / totalTaker) * 100);
@@ -176,13 +229,33 @@ function DeskBody({
           {/* Signal & Core metrics grid */}
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
             <div className="panel-inset p-2">
-              <div className="text-[9px] uppercase tracking-wider text-text-muted">Tín hiệu Desk</div>
-              <div className="mt-0.5 flex items-center gap-1.5">
+              <div className="flex items-center justify-between gap-1 text-[9px] uppercase tracking-wider text-text-muted">
+                <span>Tín hiệu Desk</span>
+                {sig.grade && (
+                  <span
+                    className={`font-bold ${
+                      sig.grade === "A+" || sig.grade === "A"
+                        ? "text-positive"
+                        : sig.grade === "B"
+                          ? "text-warning"
+                          : "text-text-muted"
+                    }`}
+                  >
+                    {sig.grade === "NO_TRADE" ? "LỌC" : sig.grade}
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                 <Badge tone={sigTone}>
                   <span className="font-bold">{sig.direction}</span>
                 </Badge>
                 <span className="num text-[12.5px] font-semibold text-text-primary">{sig.confidencePct}%</span>
               </div>
+              {sig.expectancyR != null && sig.grade && sig.grade !== "NO_TRADE" && (
+                <div className="mt-0.5 text-[9px] text-positive">
+                  E[R] {sig.expectancyR >= 0 ? `+${sig.expectancyR}R` : `${sig.expectancyR}R`}
+                </div>
+              )}
             </div>
             <div className="panel-inset p-2">
               <div className="text-[9px] uppercase tracking-wider text-text-muted">Điểm dòng tiền</div>
@@ -220,6 +293,13 @@ function DeskBody({
               <div className="bg-negative transition-all duration-300" style={{ width: `${sellTakerPct}%` }} />
             </div>
           </div>
+
+          {sig.grade === "NO_TRADE" && sig.vetoReasons && sig.vetoReasons.length > 0 && (
+            <div className="flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-[10px] text-text-secondary">
+              <ShieldAlert className="mt-0.5 size-3 shrink-0 text-warning" />
+              <span className="line-clamp-2">{sig.vetoReasons[0]}</span>
+            </div>
+          )}
 
           {/* Orderbook Bids/Asks */}
           <div>
@@ -294,11 +374,22 @@ function DeskBody({
       {showLeverage && (
         <div className="space-y-2">
           <div className="rounded-lg border border-border-subtle bg-surface-elevated/40 p-2.5">
-            <div className="mb-1.5 flex items-center justify-between">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1.5">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-secondary">
                 <Gauge className="size-3.5 text-accent-primary" /> Mức đòn bẩy giao dịch
               </span>
-              <span className="num text-[15px] font-bold text-accent-primary">{leverage}x</span>
+              <div className="flex items-center gap-1.5">
+                {hasStructuralPlan && (
+                  <button
+                    type="button"
+                    onClick={() => setSlMode((m) => (m === "structural" ? "leverage" : "structural"))}
+                    className="rounded border border-border-subtle bg-surface-primary px-1.5 py-0.5 text-[9.5px] font-semibold text-accent-primary hover:bg-surface-elevated"
+                  >
+                    {slMode === "structural" ? "🛡 SL Cấu trúc" : "⚡ SL theo đòn bẩy"}
+                  </button>
+                )}
+                <span className="num text-[15px] font-bold text-accent-primary">{leverage}x</span>
+              </div>
             </div>
             <input
               type="range"
@@ -322,47 +413,43 @@ function DeskBody({
               ))}
             </div>
 
-            {plan && (
+            {effectivePlan && (
               <div className="mt-2 space-y-1.5">
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                  <Metric label="Điểm Entry" value={fmtNum(plan.entry, digits)} tone="neutral" />
+                  <Metric label="Điểm Entry" value={fmtNum(effectivePlan.entry, digits)} tone="neutral" />
                   <Metric
-                    label="Stop Loss"
-                    value={fmtNum(plan.stopLoss, digits)}
+                    label={slMode === "structural" && hasStructuralPlan ? "SL Cấu trúc" : "Stop Loss"}
+                    value={fmtNum(effectivePlan.stopLoss, digits)}
                     tone="down"
-                    hint={`-${plan.stopDistancePct.toFixed(2)}%`}
+                    hint={`-${effectivePlan.stopDistancePct.toFixed(2)}%`}
                   />
                   <Metric
                     label="Take Profit"
-                    value={fmtNum(plan.takeProfit, digits)}
+                    value={fmtNum(effectivePlan.takeProfit, digits)}
                     tone="up"
-                    hint={`+${plan.rewardDistancePct.toFixed(2)}%`}
+                    hint={`+${effectivePlan.rewardDistancePct.toFixed(2)}%`}
                   />
                   <Metric
                     label="Thanh lý ước tính"
-                    value={plan.liquidationEst != null ? fmtNum(plan.liquidationEst, digits) : "—"}
+                    value={effectivePlan.liquidationEst != null ? fmtNum(effectivePlan.liquidationEst, digits) : "—"}
                     tone="down"
-                    hint={`R:R 1:${plan.riskReward.toFixed(1)}`}
+                    hint={`R:R 1:${effectivePlan.riskReward.toFixed(2)}`}
                   />
                 </div>
 
                 {/* Multi-Target Matrix */}
                 <div className="grid grid-cols-3 gap-1 pt-1 border-t border-border-subtle/50 text-[9.5px]">
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP1 (1:1.5): </span>
-                    <strong className="num text-positive">
-                      {fmtNum(plan.entry + (plan.takeProfit - plan.entry) * 0.6, digits)}
-                    </strong>
+                    <span className="text-text-muted">TP1 (50%+BE): </span>
+                    <strong className="num text-positive">{fmtNum(effectivePlan.tp1, digits)}</strong>
                   </div>
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP2 (1:2.5): </span>
-                    <strong className="num text-positive">{fmtNum(plan.takeProfit, digits)}</strong>
+                    <span className="text-text-muted">TP2 (30%): </span>
+                    <strong className="num text-positive">{fmtNum(effectivePlan.tp2, digits)}</strong>
                   </div>
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP3 (1:4.0): </span>
-                    <strong className="num text-positive">
-                      {fmtNum(plan.entry + (plan.takeProfit - plan.entry) * 1.6, digits)}
-                    </strong>
+                    <span className="text-text-muted">TP3 (20%): </span>
+                    <strong className="num text-positive">{fmtNum(effectivePlan.tp3, digits)}</strong>
                   </div>
                 </div>
               </div>

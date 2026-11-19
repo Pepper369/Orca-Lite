@@ -3,9 +3,22 @@ import { buildMeta } from "../freshness";
 import { getYahooChart, yahooSymbolForPair, yahooIntervalFor } from "../providers/yahoo";
 import { validateBars, logQualityEvent } from "../quality";
 import { analyzeForexScalp, type ForexScalpSignal } from "../engines/forex-scalp";
+import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
+import { getForexMarkets } from "./forex";
 import type { Meta, OhlcvBar } from "../types";
 import type { ChartCandle } from "../chart-const";
+
+const FOREX_SCALP_ALIAS: Record<string, string> = {
+  GOLD: "XAUUSD",
+  XAU: "XAUUSD",
+  SILVER: "XAGUSD",
+  XAG: "XAGUSD",
+  WTI: "USOIL",
+  WTIUSD: "USOIL",
+  BRENT: "UKOIL",
+  BRENTUSD: "UKOIL",
+};
 
 function toBars(candles: ChartCandle[]): OhlcvBar[] {
   return candles.map((c) => ({
@@ -39,23 +52,53 @@ export interface ForexScalpResult {
 export async function buildForexScalpSignal(
   pairRaw: string,
 ): Promise<{ result: ForexScalpResult; meta: Meta } | null> {
-  const pair = pairRaw.toUpperCase().replace("/", "").replace("-", "");
-  if (!/^[A-Z]{6,7}$/.test(pair)) return null;
+  const cleanRaw = pairRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const pair = FOREX_SCALP_ALIAS[cleanRaw] ?? cleanRaw;
+  if (!/^[A-Z0-9]{5,10}$/.test(pair)) return null;
 
   try {
     const { cached } = await import("../cache");
-    const cacheRes = await cached<{ result: ForexScalpResult; meta: Meta }>(`forex:scalp:${pair}`, {
+    const cacheRes = await cached<{ result: ForexScalpResult; meta: Meta }>(`forex:scalp:v2:${pair}`, {
       ttlMs: 15_000,
       staleMs: 120_000,
       softSwr: true,
       producer: async () => {
-        const [h1, m15, m5, m1, calendarEvents] = await Promise.all([
+        const marketsBudget = Promise.race([
+          getForexMarkets().catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 2_500)),
+        ]);
+        const [h1, m15, m5, m1, calendarEvents, marketsRes] = await Promise.all([
           fetchTf(pair, "1h", 80),
           fetchTf(pair, "15m", 120),
           fetchTf(pair, "5m", 200),
           fetchTf(pair, "1m", 120),
           getGlobalMacroShieldEvents().catch(() => []),
+          marketsBudget,
         ]);
+
+        let csmBaseMinusQuote: number | null = null;
+        if (marketsRes?.data?.rows?.length) {
+          const csmInputs: PairPriceInput[] = marketsRes.data.rows
+            .filter((r) => r.price > 0)
+            .map((r) => ({
+              pair: r.pair,
+              price: r.price,
+              changePercent: r.changePercent ?? 0,
+            }));
+          if (csmInputs.length >= 4) {
+            const csm = calculateCurrencyStrengthMatrix(csmInputs);
+            const scoreMap = new Map<string, number>(csm.scores.map((s) => [s.currency, s.score]));
+            const baseCurr = pair.slice(0, 3);
+            const quoteCurr = pair.length >= 6 ? pair.slice(3, 6) : "USD";
+            const baseScore = scoreMap.get(baseCurr);
+            const quoteScore = scoreMap.get(quoteCurr);
+            if (baseScore != null && quoteScore != null) {
+              csmBaseMinusQuote = Number((baseScore - quoteScore).toFixed(1));
+            } else if ((baseCurr === "XAU" || pair.includes("OIL")) && quoteScore != null) {
+              csmBaseMinusQuote = Number((5.0 - quoteScore).toFixed(1));
+            }
+          }
+        }
 
         let barsM5 = m5 ?? m15;
         if (!barsM5 || barsM5.length < 25) {
@@ -89,6 +132,7 @@ export async function buildForexScalpSignal(
           barsM1: m1 && m1.length >= 25 ? validateBars(m1).cleaned : null,
           barsH1,
           calendarEvents,
+          csmBaseMinusQuote,
         });
         if (!signal) {
           throw new Error("engine could not compute forex scalp signal");

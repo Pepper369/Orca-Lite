@@ -22,6 +22,7 @@ import {
   analyzeIctSmcLiquidity,
   type IctSmcAnalysisResult,
 } from "@/lib/engines/ict-smc-liquidity-engine";
+import { getPriceDecimals } from "@/lib/engines/asset-precision";
 
 interface IctSmcCockpitProps {
   symbol: string;
@@ -36,16 +37,19 @@ export function IctSmcCockpit({
   series,
   currentPrice,
   assetType = "forex",
-  digits = assetType === "forex" ? 5 : 2,
+  digits: digitsProp,
 }: IctSmcCockpitProps) {
+  const refPrice = currentPrice ?? series[series.length - 1]?.close ?? 1;
+  const precisionAssetType = assetType === "crypto" ? "CRYPTO" : assetType === "stock" ? "STOCK" : "FOREX";
+  const digits = digitsProp ?? getPriceDecimals(refPrice, symbol, precisionAssetType);
   const analysis: IctSmcAnalysisResult = useMemo(() => {
     return analyzeIctSmcLiquidity({
       symbol,
       bars: series,
       currentPrice,
-      assetType: assetType === "crypto" ? "CRYPTO" : assetType === "stock" ? "STOCK" : "FOREX",
+      assetType: precisionAssetType,
     });
-  }, [symbol, series, currentPrice, assetType]);
+  }, [symbol, series, currentPrice, precisionAssetType]);
 
   const {
     bias,
@@ -181,7 +185,7 @@ export function IctSmcCockpit({
                       {lastSweep.side === "BUY_SIDE_SWEPT" ? "Quét sạch BSL (Đỉnh)" : "Quét sạch SSL (Đáy)"}
                     </span>
                     <span className="text-[10px] text-muted-foreground font-semibold">
-                      Độ sâu: {lastSweep.sweepDepthPipsOrPct} pips
+                      Độ sâu: {lastSweep.sweepDepthPipsOrPct} {assetType === "crypto" ? "%" : "pips"}
                     </span>
                   </div>
                   <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">

@@ -68,8 +68,21 @@ const DIR_UI: Record<string, { label: string; tone: "up" | "down" | "neutral" }>
   neutral: { label: "QUAN SAT", tone: "neutral" },
 };
 
-export function ScalpPanel({ symbol }: { symbol: string }) {
-  const [tf, setTf] = useState<(typeof TF)[number]>("5m");
+export function ScalpPanel({
+  symbol,
+  tf: tfProp,
+  onTfChange,
+}: {
+  symbol: string;
+  tf?: "1m" | "5m" | "15m";
+  onTfChange?: (next: "1m" | "5m" | "15m") => void;
+}) {
+  const [internalTf, setInternalTf] = useState<(typeof TF)[number]>("5m");
+  const tf = tfProp ?? internalTf;
+  const setTf = (next: (typeof TF)[number]) => {
+    if (onTfChange) onTfChange(next);
+    else setInternalTf(next);
+  };
   const { data, meta, isLoading, isValidating, mutate } = useApi<ScalpResult>(
     `/api/v1/crypto/${encodeURIComponent(symbol)}/scalp?tf=${tf}`,
     { refreshInterval: 15_000, keepPreviousData: true },
