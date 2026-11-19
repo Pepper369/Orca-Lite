@@ -21,6 +21,7 @@ const DerivativesPage = lazy(() => import("@/app/derivatives/page"));
 const MacroEconomicPage = lazy(() => import("@/app/macro-economic/page"));
 const CurrencyInterestRatePage = lazy(() => import("@/app/currency-interest-rate/page"));
 const QuantPage = lazy(() => import("@/app/quant/page"));
+const CopyTradePage = lazy(() => import("@/app/copytrade/page"));
 const EarningsPage = lazy(() => import("@/app/earnings/page"));
 const HeatmapPage = lazy(() => import("@/app/heatmap/page"));
 const PortfolioPage = lazy(() => import("@/app/portfolio/page"));
@@ -115,6 +116,8 @@ export function AppRouter() {
     content = <CurrencyInterestRatePage />;
   } else if (root === "quant") {
     content = <QuantPage />;
+  } else if (root === "copytrade") {
+    content = <CopyTradePage />;
   } else if (root === "earnings") {
     content = <EarningsPage />;
   } else if (root === "heatmap") {
