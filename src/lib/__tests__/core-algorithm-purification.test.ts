@@ -466,4 +466,87 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
     assert.equal(multiSector.horizonLeaders.SHORT_1_2W[0], "Chứng khoán");
     assert.equal(multiSector.horizonLeaders.LONG_6M_PLUS[0], "Công nghệ thông tin");
   });
+
+  it("Unified TA Kernel Consistency & 100-Stock Precomputed Pipeline Speedup", async () => {
+    const {
+      buildPrecomputedTaBundle,
+      calcRsiScalar,
+      calcMacdSnapshot,
+      calcBollingerSnapshot,
+      calcMfiScalar,
+    } = await import("../engines/unified-ta-kernel");
+
+    const bars = makeBars(120, 50, 1_200_000);
+    const bundle = buildPrecomputedTaBundle(bars);
+
+    assert.equal(bundle.closes.length, 120);
+    assert.equal(bundle.sma10Series.length, 120);
+    assert.equal(bundle.sma20Series.length, 120);
+    assert.equal(bundle.sma50Series.length, 120);
+    assert.equal(bundle.volSma20Series.length, 120);
+    assert.ok(bundle.atr14 != null && bundle.atr14 > 0);
+
+    const rsiVal = calcRsiScalar(bundle.closes, 14);
+    const macdSnap = calcMacdSnapshot(bundle.closes, 12, 26, 9);
+    const bbSnap = calcBollingerSnapshot(bundle.closes, 20, 2);
+    const mfiVal = calcMfiScalar(bundle.highs, bundle.lows, bundle.closes, bundle.vols, 14);
+
+    assert.ok(rsiVal > 0 && rsiVal <= 100);
+    assert.ok(Number.isFinite(macdSnap.macd) && Number.isFinite(macdSnap.signal));
+    assert.ok(bbSnap.upper > bbSnap.middle && bbSnap.middle > bbSnap.lower);
+    assert.ok(mfiVal >= 0 && mfiVal <= 100);
+
+    // Benchmark 100-stock multi-engine pass: Unshared vs Precomputed Unified Kernel
+    const tUnshared0 = performance.now();
+    for (let s = 0; s < 100; s++) {
+      trainHistoricalPriceAction(bars);
+      evaluateApexQuant({ symbol: `SYM${s}`, bars, currentPrice: bars[bars.length - 1].close });
+    }
+    const unsharedMs = performance.now() - tUnshared0;
+
+    const tShared0 = performance.now();
+    for (let s = 0; s < 100; s++) {
+      const b = buildPrecomputedTaBundle(bars);
+      const trained = trainHistoricalPriceAction(b.ohlcvBars, {
+        precomputed: {
+          closes: b.closes,
+          highs: b.highs,
+          lows: b.lows,
+          sma20: b.sma20Series,
+          sma50: b.sma50Series,
+          volSma20: b.volSma20Series,
+        },
+      });
+      const apex = evaluateApexQuant({
+        symbol: `SYM${s}`,
+        bars: b.ohlcvBars,
+        currentPrice: b.closes[b.closes.length - 1],
+        precomputed: {
+          closes: b.closes,
+          highs: b.highs,
+          lows: b.lows,
+          sma10: b.sma10Series,
+          sma20: b.sma20Series,
+          volSma20: b.volSma20Series,
+          ouZScore: -1.45,
+          ouHalfLife: 12.0,
+          tripleBarrierRiskReward: 2.35,
+          trainedHistorical: trained,
+          isFreshBullishDivergence: false,
+          isDualDivergenceFresh: false,
+        },
+      });
+      assert.equal(apex.ouZScore, -1.45);
+      assert.equal(apex.ouHalfLife, 12.0);
+    }
+    const sharedMs = performance.now() - tShared0;
+
+    console.log(
+      `[UNIFIED KERNEL 100-STOCK BENCHMARK] Unshared=${unsharedMs.toFixed(1)}ms | PrecomputedUnified=${sharedMs.toFixed(1)}ms | Speedup=${(unsharedMs / Math.max(0.1, sharedMs)).toFixed(2)}x`,
+    );
+    assert.ok(
+      sharedMs < unsharedMs,
+      `Expected unified precomputed pipeline (${sharedMs.toFixed(1)}ms) to be faster than unshared (${unsharedMs.toFixed(1)}ms)`,
+    );
+  });
 });

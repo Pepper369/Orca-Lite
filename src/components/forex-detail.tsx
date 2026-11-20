@@ -97,24 +97,6 @@ function sessionLabel(now = new Date()): { name: string; active: boolean }[] {
   ];
 }
 
-function makeSyntheticBars(basePrice: number, count = 48, intervalSec = 3600): OhlcvBar[] {
-  const bars: OhlcvBar[] = [];
-  const now = Date.now();
-  let curr = basePrice * 0.992;
-  for (let i = count; i >= 0; i--) {
-    const time = now - i * intervalSec * 1000;
-    const delta = (Math.sin(i / 4) * 0.003 + (Math.sin(i * 1.2) * 0.002)) * curr;
-    const open = curr;
-    const close = Math.max(0.0001, curr + delta);
-    const high = Math.max(open, close) * 1.0015;
-    const low = Math.min(open, close) * 0.9985;
-    const volume = Math.round(50_000 + Math.abs(Math.sin(i)) * 100_000);
-    bars.push({ time, open, high, low, close, volume });
-    curr = close;
-  }
-  return bars;
-}
-
 export function ForexDetailPage({ pair }: { pair: string }) {
   const [interval, setInterval] = useState<(typeof INTERVALS)[number]>("1h");
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
@@ -205,10 +187,8 @@ export function ForexDetailPage({ pair }: { pair: string }) {
 
   const series = useMemo(() => {
     const rawSeries = data?.series ?? [];
-    if (rawSeries.length >= 5) return rawSeries;
-    if (price != null && price > 0) return makeSyntheticBars(price, 48);
-    return [];
-  }, [data?.series, price]);
+    return rawSeries.length >= 2 ? rawSeries : [];
+  }, [data?.series]);
 
   const seriesHigh = useMemo(() => {
     if (!series.length) return null;

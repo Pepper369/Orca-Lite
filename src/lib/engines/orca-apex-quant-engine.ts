@@ -23,8 +23,9 @@
 import { OhlcvBar, Quote } from "../types";
 import { estimateOrnsteinUhlenbeck, calculateTripleBarrierLevels } from "./advanced-quant-math";
 import { detectCandlePatterns, type DetectedCandlePattern } from "./candlestick-patterns";
-import { detectDivergences, detectFreshSwingDivergence, SHORT_3_4D } from "./divergence";
+import { detectFreshSwingDivergence } from "./divergence";
 import { trainHistoricalPriceAction, type HistoricalEdgeMetrics } from "./historical-price-action-trainer";
+import { sma } from "./unified-ta-kernel";
 
 export type ApexQuantCategory =
   | "APEX_SUPER_LEADER"      // 85 - 99: Siêu Đảo Chiều Chân Sóng Tối Thượng
@@ -55,6 +56,25 @@ export interface BottomReversalMetrics {
   divergenceFreshnessBars: number | null;
 }
 
+export interface ApexPrecomputedContext {
+  closes?: number[];
+  highs?: number[];
+  lows?: number[];
+  volumes?: number[];
+  sma10?: (number | null)[];
+  sma20?: (number | null)[];
+  volSma20?: (number | null)[];
+  atrPct?: number;
+  ouZScore?: number | null;
+  ouHalfLife?: number | null;
+  tripleBarrierRiskReward?: number | null;
+  trainedHistorical?: HistoricalEdgeMetrics;
+  topBullCandle?: DetectedCandlePattern | null;
+  isFreshBullishDivergence?: boolean;
+  isDualDivergenceFresh?: boolean;
+  divergenceFreshnessBars?: number | null;
+}
+
 export interface ApexQuantInput {
   symbol?: string;
   bars: OhlcvBar[];
@@ -73,6 +93,7 @@ export interface ApexQuantInput {
   isAbsorptionSpike?: boolean | null;
   isVsaNoSupplyTest?: boolean | null;
   isPrecisionMtfAligned?: boolean | null;
+  precomputed?: ApexPrecomputedContext;
 }
 
 export interface ApexQuantResult {
@@ -112,27 +133,12 @@ export interface ApexQuantResult {
 }
 
 /**
- * Calculates Simple Moving Average
- */
-function calculateSMA(series: number[], period: number): (number | null)[] {
-  const res: (number | null)[] = new Array(series.length).fill(null);
-  if (series.length < period) return res;
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += series[i];
-  res[period - 1] = sum / period;
-  for (let i = period; i < series.length; i++) {
-    sum += series[i] - series[i - period];
-    res[i] = sum / period;
-  }
-  return res;
-}
-
-/**
  * Evaluates Bottom Reversal & Sweet Launch Dynamics
  */
 export function analyzeBottomReversal(
   bars: OhlcvBar[],
-  currentPrice: number
+  currentPrice: number,
+  precomputed?: ApexPrecomputedContext,
 ): BottomReversalMetrics {
   const n = bars.length;
   if (n < 20) {
@@ -158,13 +164,13 @@ export function analyzeBottomReversal(
     };
   }
 
-  const closes = bars.map(b => b.close);
-  const highs = bars.map(b => b.high);
-  const lows = bars.map(b => b.low);
-  const volumes = bars.map(b => b.volume);
+  const closes = precomputed?.closes ?? bars.map(b => b.close);
+  const highs = precomputed?.highs ?? bars.map(b => b.high);
+  const lows = precomputed?.lows ?? bars.map(b => b.low);
+  const volumes = precomputed?.volumes ?? bars.map(b => b.volume);
 
-  const sma10 = calculateSMA(closes, 10);
-  const sma20 = calculateSMA(closes, 20);
+  const sma10 = precomputed?.sma10 ?? sma(closes, 10);
+  const sma20 = precomputed?.sma20 ?? sma(closes, 20);
 
   // 1. Identify 20-bar lowest low
   let lowestLow20 = Infinity;
@@ -291,8 +297,15 @@ export function analyzeBottomReversal(
     }
   }
 
-  // 6. Fresh Bullish Divergence Detection
-  const freshDiv = detectFreshSwingDivergence(bars, 4);
+  // 6. Fresh Bullish Divergence Detection (Reuse precomputed when available from unified pipeline)
+  const hasPreDiv = precomputed?.isFreshBullishDivergence !== undefined;
+  const freshDiv = hasPreDiv
+    ? {
+        isFreshBullishDivergence: Boolean(precomputed!.isFreshBullishDivergence),
+        isDualDivergenceFresh: Boolean(precomputed!.isDualDivergenceFresh),
+        divergenceFreshnessBars: precomputed!.divergenceFreshnessBars ?? null,
+      }
+    : detectFreshSwingDivergence(bars, 4);
   const isFreshBullishDivergence = freshDiv.isFreshBullishDivergence;
   const isDualDivergenceFresh = freshDiv.isDualDivergenceFresh;
   const divergenceFreshnessBars = freshDiv.divergenceFreshnessBars;
@@ -364,40 +377,51 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   const isSectorLeading = sectorRrgQuadrant === "LEADING";
   const isSectorLagging = sectorRrgQuadrant === "LAGGING";
 
+  const pre = normalized.precomputed;
+
   // 1. Analyze Bottom Reversal Dynamics
-  const rev = analyzeBottomReversal(bars, currentPrice);
+  const rev = analyzeBottomReversal(bars, currentPrice, pre);
 
-  // 2. Rolling Quant Models (Ornstein-Uhlenbeck & Triple-Barrier)
-  const closes = bars.map(b => b.close);
-  const subCloses = closes.slice(Math.max(0, closes.length - 35));
-  const ou = estimateOrnsteinUhlenbeck(subCloses);
-
-  // Approximate ATR % for dynamic volatility
-  let atrPct = 3.0;
-  if (bars.length >= 14) {
-    let trSum = 0;
-    const start = bars.length - 14;
-    for (let i = start; i < bars.length; i++) {
-      const prevC = i > 0 ? bars[i - 1].close : bars[i].close;
-      const tr = Math.max(
-        bars[i].high - bars[i].low,
-        Math.abs(bars[i].high - prevC),
-        Math.abs(bars[i].low - prevC)
-      );
-      trSum += (tr / bars[i].close) * 100;
-    }
-    atrPct = Math.max(1.5, Math.min(8.0, trSum / 14));
+  // 2. Rolling Quant Models (Ornstein-Uhlenbeck & Triple-Barrier — unified with precomputed kernel when available)
+  let ouZScore = pre?.ouZScore ?? null;
+  let ouHalfLife = pre?.ouHalfLife ?? null;
+  if (ouZScore == null || ouHalfLife == null) {
+    const closes = pre?.closes ?? bars.map(b => b.close);
+    const subCloses = closes.slice(Math.max(0, closes.length - 60));
+    const ou = estimateOrnsteinUhlenbeck(subCloses);
+    ouZScore = ou.currentZScore;
+    ouHalfLife = ou.halfLife;
   }
 
-  const tb = calculateTripleBarrierLevels(currentPrice, atrPct, 3.0, 1.3, 12);
-  const tbRR = Number(tb.riskRewardRatio.toFixed(2));
+  let tbRR = pre?.tripleBarrierRiskReward ?? null;
+  if (tbRR == null) {
+    let atrPct = pre?.atrPct ?? 3.0;
+    if (pre?.atrPct == null && bars.length >= 14) {
+      let trSum = 0;
+      const start = bars.length - 14;
+      for (let i = start; i < bars.length; i++) {
+        const prevC = i > 0 ? bars[i - 1].close : bars[i].close;
+        const tr = Math.max(
+          bars[i].high - bars[i].low,
+          Math.abs(bars[i].high - prevC),
+          Math.abs(bars[i].low - prevC)
+        );
+        trSum += (tr / bars[i].close) * 100;
+      }
+      atrPct = Math.max(1.5, Math.min(8.0, trSum / 14));
+    }
+    const tb = calculateTripleBarrierLevels(currentPrice, atrPct, 3.0, 1.3, 12);
+    tbRR = Number(tb.riskRewardRatio.toFixed(2));
+  }
 
-  // 3. Historical Price Action Training
-  const trained = trainHistoricalPriceAction(bars);
+  // 3. Historical Price Action Training (reuse precomputed when supplied by unified pipeline)
+  const trained = pre?.trainedHistorical ?? trainHistoricalPriceAction(bars);
 
-  // 4. Candlestick Pattern & Bullish Divergence Detection
-  const candlePatterns = detectCandlePatterns(bars, { recentBars: 4, reversalOnly: true });
-  const topBullCandle = candlePatterns.find(c => c.type === "bullish") ?? null;
+  // 4. Candlestick Pattern & Bullish Divergence Detection (reuse precomputed when supplied)
+  const topBullCandle =
+    pre?.topBullCandle !== undefined
+      ? pre.topBullCandle
+      : (detectCandlePatterns(bars, { recentBars: 4, reversalOnly: true }).find(c => c.type === "bullish") ?? null);
 
   const hasBullishDivergence = rev.isFreshBullishDivergence;
   const divSummary = rev.isDualDivergenceFresh
@@ -454,12 +478,12 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   // =========================================================================
   let pillar2 = 45;
   // Sweet spot for OU Z-score is [-2.8, -1.0] with stationary half-life [2, 25] bars
-  if (ou.currentZScore <= -1.1 && ou.currentZScore >= -2.8 && ou.halfLife >= 2 && ou.halfLife <= 25) {
+  if (ouZScore <= -1.1 && ouZScore >= -2.8 && ouHalfLife >= 2 && ouHalfLife <= 25) {
     pillar2 += 25;
-    highlights.push(`Quant OU Z-Score ${ou.currentZScore.toFixed(1)} (t½ ${ou.halfLife.toFixed(0)}p)`);
-  } else if (ou.currentZScore < -2.8) {
+    highlights.push(`Quant OU Z-Score ${ouZScore.toFixed(1)} (t½ ${ouHalfLife.toFixed(0)}p)`);
+  } else if (ouZScore < -2.8) {
     pillar2 += 12; // deep dip but slightly higher volatility risk
-  } else if (ou.currentZScore > 0.5) {
+  } else if (ouZScore > 0.5) {
     pillar2 -= 15; // extended above mean
   }
 
@@ -614,8 +638,8 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
       confluenceFlowScore: Math.round(pillar3),
       earlyLaunchScore: Math.round(pillar4),
     },
-    ouZScore: Number(ou.currentZScore.toFixed(2)),
-    ouHalfLife: Number(ou.halfLife.toFixed(1)),
+    ouZScore: Number(ouZScore.toFixed(2)),
+    ouHalfLife: Number(ouHalfLife.toFixed(1)),
     tripleBarrierRiskReward: tbRR,
     historicalWinRatePct: trained.historicalWinRatePct,
     upDownVolRatio: trained.upDownVolRatio,

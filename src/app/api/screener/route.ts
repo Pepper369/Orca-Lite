@@ -1,14 +1,25 @@
-import { NextResponse } from 'next/server';
-import { exec } from 'child_process';
-import util from 'util';
+import { NextResponse } from "next/server";
+import { queryScreenerStocks } from "@/lib/services/screener-snapshot-service";
 
-const execPromise = util.promisify(exec);
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { stdout } = await execPromise('python src/lib/integrations/bridge_screener.py');
-    return NextResponse.json(JSON.parse(stdout));
+    const url = new URL(req.url);
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 40) || 40));
+    const sector = url.searchParams.get("sector") ?? undefined;
+    const res = await queryScreenerStocks({ limit, sector });
+    return NextResponse.json({
+      success: true,
+      data: res.items,
+      total: res.total,
+      meta: res.meta,
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch quant data' }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch unified quant screener data", details: String(error) },
+      { status: 500 },
+    );
   }
 }

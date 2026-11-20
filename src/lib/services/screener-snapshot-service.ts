@@ -16,7 +16,15 @@ import { mapPool } from "../financial/snapshots";
 import type { Meta, Quote } from "../types";
 
 import { batchVnOhlcv } from "./ohlcv-batch";
-import { sma, adx, ttmSqueeze, superTrend, rsi } from "../engines/oscillators";
+import {
+  sma,
+  adx,
+  ttmSqueeze,
+  superTrend,
+  rsi,
+  buildPrecomputedTaBundle,
+  type PrecomputedTaBundle,
+} from "../engines/unified-ta-kernel";
 import { detectChartPatterns } from "../engines/chart-patterns";
 import { detectCandlePatterns } from "../engines/candlestick-patterns";
 import { detectDivergences, SHORT_3_4D } from "../engines/divergence";
@@ -621,40 +629,12 @@ function getScreenerUniverse(): string[] {
   return Array.from(set);
 }
 
-export interface ParsedBars {
-  closes: number[];
-  highs: number[];
-  lows: number[];
-  vols: number[];
-  ohlcvBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[];
-}
+export type ParsedBars = PrecomputedTaBundle;
 
-export function parseBarArrays(bars?: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[]): ParsedBars {
-  const n = bars ? bars.length : 0;
-  const closes: number[] = [];
-  const highs: number[] = [];
-  const lows: number[] = [];
-  const vols: number[] = [];
-  const ohlcvBars: { time: number; open: number; high: number; low: number; close: number; volume: number }[] = [];
-
-  for (let i = 0; i < n; i++) {
-    const b = bars![i];
-    const c = b.close;
-    if (!Number.isFinite(c) || c <= 0) continue;
-    const h = b.high != null && Number.isFinite(b.high) && b.high > 0 ? b.high : c;
-    const l = b.low != null && Number.isFinite(b.low) && b.low > 0 ? b.low : c;
-    const o = b.open != null && Number.isFinite(b.open) && b.open > 0 ? b.open : c;
-    const v = b.volume ?? 0;
-    const t = b.time ?? i;
-
-    closes.push(c);
-    highs.push(h);
-    lows.push(l);
-    if (v > 0) vols.push(v);
-    ohlcvBars.push({ time: t, open: o, high: h, low: l, close: c, volume: v });
-  }
-
-  return { closes, highs, lows, vols, ohlcvBars };
+export function parseBarArrays(
+  bars?: { open?: number; high?: number; low?: number; close: number; volume: number; time?: number }[],
+): ParsedBars {
+  return buildPrecomputedTaBundle(bars);
 }
 
 /**
@@ -720,9 +700,9 @@ function analyzeMaFeatures(parsed: ParsedBars, currentPrice: number | null) {
     };
   }
 
-  const sma10Series = sma(closes, 10);
-  const sma20Series = sma(closes, 20);
-  const sma50Series = sma(closes, 50);
+  const sma10Series = parsed.sma10Series;
+  const sma20Series = parsed.sma20Series;
+  const sma50Series = parsed.sma50Series;
 
   const ma10 = sma10Series[len - 1] ?? null;
   const ma20 = sma20Series[len - 1] ?? null;
@@ -982,8 +962,7 @@ function analyzeTechFeatures(
 
   let maSlope5Pct: number | null = null;
   if (n >= 25 && maRes.ma20 != null) {
-    const pastMa20 = sma(closes.slice(0, n - 5), 20);
-    const pastVal = pastMa20[pastMa20.length - 1];
+    const pastVal = parsed.sma20Series[n - 6];
     if (pastVal && pastVal > 0) {
       maSlope5Pct = Number((((maRes.ma20 - pastVal) / pastVal) * 100).toFixed(2));
     }
@@ -1180,12 +1159,7 @@ export function calculateBuyPointPlan(
     if (Number.isFinite(recentMax)) localResistances.push(recentMax);
   }
 
-  let trSum = 0;
-  const lb = Math.min(14, n - 1);
-  for (let i = n - lb; i < n; i++) {
-    trSum += Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
-  }
-  const atr14 = lb > 0 ? trSum / lb : price * 0.02;
+  const atr14 = parsed.atr14 ?? price * 0.02;
 
   const asym = computeAsymmetricPlan({
     last: price,
@@ -1295,17 +1269,7 @@ function analyzeQuantFeatures(
   const riskMetrics = calculateVaRAndCVaR(returns);
 
   // 3. Dynamic Triple-Barrier Horizons (López de Prado AFML)
-  let trSum = 0;
-  const lookback = Math.min(14, closes.length - 1);
-  for (let i = closes.length - lookback; i < closes.length; i++) {
-    const tr = Math.max(
-      highs[i] - lows[i],
-      Math.abs(highs[i] - closes[i - 1]),
-      Math.abs(lows[i] - closes[i - 1])
-    );
-    trSum += tr;
-  }
-  const atr = lookback > 0 ? trSum / lookback : (p * 0.025);
+  const atr = parsed.atr14 ?? (p * 0.025);
   const atrPct = p > 0 ? (atr / p) * 100 : 2.5;
 
   const tripleBarrier = calculateTripleBarrierLevels(p, atrPct, 3.0, 1.5, 10);
@@ -2964,8 +2928,17 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           foreignSellValBillion: foreignRow?.sellValue ? foreignRow.sellValue / 1_000_000_000 : null,
         });
 
-        // Train and calibrate historical price action (120-bar lookback empirical edge)
-        const trainedHistorical = trainHistoricalPriceAction(parsed.ohlcvBars);
+        // Train and calibrate historical price action (120-bar lookback empirical edge — reuses precomputed SMAs)
+        const trainedHistorical = trainHistoricalPriceAction(parsed.ohlcvBars, {
+          precomputed: {
+            closes: parsed.closes,
+            highs: parsed.highs,
+            lows: parsed.lows,
+            sma20: parsed.sma20Series,
+            sma50: parsed.sma50Series,
+            volSma20: parsed.volSma20Series,
+          },
+        });
 
         // Collect inputs for universe-wide Orca Master Composite percentile ranking
         orcaInputs.push({
@@ -3004,7 +2977,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const isSectorLagging = sectorRrgQuadrant === "LAGGING";
         const sectorResonance = evaluateSectorAlphaResonance(sectorRrgQuadrant);
 
-        // 4. State-of-the-art Apex Quant Confluence & Early Bottom Reversal Engine
+        // 4. State-of-the-art Apex Quant Confluence & Early Bottom Reversal Engine (reuses precomputed kernel features)
         const apexQuant = evaluateApexQuant({
           symbol: sym,
           bars: parsed.ohlcvBars,
@@ -3023,6 +2996,20 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           isAbsorptionSpike: techFeatures.isAbsorptionSpike,
           isVsaNoSupplyTest: techFeatures.isVsaNoSupplyTest,
           isPrecisionMtfAligned: techFeatures.isPrecisionMtfAligned,
+          precomputed: {
+            closes: parsed.closes,
+            highs: parsed.highs,
+            lows: parsed.lows,
+            sma10: parsed.sma10Series,
+            sma20: parsed.sma20Series,
+            volSma20: parsed.volSma20Series,
+            ouZScore: quantFeatures.ouZScore,
+            ouHalfLife: quantFeatures.ouHalfLife,
+            tripleBarrierRiskReward: quantFeatures.tripleBarrierRiskReward,
+            trainedHistorical,
+            isFreshBullishDivergence: techFeatures.hasBullishDivergence,
+            isDualDivergenceFresh: techFeatures.isDualDivergence,
+          },
         });
 
         intermediateEntries.push({

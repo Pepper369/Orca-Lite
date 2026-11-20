@@ -250,57 +250,14 @@ const DEFAULT_UNIVERSE = [
   "STB", "ACB", "DGC", "VCI", "LPB", "PVD", "KDH", "GEX"
 ];
 
+import { ema as kernelEma, rsi as kernelRsi } from "./unified-ta-kernel";
+
 function calculateEMA(prices: number[], period: number): number[] {
-  const ema: number[] = new Array(prices.length).fill(0);
-  if (prices.length < period) return ema;
-
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += prices[i];
-  }
-  ema[period - 1] = sum / period;
-  const multiplier = 2 / (period + 1);
-
-  for (let i = period; i < prices.length; i++) {
-    ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
-  }
-  return ema;
+  return kernelEma(prices, period).map((v) => v ?? 0);
 }
 
 function calculateRSI(closes: number[], period = 14): number[] {
-  const rsi: number[] = new Array(closes.length).fill(50);
-  if (closes.length <= period) return rsi;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  rsi[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      rsi[i] = 100;
-    } else {
-      const rs = avgGain / avgLoss;
-      rsi[i] = 100 - (100 / (1 + rs));
-    }
-  }
-
-  return rsi;
+  return kernelRsi(closes, period).map((v) => v ?? 50);
 }
 
 function formatBarDate(t: number): string {

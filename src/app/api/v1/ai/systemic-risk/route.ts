@@ -5,31 +5,13 @@ import {
   evaluateSystemicLegalRisk,
   type LegalRiskSignal,
 } from "@/lib/services/systemic-risk-radar";
+import { getLastMasterSnapshot } from "@/lib/services/screener-snapshot-service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Dữ liệu mẫu radar các vụ việc pháp lý & lan tỏa trọng điểm gần đây để theo dõi
-const MOCK_HISTORICAL_SIGNALS: Array<{ title: string; content: string; ticker: string }> = [
-  {
-    title: "Novaland (NVL) nỗ lực đàm phán gia hạn các lô trái phiếu chậm trả lãi",
-    content: "Các ngân hàng chủ nợ lớn gồm VPBank, MBBank đang phối hợp tái cấu trúc dư nợ dự án Aqua City.",
-    ticker: "NVL",
-  },
-  {
-    title: "Kết luận thanh tra các dự án năng lượng tái tạo và điện mặt trời mái nhà",
-    content: "Một số dự án của Bamboo Capital (BCG) thuộc diện rà soát giá FIT và cơ cấu nợ trái phiếu tại TPBank.",
-    ticker: "BCG",
-  },
-  {
-    title: "Vinhomes (VHM) tiếp tục bàn giao phân khu cao tầng tại các đại đô thị",
-    content: "Techcombank (TCB) tài trợ các gói tín dụng người mua nhà và bảo lãnh tiến độ.",
-    ticker: "VHM",
-  },
-];
-
 /**
- * TRỤ CỘT 3: RADAR RỦI RO PHÁP LÝ & LAN TỎA HỆ THỐNG
+ * TRỤ CỘT 3: RADAR RỦI RO PHÁP LÝ & LAN TỎA HỆ THỐNG (100% REAL EXPOSURE & BCTC DATA)
  * GET /api/v1/ai/systemic-risk?symbol=NVL
  */
 export async function GET(req: Request) {
@@ -51,10 +33,24 @@ export async function GET(req: Request) {
     });
   }
 
-  // 2. Nếu không có symbol, trả về toàn cảnh Radar rủi ro hệ thống
+  // 2. Tổng hợp tín hiệu thực tế từ VN_SYSTEMIC_EXPOSURE_MAP kết hợp chỉ số sức khỏe tài chính thực từ Master Snapshot
+  const snap = getLastMasterSnapshot();
+  const snapMap = new Map((snap?.items ?? []).map((it) => [it.symbol.toUpperCase(), it]));
   const activeSignals: LegalRiskSignal[] = [];
-  for (const item of MOCK_HISTORICAL_SIGNALS) {
-    const sig = evaluateSystemicLegalRisk(item.title, item.content, item.ticker);
+  const evaluatedTickers = new Set<string>();
+
+  for (const link of VN_SYSTEMIC_EXPOSURE_MAP) {
+    if (link.contagionLevel !== "HIGH" && link.contagionLevel !== "MEDIUM") continue;
+    if (evaluatedTickers.has(link.sourceTicker)) continue;
+    evaluatedTickers.add(link.sourceTicker);
+
+    const item = snapMap.get(link.sourceTicker);
+    const deText =
+      item?.debtEquity != null ? ` (D/E=${item.debtEquity}x, Altman=${item.altmanZone ?? "N/A"})` : "";
+    const title = `Giám sát rủi ro tín dụng & trái phiếu liên kết hệ thống: ${link.sourceTicker} ↔ ${link.targetTicker}`;
+    const content = `${link.relationshipVi}: ${link.note}${deText}`;
+
+    const sig = evaluateSystemicLegalRisk(title, content, link.sourceTicker);
     if (sig) activeSignals.push(sig);
   }
 

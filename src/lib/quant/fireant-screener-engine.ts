@@ -160,48 +160,16 @@ export const TARGET_FIREANT_SCREENERS: FireAntScreenerPreset[] = [
   },
 ];
 
-// Technical math calculations (Wilder RSI & true EMA MACD)
+import {
+  calcRsiScalar,
+  calcMacdSnapshot,
+  calcBollingerSnapshot,
+  calcMfiScalar,
+} from "../engines/unified-ta-kernel";
+
+// Technical math calculations delegated to Unified TA Kernel (Wilder RSI & true firstValid EMA MACD)
 export function calcRsi(values: number[], period = 14): number {
-  if (values.length < period + 1) return 50;
-  let avgGain = 0;
-  let avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = values[i] - values[i - 1];
-    if (diff >= 0) avgGain += diff;
-    else avgLoss -= diff;
-  }
-  avgGain /= period;
-  avgLoss /= period;
-
-  for (let i = period + 1; i < values.length; i++) {
-    const diff = values[i] - values[i - 1];
-    const gain = diff >= 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-  }
-  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
-  const rs = avgGain / avgLoss;
-  return Math.round((100 - 100 / (1 + rs)) * 10) / 10;
-}
-
-function calcEmaSeries(values: number[], period: number): number[] {
-  if (values.length === 0) return [];
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  let sum = 0;
-  const seedLen = Math.min(period, values.length);
-  for (let i = 0; i < seedLen; i++) {
-    sum += values[i];
-    out.push(sum / (i + 1));
-  }
-  let prev = sum / seedLen;
-  out[seedLen - 1] = prev;
-  for (let i = seedLen; i < values.length; i++) {
-    prev = values[i] * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
+  return calcRsiScalar(values, period, 50);
 }
 
 export function calcMacd(values: number[]): {
@@ -210,29 +178,7 @@ export function calcMacd(values: number[]): {
   hist: number;
   crossAbove: boolean;
 } {
-  if (values.length < 26) {
-    return { macd: 0, signal: 0, hist: 0, crossAbove: false };
-  }
-  const ema12 = calcEmaSeries(values, 12);
-  const ema26 = calcEmaSeries(values, 26);
-  const macdLine = values.map((_, idx) => ema12[idx] - ema26[idx]);
-  const signalLine = calcEmaSeries(macdLine, 9);
-
-  const n = values.length;
-  const macdVal = macdLine[n - 1];
-  const signalVal = signalLine[n - 1];
-  const prevMacd = n >= 2 ? macdLine[n - 2] : macdVal;
-  const prevSignal = n >= 2 ? signalLine[n - 2] : signalVal;
-
-  const crossAbove = prevMacd <= prevSignal && macdVal > signalVal;
-  const hist = macdVal - signalVal;
-
-  return {
-    macd: Math.round(macdVal * 100) / 100,
-    signal: Math.round(signalVal * 100) / 100,
-    hist: Math.round(hist * 100) / 100,
-    crossAbove,
-  };
+  return calcMacdSnapshot(values, 12, 26, 9);
 }
 
 export function calcBollingerBands(
@@ -246,28 +192,7 @@ export function calcBollingerBands(
   percentB: number;
   isBreakout: boolean;
 } {
-  if (values.length < period) {
-    const last = values[values.length - 1] || 10000;
-    return { upper: last * 1.05, middle: last, lower: last * 0.95, percentB: 0.5, isBreakout: false };
-  }
-  const slice = values.slice(-period);
-  const mean = slice.reduce((a, b) => a + b, 0) / period;
-  const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-  const sd = Math.sqrt(variance);
-
-  const upper = Math.round(mean + stdDev * sd);
-  const lower = Math.round(mean - stdDev * sd);
-  const current = values[values.length - 1];
-  const percentB = upper !== lower ? Math.round(((current - lower) / (upper - lower)) * 100) / 100 : 0.5;
-  const isBreakout = current >= upper;
-
-  return {
-    upper,
-    middle: Math.round(mean),
-    lower,
-    percentB,
-    isBreakout,
-  };
+  return calcBollingerSnapshot(values, period, stdDev);
 }
 
 export function calcMfi(
@@ -277,19 +202,7 @@ export function calcMfi(
   volumes: number[],
   period = 14
 ): number {
-  if (closes.length < period + 1) return 45;
-  let posMoney = 0;
-  let negMoney = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const tp = (highs[i] + lows[i] + closes[i]) / 3;
-    const prevTp = (highs[i - 1] + lows[i - 1] + closes[i - 1]) / 3;
-    const rawMoney = tp * volumes[i];
-    if (tp >= prevTp) posMoney += rawMoney;
-    else negMoney += rawMoney;
-  }
-  if (negMoney === 0) return 100;
-  const moneyRatio = posMoney / negMoney;
-  return Math.round((100 - 100 / (1 + moneyRatio)) * 10) / 10;
+  return calcMfiScalar(highs, lows, closes, volumes, period, 45);
 }
 
 export interface ScreenerCandidate {

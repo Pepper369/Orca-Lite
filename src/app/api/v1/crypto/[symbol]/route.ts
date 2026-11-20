@@ -66,20 +66,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ symbol: string 
       }
 
       const price = quote?.price ?? 100.0;
-      const now = Date.now();
-      const syntheticBars = Array.from({ length: 48 }, (_, i) => {
-        const time = now - (48 - i) * 3600_000;
-        const delta = Math.sin(i / 3) * (price * 0.012);
-        const p = Math.max(0.00001, price + delta);
-        return {
-          time,
-          open: p,
-          high: p * 1.008,
-          low: p * 0.992,
-          close: p,
-          volume: 250_000,
-        };
-      });
 
       return {
         data: {
@@ -94,14 +80,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ symbol: string 
             changePercent: 0,
             high: price * 1.02,
             low: price * 0.98,
-            volume: 1000000,
-            quoteVolume: 1000000 * price,
-            trades24h: 50000,
+            volume: 0,
+            quoteVolume: 0,
+            trades24h: 0,
             updatedAt: new Date().toISOString(),
           },
           ticker: quote,
-          bars: syntheticBars,
-          klines: syntheticBars,
+          bars: [],
+          klines: [],
           technical: null,
           patterns: [],
           funding: null,

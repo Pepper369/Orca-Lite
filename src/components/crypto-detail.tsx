@@ -111,24 +111,6 @@ function toBars(klines: OhlcvBar[] | unknown[]): OhlcvBar[] {
 }
 
 
-function makeSyntheticBars(basePrice: number, count = 48, intervalSec = 3600): OhlcvBar[] {
-  const bars: OhlcvBar[] = [];
-  const now = Date.now();
-  let curr = basePrice * 0.985;
-  for (let i = count; i >= 0; i--) {
-    const time = now - i * intervalSec * 1000;
-    const delta = (Math.sin(i / 3) * 0.008 + (Math.sin(i * 1.5) * 0.005)) * curr;
-    const open = curr;
-    const close = Math.max(0.000001, curr + delta);
-    const high = Math.max(open, close) * 1.004;
-    const low = Math.min(open, close) * 0.996;
-    const volume = Math.round(150_000 + (Math.abs(Math.sin(i)) * 300_000));
-    bars.push({ time, open, high, low, close, volume });
-    curr = close;
-  }
-  return bars;
-}
-
 export function CryptoDetailPage({ symbol }: { symbol: string }) {
   const { settings } = useSettings();
   const [interval, setInterval] = useState<(typeof INTERVALS)[number]>(
@@ -253,10 +235,8 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
 
   const rawBars = useMemo(() => toBars(data?.klines ?? data?.bars ?? []), [data?.klines, data?.bars]);
   const series = useMemo(() => {
-    if (rawBars.length >= 5) return rawBars;
-    if (price != null && price > 0) return makeSyntheticBars(price, 48);
-    return [];
-  }, [rawBars, price]);
+    return rawBars.length >= 2 ? rawBars : [];
+  }, [rawBars]);
 
   const orderFlow = useMemo(() => deriveOrderFlow(series), [series]);
   const seriesHigh = useMemo(() => {

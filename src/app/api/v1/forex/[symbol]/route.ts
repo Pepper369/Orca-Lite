@@ -96,20 +96,6 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
       }
 
       const price = current?.price ?? 1.0;
-      const now = Date.now();
-      const syntheticSeries = Array.from({ length: 48 }, (_, i) => {
-        const time = now - (48 - i) * 3600_000;
-        const delta = Math.sin(i / 3) * (price * 0.004);
-        const p = Math.max(0.0001, price + delta);
-        return {
-          time,
-          open: p,
-          high: p * 1.002,
-          low: p * 0.998,
-          close: p,
-          volume: 50_000,
-        };
-      });
 
       return {
         data: {
@@ -127,7 +113,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
             low: price * 0.995,
             updatedAt: new Date().toISOString(),
           },
-          series: syntheticSeries,
+          series: [],
           technical: null,
           patterns: [],
           referenceNote: current ? "Khôi phục tỷ giá qua bộ đệm realtime Biquote/Yahoo" : "Đang kết nối lại nguồn FX/metals",

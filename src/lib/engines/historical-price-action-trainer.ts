@@ -53,23 +53,7 @@ export interface HistoricalEdgeMetrics {
   verdictVi: string;               // Concise Vietnamese operational verdict
 }
 
-/**
- * Calculates simple moving average array
- */
-function calculateSMA(series: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = new Array(series.length).fill(null);
-  if (series.length < period) return result;
-
-  let sum = 0;
-  for (let i = 0; i < period; i++) sum += series[i];
-  result[period - 1] = sum / period;
-
-  for (let i = period; i < series.length; i++) {
-    sum += series[i] - series[i - period];
-    result[i] = sum / period;
-  }
-  return result;
-}
+import { sma } from "./unified-ta-kernel";
 
 /**
  * Analyzes rolling 50-bar Up/Down Volume Accumulation Ratio
@@ -108,6 +92,15 @@ export function trainHistoricalPriceAction(
     targetProfitPct?: number; // default: 10%
     stopLossPct?: number;     // default: 6%
     maxHoldingBars?: number;  // default: 15 bars
+    precomputed?: {
+      closes?: number[];
+      highs?: number[];
+      lows?: number[];
+      volumes?: number[];
+      sma20?: (number | null)[];
+      sma50?: (number | null)[];
+      volSma20?: (number | null)[];
+    };
   } = {}
 ): HistoricalEdgeMetrics {
   const targetProfitPct = options.targetProfitPct ?? 10;
@@ -128,13 +121,15 @@ export function trainHistoricalPriceAction(
     };
   }
 
-  const closes = bars.map(b => b.close);
-  const highs = bars.map(b => b.high);
-  const lows = bars.map(b => b.low);
-  const volumes = bars.map(b => b.volume);
+  const pre = options.precomputed;
+  const closes = pre?.closes ?? bars.map(b => b.close);
+  const highs = pre?.highs ?? bars.map(b => b.high);
+  const lows = pre?.lows ?? bars.map(b => b.low);
+  const volumes = pre?.volumes ?? bars.map(b => b.volume);
 
-  const sma20 = calculateSMA(closes, 20);
-  const sma50 = calculateSMA(closes, 50);
+  const sma20 = pre?.sma20 ?? sma(closes, 20);
+  const sma50 = pre?.sma50 ?? sma(closes, 50);
+  const volSma20 = pre?.volSma20 ?? sma(volumes, 20);
 
   // 1. Simulate historical setup executions (Breakout, MA bounce, Pocket Pivot)
   interface SimTrade {
@@ -157,10 +152,8 @@ export function trainHistoricalPriceAction(
     const prevClose = closes[i - 1];
     const curVol = volumes[i];
 
-    // Compute 20-bar avg volume prior to i
-    let sumV = 0;
-    for (let v = i - 20; v < i; v++) sumV += volumes[v];
-    const avgVol20 = sumV / 20;
+    // O(1) lookup from precomputed 20-bar volume SMA prior to i
+    const avgVol20 = volSma20[i - 1] ?? curVol;
 
     // Detect 20-day high breakout attempt
     let maxHigh20 = -Infinity;

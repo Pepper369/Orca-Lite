@@ -59,42 +59,41 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
     fallback: async () => {
       const { getSecurity } = await import("@/lib/vn/master");
       const { BOOTSTRAP_VN30_QUOTES } = await import("@/lib/bootstrap-data");
+      const { getLastMasterSnapshot } = await import("@/lib/services/screener-snapshot-service");
       const sec = getSecurity(sym);
       const boot = BOOTSTRAP_VN30_QUOTES.find((q) => q.symbol === sym) ?? null;
-      const price = boot?.price ?? 25.0;
+      const snapItem = getLastMasterSnapshot()?.items.find((it) => it.symbol === sym) ?? null;
       const now = Date.now();
-      const syntheticBars = Array.from({ length: 30 }, (_, i) => {
-        const time = now - (30 - i) * 86_400_000;
-        const delta = Math.sin(i / 2) * (price * 0.015);
-        const p = Math.max(1, price + delta);
-        return {
-          time,
-          open: p,
-          high: p * 1.01,
-          low: p * 0.99,
-          close: p,
-          volume: 500_000,
-        };
-      });
+      const realSparkBars =
+        snapItem?.sparkBars && snapItem.sparkBars.length > 0
+          ? snapItem.sparkBars.map((b, idx, arr) => ({
+              time: now - (arr.length - idx) * 86_400_000,
+              open: b.o,
+              high: b.h,
+              low: b.l,
+              close: b.c,
+              volume: b.v,
+            }))
+          : [];
 
       return {
         data: {
           symbol: sym,
-          name: boot?.name ?? sec?.name ?? sym,
+          name: snapItem?.name ?? boot?.name ?? sec?.name ?? sym,
           quote: boot ?? {
             symbol: sym,
-            name: sec?.name ?? sym,
-            price: 0,
-            change: 0,
-            changePercent: 0,
+            name: snapItem?.name ?? sec?.name ?? sym,
+            price: snapItem?.price ?? 0,
+            change: snapItem?.change ?? 0,
+            changePercent: snapItem?.changePercent ?? 0,
             referencePrice: 0,
             ceilingPrice: 0,
             floorPrice: 0,
-            volume: 0,
+            volume: snapItem?.volume ?? 0,
             quoteVolume: 0,
             assetClass: "stock",
           },
-          bars: syntheticBars,
+          bars: realSparkBars,
           technical: null,
           patterns: [],
           equity: null,

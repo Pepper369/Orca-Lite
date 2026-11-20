@@ -1,7 +1,13 @@
 import type { OhlcvBar } from "../types";
 import type { DetectedCandlePattern } from "../engines/candlestick-patterns";
-import { rsi as rsiSeries, sma, ema } from "../engines/oscillators";
-import { bollinger } from "../technical";
+import {
+  rsi as rsiSeries,
+  sma,
+  macd,
+  bollinger,
+  atr,
+  lastFinite,
+} from "../engines/unified-ta-kernel";
 import { detectDivergences } from "../engines/divergence";
 
 export type TechContext = {
@@ -22,33 +28,6 @@ export type TechContext = {
   rsiBullishDiv: boolean;
   rsiBearishDiv: boolean;
 };
-
-function lastFinite(arr: (number | null)[]): number | null {
-  for (let i = arr.length - 1; i >= 0; i--) {
-    const v = arr[i];
-    if (v != null && Number.isFinite(v)) return v;
-  }
-  return null;
-}
-
-function atr14(bars: OhlcvBar[]): number | null {
-  if (bars.length < 16) return null;
-  const trs: number[] = [];
-  for (let i = 1; i < bars.length; i++) {
-    const h = bars[i]!.high;
-    const l = bars[i]!.low;
-    const pc = bars[i - 1]!.close;
-    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
-  }
-  if (trs.length < 14) return null;
-  let avg = 0;
-  for (let i = 0; i < 14; i++) avg += trs[i]!;
-  avg /= 14;
-  for (let i = 14; i < trs.length; i++) {
-    avg = (avg * 13 + trs[i]!) / 14;
-  }
-  return avg;
-}
 
 export function extractTechContext(bars: OhlcvBar[]): TechContext {
   if (!bars.length) {
@@ -95,28 +74,15 @@ export function extractTechContext(bars: OhlcvBar[]): TechContext {
     else trend = "sideways";
   }
 
-  const atr = atr14(bars);
-  const atrPct = atr != null && close > 0 ? (atr / close) * 100 : null;
+  const atrVal = atr(bars, 14);
+  const atrPct = atrVal != null && close > 0 ? (atrVal / close) * 100 : null;
   const body = Math.abs(last.close - last.open);
-  const bodyAtr = atr != null && atr > 0 ? body / atr : null;
+  const bodyAtr = atrVal != null && atrVal > 0 ? body / atrVal : null;
 
   let macdHist: number | null = null;
   if (closes.length >= 35) {
-    const e12 = ema(closes, 12);
-    const e26 = ema(closes, 26);
-    const macdLine: number[] = [];
-    for (let i = 0; i < closes.length; i++) {
-      if (e12[i] != null && e26[i] != null) macdLine.push((e12[i] as number) - (e26[i] as number));
-      else macdLine.push(NaN);
-    }
-    const sig = ema(
-      macdLine.map((v) => (Number.isFinite(v) ? v : 0)),
-      9,
-    );
-    const li = closes.length - 1;
-    if (Number.isFinite(macdLine[li]!) && sig[li] != null) {
-      macdHist = (macdLine[li] as number) - (sig[li] as number);
-    }
+    const m = macd(closes, 12, 26, 9);
+    macdHist = lastFinite(m.histogram);
   }
 
   // 1. Khoảng cách tới đáy 20 phiên & 50 phiên

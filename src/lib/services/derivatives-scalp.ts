@@ -61,45 +61,6 @@ export interface DerivativeScalpResult {
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
-/**
- * Sinh nến tổng hợp có cơ sở từ giá hợp đồng, basis và spot VN30
- * khi feed OHLCV trực tiếp chưa được cấu hình, giúp scalping engine luôn có dữ liệu chuẩn xác.
- */
-export function buildSyntheticBars(lastPrice: number, tf: string): OhlcvBar[] {
-  const barsCount = tf === "1m" ? 90 : tf === "5m" ? 72 : 48;
-  const intervalMs = tf === "1m" ? 60_000 : tf === "5m" ? 300_000 : 900_000;
-  const now = Date.now();
-  const bars: OhlcvBar[] = [];
-
-  // Tạo chuỗi biến động vi mô quanh mức giá hợp đồng thực tế
-  let currentClose = lastPrice;
-  const step = lastPrice > 500 ? 0.4 : lastPrice > 50 ? 0.15 : 0.05; // bước dao động điểm phái sinh
-
-  for (let i = barsCount; i >= 0; i--) {
-    const time = now - i * intervalMs;
-    const wave = Math.sin(i / 6) * 1.8 + Math.cos(i / 11) * 1.2;
-    const noise = ((Math.sin(i * 3.7) * 1000) % 10) / 15;
-    const barClose = Math.round((lastPrice + wave * step + noise) * 100) / 100;
-    const high = Math.round((barClose + Math.abs(noise) + step) * 100) / 100;
-    const low = Math.round((barClose - Math.abs(noise) - step) * 100) / 100;
-    const open = Math.round((currentClose) * 100) / 100;
-    const volume = Math.max(120, Math.round(500 + Math.sin(i) * 300 + Math.abs(noise) * 200));
-
-    bars.push({ time, open, high, low, close: barClose, volume });
-    currentClose = barClose;
-  }
-
-  // Đảm bảo nến cuối cùng khớp chính xác với giá khớp thực tế
-  if (bars.length > 0) {
-    const lastBar = bars[bars.length - 1];
-    lastBar.close = lastPrice;
-    lastBar.high = Math.max(lastBar.high, lastPrice);
-    lastBar.low = Math.min(lastBar.low, lastPrice);
-  }
-
-  return bars;
-}
-
 export async function buildDerivativeScalpSignal(
   symbolRaw: string,
   timeframe = "5m",
