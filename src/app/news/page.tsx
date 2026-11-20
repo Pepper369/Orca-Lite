@@ -21,6 +21,7 @@ type NewsData = { articles: NewsArticle[]; errors: string[] };
 export default function NewsPage() {
   const [tab, setTab] = useState("");
   const [dedup, setDedup] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(14);
   const qs = tab ? `&category=${tab}` : "";
   const { data, meta, isLoading } = useApi<NewsData>(`/api/v1/news?limit=50${qs}`, {
     refreshInterval: 2 * 60_000,
@@ -188,11 +189,11 @@ export default function NewsPage() {
         <Unavailable title="Tất cả nguồn tin đều đang lỗi" meta={meta} />
       ) : (
         <Panel pad={false}>
-          <ul className="divide-y divide-line/50">
-            {displayArticles.map((a) => {
+          <ul className="grid grid-cols-1 divide-y divide-line/50 lg:grid-cols-2 lg:divide-y-0 lg:gap-px lg:bg-line/40">
+            {displayArticles.slice(0, visibleCount).map((a) => {
               const s = byId.get(a.id);
               return (
-                <li key={a.id} className="row-hover px-3.5 py-3">
+                <li key={a.id} className="row-hover bg-surface-base px-3.5 py-3">
                   <div className="flex items-start gap-3">
                     <div className="num mt-0.5 w-14 shrink-0 text-[11px] text-ink-3">
                       {new Date(a.publishedAt).toLocaleString("vi-VN", {
@@ -244,6 +245,17 @@ export default function NewsPage() {
               );
             })}
           </ul>
+          {displayArticles.length > visibleCount && (
+            <div className="flex justify-center border-t border-line/60 bg-surface-base p-3">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((c) => c + 14)}
+                className="rounded-lg border border-border-default bg-surface-elevated px-4 py-1.5 text-xs font-semibold text-text-primary hover:border-accent-primary hover:text-accent-primary transition-colors"
+              >
+                Xem thêm {Math.min(14, displayArticles.length - visibleCount)} / {displayArticles.length - visibleCount} tin còn lại
+              </button>
+            </div>
+          )}
           {data.errors.length > 0 && (
             <div className="border-t border-line px-3.5 py-2 text-[11px] text-warn/90">
               {data.errors.length} nguồn tạm lỗi — nội dung trên là phần thu thập được.

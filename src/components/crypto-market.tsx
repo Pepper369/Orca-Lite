@@ -54,6 +54,13 @@ export function CryptoMarketPage() {
       {/* View Switcher: Tín Hiệu Định Lượng VIP vs Bảng Giá Thị Trường */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle pb-3">
         <div className="flex items-center gap-2">
+          <h1 className="flex items-center gap-1.5 text-base font-bold text-text-primary">
+            <Coins className="size-4 text-accent-primary" />
+            Tiền mã hóa
+          </h1>
+          <Badge tone="accent">Binance Spot & Perp</Badge>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setViewMode("signals")}

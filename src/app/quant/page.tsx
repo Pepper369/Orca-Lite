@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function QuantPage() {
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className="w-full min-w-0 overflow-x-clip">
       <OQuantStudio />
     </div>
   );

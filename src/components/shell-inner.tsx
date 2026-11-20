@@ -16,6 +16,8 @@ import { markAppNavigating } from "@/lib/hooks";
 import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { RouteProgress, signalNavStart } from "@/components/route-progress";
 import {
+  Activity,
+  BookOpen,
   Bot,
   Boxes,
   CandlestickChart,
@@ -24,6 +26,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Coins,
+  Cpu,
   DollarSign,
   Eye,
   FlaskConical,
@@ -31,13 +34,17 @@ import {
   Grid2x2,
   Home,
   Landmark,
+  Layers,
   LayoutDashboard,
   LogOut,
   Menu,
+  Monitor,
   Newspaper,
   PiggyBank,
   Calculator,
   HeartPulse,
+  Server,
+  Sparkles,
   Target,
   FileText,
   Settings,
@@ -68,38 +75,50 @@ const NAV_SECTIONS: {
   }[];
 }[] = [
   {
-    title: "THỊ TRƯỜNG",
+    title: "TRUNG TÂM",
     items: [
       { href: "/", label: "Tổng quan", icon: Home, core: true },
-      { href: "/terminal", label: "Pro Terminal (0ms)", icon: CandlestickChart, core: true },
+      { href: "/terminal", label: "Pro Terminal (0ms)", icon: Monitor, core: true },
+      { href: "/agent", label: "Trợ lý AI", icon: Sparkles, core: true },
+    ],
+  },
+  {
+    title: "THỊ TRƯỜNG",
+    items: [
       { href: "/stocks", label: "Cổ phiếu VN", icon: CandlestickChart, core: true },
+      { href: "/derivatives", label: "Phái sinh VN30F", icon: Activity, core: true },
+      { href: "/forex", label: "Ngoại hối & Vàng", icon: DollarSign, core: true },
       { href: "/crypto", label: "Tiền mã hóa", icon: Coins, core: true },
-      { href: "/forex", label: "Ngoại hối", icon: DollarSign },
       { href: "/commodities", label: "Hàng hóa", icon: Boxes },
-      { href: "/derivatives", label: "Phái sinh", icon: CandlestickChart, core: true },
-      { href: "/macro-economic", label: "Kinh tế vĩ mô", icon: ChartNoAxesCombined },
-      { href: "/currency-interest-rate", label: "Lãi suất tiền tệ", icon: Landmark },
     ],
   },
   {
-    title: "CÔNG CỤ",
+    title: "PHÂN TÍCH & QUANT",
     items: [
-      { href: "/quant", label: "AI Quant & Bot", icon: Bot, core: true },
-      { href: "/copytrade", label: "Copy Trading & EA", icon: Users, core: true },
-      { href: "/earnings", label: "Lịch BCTC & TT96", icon: FileText, core: true },
+      { href: "/screener", label: "Bộ lọc đa tài sản", icon: FlaskConical, core: true },
+      { href: "/stocks/sectors", label: "Dòng tiền ngành", icon: Layers, core: true },
       { href: "/heatmap", label: "Bản đồ nhiệt", icon: Grid2x2 },
-      { href: "/screener", label: "Bộ lọc", icon: FlaskConical },
-      { href: "/news", label: "Tin tức", icon: Newspaper, core: true },
-      { href: "/reports", label: "Bản tin", icon: Globe2 },
-      { href: "/agent", label: "Trợ lý AI", icon: Bot },
+      { href: "/quant", label: "AI Quant & Bot", icon: Cpu, core: true },
+      { href: "/copytrade", label: "Copy Trading & EA", icon: Users },
     ],
   },
   {
-    title: "DANH MỤC",
+    title: "VĨ MÔ & TIN TỨC",
     items: [
-      { href: "/portfolio", label: "Danh mục thông minh", icon: LayoutDashboard },
+      { href: "/macro-economic", label: "Kinh tế vĩ mô", icon: ChartNoAxesCombined },
+      { href: "/currency-interest-rate", label: "Lãi suất & Tiền tệ", icon: Landmark },
+      { href: "/earnings", label: "Lịch BCTC & TT96", icon: FileText },
+      { href: "/news", label: "Tin tức", icon: Newspaper },
+      { href: "/reports", label: "Bản tin phân tích", icon: Globe2 },
+    ],
+  },
+  {
+    title: "QUẢN TRỊ",
+    items: [
+      { href: "/portfolio", label: "Danh mục thông minh", icon: LayoutDashboard, core: true },
       { href: "/watchlist", label: "Danh mục theo dõi", icon: Eye },
-      { href: "/settings", label: "Cài đặt", icon: Settings },
+      { href: "/journal", label: "Nhật ký giao dịch", icon: BookOpen },
+      { href: "/system", label: "Trạng thái hệ thống", icon: Server },
     ],
   },
 ];
@@ -148,7 +167,7 @@ function DesktopNavItem({
       onMouseEnter={() => onHover(href)}
       onTouchStart={() => onHover(href)}
       className={
-        "orca-nav-item group relative flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[13px] leading-none " +
+        "orca-nav-item group relative flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[12.5px] leading-none " +
         (active
           ? "bg-accent-primary/15 font-medium text-accent-primary"
           : "text-text-secondary hover:bg-surface-elevated hover:text-text-primary")
@@ -203,6 +222,7 @@ function isActivePath(pathname: string, href: string, activePersonalTab: string)
   const [path, hash] = href.split("#");
   if (hash) return pathname === path && activePersonalTab === hash;
   if (path === "/") return pathname === "/";
+  if (path === "/stocks" && pathname.startsWith("/stocks/sectors")) return false;
   return pathname === path || pathname.startsWith(path + "/");
 }
 

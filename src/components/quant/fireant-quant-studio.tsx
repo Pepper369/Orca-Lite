@@ -210,11 +210,11 @@ export function FireAntQuantStudio() {
             <div className="flex size-10 items-center justify-center rounded-xl bg-accent-primary/20 text-accent-primary border border-accent-primary/30">
               <Zap className="size-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-text-primary">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-bold tracking-tight text-text-primary">
                   FireAnt Quant AI Studio
-                </h1>
+                </h2>
                 <Badge tone="accent">Quant DSL v2.4</Badge>
                 <Badge tone="up">Live Verified</Badge>
               </div>

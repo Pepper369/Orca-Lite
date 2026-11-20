@@ -447,74 +447,74 @@ export function OQuantStudio() {
       </div>
 
       {/* Main Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-2">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 border-b border-border/60 pb-2">
         <button
           onClick={() => setActiveTab("fireant_studio")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+          className={`flex max-w-full items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition cursor-pointer ${
             activeTab === "fireant_studio"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
           }`}
         >
-          <Zap className="size-3.5 text-amber-400" />
-          <span>FireAnt Quant AI Studio</span>
-          <span className="rounded-full bg-accent-primary/20 px-1.5 py-0.2 text-[9px] text-accent-primary font-bold">
-            33 Chiến Lược
+          <Zap className="size-3.5 shrink-0 text-amber-400" />
+          <span className="truncate">FireAnt Quant Studio</span>
+          <span className="shrink-0 rounded-full bg-accent-primary/20 px-1.5 py-0.2 text-[9px] text-accent-primary font-bold">
+            33
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab("bots")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+          className={`flex max-w-full items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition cursor-pointer ${
             activeTab === "bots"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
           }`}
         >
-          <Bot className="size-3.5" />
-          <span>6 Bot Giao dịch Định lượng (Quant Bots)</span>
+          <Bot className="size-3.5 shrink-0" />
+          <span className="truncate">6 Quant Bots</span>
         </button>
 
         <button
           onClick={() => setActiveTab("ranking")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+          className={`flex max-w-full items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
             activeTab === "ranking"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
           }`}
         >
-          <Award className="size-3.5" />
-          <span>Bảng Xếp Hạng Đa Nhân Tố (AI Multi-Factor Ranking)</span>
-          <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[9px] text-amber-300">
+          <Award className="size-3.5 shrink-0" />
+          <span className="truncate">Xếp Hạng Đa Nhân Tố</span>
+          <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[9px] text-amber-300">
             Top {compositeRanked.length}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab("strategies")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+          className={`flex max-w-full items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
             activeTab === "strategies"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
           }`}
         >
-          <Sparkles className="size-3.5" />
-          <span>Chiến Lược Định Lượng AI (Quant Strategies)</span>
-          <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
-            {strategies.length || 8} Mô Hình
+          <Sparkles className="size-3.5 shrink-0" />
+          <span className="truncate">Chiến Lược AI</span>
+          <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
+            {strategies.length || 8}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab("signals")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition ${
+          className={`flex max-w-full items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
             activeTab === "signals"
               ? "bg-accent-primary text-text-inverse shadow-sm"
               : "text-text-muted hover:bg-bg-surface hover:text-text-primary"
           }`}
         >
-          <Flame className="size-3.5" />
-          <span>Tín Hiệu Nổi Bật (Breakout, Dòng Tiền, Định Giá)</span>
+          <Flame className="size-3.5 shrink-0" />
+          <span className="truncate">Tín Hiệu Nổi Bật</span>
         </button>
 
         <button

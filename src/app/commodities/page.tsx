@@ -63,6 +63,8 @@ export default function CommoditiesPage() {
   const [group, setGroup] = useState("");
   const [sentimentFilter, setSentimentFilter] = useState<string>("");
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(12);
+  const [showConverter, setShowConverter] = useState(false);
 
   const { data, meta, isLoading, isValidating, mutate } = useApi<Data>("/api/v1/commodities", {
     refreshInterval: 5 * 60_000,
@@ -280,9 +282,23 @@ export default function CommoditiesPage() {
         )}
       </div>
 
-      <CurrencyConverter />
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setShowConverter((v) => !v)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated/70 px-3 py-1.5 text-xs font-medium text-text-secondary hover:border-accent-primary/40 hover:text-text-primary transition-colors"
+        >
+          {showConverter ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+          <span>{showConverter ? "Ẩn công cụ quy đổi ngoại tệ" : "Mở công cụ quy đổi ngoại tệ"}</span>
+        </button>
+        <span className="text-[11px] text-text-muted">
+          Hiển thị {Math.min(visibleCount, catalog.length)} / {catalog.length} mặt hàng
+        </span>
+      </div>
 
-      <CommodityLineChart options={chartOptions} height={320} />
+      {showConverter && <CurrencyConverter />}
+
+      <CommodityLineChart options={chartOptions} height={300} />
 
       {meta?.freshness && (meta.freshness === "DELAYED" || meta.freshness === "STALE" || meta.degraded) && (
         <FreshnessAlertBanner
@@ -314,8 +330,9 @@ export default function CommoditiesPage() {
           className="mt-3"
         />
       ) : (
+        <>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {catalog.map((d) => {
+          {catalog.slice(0, visibleCount).map((d) => {
             const row = bySymbol.get(d.symbol);
             const groupMeta = groups.find((x) => x.key === d.group);
             const impact = d.vnImpact;
@@ -498,6 +515,18 @@ export default function CommoditiesPage() {
             );
           })}
         </div>
+        {catalog.length > visibleCount && (
+          <div className="mt-3 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((c) => c + 12)}
+              className="rounded-lg border border-border-default bg-surface-elevated px-4 py-2 text-xs font-semibold text-text-primary hover:border-accent-primary hover:text-accent-primary transition-colors"
+            >
+              Xem thêm {Math.min(12, catalog.length - visibleCount)} / {catalog.length - visibleCount} mặt hàng còn lại
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

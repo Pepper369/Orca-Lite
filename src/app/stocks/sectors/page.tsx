@@ -78,8 +78,19 @@ export default function SectorTrendPage() {
   }
 
   return (
-    <div className="stock-workspace">
-      <Panel title="Phân tích xu hướng ngành">
+    <div className="stock-workspace space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-bold tracking-tight text-text-primary">
+          Phân tích xu hướng & dòng tiền ngành
+        </h1>
+        <Link
+          href="/screener?universe=sector-flow"
+          className="rounded-lg border border-accent-primary/30 bg-accent-primary/10 px-2.5 py-1 text-xs font-semibold text-accent-primary hover:bg-accent-primary/20 transition-colors"
+        >
+          Mở Bộ lọc Dòng tiền 4 Khung ↗
+        </Link>
+      </div>
+      <Panel title="Tổng quan nhóm ngành">
         <div className="mb-3 flex flex-wrap items-center gap-3 text-[12px] text-ink-3">
           {data.sessionDate && (
             <span>

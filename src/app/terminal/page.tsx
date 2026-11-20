@@ -113,13 +113,13 @@ export default function ProTerminalPage() {
       {/* Top Bar */}
       <header className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle bg-surface-base/80 rounded-t-xl shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 font-bold tracking-tight text-[15px]">
+          <h1 className="flex items-center gap-1.5 font-bold tracking-tight text-[15px]">
             <Zap className="size-4 text-accent-primary animate-pulse" />
             ORCA PRO TERMINAL
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-primary/20 text-accent-primary font-mono border border-accent-primary/30">
               0ms SPA
             </span>
-          </div>
+          </h1>
 
           <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-text-muted">
             <Cpu className="size-3.5 text-accent-primary" />
