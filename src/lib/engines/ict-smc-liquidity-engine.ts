@@ -328,27 +328,37 @@ function detectLiquidityPools(
   const sellSidePools: LiquidityPool[] = [];
   const n = bars.length;
 
-  for (let i = 3; i < n - 3; i++) {
+  for (let i = 2; i < n - 2; i++) {
     const b = bars[i];
-    // Swing High (Fractal pivot 3-bar left and right)
-    const isSwingHigh =
+    const hasLeft3 = i >= 3;
+    const hasRight3 = i < n - 3;
+
+    // 2-bar causal minor fractal (strictly confirmed by bars [i-2..i+2] before bar i+3 opens)
+    const isMinorHigh =
       b.high > bars[i - 1].high &&
       b.high > bars[i - 2].high &&
-      b.high > bars[i - 3].high &&
       b.high > bars[i + 1].high &&
-      b.high > bars[i + 2].high &&
+      b.high > bars[i + 2].high;
+    const isSwingHigh =
+      hasLeft3 &&
+      hasRight3 &&
+      isMinorHigh &&
+      b.high > bars[i - 3].high &&
       b.high > bars[i + 3].high;
 
-    // Swing Low
-    const isSwingLow =
+    const isMinorLow =
       b.low < bars[i - 1].low &&
       b.low < bars[i - 2].low &&
-      b.low < bars[i - 3].low &&
       b.low < bars[i + 1].low &&
-      b.low < bars[i + 2].low &&
+      b.low < bars[i + 2].low;
+    const isSwingLow =
+      hasLeft3 &&
+      hasRight3 &&
+      isMinorLow &&
+      b.low < bars[i - 3].low &&
       b.low < bars[i + 3].low;
 
-    if (isSwingHigh) {
+    if (isSwingHigh || isMinorHigh) {
       // Check if Equal Highs (EQH) with a recent pool within 3 pips
       const isEqh = buySidePools.some((p) => Math.abs(p.price - b.high) <= pipSize * 3);
       buySidePools.push({
@@ -357,12 +367,12 @@ function detectLiquidityPools(
         price: b.high,
         time: b.time,
         barIndex: i,
-        significance: isEqh ? "HIGH_EXTERNAL" : "MEDIUM_INTERNAL",
+        significance: isEqh ? "HIGH_EXTERNAL" : isSwingHigh ? "MEDIUM_INTERNAL" : "MINOR",
         status: "UNTOUCHED",
       });
     }
 
-    if (isSwingLow) {
+    if (isSwingLow || isMinorLow) {
       // Check if Equal Lows (EQL)
       const isEql = sellSidePools.some((p) => Math.abs(p.price - b.low) <= pipSize * 3);
       sellSidePools.push({
@@ -371,7 +381,7 @@ function detectLiquidityPools(
         price: b.low,
         time: b.time,
         barIndex: i,
-        significance: isEql ? "HIGH_EXTERNAL" : "MEDIUM_INTERNAL",
+        significance: isEql ? "HIGH_EXTERNAL" : isSwingLow ? "MEDIUM_INTERNAL" : "MINOR",
         status: "UNTOUCHED",
       });
     }
@@ -580,32 +590,39 @@ function detectAdvancedSweeps(
     const prev = bars[i - 1];
     const barRange = Math.max(1e-12, b.high - b.low);
 
-    // Check Sell-Side Liquidity Swept (Bullish Turtle Soup / Judas Swing) - strictly causal
+    // Check Sell-Side Liquidity Swept (Bullish Turtle Soup / Judas Swing / Displacement Reclaim) - strictly causal
     let bestSslSweep: AdvancedSweepEvent | null = null;
     for (const pool of sslPools) {
-      if (pool.barIndex + 3 > i) continue; // Zero look-ahead: pivot must exist cleanly before bar i
+      if (pool.barIndex + 3 > i) continue; // Zero look-ahead: minor/major pivot exists strictly before bar i
       if (b.low < pool.price && b.close > pool.price) {
         const lowerWick = Math.min(b.open, b.close) - b.low;
         const wickRatio = lowerWick / barRange;
+        const bullBodyRatio = Math.max(0, b.close - b.open) / barRange;
         const hasVolumeOrStrongReclaim =
           (b.volume ?? 0) >= (prev.volume ?? 0) * 1.1 || b.close > pool.price + pipSize;
+        const isWickSweep = wickRatio >= 0.42 || (wickRatio >= 0.30 && hasVolumeOrStrongReclaim);
+        const isDisplacementReclaim =
+          bullBodyRatio >= 0.45 &&
+          b.close > pool.price + pipSize * 0.5 &&
+          (b.close > prev.high || (b.volume ?? 0) >= (prev.volume ?? 0) * 1.15);
 
-        if (wickRatio >= 0.45 || (wickRatio >= 0.35 && hasVolumeOrStrongReclaim)) {
+        if (isWickSweep || isDisplacementReclaim) {
           const depthPips = Math.round(((pool.price - b.low) / Math.max(1e-12, pipSize)) * 10) / 10;
           const isJudas = checkJudasSessionTime(b.time);
+          const dispRatio = Math.max(wickRatio, bullBodyRatio);
           const candidate: AdvancedSweepEvent = {
             id: `sweep_ssl_${b.time}`,
             time: b.time,
             barIndex: i,
-            sweepType: isJudas ? "JUDAS_SWING" : "TURTLE_SOUP",
+            sweepType: isJudas ? "JUDAS_SWING" : isWickSweep ? "TURTLE_SOUP" : "PURGE_AND_REVERT",
             side: "SELL_SIDE_SWEPT",
             sweptLevel: pool.price,
             wickExtreme: b.low,
             closePrice: b.close,
             sweepDepthPipsOrPct: depthPips,
             mssConfirmed: b.close > prev.high,
-            displacementRatio: Number(wickRatio.toFixed(2)),
-            conviction: wickRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : wickRatio >= 0.42 ? "HIGH" : "MODERATE",
+            displacementRatio: Number(dispRatio.toFixed(2)),
+            conviction: dispRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : dispRatio >= 0.42 ? "HIGH" : "MODERATE",
           };
           if (!bestSslSweep || pool.price < bestSslSweep.sweptLevel) {
             bestSslSweep = candidate;
@@ -615,32 +632,39 @@ function detectAdvancedSweeps(
     }
     if (bestSslSweep) sweeps.push(bestSslSweep);
 
-    // Check Buy-Side Liquidity Swept (Bearish Turtle Soup / Judas Swing) - strictly causal
+    // Check Buy-Side Liquidity Swept (Bearish Turtle Soup / Judas Swing / Displacement Reclaim) - strictly causal
     let bestBslSweep: AdvancedSweepEvent | null = null;
     for (const pool of bslPools) {
       if (pool.barIndex + 3 > i) continue; // Zero look-ahead
       if (b.high > pool.price && b.close < pool.price) {
         const upperWick = b.high - Math.max(b.open, b.close);
         const wickRatio = upperWick / barRange;
+        const bearBodyRatio = Math.max(0, b.open - b.close) / barRange;
         const hasVolumeOrStrongReclaim =
           (b.volume ?? 0) >= (prev.volume ?? 0) * 1.1 || b.close < pool.price - pipSize;
+        const isWickSweep = wickRatio >= 0.42 || (wickRatio >= 0.30 && hasVolumeOrStrongReclaim);
+        const isDisplacementReclaim =
+          bearBodyRatio >= 0.45 &&
+          b.close < pool.price - pipSize * 0.5 &&
+          (b.close < prev.low || (b.volume ?? 0) >= (prev.volume ?? 0) * 1.15);
 
-        if (wickRatio >= 0.45 || (wickRatio >= 0.35 && hasVolumeOrStrongReclaim)) {
+        if (isWickSweep || isDisplacementReclaim) {
           const depthPips = Math.round(((b.high - pool.price) / Math.max(1e-12, pipSize)) * 10) / 10;
           const isJudas = checkJudasSessionTime(b.time);
+          const dispRatio = Math.max(wickRatio, bearBodyRatio);
           const candidate: AdvancedSweepEvent = {
             id: `sweep_bsl_${b.time}`,
             time: b.time,
             barIndex: i,
-            sweepType: isJudas ? "JUDAS_SWING" : "TURTLE_SOUP",
+            sweepType: isJudas ? "JUDAS_SWING" : isWickSweep ? "TURTLE_SOUP" : "PURGE_AND_REVERT",
             side: "BUY_SIDE_SWEPT",
             sweptLevel: pool.price,
             wickExtreme: b.high,
             closePrice: b.close,
             sweepDepthPipsOrPct: depthPips,
             mssConfirmed: b.close < prev.low,
-            displacementRatio: Number(wickRatio.toFixed(2)),
-            conviction: wickRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : wickRatio >= 0.42 ? "HIGH" : "MODERATE",
+            displacementRatio: Number(dispRatio.toFixed(2)),
+            conviction: dispRatio >= 0.58 ? "INSTITUTIONAL_PRIME" : dispRatio >= 0.42 ? "HIGH" : "MODERATE",
           };
           if (!bestBslSweep || pool.price > bestBslSweep.sweptLevel) {
             bestBslSweep = candidate;

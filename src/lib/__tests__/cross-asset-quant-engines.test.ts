@@ -378,4 +378,62 @@ describe("Unified Cross-Asset Quantitative Engines", () => {
       assert.ok(item.quantRegime != null);
     }
   });
+
+  // ==========================================================================
+  // 10. Forex M5 Flow Telemetry + Crypto H1/Liquidation Precision Wiring
+  // ==========================================================================
+  it("PHASE4-FX-CRYPTO-FLOW: propagates M5 DOM/FII/Absorption in Forex & 1H/LiqCluster/Flow in Crypto", () => {
+    const startSec = Math.floor(Date.UTC(2026, 10, 19, 13, 0, 0) / 1000);
+    const fxBars: OhlcvBar[] = Array.from({ length: 80 }, (_, i) => {
+      const pull = i % 7 === 4 ? -0.00025 : 0.00035;
+      const open = 1.08 + i * 0.0002;
+      const close = open + pull;
+      return {
+        time: startSec + i * 300,
+        open,
+        high: Math.max(open, close) + 0.00025,
+        low: Math.min(open, close) - 0.00035,
+        close,
+        volume: 1500 + (i % 7 === 0 ? 700 : 0),
+      };
+    });
+
+    const fxSig = analyzeForexScalp({
+      pair: "EURUSD",
+      barsM15: fxBars,
+      barsM5: fxBars,
+      nowMs: (startSec + 80 * 300) * 1000,
+      spreadPips: 0.9,
+      csmBaseMinusQuote: 2.1,
+    });
+    assert.ok(fxSig != null && fxSig.flowMetrics != null);
+    assert.equal(fxSig!.flowMetrics!.cmeTicker, "6E=F");
+    assert.ok(Number.isFinite(fxSig!.flowMetrics!.fii));
+    assert.ok(fxSig!.precision != null && fxSig!.precision.grade !== "NO_TRADE");
+
+    const btcBars: OhlcvBar[] = fxBars.map((b, i) => ({
+      time: b.time,
+      open: 90000 + i * 110,
+      high: 90000 + i * 110 + 180,
+      low: 90000 + i * 110 - 120,
+      close: 90000 + i * 110 + 95,
+      volume: 2500 + i * 15,
+    }));
+    const cryptoSig = analyzeScalpMulti({
+      symbol: "BTCUSDT",
+      barsM15: btcBars,
+      barsM5: btcBars,
+      barsH1: btcBars.slice(-24),
+      quoteVolume24h: 400_000_000,
+      spreadPct: 0.0002,
+      orderBookImbalance: 28,
+      flowIntensityIndex: 35,
+      absorptionType: "BULLISH_ABSORPTION",
+      liquidationClusterAligned: "SHORT_SQUEEZE_UP",
+    });
+    assert.ok(cryptoSig.precision != null);
+    assert.equal(cryptoSig.precision!.direction, "BUY");
+    assert.ok(cryptoSig.precision!.gatesPassed.some((g) => g.includes("FII")));
+    assert.ok(cryptoSig.precision!.gatesPassed.some((g) => g.includes("Liquidation Magnet")));
+  });
 });

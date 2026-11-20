@@ -4,6 +4,8 @@ import { atr, supportResistance } from "../technical";
 import type { ForexScalpInput, ForexScalpSetup, ForexScalpSignal } from "./forex-scalp-types";
 import { evaluatePrecisionTradeSetup } from "./fx-crypto-precision-engine";
 import { buildSharedBarContext } from "./unified-ta-kernel";
+import { reconstructSyntheticDom } from "./forex-cme-dom-bridge";
+import { generateDeepFlowSignal } from "./forex-order-flow-pro";
 import {
   detectForexRegime,
   pipSize,
@@ -98,6 +100,18 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   });
   const prelimCandidate = prelimRanked.find((s) => s.direction === "BUY" || s.direction === "SELL") ?? null;
 
+  // Intraday M5 Synthetic DOM Imbalance + Institutional Flow Intensity / Absorption / CVD Divergence
+  const domM5 = reconstructSyntheticDom(pair, input.barsM5, filter.spreadPips);
+  const flowM5 = generateDeepFlowSignal(
+    pair,
+    input.barsM5,
+    filter.spreadPips != null ? { currentSpreadPips: filter.spreadPips } : undefined,
+  );
+  const effDomImbalance = input.orderBookImbalance ?? domM5.orderBookImbalanceRatio;
+  const effFii = input.flowIntensityIndex ?? flowM5.flowIntensityIndex;
+  const effAbsorption = input.absorptionType ?? flowM5.absorption.type;
+  const effCvdDiv = input.volumeDeltaDivergence ?? flowM5.cvdDivergence;
+
   const precision = evaluatePrecisionTradeSetup({
     symbol: pair,
     assetType: "FOREX",
@@ -112,6 +126,10 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     candidateEntry: prelimCandidate?.entry ?? null,
     candidateStopLoss: prelimCandidate?.stopLoss ?? null,
     spreadPipsOrPct: filter.spreadPips,
+    orderBookImbalance: effDomImbalance,
+    flowIntensityIndex: effFii,
+    absorptionType: effAbsorption,
+    volumeDeltaDivergence: effCvdDiv,
     csmBaseMinusQuote: input.csmBaseMinusQuote ?? null,
     sessionLabel: filter.sessionLabel,
     isNewsOrCascadeLockout: !filter.newsOk || !filter.eligible,
@@ -307,6 +325,15 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     primarySetup,
     moduleBStatus,
     precision,
+    flowMetrics: {
+      fii: effFii,
+      absorption: effAbsorption,
+      cvdDivergence: effCvdDiv,
+      domImbalance: effDomImbalance,
+      cmeTicker: domM5.cmeContract?.cmeTicker,
+      vpoc: flowM5.volumeProfile.vpocPrice,
+      vwap: flowM5.vwap.vwap,
+    },
     riskHint: {
       recommendedRiskPct: scaledRiskPct,
       stopPips: primarySetup?.stopPips ?? (precision.entry && precision.stopLoss ? toPips(pair, Math.abs(precision.entry - precision.stopLoss)) : null),

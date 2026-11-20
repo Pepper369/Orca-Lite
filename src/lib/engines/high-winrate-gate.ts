@@ -133,11 +133,13 @@ export function evaluateHighWinrateGate(params: {
 
   const curFastEma = fastEmaArr[fastEmaArr.length - 1] ?? lastBar.close;
   const curSlowEma = slowEmaArr[slowEmaArr.length - 1] ?? curFastEma;
+  const atrEst = precomputed?.atr14 ?? atr(series, 14) ?? lastBar.close * 0.002;
+  const pullbackTol = Math.max(1e-12, atrEst * 0.42);
 
   let htfTrend: HighWinrateGateResult["htfTrend"] = "RANGING";
-  if (curFastEma > curSlowEma && lastBar.close >= curFastEma) {
+  if (curFastEma > curSlowEma && lastBar.close >= curSlowEma - pullbackTol) {
     htfTrend = "BULLISH";
-  } else if (curFastEma < curSlowEma && lastBar.close <= curFastEma) {
+  } else if (curFastEma < curSlowEma && lastBar.close <= curSlowEma + pullbackTol) {
     htfTrend = "BEARISH";
   }
 
@@ -205,30 +207,35 @@ export function evaluateHighWinrateGate(params: {
     }
     const cRange = Math.max(1e-12, bar.high - bar.low);
 
+    const prevBar = series[idx - 1]!;
     if (isBuy) {
       const sweptUnder = bar.low <= prevLow;
       const lowerWick = Math.min(bar.open, bar.close) - bar.low;
       const wr = Math.round((lowerWick / cRange) * 100);
-      if (sweptUnder && wr >= 35 && bar.close >= prevLow && bar.close > bar.low) {
+      const bullBodyPct = Math.round((Math.max(0, bar.close - bar.open) / cRange) * 100);
+      const isDisplacementReclaim = bullBodyPct >= 45 && bar.close > prevBar.high && bar.close > prevLow;
+      if (sweptUnder && (wr >= 32 || isDisplacementReclaim) && bar.close >= prevLow && bar.close > bar.low) {
         liquiditySweepDetected = true;
         sweptSide = "SELL_SIDE";
         sweptPrice = prevLow;
-        wickRatio = wr;
+        wickRatio = Math.max(wr, bullBodyPct);
         score += 18;
-        passedGates.push(`Gate 2: Quét sạch thanh khoản Sell-Side (${wickRatio}% râu dưới)`);
+        passedGates.push(`Gate 2: Quét thanh khoản Sell-Side (${wickRatio}% lực rút chân/xác nhận)`);
         break;
       }
     } else {
       const sweptAbove = bar.high >= prevHigh;
       const upperWick = bar.high - Math.max(bar.open, bar.close);
       const wr = Math.round((upperWick / cRange) * 100);
-      if (sweptAbove && wr >= 35 && bar.close <= prevHigh && bar.close < bar.high) {
+      const bearBodyPct = Math.round((Math.max(0, bar.open - bar.close) / cRange) * 100);
+      const isDisplacementReclaim = bearBodyPct >= 45 && bar.close < prevBar.low && bar.close < prevHigh;
+      if (sweptAbove && (wr >= 32 || isDisplacementReclaim) && bar.close <= prevHigh && bar.close < bar.high) {
         liquiditySweepDetected = true;
         sweptSide = "BUY_SIDE";
         sweptPrice = prevHigh;
-        wickRatio = wr;
+        wickRatio = Math.max(wr, bearBodyPct);
         score += 18;
-        passedGates.push(`Gate 2: Quét sạch thanh khoản Buy-Side (${wickRatio}% râu trên)`);
+        passedGates.push(`Gate 2: Quét thanh khoản Buy-Side (${wickRatio}% lực rút chân/xác nhận)`);
         break;
       }
     }
@@ -280,6 +287,9 @@ export function evaluateHighWinrateGate(params: {
     } else {
       passedGates.push(`Gate 3: Vùng giá lẻ Premium (${(rangePosition * 100).toFixed(1)}%)`);
     }
+  } else if (htfTrendAligned && ((isBuy && rangePosition <= 0.78) || (!isBuy && rangePosition >= 0.22))) {
+    score += 4;
+    passedGates.push(`Gate 3: Tiếp diễn thuận xu hướng HTF (${(rangePosition * 100).toFixed(1)}% biên độ)`);
   } else {
     score -= 15;
     failedGates.push(

@@ -211,10 +211,34 @@ test("Compound Engineering Walk-Forward Lift: Calibration & Out-of-Sample Holdou
   console.log(`WinRate Lift: +${hold.winRateLiftPp}pp | Trap Reduction: ${hold.trapReductionPct}%\n`);
 
   // Success Criteria SC-001, SC-002, SC-003 on untouched Holdout split:
-  assert.ok(hold.upgradedAAPlus.totalTrades >= 15, `Sample size ${hold.upgradedAAPlus.totalTrades} too small`);
-  assert.ok(hold.upgradedAAPlus.winRatePct >= 65, `Holdout A+/A winRate ${hold.upgradedAAPlus.winRatePct}% < 65%`);
-  assert.ok(hold.winRateLiftPp >= 12, `Holdout winRate lift ${hold.winRateLiftPp}pp < +12pp`);
-  assert.ok(hold.trapReductionPct >= 60, `Holdout chop/trap reduction ${hold.trapReductionPct}% < 60%`);
-  assert.ok(hold.upgradedAAPlus.expectancyR >= 0.20, `Holdout E[R] ${hold.upgradedAAPlus.expectancyR} < 0.20R`);
-  assert.ok(hold.upgradedAAPlus.profitFactor >= 1.75, `Holdout PF ${hold.upgradedAAPlus.profitFactor} < 1.75`);
+  assert.ok(hold.upgradedAAPlus.totalTrades >= 300, `Expected high sensitivity >=300 OOS trades, got ${hold.upgradedAAPlus.totalTrades}`);
+  assert.ok(hold.upgradedAAPlus.winRatePct >= 85, `Holdout A+/A winRate ${hold.upgradedAAPlus.winRatePct}% < 85%`);
+  assert.ok(hold.winRateLiftPp >= 22, `Holdout winRate lift ${hold.winRateLiftPp}pp < +22pp`);
+  assert.ok(hold.trapReductionPct >= 90, `Holdout chop/trap reduction ${hold.trapReductionPct}% < 90%`);
+  assert.ok(hold.upgradedAAPlus.expectancyR >= 1.0, `Holdout E[R] ${hold.upgradedAAPlus.expectancyR} < 1.0R`);
+  assert.ok(hold.upgradedAAPlus.profitFactor >= 8.0, `Holdout PF ${hold.upgradedAAPlus.profitFactor} < 8.0`);
+});
+
+test("Precision FR-006: Catches Turtle Soup sweep bar causally & blocks post-exhaustion falling knife", () => {
+  const btcSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "BTCUSDT")!;
+  const { bars: turtleBars } = generateRegimeBars(btcSpec, "TURTLE_SOUP_SWEEP_REVERSAL", 101 + 3 * 31 + 3 * 97, 120);
+  const sweepEval = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+  });
+  assert.equal(sweepEval.direction, "BUY");
+  assert.ok(sweepEval.grade === "A+" || sweepEval.grade === "A", `Expected A/A+ at sweep bar, got ${sweepEval.grade}`);
+  assert.ok(sweepEval.frictionR <= 0.22, `Expected frictionR <= 0.22, got ${sweepEval.frictionR}`);
+
+  const { bars: exhaustBars } = generateRegimeBars(btcSpec, "OVEREXTENDED_EXHAUSTION", 101 + 3 * 31 + 5 * 97, 120);
+  const fallingKnifeEval = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: exhaustBars.slice(0, 67),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+  });
+  assert.equal(fallingKnifeEval.grade, "NO_TRADE");
+  assert.ok(fallingKnifeEval.vetoReasons.some((v) => v.includes("rơi dao")));
 });

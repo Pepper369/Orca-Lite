@@ -166,12 +166,14 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         const newsWarning = cb.isLockout ? cb.warningMessage : undefined;
 
         const detailSeries = detail?.detail?.series ?? [];
-        let fii: number | null = null;
-        let absorption: ForexQuantSignalItem["absorption"] = null;
-        let vpoc: number | null = null;
-        let vwap: number | null = null;
-        let cmeTicker: string | undefined;
-        let domImbalance: number | undefined;
+        const m5Flow = sig.flowMetrics;
+        let fii: number | null = m5Flow?.fii ?? null;
+        let absorption: ForexQuantSignalItem["absorption"] = m5Flow?.absorption ?? null;
+        let vpoc: number | null = m5Flow?.vpoc ?? null;
+        let vwap: number | null = m5Flow?.vwap ?? null;
+        let cmeTicker: string | undefined = m5Flow?.cmeTicker;
+        let domImbalance: number | undefined = m5Flow?.domImbalance;
+        let cvdDiv: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null = m5Flow?.cvdDivergence ?? null;
         let spreadLockoutReason: string | null = null;
 
         const evidence = [...sig.evidence];
@@ -182,18 +184,19 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           const spreadOpts =
             sig.filter.spreadPips != null ? { currentSpreadPips: sig.filter.spreadPips } : undefined;
           const flow = generateDeepFlowSignal(pair, detailSeries, spreadOpts);
-          fii = flow.flowIntensityIndex;
-          absorption = flow.absorption.type;
-          vpoc = flow.volumeProfile.vpocPrice;
-          vwap = flow.vwap.vwap;
+          if (fii == null) fii = flow.flowIntensityIndex;
+          if (absorption == null) absorption = flow.absorption.type;
+          if (vpoc == null) vpoc = flow.volumeProfile.vpocPrice;
+          if (vwap == null) vwap = flow.vwap.vwap;
+          if (cvdDiv == null) cvdDiv = flow.cvdDivergence;
           if (flow.spreadSafety && !flow.spreadSafety.isSafe && flow.spreadSafety.lockoutReason) {
             spreadLockoutReason = flow.spreadSafety.lockoutReason;
             riskNotes.unshift(spreadLockoutReason);
           }
 
           const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
-          cmeTicker = dom.cmeContract?.cmeTicker;
-          domImbalance = dom.orderBookImbalanceRatio;
+          if (!cmeTicker) cmeTicker = dom.cmeContract?.cmeTicker;
+          if (domImbalance == null) domImbalance = dom.orderBookImbalanceRatio;
 
           if (flow.absorption.detected) {
             if (flow.absorption.type === "BULLISH_ABSORPTION" && sig.direction === "watch-long") {
@@ -218,6 +221,9 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
                     ? setup.direction
                     : "AUTO",
                 orderBookImbalance: domImbalance ?? null,
+                flowIntensityIndex: fii,
+                absorptionType: absorption,
+                volumeDeltaDivergence: cvdDiv,
                 csmBaseMinusQuote: csmSpread,
                 sessionLabel: sig.filter.sessionLabel,
                 spreadPipsOrPct: sig.filter.spreadPips,

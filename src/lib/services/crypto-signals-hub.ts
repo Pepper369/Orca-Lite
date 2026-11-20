@@ -126,10 +126,29 @@ async function scanSingleCryptoPair(
     const lastPrice = Number(ticker.lastPrice) || execBars[execBars.length - 1]!.close;
     const quoteVol = Number((ticker as { quoteVolume?: string }).quoteVolume ?? 0) || null;
 
-    // L2 DOM & Funding Rate Analysis
+    // L2 DOM, True Spread, 1H Macro Bars, Liquidation Clusters & Funding Rate Analysis
     const dom = evaluateTrueLevel2Dom(book, 5);
     const domImbalance = dom.imbalanceRatio;
+    const bestBid = book.bids[0]?.price ?? 0;
+    const bestAsk = book.asks[0]?.price ?? 0;
+    const liveSpreadPct =
+      bestBid > 0 && bestAsk >= bestBid
+        ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2)
+        : null;
     const fundingAnalysis = analyzeFundingRate(funding.fundingRate);
+    const bars1h = resampleOhlcvBars(htfBars, 4);
+    const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
+    const prelimAtrExec = calcAtr(execBars, 14) ?? lastPrice * 0.015;
+    const liqClusters =
+      openInterestUsd > 0 ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, prelimAtrExec) : null;
+    const liquidationClusterAligned =
+      liqClusters?.dominantExposure === "SHORTS_EXPOSED"
+        ? "SHORT_SQUEEZE_UP"
+        : liqClusters?.dominantExposure === "LONGS_EXPOSED"
+          ? "LONG_FLUSH_DOWN"
+          : liqClusters
+            ? "BALANCED"
+            : null;
 
     // News & Liquidation Cascade Shield Check (wired with Economic Calendar)
     const nExec = execBars.length;
@@ -145,16 +164,19 @@ async function scanSingleCryptoPair(
       calendarEvents,
     });
 
-    // Multi-TF Scalp + Precision Engine
+    // Multi-TF Scalp + Precision Engine (with 1H macro alignment, real L2 spread & liquidation magnet context)
     const scalp =
       execBars.length >= 60
         ? analyzeScalpMulti({
             symbol: pair,
             barsM15: htfBars,
             barsM5: execBars,
+            barsH1: bars1h.length >= 12 ? bars1h : null,
             quoteVolume24h: quoteVol,
             fundingRate: funding.fundingRate,
+            spreadPct: liveSpreadPct,
             orderBookImbalance: domImbalance,
+            liquidationClusterAligned,
             isLockout: shield.isLockout,
             lockoutReason: shield.warningMessage,
           })
@@ -167,8 +189,11 @@ async function scanSingleCryptoPair(
         assetType: "CRYPTO",
         barsExecution: execBars,
         barsHtf: htfBars !== execBars ? htfBars : null,
+        barsMacro: bars1h.length >= 12 ? bars1h : null,
+        spreadPipsOrPct: liveSpreadPct,
         orderBookImbalance: domImbalance,
         fundingRate: funding.fundingRate,
+        liquidationClusterAligned,
         isNewsOrCascadeLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
       });
@@ -204,15 +229,11 @@ async function scanSingleCryptoPair(
       evidence.push("Funding Rate âm sâu: Kích hoạt nhịp Short Squeeze");
     }
 
-    const bars1h = resampleOhlcvBars(htfBars, 4);
     const leverageGov = computeGarmanKlassLeverageCap(
       bars1h.length >= 5 ? bars1h : execBars.slice(-24),
       true,
     );
-    const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
-    const atrExec = scalp?.atr ?? calcAtr(execBars, 14) ?? lastPrice * 0.015;
-    const liqClusters =
-      openInterestUsd > 0 ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, atrExec) : null;
+    const atrExec = scalp?.atr ?? prelimAtrExec;
 
     const gradeFactor = setupGrade === "A+" ? 1.0 : setupGrade === "A" ? 0.8 : 0.6;
     const pairLevCap = pair === "BTCUSDT" || pair === "ETHUSDT" ? 15 : 8;

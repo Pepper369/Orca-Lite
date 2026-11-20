@@ -27,6 +27,10 @@ export interface PrecisionSetupInput {
   orderBookImbalance?: number | null;
   fundingRate?: number | null;
   csmBaseMinusQuote?: number | null;
+  flowIntensityIndex?: number | null;
+  absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
+  volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
+  liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
   sessionLabel?: string | null;
   isNewsOrCascadeLockout?: boolean;
   lockoutReason?: string | null;
@@ -108,6 +112,7 @@ function biasFromEmaArrays(
   closes: number[],
   fastArr: (number | null)[],
   slowArr: (number | null)[],
+  atr14?: number | null,
 ): "BULLISH" | "BEARISH" | "NEUTRAL" {
   const n = closes.length;
   if (n < 10) return "NEUTRAL";
@@ -118,8 +123,10 @@ function biasFromEmaArrays(
   if (f == null || s == null) return "NEUTRAL";
   const slopeUp = prevS == null || s >= prevS * 0.9998;
   const slopeDown = prevS == null || s <= prevS * 1.0002;
-  if (f > s && lastClose >= s && slopeUp) return "BULLISH";
-  if (f < s && lastClose <= s && slopeDown) return "BEARISH";
+  // Preserve trend bias on controlled healthy pullbacks below EMA21 instead of dropping immediately to NEUTRAL
+  const pullbackTol = atr14 != null && atr14 > 0 ? atr14 * 0.42 : lastClose * 0.0025;
+  if (f > s && lastClose >= s - pullbackTol && slopeUp) return "BULLISH";
+  if (f < s && lastClose <= s + pullbackTol && slopeDown) return "BEARISH";
   return "NEUTRAL";
 }
 
@@ -129,7 +136,149 @@ function inferEmaBias(bars: OhlcvBar[], fastP = 9, slowP = 21): "BULLISH" | "BEA
   const n = closes.length;
   const sP = Math.max(6, Math.min(slowP, n - 1));
   const fP = Math.max(3, Math.min(fastP, sP - 2));
-  return biasFromEmaArrays(closes, ema(closes, fP), ema(closes, sP));
+  let rangeSum = 0;
+  const start = Math.max(0, n - 10);
+  for (let i = start; i < n; i++) rangeSum += bars[i]!.high - bars[i]!.low;
+  const avgRange = rangeSum / Math.max(1, n - start);
+  return biasFromEmaArrays(closes, ema(closes, fP), ema(closes, sP), avgRange);
+}
+
+/**
+ * Strictly causal microstructure detectors: RSI divergence, volatility squeeze expansion, and EMA pullback reclaim.
+ */
+function detectCausalMicroSignals(params: {
+  bars: OhlcvBar[];
+  rsiSeries: (number | null)[];
+  atr14: number;
+  pip: number;
+  execBias: "BULLISH" | "BEARISH" | "NEUTRAL";
+  e9: number;
+  e21: number;
+  isDeadChop: boolean;
+}) {
+  const { bars, rsiSeries, atr14, pip, execBias, e9, e21, isDeadChop } = params;
+  const n = bars.length;
+  const lastBar = bars[n - 1]!;
+  const currentPrice = lastBar.close;
+  const lastRsi = rsiSeries[n - 1] ?? 50;
+  const barRange = Math.max(1e-12, lastBar.high - lastBar.low);
+
+  // 1. Causal 18-bar RSI Divergence: earlier [n-18..n-5] vs recent [n-4..n-1]
+  let bullRsiDiv = false;
+  let bearRsiDiv = false;
+  if (n >= 18) {
+    const eStart = Math.max(0, n - 18);
+    const eEnd = n - 5;
+    let earlierLow = Infinity;
+    let earlierLowIdx = -1;
+    let earlierHigh = -Infinity;
+    let earlierHighIdx = -1;
+    for (let i = eStart; i <= eEnd; i++) {
+      if (bars[i]!.low < earlierLow) {
+        earlierLow = bars[i]!.low;
+        earlierLowIdx = i;
+      }
+      if (bars[i]!.high > earlierHigh) {
+        earlierHigh = bars[i]!.high;
+        earlierHighIdx = i;
+      }
+    }
+    let recentLow = Infinity;
+    let recentLowIdx = -1;
+    let recentHigh = -Infinity;
+    let recentHighIdx = -1;
+    for (let i = n - 4; i < n; i++) {
+      if (bars[i]!.low < recentLow) {
+        recentLow = bars[i]!.low;
+        recentLowIdx = i;
+      }
+      if (bars[i]!.high > recentHigh) {
+        recentHigh = bars[i]!.high;
+        recentHighIdx = i;
+      }
+    }
+    const eRsiLow = earlierLowIdx >= 0 ? rsiSeries[earlierLowIdx] : null;
+    const rRsiLow = recentLowIdx >= 0 ? rsiSeries[recentLowIdx] : null;
+    const eRsiHigh = earlierHighIdx >= 0 ? rsiSeries[earlierHighIdx] : null;
+    const rRsiHigh = recentHighIdx >= 0 ? rsiSeries[recentHighIdx] : null;
+    const tol = pip * 2 + currentPrice * 0.0008;
+
+    if (eRsiLow != null && rRsiLow != null) {
+      const bullCandle = lastBar.close > lastBar.open || (lastBar.close - lastBar.low) / barRange >= 0.48;
+      if (recentLow <= earlierLow + tol && rRsiLow >= eRsiLow + 3.2 && lastRsi <= 54 && bullCandle) {
+        bullRsiDiv = true;
+      }
+    }
+    if (eRsiHigh != null && rRsiHigh != null) {
+      const bearCandle = lastBar.close < lastBar.open || (lastBar.high - lastBar.close) / barRange >= 0.48;
+      if (recentHigh >= earlierHigh - tol && rRsiHigh <= eRsiHigh - 3.2 && lastRsi >= 46 && bearCandle) {
+        bearRsiDiv = true;
+      }
+    }
+  }
+
+  // 2. Volatility Squeeze Compression Breakout
+  let bullBreakout = false;
+  let bearBreakout = false;
+  if (n >= 10) {
+    let priorRangeSum = 0;
+    let priorHigh = -Infinity;
+    let priorLow = Infinity;
+    for (let i = n - 9; i <= n - 2; i++) {
+      priorRangeSum += bars[i]!.high - bars[i]!.low;
+      if (i >= n - 6) {
+        if (bars[i]!.high > priorHigh) priorHigh = bars[i]!.high;
+        if (bars[i]!.low < priorLow) priorLow = bars[i]!.low;
+      }
+    }
+    const priorAvgRange = priorRangeSum / 8;
+    const body = Math.abs(lastBar.close - lastBar.open);
+    if (priorAvgRange <= atr14 * 0.94 && body >= atr14 * 0.48 && barRange >= priorAvgRange * 1.18) {
+      if (lastBar.close > lastBar.open && lastBar.close > priorHigh - atr14 * 0.08) bullBreakout = true;
+      if (lastBar.close < lastBar.open && lastBar.close < priorLow + atr14 * 0.08) bearBreakout = true;
+    }
+  }
+
+  // 3. Trend Pullback Reclaim into EMA9/EMA21 Pocket
+  let bullPullbackReclaim = false;
+  let bearPullbackReclaim = false;
+  if (!isDeadChop && n >= 4) {
+    const minLow3 = Math.min(bars[n - 1]!.low, bars[n - 2]!.low, bars[n - 3]!.low);
+    const maxHigh3 = Math.max(bars[n - 1]!.high, bars[n - 2]!.high, bars[n - 3]!.high);
+    const prevClose = bars[n - 2]!.close;
+    const closeLocBull = (lastBar.close - lastBar.low) / barRange;
+    const closeLocBear = (lastBar.high - lastBar.close) / barRange;
+
+    if (
+      execBias === "BULLISH" &&
+      minLow3 <= e9 + atr14 * 0.2 &&
+      minLow3 >= e21 - atr14 * 0.65 &&
+      lastBar.close >= lastBar.open &&
+      (lastBar.close >= prevClose || closeLocBull >= 0.5) &&
+      closeLocBull >= 0.42
+    ) {
+      bullPullbackReclaim = true;
+    }
+    if (
+      execBias === "BEARISH" &&
+      maxHigh3 >= e9 - atr14 * 0.2 &&
+      maxHigh3 <= e21 + atr14 * 0.65 &&
+      lastBar.close <= lastBar.open &&
+      (lastBar.close <= prevClose || closeLocBear >= 0.5) &&
+      closeLocBear >= 0.42
+    ) {
+      bearPullbackReclaim = true;
+    }
+  }
+
+  return {
+    bullRsiDiv,
+    bearRsiDiv,
+    bullBreakout,
+    bearBreakout,
+    bullPullbackReclaim,
+    bearPullbackReclaim,
+  };
 }
 
 function computeSessionVwap(bars: OhlcvBar[]): number | null {
@@ -162,6 +311,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     orderBookImbalance,
     fundingRate,
     csmBaseMinusQuote,
+    flowIntensityIndex = null,
+    absorptionType = null,
+    volumeDeltaDivergence = null,
+    liquidationClusterAligned = null,
     sessionLabel,
     isNewsOrCascadeLockout = false,
     lockoutReason,
@@ -215,7 +368,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (sgn !== 0) prevSign = sgn;
   }
 
-  const execBias = biasFromEmaArrays(closes, execCtx.ema9, execCtx.ema21);
+  const execBias = biasFromEmaArrays(closes, execCtx.ema9, execCtx.ema21, atr14);
   const htfBias = htf.length >= 10 ? inferEmaBias(htf, 7, 16) : execBias;
   const macroBias = macro.length >= 10 ? inferEmaBias(macro, 5, 13) : htfBias;
 
@@ -261,14 +414,56 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const histLast = macdHist[n - 1] ?? 0;
   const vwap = computeSessionVwap(barsExecution);
 
+  const microSignals = detectCausalMicroSignals({
+    bars: barsExecution,
+    rsiSeries: execCtx.rsi14Series,
+    atr14,
+    pip,
+    execBias,
+    e9,
+    e21,
+    isDeadChop,
+  });
+
   const bullSweepRecent = ict.recentSweeps.some(
     (s) => s.side === "SELL_SIDE_SWEPT" && s.barIndex >= n - 4,
   );
   const bearSweepRecent = ict.recentSweeps.some(
     (s) => s.side === "BUY_SIDE_SWEPT" && s.barIndex >= n - 4,
   );
-  const bullMss = ict.marketStructure.lastMss === "BULLISH_MSS";
-  const bearMss = ict.marketStructure.lastMss === "BEARISH_MSS";
+  const bullSweepWithConfirm = ict.recentSweeps.some(
+    (s) => s.side === "SELL_SIDE_SWEPT" && s.barIndex >= n - 4 && (s.mssConfirmed || s.displacementRatio >= 0.52),
+  );
+  const bearSweepWithConfirm = ict.recentSweeps.some(
+    (s) => s.side === "BUY_SIDE_SWEPT" && s.barIndex >= n - 4 && (s.mssConfirmed || s.displacementRatio >= 0.52),
+  );
+  const bullMss = ict.marketStructure.lastMss === "BULLISH_MSS" || bullSweepWithConfirm;
+  const bearMss = ict.marketStructure.lastMss === "BEARISH_MSS" || bearSweepWithConfirm;
+  const bullDivSignal = microSignals.bullRsiDiv || volumeDeltaDivergence === "BULLISH_DIVERGENCE";
+  const bearDivSignal = microSignals.bearRsiDiv || volumeDeltaDivergence === "BEARISH_DIVERGENCE";
+
+  let maxRsiWin10 = 0;
+  let minRsiWin10 = 100;
+  for (let i = Math.max(0, n - 12); i < n - 1; i++) {
+    const rv = execCtx.rsi14Series[i];
+    if (rv != null) {
+      if (rv > maxRsiWin10) maxRsiWin10 = rv;
+      if (rv < minRsiWin10) minRsiWin10 = rv;
+    }
+  }
+  const prevBar = barsExecution[n - 2]!;
+  const twoBarDrop = n >= 3 ? closes[n - 3]! - currentPrice : 0;
+  const twoBarRise = n >= 3 ? currentPrice - closes[n - 3]! : 0;
+  const twoRedCrash =
+    lastBar.close < lastBar.open &&
+    prevBar.close < prevBar.open &&
+    twoBarDrop >= atr14 * 0.95;
+  const twoGreenSurge =
+    lastBar.close > lastBar.open &&
+    prevBar.close > prevBar.open &&
+    twoBarRise >= atr14 * 0.95;
+  const isBearExhaustionBreakdown = maxRsiWin10 >= 73 && twoRedCrash && currentPrice < e9 && !bullSweepRecent;
+  const isBullExhaustionRebound = minRsiWin10 <= 27 && twoGreenSurge && currentPrice > e9 && !bearSweepRecent;
 
   // ------------------------------------------------------------------
   // 3. SYMMETRICAL DIRECTIONAL SCORING (NO BLIND BULL BIAS)
@@ -291,6 +486,18 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   if (bullMss || ict.optimalTradeSetup.direction === "BUY") bullPts += 14;
   if (bearMss || ict.optimalTradeSetup.direction === "SELL") bearPts += 14;
 
+  if (bullDivSignal) bullPts += 11;
+  if (bearDivSignal) bearPts += 11;
+
+  if (microSignals.bullBreakout) bullPts += 11;
+  if (microSignals.bearBreakout) bearPts += 11;
+
+  if (microSignals.bullPullbackReclaim) bullPts += 10;
+  if (microSignals.bearPullbackReclaim) bearPts += 10;
+
+  if (isBullExhaustionRebound) bullPts += 28;
+  if (isBearExhaustionBreakdown) bearPts += 28;
+
   if (histLast > 0) bullPts += 8;
   else if (histLast < 0) bearPts += 8;
 
@@ -302,6 +509,17 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   if (realImbalance >= 18) bullPts += 10;
   else if (realImbalance <= -18) bearPts += 10;
 
+  if (flowIntensityIndex != null) {
+    if (flowIntensityIndex >= 22) bullPts += 8;
+    else if (flowIntensityIndex <= -22) bearPts += 8;
+  }
+
+  if (absorptionType === "BULLISH_ABSORPTION") bullPts += 9;
+  else if (absorptionType === "BEARISH_ABSORPTION") bearPts += 9;
+
+  if (liquidationClusterAligned === "SHORT_SQUEEZE_UP") bullPts += 7;
+  else if (liquidationClusterAligned === "LONG_FLUSH_DOWN") bearPts += 7;
+
   if (csmBaseMinusQuote != null) {
     if (csmBaseMinusQuote >= 1.2) bullPts += 10;
     else if (csmBaseMinusQuote <= -1.2) bearPts += 10;
@@ -310,9 +528,18 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   let resolvedDir: "BUY" | "SELL" | "NEUTRAL" = "NEUTRAL";
   if (candidateDirection === "BUY" || candidateDirection === "SELL") {
     resolvedDir = candidateDirection;
+  } else if (bullSweepRecent && bullMss && !bearSweepRecent) {
+    // Fresh confirmed liquidity sweep takes precedence over lagged EMA trend readings
+    resolvedDir = "BUY";
+  } else if (bearSweepRecent && bearMss && !bullSweepRecent) {
+    resolvedDir = "SELL";
   } else {
     const gap = Math.abs(bullPts - bearPts);
-    if (gap >= 12) {
+    const minGap =
+      bullSweepRecent || bearSweepRecent || microSignals.bullBreakout || microSignals.bearBreakout
+        ? 10
+        : 12;
+    if (gap >= minGap) {
       resolvedDir = bullPts > bearPts ? "BUY" : "SELL";
     }
   }
@@ -330,7 +557,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   if (resolvedDir === "NEUTRAL") {
     vetoReasons.push("Lực mua/bán cân bằng, thiếu ưu thế định hướng rõ ràng");
-    gatesFailed.push("Thiếu ưu thế định hướng (Directional gap < 12đ)");
+    gatesFailed.push("Thiếu ưu thế định hướng (Directional gap thấp)");
   }
 
   if (regimeState === "EXTREME_VOL") {
@@ -342,6 +569,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const isBuy = finalDir === "BUY";
   const hasSweep = isBuy ? bullSweepRecent : bearSweepRecent;
   const hasMss = isBuy ? bullMss : bearMss;
+  const hasDiv = isBuy ? bullDivSignal : bearDivSignal;
+  const hasBreakout = isBuy ? microSignals.bullBreakout : microSignals.bearBreakout;
+  const hasPullbackReclaim = isBuy ? microSignals.bullPullbackReclaim : microSignals.bearPullbackReclaim;
+  const hasExhaustionShift = isBuy ? isBullExhaustionRebound : isBearExhaustionBreakdown;
 
   // ------------------------------------------------------------------
   // 4. 7-GATE EVALUATION & HARD VETOES
@@ -360,10 +591,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if (htfMatches || (macroMatches && !htfOpposes)) {
     precisionScore += 12;
     gatesPassed.push(`Gate 1: Thuận khung lớn (${htfBias}/${macroBias})`);
-  } else if (htfOpposes && macroOpposes && !(hasSweep && hasMss)) {
+  } else if (htfOpposes && macroOpposes && !(hasSweep && hasMss) && !hasExhaustionShift) {
     precisionScore -= 20;
     vetoReasons.push(`Ngược xu hướng cả HTF lẫn Macro (${htfBias}/${macroBias}) mà chưa có Sweep+MSS đảo chiều`);
     gatesFailed.push("Gate 1: Bẫy bắt dao rơi ngược hoàn toàn HTF + Macro");
+  } else if (hasExhaustionShift) {
+    precisionScore += 10;
+    gatesPassed.push("Gate 1: Đảo chiều phân phối sau đỉnh/đáy quá mua/quá bán (Post-Exhaustion Shift)");
   } else if (htfOpposes) {
     precisionScore -= 8;
     gatesFailed.push(`Gate 1: HTF (${htfBias}) chưa đồng thuận`);
@@ -377,13 +611,24 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 1b: Xu hướng sạch (ADX ${adxVal.toFixed(1)}, ER ${(erVal * 100).toFixed(0)}%)`);
   }
 
-  // GATE 2: Liquidity Sweep & MSS Confirmation
-  if (hasSweep && hasMss) {
-    precisionScore += 16;
-    gatesPassed.push("Gate 2: Quét thanh khoản Sweep + xác nhận MSS đảo chiều");
+  // GATE 2: Liquidity Sweep, MSS, Divergence & Compression Breakout Confirmation
+  if (hasSweep && (hasMss || hasBreakout || hasDiv)) {
+    precisionScore += 17;
+    gatesPassed.push("Gate 2: Quét thanh khoản Sweep + xác nhận MSS/Đà đảo chiều");
   } else if (hasSweep) {
-    precisionScore += 12;
+    precisionScore += 13;
     gatesPassed.push("Gate 2: Quét thanh khoản 1-4 nến gần nhất");
+  } else if (hasMss && (hasBreakout || hasPullbackReclaim || hasExhaustionShift)) {
+    precisionScore += 11;
+    gatesPassed.push("Gate 2: Phá vỡ cấu trúc vi mô (MSS) + Xung lực xác nhận");
+  } else if (hasBreakout || hasDiv || hasPullbackReclaim || hasExhaustionShift) {
+    precisionScore += 9;
+    const labels: string[] = [];
+    if (hasBreakout) labels.push("Bứt phá nén biến động");
+    if (hasDiv) labels.push("Phân kỳ RSI/CVD");
+    if (hasPullbackReclaim) labels.push("Pullback reclaim EMA9/21");
+    if (hasExhaustionShift) labels.push("Đảo chiều sau Parabolic");
+    gatesPassed.push(`Gate 2: Tín hiệu vi mô (${labels.join(" + ")})`);
   } else if (hasMss) {
     precisionScore += 7;
     gatesPassed.push("Gate 2: Phá vỡ cấu trúc vi mô (MSS)");
@@ -391,7 +636,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push("Gate 2: Chưa có nhịp quét Sweep/MSS");
   }
 
-  // GATE 3: Value Zone (OTE/FVG/Discount-Premium) + Parabolic Anti-Chase
+  // GATE 3: Value Zone (OTE/FVG/Discount-Premium) + Parabolic Anti-Chase & Post-Exhaustion Knife Guard
   const sma20Arr = sma(closes, 20);
   const s20 = sma20Arr[n - 1] ?? currentPrice;
   const std20Slice = closes.slice(-20);
@@ -406,22 +651,38 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ((isBuy && currentPrice > e21 && rsi14 >= 74) || (!isBuy && currentPrice < e21 && rsi14 <= 26)) &&
     (Math.abs(bbZ) > 2.05 || recent3Ret > atr14 * 2.4);
 
+  const isFallingKnifeTrap =
+    (isBuy && maxRsiWin10 >= 73 && twoRedCrash && !hasSweep) ||
+    (!isBuy && minRsiWin10 <= 27 && twoGreenSurge && !hasSweep);
+
   if (isParabolicExtended) {
     vetoReasons.push(`Chạy quá đà Parabolic (${distEma21Atr.toFixed(1)}x ATR từ EMA21, RSI ${rsi14.toFixed(0)}) — cấm đuổi lệnh`);
     gatesFailed.push("Gate 3 (Anti-Chase Veto): Quá mua/quá bán căng quá mức");
     precisionScore -= 16;
+  } else if (isFallingKnifeTrap) {
+    vetoReasons.push(
+      isBuy
+        ? `Bẫy bắt đáy rơi dao sau đỉnh quá mua (RSI đỉnh ${maxRsiWin10.toFixed(0)}, 2 nến xả mạnh) — chờ Sweep/Reclaim`
+        : `Bẫy chặn đỉnh ngược sóng hồi sau đáy quá bán (RSI đáy ${minRsiWin10.toFixed(0)}) — chờ xác nhận`,
+    );
+    gatesFailed.push("Gate 3b (Falling-Knife Veto): Xả mạnh ngay sau cực trị quá mua/quá bán");
+    precisionScore -= 18;
   }
 
   const inValuePullback =
-    (isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "DISCOUNT" || (currentPrice >= e21 - atr14 * 0.6 && currentPrice <= e9 + atr14 * 0.4))) ||
-    (!isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "PREMIUM" || (currentPrice <= e21 + atr14 * 0.6 && currentPrice >= e9 - atr14 * 0.4)));
+    (isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "DISCOUNT" || (currentPrice >= e21 - atr14 * 0.65 && currentPrice <= e9 + atr14 * 0.45))) ||
+    (!isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "PREMIUM" || (currentPrice <= e21 + atr14 * 0.65 && currentPrice >= e9 - atr14 * 0.45)));
 
-  if (inValuePullback && !isParabolicExtended) {
+  if ((inValuePullback || (hasBreakout && htfMatches)) && !isParabolicExtended && !isFallingKnifeTrap) {
     precisionScore += 10;
-    gatesPassed.push("Gate 3: Vùng giá trị tối ưu (Discount/Premium hoặc pullback EMA9/21)");
+    gatesPassed.push(
+      inValuePullback
+        ? "Gate 3: Vùng giá trị tối ưu (Discount/Premium hoặc pullback EMA9/21)"
+        : "Gate 3: Bứt phá từ vùng nén đồng thuận xu hướng HTF",
+    );
   }
 
-  // GATE 4: Order Flow + CSM + Crypto Funding
+  // GATE 4: Order Flow + FII/Absorption + Liquidation Clusters + CSM + Crypto Funding
   if (isBuy && realImbalance >= 12) {
     precisionScore += 6;
     gatesPassed.push(`Gate 4: Dòng tiền/CLV ủng hộ mua (+${realImbalance}%)`);
@@ -431,6 +692,30 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if ((isBuy && realImbalance <= -35) || (!isBuy && realImbalance >= 35)) {
     precisionScore -= 8;
     gatesFailed.push(`Gate 4: Áp lực Order Flow ngược hướng (${realImbalance}%)`);
+  }
+
+  if (flowIntensityIndex != null) {
+    if ((isBuy && flowIntensityIndex >= 22) || (!isBuy && flowIntensityIndex <= -22)) {
+      precisionScore += 5;
+      gatesPassed.push(`Gate 4 (FII): Dòng tiền tổ chức ${flowIntensityIndex > 0 ? "+" : ""}${flowIntensityIndex} đồng thuận`);
+    } else if ((isBuy && flowIntensityIndex <= -38) || (!isBuy && flowIntensityIndex >= 38)) {
+      precisionScore -= 6;
+      gatesFailed.push(`Gate 4 (FII): Dòng tiền tổ chức nghịch pha (${flowIntensityIndex})`);
+    }
+  }
+
+  if ((isBuy && absorptionType === "BULLISH_ABSORPTION") || (!isBuy && absorptionType === "BEARISH_ABSORPTION")) {
+    precisionScore += 5;
+    gatesPassed.push(`Gate 4 (Absorption): Phát hiện ${absorptionType} đỡ giá`);
+  }
+
+  if (
+    assetType === "CRYPTO" &&
+    ((isBuy && liquidationClusterAligned === "SHORT_SQUEEZE_UP") ||
+      (!isBuy && liquidationClusterAligned === "LONG_FLUSH_DOWN"))
+  ) {
+    precisionScore += 4;
+    gatesPassed.push(`Gate 4 (Liquidation Magnet): Cụm thanh lý ${liquidationClusterAligned} hút giá thuận chiều`);
   }
 
   if (assetType === "FOREX" && csmBaseMinusQuote != null) {
@@ -495,9 +780,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ? candidateEntry
     : currentPrice;
 
-  // Prefer pullback limit entry inside OTE/FVG if within 0.4x ATR and not already filled by sweep reclaim
+  // Prefer pullback limit entry inside OTE/FVG only when close (<= 0.25x ATR) and NOT a fast expansion/breakout/sweep bar
   const oteEntry = ict.optimalTradeSetup.direction === finalDir ? ict.optimalTradeSetup.entryOptimal : null;
-  if (oteEntry != null && Math.abs(currentPrice - oteEntry) <= atr14 * 0.4) {
+  const strongDisplacementCandle = Math.abs(lastBar.close - lastBar.open) >= atr14 * 0.45;
+  if (
+    oteEntry != null &&
+    Math.abs(currentPrice - oteEntry) <= atr14 * 0.25 &&
+    !hasBreakout &&
+    !pace.isIrreversibleLock &&
+    !(hasSweep && strongDisplacementCandle)
+  ) {
     const betterPrice = isBuy ? oteEntry < currentPrice : oteEntry > currentPrice;
     if (betterPrice) {
       rawEntry = oteEntry;
@@ -505,20 +797,40 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     }
   }
 
-  const recentStructBars = barsExecution.slice(-10);
-  const swingLow10 = Math.min(...recentStructBars.map((b) => b.low));
-  const swingHigh10 = Math.max(...recentStructBars.map((b) => b.high));
-  const slBuffer = Math.max(pip * 3, atr14 * 0.35);
+  // Compute friction ahead of SL clamping so compressed low-ATR setups don't place stops inside spread/fee noise
+  let totalFrictionPrice: number;
+  if (assetType === "FOREX") {
+    const clean = symbol.toUpperCase();
+    const defaultSpread = clean.startsWith("XAU") ? 2.5 : clean.includes("JPY") ? 1.2 : 1.0;
+    const sp = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? spreadPipsOrPct : defaultSpread;
+    totalFrictionPrice = (sp + 0.35) * pip;
+  } else {
+    const spDec = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? Math.min(spreadPipsOrPct, 0.02) : 0.0004;
+    totalFrictionPrice = rawEntry * Math.max(0.0008, spDec + 0.0006);
+  }
+
+  const recentStructBars = barsExecution.slice(-5);
+  const swingLow5 = Math.min(...recentStructBars.map((b) => b.low));
+  const swingHigh5 = Math.max(...recentStructBars.map((b) => b.high));
+  const structuralVolUnit = Math.max(atr14, medianRange * 1.15);
+  const slBuffer = Math.max(pip * 3, structuralVolUnit * 0.30);
 
   let rawStopDist =
     candidateStopLoss != null && Number.isFinite(candidateStopLoss) && candidateStopLoss > 0
       ? Math.abs(rawEntry - candidateStopLoss)
       : isBuy
-        ? rawEntry - (swingLow10 - slBuffer)
-        : swingHigh10 + slBuffer - rawEntry;
+        ? rawEntry - (swingLow5 - slBuffer)
+        : swingHigh5 + slBuffer - rawEntry;
 
-  // Clamp SL distance to [0.75 * ATR, 2.2 * ATR] so noise does not stop out good trades cleanly
-  const stopDist = Math.min(atr14 * 2.2, Math.max(atr14 * 0.75, Math.max(pip * 5, rawStopDist)));
+  // Ensure stop is anchored outside recent 5-bar micro-swing & spread/fee noise while keeping fast capital turnover
+  const minFrictionSafeStop =
+    candidateStopLoss == null ? Math.min(structuralVolUnit * 2.1, totalFrictionPrice / 0.19) : 0;
+  const upperStopCap = Math.max(structuralVolUnit * 1.6, minFrictionSafeStop);
+  const stopDist = Math.min(
+    structuralVolUnit * 2.2,
+    upperStopCap,
+    Math.max(structuralVolUnit * 0.90, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
+  );
   const rawSl = isBuy ? rawEntry - stopDist : rawEntry + stopDist;
 
   // Liquidity targets from Support/Resistance & Ict Pools
@@ -536,24 +848,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (candidates.length > 0) target2Dist = rawEntry - candidates[0]!;
   }
 
-  const tp1Dist = stopDist * 1.15;
+  // Lock 50% TP1 & move SL to Breakeven at 0.95R to shield high winrate before intraday mean-reversion
+  const tp1Dist = stopDist * 0.95;
   const tp3Dist = Math.max(target2Dist * 1.35, stopDist * 3.1);
 
   const tp1Raw = isBuy ? rawEntry + tp1Dist : rawEntry - tp1Dist;
   const tp2Raw = isBuy ? rawEntry + target2Dist : rawEntry - target2Dist;
   const tp3Raw = isBuy ? rawEntry + tp3Dist : rawEntry - tp3Dist;
-
-  // Friction calculation
-  let totalFrictionPrice: number;
-  if (assetType === "FOREX") {
-    const clean = symbol.toUpperCase();
-    const defaultSpread = clean.startsWith("XAU") ? 2.5 : clean.includes("JPY") ? 1.2 : 1.0;
-    const sp = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? spreadPipsOrPct : defaultSpread;
-    totalFrictionPrice = (sp + 0.35) * pip;
-  } else {
-    const spDec = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? Math.min(spreadPipsOrPct, 0.02) : 0.0004;
-    totalFrictionPrice = rawEntry * Math.max(0.0008, spDec + 0.0006);
-  }
 
   const frictionR = Number((totalFrictionPrice / Math.max(1e-12, stopDist)).toFixed(3));
   const grossRiskReward = Number((target2Dist / Math.max(1e-12, stopDist)).toFixed(2));
@@ -592,21 +893,21 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   precisionScore = Math.max(25, Math.min(95, Math.round(precisionScore)));
 
-  // Calibrated outcome probabilities & net Expectancy E[R] under 50% TP1 BE / 30% TP2 / 20% TP3 scaling
+  // Calibrated outcome probabilities & net Expectancy E[R] under 50% TP1 BE (0.95R) / 30% TP2 / 20% TP3 scaling
   const pTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));
   const pTp2 = Math.max(0.24, pTp1 * 0.72);
   const pTp3 = Math.max(0.12, pTp1 * 0.44);
   const calibratedWinRatePct = Math.round(pTp1 * 100);
   const expectancyR = Number(
-    (pTp1 * (0.5 * 1.15) + pTp2 * (0.3 * grossRiskReward) + pTp3 * (0.2 * 3.1) - (1 - pTp1) * 1.0 - frictionR).toFixed(2),
+    (pTp1 * (0.5 * 0.95) + pTp2 * (0.3 * grossRiskReward) + pTp3 * (0.2 * 3.1) - (1 - pTp1) * 1.0 - frictionR).toFixed(2),
   );
 
   // Assign final setup grade
   let grade: SetupGrade = "NO_TRADE";
   if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL") {
-    if (precisionScore >= 80 && expectancyR >= 0.32) grade = "A+";
-    else if (precisionScore >= 68 && expectancyR >= 0.18) grade = "A";
-    else if (precisionScore >= 56 && expectancyR >= 0.06) grade = "B";
+    if (precisionScore >= 78 && expectancyR >= 0.30) grade = "A+";
+    else if (precisionScore >= 65 && expectancyR >= 0.16) grade = "A";
+    else if (precisionScore >= 54 && expectancyR >= 0.05) grade = "B";
   }
 
   if (grade === "NO_TRADE") {

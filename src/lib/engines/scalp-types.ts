@@ -103,6 +103,10 @@ export interface ScalpAnalyzeInput {
   openInterest?: number | null;
   spreadPct?: number | null;
   orderBookImbalance?: number | null;
+  flowIntensityIndex?: number | null;
+  absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
+  volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
+  liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
   isLockout?: boolean;
   lockoutReason?: string | null;
 }

@@ -166,6 +166,10 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     spreadPipsOrPct: input.spreadPct ?? null,
     orderBookImbalance: input.orderBookImbalance ?? null,
     fundingRate: input.fundingRate ?? null,
+    flowIntensityIndex: input.flowIntensityIndex ?? null,
+    absorptionType: input.absorptionType ?? null,
+    volumeDeltaDivergence: input.volumeDeltaDivergence ?? null,
+    liquidationClusterAligned: input.liquidationClusterAligned ?? null,
     isNewsOrCascadeLockout: Boolean(input.isLockout || !filter.eligible),
     lockoutReason:
       input.lockoutReason ?? (!filter.eligible ? filter.reasons[0] ?? "Asset Filter blocked" : null),

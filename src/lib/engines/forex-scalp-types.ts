@@ -85,6 +85,15 @@ export interface ForexScalpSignal {
   primarySetup: ForexScalpSetup | null;
   moduleBStatus: "AVAILABLE" | "ORDER_FLOW_UNAVAILABLE";
   precision?: PrecisionTradeSetup;
+  flowMetrics?: {
+    fii: number;
+    absorption: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE";
+    cvdDivergence: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE";
+    domImbalance: number;
+    cmeTicker?: string;
+    vpoc?: number | null;
+    vwap?: number | null;
+  };
   riskHint: {
     recommendedRiskPct: number;
     stopPips: number | null;
@@ -104,4 +113,8 @@ export interface ForexScalpInput {
   nowMs?: number;
   calendarEvents?: { name?: string; time?: string; currency?: string; importance?: string }[];
   csmBaseMinusQuote?: number | null;
+  orderBookImbalance?: number | null;
+  flowIntensityIndex?: number | null;
+  absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
+  volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
 }
