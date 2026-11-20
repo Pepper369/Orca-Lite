@@ -1,0 +1,11 @@
+# Tasks: Project-Wide Core Algorithm, Numerical Precision & Money-Flow Purification
+
+- [x] **T001** Run Graphify AST dependency & community analysis (`4,428 nodes, 12,523 edges, 187 communities` in `src/lib`) and audit all core engines/services
+- [x] **T002** Create Spec Kit artifacts (`spec.md`, `plan.md`, `tasks.md`, `checklists/requirements.md`, `.specify/feature.json`) and Compound Engineering audit doc (`docs/solutions/quant-engines/core-algorithm-and-money-flow-audit.md`)
+- [ ] **T003** Phase 1A: Purify `src/lib/engines/money-flow.ts` & `src/lib/engines/vsa-engine.ts` (`MF-01`, `MF-02`, `MF-03` — causal swings, directional BSL/SSL, OB self-mitigation fix, rolling prior-bar VSA baseline, zero-volume guard)
+- [ ] **T004** Phase 1B: Purify `src/lib/engines/forex-order-flow-pro.ts`, `src/components/forex-order-flow.tsx`, `src/lib/services/sector-flow.ts` (`MF-04`, `MF-06`, `MF-07` — range-overlapped Volume Profile, swing-to-swing CVD absorption, zero-volume `hasVolume` fix, VND-value sector flow)
+- [ ] **T005** Phase 2A: Purify `src/lib/engines/advanced-quant-math.ts` & `src/lib/engines/trade-signal.ts` (`QM-03`, `QM-04`, `QM-06` — strict OU root $\phi \in (0,1)$, frequency-consistent DSR, small-sample VaR/CVaR, scale-invariant MACD histogram bias)
+- [ ] **T006** Phase 2B: Purify `src/lib/engines/divergence.ts`, `src/lib/engines/mtf-consensus.ts`, `src/lib/engines/wyckoff-elliott.ts`, `src/lib/engines/historical-price-action-trainer.ts` (`TA-01`..`TA-05` — ATR-scaled divergence lifecycle, 1000x VN VWAP unit guard, percentage-normalized Wyckoff slope & timestamp RS, entry-bar causality)
+- [ ] **T007** Phase 3A: Purify `src/lib/services/screener-snapshot-service.ts`, `src/lib/engines/asymmetric-quant-engine.ts`, `src/lib/engines/orca-apex-quant-engine.ts`, `src/lib/engines/multi-factor-quant-composite.ts`, `src/lib/engines/orca-master-composite.ts` (`MF-05`, `SC-02`..`SC-06`, `QM-05`)
+- [ ] **T008** Phase 3B: Purify `src/lib/quant/fireant-screener-engine.ts`, `src/lib/quant/quant-engine.ts`, `src/lib/engines/miquant-quant-engine.ts` (`SC-01`, `QM-01`, `QM-02` — real Wilder RSI & EMA MACD, eliminate ASCII-hashed fake F-Score/Beta/ATR)
+- [ ] **T009** Phase 4: Build verification test suite `src/lib/__tests__/core-algorithm-purification.test.ts`, run `tsc --noEmit`, `node:test`, `vitest`, `npm run build`, and sync to `origin/main`

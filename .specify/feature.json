@@ -1,3 +1,7 @@
 {
-  "feature_directory": "specs/002-screener-fa-system-upgrade"
+  "feature": "002-core-algorithm-moneyflow-purification",
+  "specDir": "specs/002-core-algorithm-moneyflow-purification",
+  "title": "Project-Wide Core Algorithm, Numerical Precision & Money-Flow Purification",
+  "status": "planned",
+  "updatedAt": "2026-11-20T09:30:00+07:00"
 }
