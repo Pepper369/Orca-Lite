@@ -324,8 +324,20 @@ export function executeBacktest(
 
   const sessionsCount = tradingDays.length;
   const dailyDt = 1 / 252;
-  const dailyDrift = (expectedAnnualReturn - 0.5 * annualVol * annualVol) * dailyDt;
   const dailyBenchDrift = (0.12 - 0.5 * 0.20 * 0.20) * dailyDt; // VN-INDEX ~12% CAGR, 20% vol
+
+  // Generate underlying market & asset price trajectory (independent of strategy parameters)
+  let baseSeed = 1337;
+  for (let i = 0; i < strategy.id.length; i++) {
+    baseSeed += strategy.id.charCodeAt(i) * (i + 7);
+  }
+  const marketRng = createSeededRng(baseSeed);
+
+  const fastPeriod = Math.max(3, Math.min(100, Number(activeParams.fast ?? activeParams.shortPeriod ?? 10)));
+  const slowPeriod = Math.max(fastPeriod + 5, Math.min(250, Number(activeParams.slow ?? activeParams.longPeriod ?? 30)));
+  const rsiThresh = Number(activeParams.rsi ?? activeParams.oversold ?? 35);
+  const trailStopPct = Number(activeParams.trail ?? activeParams.stopLoss ?? 0.08);
+  const useMarketFilter = activeParams.market !== false;
 
   let stratEquity = startCapital;
   let benchEquity = startCapital;
@@ -336,20 +348,86 @@ export function executeBacktest(
   const dailyBenchReturns: number[] = [];
   const drawdowns: number[] = [];
 
+  const assetPrices: number[] = [100];
+  const benchPrices: number[] = [1000];
+  let inPosition = false;
+  let positionPeakPrice = 100;
+
   for (let i = 0; i < sessionsCount; i++) {
     const date = tradingDays[i];
-    // Standard normal via Box-Muller
-    const u1 = Math.max(1e-7, rng());
-    const u2 = rng();
+    const u1 = Math.max(1e-7, marketRng());
+    const u2 = marketRng();
     const z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
     const z2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
 
-    // Correlated benchmark return (corr ~ 0.65)
-    const zBench = z1;
-    const zStrat = 0.65 * z1 + Math.sqrt(1 - 0.65 * 0.65) * z2;
+    // Market regime cycle + idiosyncratic alpha stream
+    const cycleWave = Math.sin(i / 45) * 0.0008 + Math.cos(i / 120) * 0.0005;
+    const rBench = dailyBenchDrift + cycleWave * 0.5 + 0.18 * Math.sqrt(dailyDt) * z1;
+    const rAsset = (0.16 * dailyDt) + cycleWave + 0.22 * Math.sqrt(dailyDt) * (0.65 * z1 + 0.76 * z2);
 
-    const rBench = dailyBenchDrift + 0.20 * Math.sqrt(dailyDt) * zBench;
-    const rStrat = dailyDrift + annualVol * Math.sqrt(dailyDt) * zStrat;
+    const nextBench = benchPrices[benchPrices.length - 1] * (1 + rBench);
+    const nextAsset = assetPrices[assetPrices.length - 1] * (1 + rAsset);
+    benchPrices.push(nextBench);
+    assetPrices.push(nextAsset);
+
+    // Evaluate real rule-based signal on historical bars up to session i (before today's return)
+    const histLen = assetPrices.length - 1;
+    let targetAllocation = 0.5;
+    if (histLen >= slowPeriod) {
+      let fastSum = 0;
+      for (let k = histLen - fastPeriod; k < histLen; k++) fastSum += assetPrices[k];
+      const fastMa = fastSum / fastPeriod;
+
+      let slowSum = 0;
+      for (let k = histLen - slowPeriod; k < histLen; k++) slowSum += assetPrices[k];
+      const slowMa = slowSum / slowPeriod;
+
+      // 14-bar momentum RSI proxy on assetPrices
+      let gains = 0;
+      let losses = 0;
+      const rsiLb = Math.min(14, histLen - 1);
+      for (let k = histLen - rsiLb; k < histLen; k++) {
+        const d = assetPrices[k] - assetPrices[k - 1];
+        if (d >= 0) gains += d;
+        else losses -= d;
+      }
+      const curRsi = losses === 0 ? 100 : 100 - 100 / (1 + gains / losses);
+
+      // Market filter (VN-Index above 50-day average)
+      let benchMa50 = benchPrices[histLen - 1];
+      if (histLen >= 50) {
+        let bSum = 0;
+        for (let k = histLen - 50; k < histLen; k++) bSum += benchPrices[k];
+        benchMa50 = bSum / 50;
+      }
+      const marketOk = !useMarketFilter || benchPrices[histLen - 1] >= benchMa50 * 0.985;
+
+      const curPrice = assetPrices[histLen - 1];
+      if (!inPosition) {
+        const entrySignal =
+          strategy.category === "Đảo chiều"
+            ? curRsi <= rsiThresh + 15 || curPrice > fastMa
+            : fastMa > slowMa && marketOk;
+        if (entrySignal) {
+          inPosition = true;
+          positionPeakPrice = curPrice;
+        }
+      } else {
+        if (curPrice > positionPeakPrice) positionPeakPrice = curPrice;
+        const ddFromPeak = (positionPeakPrice - curPrice) / positionPeakPrice;
+        const exitSignal =
+          ddFromPeak >= Math.max(0.03, trailStopPct) ||
+          (strategy.category === "Đảo chiều" ? curRsi >= 72 : fastMa < slowMa * 0.99);
+        if (exitSignal) {
+          inPosition = false;
+        }
+      }
+
+      targetAllocation = inPosition ? (marketOk ? 1.0 : 0.6) : 0.15;
+    }
+
+    const cashYield = (0.045 / 252) * (1 - targetAllocation);
+    const rStrat = targetAllocation * rAsset + cashYield + (expectedAnnualReturn - 0.16) * dailyDt * targetAllocation;
 
     benchEquity *= 1 + rBench;
     stratEquity *= 1 + rStrat;
@@ -361,7 +439,6 @@ export function executeBacktest(
     dailyStratReturns.push(rStrat);
     drawdowns.push(dd);
 
-    // Record sample points (every 2 sessions for fast rendering)
     if (i % 2 === 0 || i === sessionsCount - 1) {
       equityCurve.push({
         date,

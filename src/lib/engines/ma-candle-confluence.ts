@@ -217,7 +217,8 @@ export interface MaCandleConfluenceRow {
 
 function roundPrice(val: number, refPrice: number): number {
   if (!Number.isFinite(val) || !Number.isFinite(refPrice)) return 0;
-  if (refPrice < 2) return +val.toFixed(4);
+  if (refPrice < 0.05) return +val.toFixed(6);
+  if (refPrice < 2) return +val.toFixed(5);
   if (refPrice < 20) return +val.toFixed(3);
   return +val.toFixed(2);
 }
@@ -226,21 +227,21 @@ function lastSma(closes: number[], period: number): number | null {
   if (closes.length < period) return null;
   const series = sma(closes, period);
   const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
 }
 
 function prevSma(closes: number[], period: number, barsAgo = 1): number | null {
   if (closes.length < period + barsAgo) return null;
   const series = sma(closes, period);
   const v = series[series.length - 1 - barsAgo];
-  return v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
 }
 
 function lastEma(closes: number[], period: number): number | null {
   if (closes.length < period) return null;
   const series = ema(closes, period);
   const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
 }
 
 function avgVol(bars: OhlcvBar[], n = 20): number | null {

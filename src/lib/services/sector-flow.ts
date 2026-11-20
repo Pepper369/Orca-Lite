@@ -89,7 +89,7 @@ export function rankSectorsByFlow(stocks: InputStockQuote[]): SectorFlowItem[] {
   const maxFlow = Math.max(...allFlows);
   const flowRange = maxFlow - minFlow;
 
-  const allVols = Array.from(accMap.values()).map((a) => a.totalVolume);
+  const allVols = Array.from(accMap.values()).map((a) => a.totalVolumeVND);
   const minVol = Math.min(...allVols);
   const maxVol = Math.max(...allVols);
   const volRange = maxVol - minVol;
@@ -99,7 +99,7 @@ export function rankSectorsByFlow(stocks: InputStockQuote[]): SectorFlowItem[] {
   for (const [sector, acc] of accMap.entries()) {
     const normFlow = flowRange === 0 ? 50 : ((acc.totalForeignValue - minFlow) / flowRange) * 100;
     const breadth = acc.total > 0 ? (acc.advances / acc.total) * 100 : 50;
-    const normVol = volRange === 0 ? 50 : ((acc.totalVolume - minVol) / volRange) * 100;
+    const normVol = volRange === 0 ? 50 : ((acc.totalVolumeVND - minVol) / volRange) * 100;
 
     const score = Number((normFlow * 0.4 + breadth * 0.3 + normVol * 0.3).toFixed(1));
 
@@ -115,9 +115,12 @@ export function rankSectorsByFlow(stocks: InputStockQuote[]): SectorFlowItem[] {
 
     const avgChangePct = acc.total > 0 ? Number((acc.sumChangePct / acc.total).toFixed(2)) : 0;
 
-    const sortedStocks = [...acc.stockFlows].sort(
-      (a, b) => Math.abs(b.netForeignVnd) - Math.abs(a.netForeignVnd)
-    );
+    const sortedStocks = [...acc.stockFlows].sort((a, b) => {
+      if (signal === "inflow" || (signal === "neutral" && acc.totalForeignValue >= 0)) {
+        return b.netForeignVnd - a.netForeignVnd;
+      }
+      return a.netForeignVnd - b.netForeignVnd;
+    });
     const topStocks = sortedStocks.slice(0, 2);
 
     results.push({

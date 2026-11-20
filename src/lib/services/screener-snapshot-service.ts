@@ -1147,12 +1147,23 @@ export function calculateBuyPointPlan(
     };
   }
 
-  // 2. Tính bệ đỡ hỗ trợ hội tụ đa tầng theo thuật toán Asymmetric Quant
+  // 2. Tính bệ đỡ hỗ trợ hội tụ đa tầng theo thuật toán Asymmetric Quant (chỉ dùng Swing Pivot thực)
   const localSupports: number[] = [];
   const localResistances: number[] = [];
-  for (let i = Math.max(0, n - 25); i < n; i++) {
-    if (lows[i] && lows[i] > 0) localSupports.push(lows[i]);
-    if (highs[i] && highs[i] > 0) localResistances.push(highs[i]);
+  const srWindow = Math.max(2, n - 45);
+  for (let i = srWindow; i < n - 1; i++) {
+    const isPivotLow = lows[i] > 0 && lows[i] <= lows[i - 1] && lows[i] <= lows[i + 1] && (i < 2 || lows[i] <= lows[i - 2]);
+    const isPivotHigh = highs[i] > 0 && highs[i] >= highs[i - 1] && highs[i] >= highs[i + 1] && (i < 2 || highs[i] >= highs[i - 2]);
+    if (isPivotLow) localSupports.push(lows[i]);
+    if (isPivotHigh) localResistances.push(highs[i]);
+  }
+  if (localSupports.length === 0) {
+    const recentMin = Math.min(...lows.slice(Math.max(0, n - 20)).filter((v) => v > 0));
+    if (Number.isFinite(recentMin)) localSupports.push(recentMin);
+  }
+  if (localResistances.length === 0) {
+    const recentMax = Math.max(...highs.slice(Math.max(0, n - 20)).filter((v) => v > 0));
+    if (Number.isFinite(recentMax)) localResistances.push(recentMax);
   }
 
   let trSum = 0;
@@ -1254,8 +1265,8 @@ function analyzeQuantFeatures(
 
   const p = currentPrice ?? closes[closes.length - 1];
 
-  // 1. Ornstein-Uhlenbeck (OU) Mean Reversion Estimation
-  const ouResult = estimateOrnsteinUhlenbeck(closes);
+  // 1. Ornstein-Uhlenbeck (OU) Mean Reversion Estimation on recent 60-bar regime window
+  const ouResult = estimateOrnsteinUhlenbeck(closes.slice(-60));
   const ouZ = Number.isFinite(ouResult.currentZScore) ? Number(ouResult.currentZScore.toFixed(2)) : null;
   const ouHalfLife = Number.isFinite(ouResult.halfLife) && ouResult.halfLife < 100 ? ouResult.halfLife : null;
   const ouMu = Number.isFinite(ouResult.mu) ? Math.round(ouResult.mu) : null;
@@ -2761,7 +2772,35 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           foreignRow?.buyRatioPct,
         );
 
-        const beta: number | null = null;
+        let beta: number | null = null;
+        if (parsed.closes.length >= 20 && indexBars.length >= 20) {
+          const kLen = Math.min(60, parsed.closes.length - 1, indexBars.length - 1);
+          const sRets: number[] = [];
+          const mRets: number[] = [];
+          for (let k = 0; k < kLen; k++) {
+            const sPrev = parsed.closes[parsed.closes.length - 1 - k - 1];
+            const sCur = parsed.closes[parsed.closes.length - 1 - k];
+            const mPrev = indexBars[indexBars.length - 1 - k - 1]?.close ?? 0;
+            const mCur = indexBars[indexBars.length - 1 - k]?.close ?? 0;
+            if (sPrev > 0 && mPrev > 0) {
+              sRets.push((sCur - sPrev) / sPrev);
+              mRets.push((mCur - mPrev) / mPrev);
+            }
+          }
+          if (sRets.length >= 15) {
+            const meanS = sRets.reduce((a, b) => a + b, 0) / sRets.length;
+            const meanM = mRets.reduce((a, b) => a + b, 0) / mRets.length;
+            let cov = 0;
+            let varM = 0;
+            for (let k = 0; k < sRets.length; k++) {
+              cov += (sRets[k] - meanS) * (mRets[k] - meanM);
+              varM += (mRets[k] - meanM) ** 2;
+            }
+            if (varM > 1e-10) {
+              beta = Number(Math.max(-0.5, Math.min(2.8, cov / varM)).toFixed(2));
+            }
+          }
+        }
         const quantFeatures = analyzeQuantFeatures(
           parsed,
           price,
@@ -2879,13 +2918,14 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           techFeatures.volRatio20
         );
 
-        // Evaluate Smart Money Footprint
+        // Evaluate Smart Money Footprint (Keep foreignBuyRatioPct separate from market activeBuyRatioPct)
         const smartMoney = evaluateSmartMoneyFootprint({
           symbol: sym,
           bars: parsed.ohlcvBars,
           currentPrice: price,
           foreignNetValBillion: foreignNetVal,
-          activeBuyRatioPct: foreignRow?.buyRatioPct ?? null,
+          activeBuyRatioPct: null,
+          foreignBuyRatioPct: foreignRow?.buyRatioPct ?? null,
           foreignBuyValBillion: foreignRow?.buyValue ? foreignRow.buyValue / 1_000_000_000 : null,
           foreignSellValBillion: foreignRow?.sellValue ? foreignRow.sellValue / 1_000_000_000 : null,
         });
@@ -2936,7 +2976,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           bars: parsed.ohlcvBars,
           currentPrice: price ?? (parsed.closes[parsed.closes.length - 1] || 0),
           quote: q,
-          activeBuyRatioPct: foreignRow?.buyRatioPct ?? null,
+          activeBuyRatioPct: null,
           foreignNetValBillion: foreignNetVal,
           rsRating,
           piotroskiFScore,

@@ -1,0 +1,314 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import type { OhlcvBar } from "../types";
+import { analyzeMoneyFlow } from "../engines/money-flow";
+import { analyzeVsaBars, detectSingleVsaBar } from "../engines/vsa-engine";
+import { computeVolumeProfile, computeSessionVwap, detectCvdAndAbsorption } from "../engines/forex-order-flow-pro";
+import { evaluateSmartMoneyFootprint } from "../engines/smart-money-footprint";
+import { rankSectorsByFlow } from "../services/sector-flow";
+import { calcRsi, calcMacd, scanFireAntScreener } from "../quant/fireant-screener-engine";
+import { computeAsymmetricPlan } from "../engines/asymmetric-quant-engine";
+import { evaluateApexQuant } from "../engines/orca-apex-quant-engine";
+import { scoreFundamentalPillar, calculateUniverseMultiFactor } from "../engines/multi-factor-quant-composite";
+import { calculateUniverseOrcaMaster } from "../engines/orca-master-composite";
+import { computeQuantAttributes } from "../engines/miquant-quant-engine";
+import { executeBacktest } from "../quant/quant-engine";
+import { FIREANT_RAW_STRATEGIES } from "../quant/fireant-strategies";
+import {
+  estimateOrnsteinUhlenbeck,
+  calculateDeflatedSharpeRatio,
+  calculateVaRAndCVaR,
+} from "../engines/advanced-quant-math";
+import { techBiasFromSnapshot } from "../engines/trade-signal";
+import { detectDivergences, SHORT_3_4D } from "../engines/divergence";
+import { evaluateMtfConsensus } from "../engines/mtf-consensus";
+import { computeWyckoffRS } from "../engines/wyckoff-elliott";
+import { trainHistoricalPriceAction } from "../engines/historical-price-action-trainer";
+
+function makeBars(count: number, basePrice = 100, baseVol = 100000): OhlcvBar[] {
+  const out: OhlcvBar[] = [];
+  const t0 = 1700000000000;
+  for (let i = 0; i < count; i++) {
+    const wave = Math.sin(i / 4) * (basePrice * 0.02);
+    const close = basePrice + wave;
+    const open = close - basePrice * 0.002;
+    const high = Math.max(open, close) + basePrice * 0.005;
+    const low = Math.min(open, close) - basePrice * 0.005;
+    out.push({
+      time: t0 + i * 86400000,
+      open,
+      high,
+      low,
+      close,
+      volume: baseVol,
+    });
+  }
+  return out;
+}
+
+describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", () => {
+  it("MF-01 & MF-02: detects latest-bar liquidity sweep without self-cancellation and keeps fresh Order Blocks OPEN", () => {
+    const bars = makeBars(60, 100, 120000);
+    // Construct a clear confirmed swing low at index 45 (price = 95.0)
+    for (let i = 40; i < 59; i++) {
+      bars[i] = {
+        time: bars[i]!.time,
+        open: 100,
+        high: 101,
+        low: 98.5,
+        close: 99.5,
+        volume: 100000,
+      };
+    }
+    bars[45] = {
+      time: bars[45]!.time,
+      open: 97,
+      high: 97.5,
+      low: 95.0,
+      close: 96.8,
+      volume: 140000,
+    };
+    bars[52] = {
+      time: bars[52]!.time,
+      open: 97,
+      high: 97.4,
+      low: 95.02,
+      close: 96.9,
+      volume: 135000,
+    };
+    // Latest bar (index 59) sweeps below 95.0 (low = 94.6) and reclaims above 95.0 (close = 97.2)
+    bars[59] = {
+      time: bars[59]!.time,
+      open: 96.5,
+      high: 97.5,
+      low: 94.6,
+      close: 97.2,
+      volume: 220000,
+    };
+
+    const mf = analyzeMoneyFlow(bars);
+    assert.equal(mf.liquidity.sweep, "SELL_SIDE", "Latest bar sell-side sweep must not self-cancel");
+    if (mf.liquidity.nearestBuySide != null) {
+      assert.ok(
+        mf.liquidity.nearestBuySide > bars[59]!.close,
+        "nearestBuySide must strictly rest above current close",
+      );
+    }
+    if (mf.liquidity.nearestSellSide != null) {
+      assert.ok(
+        mf.liquidity.nearestSellSide < bars[59]!.close,
+        "nearestSellSide must strictly rest below current close",
+      );
+    }
+  });
+
+  it("MF-03: VSA engines emit zero false NO_SUPPLY/NO_DEMAND signals on zero-volume series", () => {
+    const zeroVolBars = makeBars(45, 1.085, 0);
+    const vsaRes = analyzeVsaBars(zeroVolBars);
+    assert.equal(vsaRes.recentSignals.length, 0, "Zero-volume FX bars must produce 0 VSA signals");
+    assert.equal(detectSingleVsaBar(zeroVolBars, 25, 0, 0.002), null);
+
+    const mfZero = analyzeMoneyFlow(zeroVolBars)!;
+    assert.ok(mfZero);
+    assert.equal(mfZero.vsa.events.includes("NO_DEMAND"), false);
+    assert.equal(mfZero.vsa.events.includes("NO_SUPPLY"), false);
+    assert.equal(mfZero.vsa.rvol, null);
+  });
+
+  it("MF-04: computeVolumeProfile distributes wide-bar volume across multiple bins and XAGUSD uses 0.01 pip scale", () => {
+    const bars: OhlcvBar[] = [
+      { time: 1, open: 100, high: 110, low: 90, close: 108, volume: 1000 },
+      { time: 2, open: 108, high: 112, low: 92, close: 95, volume: 1000 },
+    ];
+    const vp = computeVolumeProfile(bars, 12);
+    const nonZeroBins = vp.bins.filter((b) => b.volume > 0);
+    assert.ok(nonZeroBins.length >= 6, `Wide candles must span multiple bins, got ${nonZeroBins.length}`);
+
+    const silverBars = makeBars(20, 30.5, 5000);
+    const vwapRes = computeSessionVwap("XAGUSD", silverBars);
+    // Distance on ~30.5 silver with 0.01 pip scale should be a few pips, not 100x inflated
+    assert.ok(vwapRes.distanceToVwapPips < 150, `XAGUSD pip distance should use 0.01 pip scale, got ${vwapRes.distanceToVwapPips}`);
+
+    const cvdRes = detectCvdAndAbsorption("EURUSD", makeBars(25, 1.08, 1000));
+    assert.equal(cvdRes.cvdTimeline.length, 25);
+  });
+
+  it("MF-05 & MF-06: SmartMoneyFootprint separates foreignBuyRatioPct from activeBuyRatioPct and SectorFlow sorts directionally by VND value", () => {
+    const bars = makeBars(25, 30, 500000);
+    // Tiny foreign buy (1000 shares, 0 sell -> 100% foreignBuyRatioPct) with null activeBuyRatioPct
+    const sm = evaluateSmartMoneyFootprint({
+      symbol: "AAA",
+      bars,
+      currentPrice: 30,
+      foreignNetValBillion: 0.03,
+      activeBuyRatioPct: null,
+      foreignBuyRatioPct: 100,
+      foreignBuyValBillion: 0.03,
+      foreignSellValBillion: 0,
+    });
+    assert.equal(sm.activeBuyRatioPct, null, "Must not report foreign-only ratio as market activeBuyRatioPct");
+    assert.notEqual(sm.signal, "HEAVY_ACCUMULATION", "Tiny foreign trade must not trigger HEAVY_ACCUMULATION");
+
+    const sectors = rankSectorsByFlow([
+      { ticker: "VCB", sector: "Ngân hàng", close: 90000, volume: 2000000, changePercent: 1.5, foreignNetVol: 500000 },
+      { ticker: "STB", sector: "Ngân hàng", close: 34000, volume: 5000000, changePercent: 1.2, foreignNetVol: -800000 },
+      { ticker: "HPG", sector: "Thép", close: 27400, volume: 1000000, changePercent: -1.0, foreignNetVol: -400000 },
+    ]);
+    const bankSector = sectors.find((s) => s.sector === "Ngân hàng")!;
+    assert.equal(
+      bankSector.topStocks[0]?.ticker,
+      "VCB",
+      "Positive inflow sector must list top net-inflow stock first, not largest absolute outflow",
+    );
+  });
+
+  it("SC-01 & SC-03: FireAnt Screener uses Wilder RSI / EMA MACD without Math.sin and Asymmetric plan respects overhead resistance", () => {
+    const trendingCloses = Array.from({ length: 40 }, (_, i) => 100 + i * 1.1 + (i % 4 === 0 ? -2.2 : 0.6));
+    const rsiVal = calcRsi(trendingCloses, 14);
+    const macdObj = calcMacd(trendingCloses);
+    assert.ok(rsiVal > 50 && rsiVal < 95, `Expected Wilder RSI in (50, 95), got ${rsiVal}`);
+    assert.notEqual(
+      macdObj.signal,
+      Math.round(macdObj.macd * 0.8 * 100) / 100,
+      "MACD signal must be 9-period EMA, not macd * 0.8",
+    );
+
+    const oversoldCandidates = scanFireAntScreener("oversold_bounce");
+    assert.ok(oversoldCandidates.length > 0);
+    for (const c of oversoldCandidates) {
+      assert.ok(c.rsi < 30, `Oversold candidate ${c.symbol} must satisfy Wilder RSI < 30, got ${c.rsi}`);
+    }
+
+    // Asymmetric plan with nearby resistance ceiling at +1.5R
+    const asym = computeAsymmetricPlan({
+      last: 100,
+      atr14: 2.0,
+      supports: [99.5],
+      resistances: [104.5],
+      sma20: 99.8,
+      sma50: 98.0,
+    });
+    assert.ok(asym.riskReward < 3.5, `Risk/Reward must reflect true resistance ceiling (got ${asym.riskReward})`);
+  });
+
+  it("SC-04, SC-05 & SC-06: ApexQuant anchors Wyckoff Spring to bottom, MultiFactor syncs category post-calibration, MasterComposite exempts financials fairly", () => {
+    // Uptrend bars with a hammer at the top -> must NOT be classified as a Wyckoff Spring bottom
+    const topHammerBars: OhlcvBar[] = Array.from({ length: 30 }, (_, i) => {
+      const base = 100 + i * 2;
+      return {
+        time: 1700000000000 + i * 86400000,
+        open: base,
+        high: base + 1,
+        low: i === 29 ? base - 4 : base - 0.5,
+        close: base + 0.8,
+        volume: 100000,
+      };
+    });
+    const apex = evaluateApexQuant({ symbol: "TOP", bars: topHammerBars, currentPrice: topHammerBars[29]!.close });
+    assert.equal(apex.reversalMetrics.isWyckoffSpring, false, "Hammer at 20-bar high must not trigger Wyckoff Spring");
+
+    const fundPillar = scoreFundamentalPillar({
+      symbol: "FPT",
+      fScore: 8,
+      roic: 22,
+      sloanAccrualRatio: 2.0,
+      cfoToNetProfit: 1.15,
+      altmanZScore: 3.5,
+      interestCoverage: 8.0,
+    });
+    assert.ok(fundPillar.score <= 99 && fundPillar.score >= 75);
+
+    const universe = calculateUniverseMultiFactor([
+      { symbol: "WEAK", fScore: 2, roe: 3, pe: 40 },
+      { symbol: "MID", fScore: 5, roe: 12, pe: 15 },
+      { symbol: "STRONG", fScore: 9, roe: 25, roic: 24, pe: 10, marginOfSafetyPct: 25 },
+    ]);
+    const strong = universe.get("STRONG")!;
+    assert.equal(strong.compositeScore, 99);
+    assert.equal(strong.category, "SUPER_ELITE", "Post-calibration category must sync with calibratedPercentile");
+
+    const masterMap = calculateUniverseOrcaMaster([
+      { symbol: "VCB", piotroskiFScore: 7, altmanZone: "EXEMPT_FINANCIAL", roe: 21 },
+      { symbol: "FPT", piotroskiFScore: 7, altmanZone: "SAFE", roe: 21 },
+    ]);
+    assert.equal(
+      masterMap.get("VCB")!.breakdown.fundamentalScore,
+      masterMap.get("FPT")!.breakdown.fundamentalScore,
+      "EXEMPT_FINANCIAL with strong ROE must achieve parity with non-financial SAFE",
+    );
+  });
+
+  it("QM-01, QM-02, QM-03, QM-04 & QM-06: MiQuant, Backtest Studio, OU stationarity, DSR frequency, VaR non-negativity, and MACD scaling", () => {
+    // QM-01: Different symbols with identical price and factor inputs must produce identical quant attributes (no ASCII hash)
+    const attrA = computeQuantAttributes("FPT", 100000, { pctChange: 2.0, volumeRatio: 1.3, upsidePct: 20 });
+    const attrB = computeQuantAttributes("VCB", 100000, { pctChange: 2.0, volumeRatio: 1.3, upsidePct: 20 });
+    assert.deepEqual(attrA, attrB, "computeQuantAttributes must depend on market data, not ticker ASCII hash");
+
+    // QM-02: Changing strategy parameters must alter rule-based execution results
+    const strat = FIREANT_RAW_STRATEGIES[0]!;
+    const btFast = executeBacktest(strat, { fast: 5, slow: 20, trail: 0.05 });
+    const btSlow = executeBacktest(strat, { fast: 25, slow: 90, trail: 0.18 });
+    assert.notEqual(btFast.metrics.totalReturn, btSlow.metrics.totalReturn);
+
+    // QM-03: Oscillatory alternating series (b <= -1, phi <= 0) must NOT be accepted as stationary OU diffusion
+    const alternating = Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? 110 : 90));
+    const ouOsc = estimateOrnsteinUhlenbeck(alternating);
+    assert.equal(ouOsc.isStationary, false, "Alternating negative-phi AR(1) root cannot be stationary OU");
+
+    // Smooth mean-reverting AR(1) with phi = 0.85 -> stationary OU
+    const mrSeries: number[] = [100];
+    for (let i = 1; i < 60; i++) {
+      const prev = mrSeries[i - 1]!;
+      mrSeries.push(100 + 0.82 * (prev - 100) + Math.sin(i) * 0.8);
+    }
+    const ouValid = estimateOrnsteinUhlenbeck(mrSeries);
+    assert.equal(ouValid.isStationary, true);
+    assert.ok(ouValid.theta > 0 && ouValid.halfLife > 0 && ouValid.halfLife < 30);
+
+    // QM-04: DSR frequency conversion & non-negative VaR
+    const dsr = calculateDeflatedSharpeRatio({
+      observedSharpe: 2.1,
+      trialsCount: 5,
+      sampleLengthBars: 252,
+      skewness: -0.2,
+      kurtosis: 3.5,
+    });
+    assert.ok(dsr.deflatedSharpeRatio > 0.7 && dsr.deflatedSharpeRatio <= 1.0);
+
+    const posReturns = Array.from({ length: 12 }, (_, i) => 0.005 + i * 0.001);
+    const riskPos = calculateVaRAndCVaR(posReturns);
+    assert.ok(riskPos.var95Pct >= 0 && riskPos.cvar95Pct >= riskPos.var95Pct);
+
+    // QM-06: Scale-invariant MACD histogram scoring across FX and Stocks
+    const fxBias = techBiasFromSnapshot({ macdHistogram: 0.0008, atr14: 0.0020 });
+    const stockBias = techBiasFromSnapshot({ macdHistogram: 400, atr14: 1000 });
+    assert.equal(fxBias.bias, stockBias.bias, "Identical MACD/ATR ratio must produce identical tech bias");
+  });
+
+  it("TA-01, TA-02, TA-03 & TA-05: ATR-adaptive divergence, 1000x VND VWAP normalization, timestamp-aligned Wyckoff RS, and causal price-action trainer", () => {
+    // TA-02: 1000x VND unit normalization in MTF H1 VWAP
+    const vnDaily = makeBars(40, 32.5, 5000000);
+    const mtf = evaluateMtfConsensus(vnDaily, {
+      price: 33.0,
+      open: 32.2,
+      high: 33.2,
+      low: 32.1,
+      volume: 1000000,
+      quoteVolume: 32500000000, // 32,500 VND * 1,000,000 shares (raw VND)
+    });
+    assert.equal(mtf.details.h1.bias, "BULL", "Price 33.0 above normalized VWAP 32.5 must be BULL on H1");
+
+    // TA-03: Timestamp-aligned Wyckoff RS
+    const stockBars = makeBars(70, 50, 200000);
+    // Drop 3 intermediate bars from benchmark to simulate holiday/missing-bar offset
+    const benchBars = makeBars(70, 1200, 500000000).filter((_, idx) => idx !== 20 && idx !== 35 && idx !== 50);
+    const rs = computeWyckoffRS(stockBars, benchBars);
+    assert.ok(Number.isFinite(rs.rsScore));
+
+    // TA-01 & TA-05: Divergence & Historical Price Action Trainer run cleanly
+    const divs = detectDivergences(stockBars, SHORT_3_4D);
+    assert.ok(Array.isArray(divs));
+    const trained = trainHistoricalPriceAction(stockBars);
+    assert.ok(trained.historicalEdgeScore >= 0 && trained.historicalEdgeScore <= 100);
+  });
+});

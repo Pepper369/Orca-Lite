@@ -203,8 +203,10 @@ export function trainHistoricalPriceAction(
 
     const setupTrigger = (isBreakoutAttempt || isMaBounce || isPocketPivot) && i > inPositionUntil;
 
-    if (setupTrigger) {
-      const entryPrice = closes[i + 1] ?? curClose;
+    if (setupTrigger && i + 1 < bars.length) {
+      // Enter at next bar's open (bars[i + 1].open) so intra-bar highs/lows on bar i + 1 occur strictly after entry
+      const nextOpen = bars[i + 1]?.open;
+      const entryPrice = nextOpen && nextOpen > 0 ? nextOpen : (closes[i] ?? curClose);
       let outcome: "WIN" | "LOSS" = "LOSS";
       let peakGain = 0;
 

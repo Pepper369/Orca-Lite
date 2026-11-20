@@ -199,23 +199,45 @@ export interface QuantStrategyDefinition {
   stocks: QuantStrategyStock[];
 }
 
-export function computeQuantAttributes(symbol: string, currentPrice: number) {
-  let hash = 0;
-  for (let i = 0; i < symbol.length; i++) {
-    hash = (hash << 5) - hash + symbol.charCodeAt(i);
-    hash |= 0;
+export interface QuantAttributeInput {
+  pctChange?: number;
+  volumeRatio?: number;
+  upsidePct?: number;
+  foreignNetValue?: number;
+  fScore?: number | null;
+  beta?: number | null;
+  atrPct?: number | null;
+}
+
+export function computeQuantAttributes(
+  symbol: string,
+  currentPrice: number,
+  input?: QuantAttributeInput,
+) {
+  const absChange = Math.abs(input?.pctChange ?? 1.5);
+  const volRatio = Math.max(0.4, input?.volumeRatio ?? 1.0);
+  const upside = input?.upsidePct ?? 12;
+
+  // Derive empirical F-Score (0-9) from real fundamental/valuation/flow signals instead of ASCII hash
+  let f_score = input?.fScore != null ? Math.max(0, Math.min(9, Math.round(input.fScore))) : 6;
+  if (input?.fScore == null) {
+    if (upside >= 18) f_score += 1;
+    if ((input?.foreignNetValue ?? 0) > 0) f_score += 1;
+    if (volRatio >= 1.2 && (input?.pctChange ?? 0) >= 0) f_score += 1;
+    f_score = Math.max(4, Math.min(9, f_score));
   }
-  const posHash = Math.abs(hash);
+  const quality = Math.min(98, Math.max(50, Math.round(52 + f_score * 5)));
 
-  // Piotroski F-Score (0-9): typically 6 to 9 for monitored VN stocks
-  const f_score = 6 + (posHash % 4); // 6, 7, 8, or 9
-  const quality = Math.min(98, 60 + (f_score - 5) * 9 + (posHash % 7)); // 69-98
+  // Empirical Beta & ATR% derived from observed price move & volume intensity when explicit series unavailable
+  const atr_pct =
+    input?.atrPct != null && input.atrPct > 0
+      ? Number(input.atrPct.toFixed(1))
+      : Number(Math.max(1.6, Math.min(5.5, 1.8 + absChange * 0.45 + Math.max(0, volRatio - 1) * 0.6)).toFixed(1));
 
-  // Beta relative to VN-Index: 0.65 to 1.35
-  const beta = Number((0.65 + ((posHash % 70) / 100)).toFixed(2));
-
-  // ATR%: 2.2% - 4.5% daily volatility
-  const atr_pct = Number((2.2 + ((posHash % 23) / 10)).toFixed(1));
+  const beta =
+    input?.beta != null && Number.isFinite(input.beta)
+      ? Number(input.beta.toFixed(2))
+      : Number(Math.max(0.55, Math.min(1.65, 0.62 * (atr_pct / 2.2))).toFixed(2));
 
   // ATR dynamic stop loss (2.0 x ATR) and take profit (3.0 x ATR)
   const stop_loss_atr = Math.round(currentPrice * (1 - (2.0 * atr_pct) / 100));
@@ -225,7 +247,12 @@ export function computeQuantAttributes(symbol: string, currentPrice: number) {
 }
 
 function enrichMetrics(symbol: string, price: number, base: Record<string, any> = {}) {
-  const q = computeQuantAttributes(symbol, price);
+  const q = computeQuantAttributes(symbol, price, {
+    pctChange: typeof base.pct_change === "number" ? base.pct_change * 100 : undefined,
+    volumeRatio: typeof base.volume_ratio === "number" ? base.volume_ratio : undefined,
+    upsidePct: typeof base.upside === "number" ? base.upside * 100 : undefined,
+    foreignNetValue: typeof base.total_netvalue === "number" ? base.total_netvalue : undefined,
+  });
   const tb = calculateTripleBarrierLevels(price, q.atr_pct, 3.0, 2.0, 10);
   return {
     ...base,
@@ -375,7 +402,12 @@ export const MiQuantEngine = {
       (item) => {
         const f = item.factors!;
         const price = item.close || 0;
-        const qAttr = computeQuantAttributes(item.symbol!, price);
+        const qAttr = computeQuantAttributes(item.symbol!, price, {
+          pctChange: item.pct_change,
+          volumeRatio: item.volume_ratio,
+          upsidePct: item.details?.upside_pct,
+          foreignNetValue: item.details?.foreign_netvalue,
+        });
 
         f.quality = qAttr.quality;
         item.details = {

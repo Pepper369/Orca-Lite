@@ -28,6 +28,8 @@ export interface TechSnapshot {
   rsi14?: number | null;
   macdHistogram?: number | null;
   macdCross?: "bull" | "bear" | null;
+  atr14?: number | null;
+  refPrice?: number | null;
   priceAboveSma20?: boolean | null;
   priceAboveSma50?: boolean | null;
   /** Giá so với SMA200 */
@@ -195,7 +197,18 @@ export function techBiasFromSnapshot(t: TechSnapshot): { bias: number; reasons: 
   if (t.macdHistogram != null) {
     const absH = Math.abs(t.macdHistogram);
     if (absH > 1e-8) {
-      const scale = Math.min(1, absH * 40);
+      // Scale-invariant normalization by ATR14 or reference price so FX (0.0005), stocks (300), and BTC (500) score consistently
+      let normDenom =
+        t.atr14 != null && t.atr14 > 1e-8
+          ? t.atr14 * 0.35
+          : t.refPrice != null && t.refPrice > 1e-8
+            ? t.refPrice * 0.008
+            : null;
+      if (normDenom == null) {
+        // Infer scale order of magnitude when neither atr14 nor refPrice is provided
+        normDenom = absH >= 10 ? absH * 1.5 : absH < 0.01 ? 0.0015 : 0.025;
+      }
+      const scale = Math.min(1, absH / Math.max(normDenom, 1e-9));
       if (t.macdHistogram > 0) {
         bias += 10 * scale;
         if (scale > 0.25) reasons.push("MACD hist dương");

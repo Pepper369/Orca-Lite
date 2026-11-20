@@ -149,21 +149,20 @@ function findSupportConfluence(input: AsymmetricPlanInput): SupportConfluenceClu
  * 2. Thuật toán Tìm Trần Lợi Nhuận Mục Tiêu (Upside Target Ceiling)
  */
 function findUpsideCeiling(input: AsymmetricPlanInput, entryPrice: number): number {
-  const last = input.last;
-  const resistances = (input.resistances ?? []).filter((r) => r > entryPrice * 1.05);
+  const resistances = (input.resistances ?? [])
+    .filter((r) => Number.isFinite(r) && r > entryPrice * 1.015)
+    .sort((a, b) => a - b);
 
   let target = 0;
   if (resistances.length > 0) {
-    // Lấy kháng cự có khoảng cách biên độ tốt (ưu tiên >= +12%)
-    const solidRes = resistances.find((r) => r >= entryPrice * 1.10) ?? resistances[0]!;
-    target = solidRes;
-  } else if (input.high52w && input.high52w > entryPrice * 1.08) {
+    // Tôn trọng kháng cự cấu trúc gần nhất phía trên điểm mua (nearest overhead wall)
+    target = resistances[0]!;
+  } else if (input.high52w && input.high52w > entryPrice * 1.04) {
     target = input.high52w;
-  } else if (input.bollinger?.upper && input.bollinger.upper > entryPrice * 1.08) {
+  } else if (input.bollinger?.upper && input.bollinger.upper > entryPrice * 1.04) {
     target = input.bollinger.upper;
   } else {
-    // Mặc định mục tiêu tối thiểu +14% để đảm bảo tỷ suất bất đối xứng
-    target = entryPrice * 1.145;
+    target = entryPrice * 1.12;
   }
 
   return tickRound(target);
@@ -216,16 +215,16 @@ export function computeAsymmetricPlan(input: AsymmetricPlanInput): AsymmetricPla
   const riskPct = Math.round((riskPerShare / optimalEntry) * 1000) / 10;
 
   // =========================================================================
-  // C. XÁC ĐỊNH MỤC TIÊU LỢI NHUẬN (TAKE PROFIT): LÃI CAO NHẤT (12% - 25%+)
+  // C. XÁC ĐỊNH MỤC TIÊU LỢI NHUẬN (TAKE PROFIT) TÔN TRỌNG KHÁNG CỰ CẤU TRÚC
   // =========================================================================
   const ceiling = findUpsideCeiling(input, optimalEntry);
-  // Mục tiêu đảm bảo R:R tối thiểu 1:3.5
-  const minTarget3_5r = tickRound(optimalEntry + riskPerShare * 3.5);
-  const takeProfit = tickRound(Math.max(ceiling, minTarget3_5r));
+  // Tôn trọng trần kháng cự cấu trúc thực tế thay vì cưỡng bức >= 3.5R
+  const minViableTarget = tickRound(optimalEntry + riskPerShare * 1.2);
+  const takeProfit = tickRound(Math.max(ceiling, minViableTarget));
 
-  const rewardPerShare = takeProfit - optimalEntry;
+  const rewardPerShare = Math.max(0.01, takeProfit - optimalEntry);
   const rewardPct = Math.round((rewardPerShare / optimalEntry) * 1000) / 10;
-  const riskReward = Math.round((rewardPerShare / riskPerShare) * 10) / 10;
+  const riskReward = Math.round((rewardPerShare / Math.max(riskPerShare, 1e-6)) * 10) / 10;
 
   // 3 Nấc lợi nhuận phân bổ
   const takeProfit1 = tickRound(optimalEntry + riskPerShare * 1.8);

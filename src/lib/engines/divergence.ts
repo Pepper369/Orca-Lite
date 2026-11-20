@@ -196,13 +196,32 @@ function pairAdjacent(
       const barsSincePivot = Math.max(0, currentIdx - b.index);
       barsAgo = barsSincePivot;
 
+      // Compute asset- & timeframe-adaptive ATR(14) at pivot B so FX (0.15% ATR), Crypto, and Stocks share invariant lifecycle gates
+      const atrStart = Math.max(1, b.index - 13);
+      let trSum = 0;
+      let trCount = 0;
+      for (let m = atrStart; m <= b.index; m++) {
+        const curB = bars[m]!;
+        const prevC = bars[m - 1]?.close ?? curB.open;
+        trSum += Math.max(
+          curB.high - curB.low,
+          Math.abs(curB.high - prevC),
+          Math.abs(curB.low - prevC),
+        );
+        trCount++;
+      }
+      const localAtr = trCount > 0 && trSum > 0 ? trSum / trCount : b.price * 0.015;
+      const breakDist = Math.min(b.price * 0.015, Math.max(localAtr * 0.85, b.price * 0.0005));
+      const playOutFastPct = Math.min(4.5, Math.max(0.25, ((localAtr * 2.2) / Math.max(b.price, 1e-9)) * 100));
+      const playOutSustainedPct = Math.min(2.0, Math.max(0.12, ((localAtr * 1.1) / Math.max(b.price, 1e-9)) * 100));
+
       if (bullish) {
         let broken = false;
         let confirmedIdx = -1;
         const pivotHigh = bars[b.index]?.high ?? b.price;
         for (let k = b.index + 1; k <= currentIdx; k++) {
           const barK = bars[k]!;
-          if (barK.low < b.price * 0.985) {
+          if (barK.low < b.price - breakDist) {
             broken = true;
             break;
           }
@@ -218,9 +237,9 @@ function pairAdjacent(
           confirmationBarIndex = confirmedIdx;
           const lastClose = bars[currentIdx]!.close;
           const pctFromPivot = ((lastClose - b.price) / Math.max(b.price, 1e-9)) * 100;
-          if (pctFromPivot > 4.5 || (barsSincePivot > 4 && pctFromPivot > 2.0)) {
+          if (pctFromPivot > playOutFastPct || (barsSincePivot > 4 && pctFromPivot > playOutSustainedPct)) {
             status = "playing_out";
-            trigger = `Đang diễn biến (+${pctFromPivot.toFixed(1)}% từ đáy)`;
+            trigger = `Đang diễn biến (+${pctFromPivot.toFixed(2)}% từ đáy)`;
           } else {
             status = "confirmed";
             trigger = `Nến T+${confirmedIdx - b.index} xác nhận nảy đóng vượt đỉnh pivot`;
@@ -236,7 +255,7 @@ function pairAdjacent(
         const pivotLow = bars[b.index]?.low ?? b.price;
         for (let k = b.index + 1; k <= currentIdx; k++) {
           const barK = bars[k]!;
-          if (barK.high > b.price * 1.015) {
+          if (barK.high > b.price + breakDist) {
             broken = true;
             break;
           }
@@ -252,9 +271,9 @@ function pairAdjacent(
           confirmationBarIndex = confirmedIdx;
           const lastClose = bars[currentIdx]!.close;
           const pctFromPivot = ((b.price - lastClose) / Math.max(b.price, 1e-9)) * 100;
-          if (pctFromPivot > 4.5 || (barsSincePivot > 4 && pctFromPivot > 2.0)) {
+          if (pctFromPivot > playOutFastPct || (barsSincePivot > 4 && pctFromPivot > playOutSustainedPct)) {
             status = "playing_out";
-            trigger = `Đang diễn biến giảm (-${pctFromPivot.toFixed(1)}% từ đỉnh)`;
+            trigger = `Đang diễn biến giảm (-${pctFromPivot.toFixed(2)}% từ đỉnh)`;
           } else {
             status = "confirmed";
             trigger = `Nến T+${confirmedIdx - b.index} xác nhận thủng đáy pivot`;

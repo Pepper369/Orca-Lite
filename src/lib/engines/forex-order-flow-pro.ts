@@ -104,15 +104,13 @@ export interface InstitutionalFlowSignal {
   summary: string;
 }
 
+import { getAssetPipSize } from "./asset-precision";
+
 /**
  * Helper to get pip scale for a pair.
  */
 function getPipScale(pair: string): number {
-  const p = pair.toUpperCase().replace("/", "").replace("-", "");
-  if (p.includes("JPY")) return 0.01;
-  if (p.startsWith("XAU") || p === "GOLD") return 0.1;
-  if (p.startsWith("OIL") || p === "USOIL" || p === "UKOIL") return 0.01;
-  return 0.0001;
+  return getAssetPipSize(pair);
 }
 
 /**
@@ -159,21 +157,51 @@ export function computeVolumeProfile(
     sellVolume: 0,
   }));
 
-  // Distribute volume into bins with Close Location Value (CLV)
+  // Distribute volume across all overlapped price bins in [b.low, b.high] with body weighting
   for (const b of bars) {
     const v = b.volume ?? 1;
     const candleRange = Math.max(1e-8, b.high - b.low);
     const clv = ((b.close - b.low) - (b.high - b.close)) / candleRange;
-    const buyPart = v * Math.min(1, Math.max(0, 0.5 + clv * 0.5));
+    const buyRatio = Math.min(1, Math.max(0, 0.5 + clv * 0.5));
+    const buyPart = v * buyRatio;
     const sellPart = v - buyPart;
 
-    const binIdx = Math.min(
+    const startBin = Math.min(
       numBins - 1,
-      Math.max(0, Math.floor((b.close - minPrice) / binStep))
+      Math.max(0, Math.floor((b.low - minPrice) / binStep)),
     );
-    rawBins[binIdx].volume += v;
-    rawBins[binIdx].buyVolume += buyPart;
-    rawBins[binIdx].sellVolume += sellPart;
+    const endBin = Math.min(
+      numBins - 1,
+      Math.max(startBin, Math.floor((b.high - minPrice) / binStep)),
+    );
+
+    if (startBin === endBin) {
+      rawBins[startBin].volume += v;
+      rawBins[startBin].buyVolume += buyPart;
+      rawBins[startBin].sellVolume += sellPart;
+      continue;
+    }
+
+    const bodyLow = Math.min(b.open, b.close);
+    const bodyHigh = Math.max(b.open, b.close);
+    const weights: number[] = [];
+    let weightSum = 0;
+    for (let idx = startBin; idx <= endBin; idx++) {
+      const binLow = minPrice + idx * binStep;
+      const binHigh = binLow + binStep;
+      const rangeOverlap = Math.max(0, Math.min(b.high, binHigh) - Math.max(b.low, binLow));
+      const bodyOverlap = Math.max(0, Math.min(bodyHigh, binHigh) - Math.max(bodyLow, binLow));
+      const w = Math.max(1e-6, rangeOverlap * 0.4 + bodyOverlap * 0.6);
+      weights.push(w);
+      weightSum += w;
+    }
+
+    for (let idx = startBin; idx <= endBin; idx++) {
+      const share = weightSum > 0 ? weights[idx - startBin]! / weightSum : 1 / (endBin - startBin + 1);
+      rawBins[idx].volume += v * share;
+      rawBins[idx].buyVolume += buyPart * share;
+      rawBins[idx].sellVolume += sellPart * share;
+    }
   }
 
   // Find VPOC (Bin with maximum volume)
@@ -358,13 +386,28 @@ export function detectCvdAndAbsorption(
 
   const lastDelta = cvdTimeline[n - 1]?.delta ?? 0;
 
-  // Check CVD Divergence in last 15 bars
-  const checkWindow = Math.min(15, n);
+  // Check CVD Divergence between structural pivots in recent 20 bars
+  const checkWindow = Math.min(20, n);
   const recentBars = bars.slice(-checkWindow);
   const recentCvd = cvdTimeline.slice(-checkWindow);
 
-  const priceLowIdx = recentBars.reduce((minI, b, i, arr) => (b.low < arr[minI].low ? i : minI), 0);
-  const priceHighIdx = recentBars.reduce((maxI, b, i, arr) => (b.high > arr[maxI].high ? i : maxI), 0);
+  // Recent trough / peak in the last 4 bars
+  const tailStart = Math.max(3, checkWindow - 4);
+  let recentLowIdx = tailStart;
+  let recentHighIdx = tailStart;
+  for (let i = tailStart; i < checkWindow; i++) {
+    if (recentBars[i].low <= recentBars[recentLowIdx].low) recentLowIdx = i;
+    if (recentBars[i].high >= recentBars[recentHighIdx].high) recentHighIdx = i;
+  }
+
+  // Prior distinct swing trough / peak at least 3 bars earlier
+  const priorEnd = Math.max(1, tailStart - 2);
+  let priorLowIdx = 0;
+  let priorHighIdx = 0;
+  for (let i = 1; i < priorEnd; i++) {
+    if (recentBars[i].low < recentBars[priorLowIdx].low) priorLowIdx = i;
+    if (recentBars[i].high > recentBars[priorHighIdx].high) priorHighIdx = i;
+  }
 
   let cvdDivergence: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" = "NONE";
   let absorption: AbsorptionEvent = {
@@ -376,10 +419,11 @@ export function detectCvdAndAbsorption(
     detail: "Không có hấp thụ bất thường.",
   };
 
-  // Bullish Absorption: Price makes new low or retests low, but CVD made significantly higher low
+  // Bullish Absorption: Price makes lower/equal low vs prior swing low (within 2 pips), but CVD makes higher low
   if (
-    priceLowIdx >= checkWindow - 3 &&
-    recentCvd[priceLowIdx].cvd > recentCvd[0].cvd
+    recentLowIdx - priorLowIdx >= 3 &&
+    recentBars[recentLowIdx].low <= recentBars[priorLowIdx].low + pip * 2 &&
+    recentCvd[recentLowIdx].cvd > recentCvd[priorLowIdx].cvd
   ) {
     cvdDivergence = "BULLISH_DIVERGENCE";
     absorption = {
@@ -392,10 +436,11 @@ export function detectCvdAndAbsorption(
         "HẤP THỤ MUA (Bullish Absorption): Khối lượng bán xả mạnh nhưng giá không tạo đáy sâu mới. Cá mập đặt Limit Buy hấp thụ sạch thanh khoản bán tháo.",
     };
   }
-  // Bearish Absorption: Price makes new high, but CVD fails to make higher high
+  // Bearish Absorption: Price makes higher/equal high vs prior swing high, but CVD makes lower high
   else if (
-    priceHighIdx >= checkWindow - 3 &&
-    recentCvd[priceHighIdx].cvd < recentCvd[0].cvd
+    recentHighIdx - priorHighIdx >= 3 &&
+    recentBars[recentHighIdx].high >= recentBars[priorHighIdx].high - pip * 2 &&
+    recentCvd[recentHighIdx].cvd < recentCvd[priorHighIdx].cvd
   ) {
     cvdDivergence = "BEARISH_DIVERGENCE";
     absorption = {

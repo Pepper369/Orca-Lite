@@ -299,12 +299,19 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   const b = (count * sumXY - sumX * sumY) / denominator;
   const a = (sumY - b * sumX) / count;
 
-  // Stationarity check: discrete AR(1) coeff phi = 1 + b must lie strictly in (-1, 1), i.e. -2 < b < 0
-  const isStationary = b < 0 && b > -2.0;
-  const phi = isStationary ? Math.max(1e-2, Math.abs(1.0 + b) > 1e-2 ? Math.abs(1.0 + b) : 0.05) : 1.0;
+  // Stationarity check for continuous-time Ornstein-Uhlenbeck diffusion:
+  // Discrete AR(1) coefficient phi = 1 + b = exp(-theta * dt) MUST lie strictly in (0, 1), i.e., -1 < b < 0.
+  // Negative AR(1) roots (-2 < b <= -1, phi <= 0) oscillate sign every bar and cannot come from an OU process.
+  const rawPhi = 1.0 + b;
+  const isStationary = b < -1e-5 && b > -1.0 && rawPhi > 1e-4 && rawPhi < 1.0;
+  const phi = isStationary ? rawPhi : 1.0;
   const theta = isStationary ? -Math.log(phi) / dt : 0;
-  const mu = isStationary ? -a / b : series[n - 1];
-  const halfLife = theta > 0 ? Number((Math.log(2.0) / theta).toFixed(2)) : Infinity;
+  const rawMu = isStationary ? -a / b : series[n - 1];
+  const lastPrice = series[n - 1];
+  const mu = Number.isFinite(rawMu)
+    ? Math.max(lastPrice * 0.2, Math.min(lastPrice * 5.0, rawMu))
+    : lastPrice;
+  const halfLife = isStationary && theta > 0 ? Number((Math.log(2.0) / theta).toFixed(2)) : Infinity;
 
   // Compute residuals variance
   let resSumSq = 0;
@@ -314,9 +321,16 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
     const pred = a + b * x;
     resSumSq += (y - pred) ** 2;
   }
-  const resVar = resSumSq / (count - 2);
-  const sigma = theta > 0 ? Math.sqrt(Math.max(1e-8, (resVar * 2 * theta) / (1 - Math.exp(-2 * theta * dt)))) : Math.sqrt(resVar);
-  const eqStd = theta > 0 ? sigma / Math.sqrt(2 * theta) : Math.sqrt(resVar);
+  const dof = Math.max(1, count - 2);
+  const resVar = resSumSq / dof;
+  const sigma =
+    isStationary && theta > 0
+      ? Math.sqrt(Math.max(1e-8, (resVar * 2 * theta) / (1 - Math.exp(-2 * theta * dt))))
+      : Math.sqrt(Math.max(1e-8, resVar));
+  const eqStd =
+    isStationary && theta > 0
+      ? sigma / Math.sqrt(2 * theta)
+      : Math.sqrt(Math.max(1e-8, resVar));
 
   const currentVal = series[n - 1];
   const currentZScore = eqStd > 0 ? Number(((currentVal - mu) / eqStd).toFixed(2)) : 0;
@@ -521,21 +535,27 @@ export function calculateDeflatedSharpeRatio(params: DSRParams): DSRResult {
   const T = Math.max(10, sampleLengthBars);
   const gammaEuler = 0.5772156649; // Euler-Mascheroni constant
 
-  // Expected Maximum Sharpe Ratio under Null Hypothesis (pure luck over N trials)
+  // Expected Maximum Sharpe Ratio under Null Hypothesis (annualized scale)
   let srStar = 0;
   if (N > 1) {
     const sqrt2LnN = Math.sqrt(2.0 * Math.log(N));
     srStar = Math.sqrt(varSharpeEstimates) * (sqrt2LnN + gammaEuler / sqrt2LnN);
   }
 
-  // Standard Error of Sharpe Ratio under non-normality:
-  // SE(SR) = sqrt((1 - skew * SR + ((kurt - 1) / 4) * SR^2) / (T - 1))
-  const varianceFactor =
-    1.0 - skewness * observedSharpe + ((kurtosis - 1.0) / 4.0) * (observedSharpe * observedSharpe);
-  const seSr = Math.sqrt(Math.max(1e-8, varianceFactor / (T - 1)));
+  // Convert annualized Sharpe ratios to per-bar frequency (SR_bar = SR_annual / sqrt(252))
+  // to match daily sample length T in Bailey & López de Prado (2014) Eq. (11)
+  const sqrtAnnual = Math.sqrt(252);
+  const srBar = observedSharpe / sqrtAnnual;
+  const srStarBar = srStar / sqrtAnnual;
 
-  // Test statistic Z = (SR_hat - SR*) / SE(SR)
-  const z = (observedSharpe - srStar) / seSr;
+  // Standard Error of per-bar Sharpe Ratio under non-normality:
+  // SE(SR_bar) = sqrt((1 - skew * SR_bar + ((kurt - 1) / 4) * SR_bar^2) / (T - 1))
+  const varianceFactor =
+    1.0 - skewness * srBar + ((kurtosis - 1.0) / 4.0) * (srBar * srBar);
+  const seSrBar = Math.sqrt(Math.max(1e-8, varianceFactor / (T - 1)));
+
+  // Test statistic Z = (SR_hat_bar - SR*_bar) / SE(SR_bar)
+  const z = (srBar - srStarBar) / seSrBar;
   const dsr = normCdf(z);
   const pValue = 1.0 - dsr;
 
@@ -646,19 +666,30 @@ export function calculateVaRAndCVaR(returns: number[]): RiskMetricsResult {
   const skewness = std > 0 ? m3 / (std ** 3) : 0;
   const kurtosis = std > 0 ? m4 / (std ** 4) : 3;
 
-  // Sorted returns for historical VaR/CVaR
+  // Sorted returns for historical VaR/CVaR with linear quantile interpolation & non-negative loss clamp
   const sorted = [...returns].sort((a, b) => a - b);
-  const idx95 = Math.floor(n * 0.05);
-  const idx99 = Math.floor(n * 0.01);
+  const interpQuantile = (alpha: number): number => {
+    const pos = alpha * (n - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.min(n - 1, lo + 1);
+    const frac = pos - lo;
+    return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+  };
 
-  const histVaR95 = -sorted[idx95];
-  const histVaR99 = -sorted[idx99];
+  const q05 = interpQuantile(0.05);
+  const q01 = interpQuantile(0.01);
+  const histVaR95 = Math.max(0, -q05);
+  const histVaR99 = Math.max(histVaR95, -q01);
 
-  // CVaR = Average of losses exceeding VaR
-  const tail95 = sorted.slice(0, idx95 + 1);
-  const tail99 = sorted.slice(0, Math.max(1, idx99 + 1));
-  const cvar95 = -(tail95.reduce((a, b) => a + b, 0) / tail95.length);
-  const cvar99 = -(tail99.reduce((a, b) => a + b, 0) / tail99.length);
+  // CVaR = Average of losses exceeding VaR quantile
+  const cutoff95 = Math.max(1, Math.ceil(n * 0.05));
+  const cutoff99 = Math.max(1, Math.ceil(n * 0.01));
+  const tail95 = sorted.slice(0, cutoff95);
+  const tail99 = sorted.slice(0, cutoff99);
+  const rawCvar95 = -(tail95.reduce((a, b) => a + b, 0) / tail95.length);
+  const rawCvar99 = -(tail99.reduce((a, b) => a + b, 0) / tail99.length);
+  const cvar95 = Math.max(histVaR95, rawCvar95);
+  const cvar99 = Math.max(histVaR99, rawCvar99);
 
   // Cornish-Fisher VaR 95% (left-tail quantile z05 = Phi^-1(0.05) ~ -1.64485)
   // Negative skewness makes zCf more negative, increasing downside crash VaR

@@ -241,9 +241,9 @@ export function scoreFundamentalPillar(input: MultiFactorInput): {
   let score = 50;
   const signals: string[] = [];
 
-  // 1. Piotroski F-Score (0 - 9)
+  // 1. Piotroski F-Score (0 - 9) — Base anchor scaled to [35..75] to prevent double-counting saturation with ROIC/CFO/Altman
   if (input.fScore != null) {
-    score = Math.round((input.fScore / 9) * 100);
+    score = 35 + Math.round((input.fScore / 9) * 40);
     if (input.fScore >= 7) signals.push(`Piotroski ${input.fScore}/9 điểm (Siêu khỏe)`);
     else if (input.fScore <= 3) signals.push(`Piotroski yếu ${input.fScore}/9 điểm`);
   }
@@ -586,6 +586,28 @@ export function calculateUniverseMultiFactor(
     }
 
     item.compositeScore = calibratedPercentile;
+    if (calibratedPercentile >= 90) {
+      item.category = "SUPER_ELITE";
+      item.categoryVi = "Siêu Cổ Phiếu Elite";
+    } else if (calibratedPercentile >= 80) {
+      item.category = "LEADER";
+      item.categoryVi = "Cổ Phiếu Dẫn Dắt";
+    } else if (calibratedPercentile >= 60) {
+      item.category = "WATCH";
+      item.categoryVi = "Theo Dõi Tích Cực";
+    } else if (calibratedPercentile < 40) {
+      item.category = "AVOID";
+      item.categoryVi = "Kém (Cần Tránh)";
+    } else {
+      item.category = "NEUTRAL";
+      item.categoryVi = "Trung Tính";
+    }
+    item.summaryVi =
+      `Orca Quant Composite ${item.compositeScore}/99 (${item.categoryVi}) [Regime: ${item.regime}]: ` +
+      `Tech: ${item.breakdown.technical.rawScore}đ, Fund: ${item.breakdown.fundamental.rawScore}đ, Val: ${item.breakdown.valuation.rawScore}đ.` +
+      (item.tripleBarrier
+        ? ` Kế hoạch T+20: Mục tiêu ${item.tripleBarrier.profitTargetPct}%, Stop ${item.tripleBarrier.stopLossPct}% (R:R ${item.tripleBarrier.riskRewardRatio}x).`
+        : "");
     resultMap.set(item.symbol, item);
   });
 

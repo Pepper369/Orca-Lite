@@ -259,10 +259,16 @@ export function evaluateHourlyBias(
   const pos = (p - barLow) / barRange; // 0 to 1
   const lowerWick = Math.min(barOpen, p) - barLow;
   const lowerWickPct = (lowerWick / barRange) * 100;
-  const avgPrice =
+  let avgPrice =
     quote?.quoteVolume && quote.volume && quote.volume > 0
       ? quote.quoteVolume / quote.volume
       : (barHigh + barLow + p) / 3;
+  // Normalize 1000x VND unit mismatch when quoteVolume/volume is in raw VND (e.g. 32,500) and bar prices are in thousand-VND (32.5)
+  if (p > 0 && p < 1000 && avgPrice > p * 100) {
+    avgPrice = avgPrice / 1000;
+  } else if (p >= 1000 && avgPrice > 0 && avgPrice < p / 100) {
+    avgPrice = avgPrice * 1000;
+  }
 
   const isGreenSession = p >= barOpen;
   const isAboveVwap = p >= avgPrice * 0.998;

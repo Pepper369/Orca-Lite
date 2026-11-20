@@ -45,13 +45,18 @@ export function detectSingleVsaBar(
   avgSpread: number,
 ): VsaBarSignal | null {
   if (idx < 1 || idx >= bars.length) return null;
+  if (!Number.isFinite(volAvg) || volAvg <= 0 || !Number.isFinite(avgSpread) || avgSpread <= 0) {
+    return null;
+  }
 
   const b = bars[idx]!;
   const prev = bars[idx - 1]!;
-  const spread = Math.max(0.001, b.high - b.low);
-  const prevSpread = Math.max(0.001, prev.high - prev.low);
-  const closePos = (b.close - b.low) / spread;
   const vol = b.volume || 0;
+  if (vol <= 0) return null;
+
+  const spread = Math.max(1e-8, b.high - b.low);
+  const prevSpread = Math.max(1e-8, prev.high - prev.low);
+  const closePos = (b.close - b.low) / spread;
 
   const closePosition: VsaBarSignal["closePosition"] =
     closePos >= 0.65 ? "UPPER" : closePos <= 0.35 ? "LOWER" : "MIDDLE";
@@ -75,8 +80,8 @@ export function detectSingleVsaBar(
         ? "LOW"
         : "AVERAGE";
 
-  const isUpBar = b.close >= prev.close;
-  const isDownBar = b.close <= prev.close;
+  const isUpBar = b.close > prev.close || (b.close === prev.close && b.close > b.open);
+  const isDownBar = b.close < prev.close || (b.close === prev.close && b.close < b.open);
 
   // 1. SHAKEOUT / REVERSE UPTHRUST (Rũ bỏ gom hàng)
   if (b.low < prev.low && closePos >= 0.65 && isWideSpread && (isHighVol || isUltraVol)) {
@@ -211,15 +216,17 @@ export function analyzeVsaBars(bars: OhlcvBar[]): VsaAnalysisResult {
     return { latestSignal: null, recentSignals: [], summaryVi: "Chưa đủ 20 nến để phân tích VSA." };
   }
 
-  const volMaLen = Math.min(20, n);
-  const volAvg = avg(bars.slice(-volMaLen).map((b) => b.volume || 0)) || 1;
-  const avgSpread = avg(bars.slice(-volMaLen).map((b) => b.high - b.low)) || 0.1;
-
   const recentSignals: VsaBarSignal[] = [];
   const lookback = Math.min(25, n);
 
-  for (let i = n - lookback; i < n; i++) {
-    const sig = detectSingleVsaBar(bars, i, volAvg, avgSpread);
+  for (let i = Math.max(1, n - lookback); i < n; i++) {
+    const baseStart = Math.max(0, i - 20);
+    const priorWindow = i > baseStart ? bars.slice(baseStart, i) : bars.slice(0, Math.min(20, n));
+    const localVolAvg = avg(priorWindow.map((b) => Math.max(0, b.volume || 0)));
+    const localAvgSpread = avg(priorWindow.map((b) => Math.max(0, b.high - b.low)));
+    if (localVolAvg <= 0 || localAvgSpread <= 0) continue;
+
+    const sig = detectSingleVsaBar(bars, i, localVolAvg, localAvgSpread);
     if (sig) {
       recentSignals.push(sig);
     }

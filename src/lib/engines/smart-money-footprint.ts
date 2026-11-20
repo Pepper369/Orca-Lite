@@ -40,7 +40,8 @@ export interface SmartMoneyInput {
   bars: OhlcvBar[];
   currentPrice?: number | null;
   foreignNetValBillion?: number | null;
-  activeBuyRatioPct?: number | null; // From VPS or quote stream
+  activeBuyRatioPct?: number | null; // True market-wide active taker buy ratio (from matched orderflow)
+  foreignBuyRatioPct?: number | null; // Foreign-only buy / (foreign buy + sell) ratio
   foreignBuyValBillion?: number | null;
   foreignSellValBillion?: number | null;
   totalMarketValBillion?: number | null;
@@ -113,31 +114,43 @@ export function checkSpringAbsorption(bars: OhlcvBar[]): boolean {
  * Evaluates Smart Money Footprint score and classification.
  */
 export function evaluateSmartMoneyFootprint(input: SmartMoneyInput): SmartMoneyResult {
-  const { symbol, bars, foreignNetValBillion, activeBuyRatioPct } = input;
+  const {
+    symbol,
+    bars,
+    foreignNetValBillion,
+    activeBuyRatioPct,
+    foreignBuyRatioPct,
+    foreignBuyValBillion,
+    foreignSellValBillion,
+    totalMarketValBillion,
+  } = input;
   const n = bars.length;
 
   let score = 50;
   const isPocketPivot = n >= 12 ? checkPocketPivot(bars) : false;
   const isSpringTest = n >= 15 ? checkSpringAbsorption(bars) : false;
 
-  // 1. Orderflow Buy Aggression Factor (0 to +25 or -20)
-  const buyRatio = activeBuyRatioPct ?? 50;
-  if (buyRatio >= 68) {
-    score += 25;
-  } else if (buyRatio >= 58) {
-    score += 15;
-  } else if (buyRatio >= 53) {
-    score += 8;
-  } else if (buyRatio <= 38) {
-    score -= 22;
-  } else if (buyRatio <= 44) {
-    score -= 12;
+  // 1. Orderflow Buy Aggression Factor (0 to +25 or -22) — ONLY when true market active buy ratio is provided
+  const hasTrueActiveBuy = activeBuyRatioPct != null && Number.isFinite(activeBuyRatioPct);
+  const buyRatio = hasTrueActiveBuy ? activeBuyRatioPct! : 50;
+  if (hasTrueActiveBuy) {
+    if (buyRatio >= 68) {
+      score += 25;
+    } else if (buyRatio >= 58) {
+      score += 15;
+    } else if (buyRatio >= 53) {
+      score += 8;
+    } else if (buyRatio <= 38) {
+      score -= 22;
+    } else if (buyRatio <= 44) {
+      score -= 12;
+    }
   }
 
-  // 2. Foreign Investor Flow Factor (0 to +20 or -15)
+  // 2. Foreign Investor Flow Factor (0 to +20 or -18) + Meaningful Foreign Participation Share
   const fnv = foreignNetValBillion ?? 0;
+  const totalForeignVal = (foreignBuyValBillion ?? 0) + (foreignSellValBillion ?? 0);
   if (fnv >= 20) {
-    // Over +20 Billion VND net buy
     score += 20;
   } else if (fnv >= 5) {
     score += 12;
@@ -148,6 +161,17 @@ export function evaluateSmartMoneyFootprint(input: SmartMoneyInput): SmartMoneyR
   } else if (fnv <= -5) {
     score -= 10;
   }
+
+  // Secondary foreign buy conviction ONLY when foreign turnover is non-trivial (>= 1.0 Billion VND)
+  if (foreignBuyRatioPct != null && totalForeignVal >= 1.0) {
+    if (foreignBuyRatioPct >= 70 && fnv > 0) score += 5;
+    else if (foreignBuyRatioPct <= 30 && fnv < 0) score -= 5;
+  }
+
+  const foreignSharePct =
+    totalMarketValBillion && totalMarketValBillion > 0 && totalForeignVal > 0
+      ? Number(Math.min(100, (totalForeignVal / totalMarketValBillion) * 100).toFixed(1))
+      : null;
 
   // 3. Technical Footprint Signatures (+10 to +15)
   if (isPocketPivot) score += 14;
@@ -178,10 +202,12 @@ export function evaluateSmartMoneyFootprint(input: SmartMoneyInput): SmartMoneyR
   let signalVi = "Dòng tiền bình thường";
   let summaryVi = "Áp lực mua bán cân bằng, chưa có dấu hiệu gom hàng đột biến.";
 
-  if (score >= 78 || (buyRatio >= 65 && fnv >= 5)) {
+  if (score >= 78 || (hasTrueActiveBuy && buyRatio >= 65 && fnv >= 5)) {
     signal = "HEAVY_ACCUMULATION";
     signalVi = "Cá Mập Gom Mạnh";
-    summaryVi = `Lệnh mua chủ động áp đảo (${buyRatio.toFixed(1)}%) kết hợp khối ngoại mua ròng ${fnv > 0 ? `+${fnv.toFixed(1)} tỷ` : ""}, dấu chân tổ chức rất rõ nét.`;
+    summaryVi = hasTrueActiveBuy
+      ? `Lệnh mua chủ động áp đảo (${buyRatio.toFixed(1)}%) kết hợp khối ngoại mua ròng ${fnv > 0 ? `+${fnv.toFixed(1)} tỷ` : ""}, dấu chân tổ chức rất rõ nét.`
+      : `Hội tụ dòng tiền tổ chức và khối ngoại mua ròng ${fnv > 0 ? `+${fnv.toFixed(1)} tỷ` : ""} kèm đột biến thanh khoản.`;
   } else if (isPocketPivot) {
     signal = "POCKET_PIVOT";
     signalVi = "Pocket Pivot Điểm Nổ";
@@ -194,10 +220,12 @@ export function evaluateSmartMoneyFootprint(input: SmartMoneyInput): SmartMoneyR
     signal = "FOREIGN_NET_BUY";
     signalVi = "Khối Ngoại Gom Ròng";
     summaryVi = `Khối ngoại liên tục mua ròng mạnh (+${fnv.toFixed(1)} tỷ VNĐ), tạo bệ đỡ thanh khoản vững chắc.`;
-  } else if (score <= 35 || buyRatio <= 40) {
+  } else if (score <= 35 || (hasTrueActiveBuy && buyRatio <= 40)) {
     signal = "DISTRIBUTION";
     signalVi = "Áp Lực Xả Hàng";
-    summaryVi = `Phe bán chủ động chiếm ưu thế (${(100 - buyRatio).toFixed(1)}%), dòng tiền tổ chức có dấu hiệu hạ tỷ trọng.`;
+    summaryVi = hasTrueActiveBuy
+      ? `Phe bán chủ động chiếm ưu thế (${(100 - buyRatio).toFixed(1)}%), dòng tiền tổ chức có dấu hiệu hạ tỷ trọng.`
+      : `Áp lực bán ròng khối ngoại (${fnv.toFixed(1)} tỷ VNĐ), dòng tiền lớn có dấu hiệu hạ tỷ trọng.`;
   }
 
   return {
@@ -205,9 +233,9 @@ export function evaluateSmartMoneyFootprint(input: SmartMoneyInput): SmartMoneyR
     score,
     signal,
     signalVi,
-    activeBuyRatioPct: buyRatio !== 50 ? Number(buyRatio.toFixed(1)) : null,
+    activeBuyRatioPct: hasTrueActiveBuy ? Number(buyRatio.toFixed(1)) : null,
     foreignNetValBillion: fnv !== 0 ? Number(fnv.toFixed(1)) : null,
-    foreignSharePct: null,
+    foreignSharePct,
     isPocketPivot,
     isSpringTest,
     isVolumeAbsorption,

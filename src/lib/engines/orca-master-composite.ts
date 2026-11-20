@@ -95,10 +95,11 @@ export function computeRawOrcaScore(input: OrcaMasterInput): {
   if (input.piotroskiFScore != null) {
     fundScore = Math.round((input.piotroskiFScore / 9) * 100);
   }
+  const roe = input.roe ?? 0;
   if (input.altmanZone === "SAFE") fundScore += 8;
+  else if (input.altmanZone === "EXEMPT_FINANCIAL") fundScore += roe >= 12 ? 8 : 6;
   else if (input.altmanZone === "DISTRESS") fundScore -= 18;
 
-  const roe = input.roe ?? 0;
   if (roe >= 20) fundScore += 8;
   else if (roe >= 14) fundScore += 5;
   else if (roe < 0) fundScore -= 12;

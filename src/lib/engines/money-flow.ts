@@ -357,14 +357,18 @@ function detectOrderBlocks(
   atr: number,
   cfg: MoneyFlowConfig,
 ): OrderBlock[] {
-  const obs: OrderBlock[] = [];
-  const medianSpread = median(bars.slice(-30).map((b) => b.high - b.low));
-  const dispThreshold = medianSpread * cfg.displacementRatio;
+  const obs: (OrderBlock & { displacementIndex: number })[] = [];
 
   for (let i = 3; i < bars.length; i++) {
     const bar = bars[i]!;
     const spread = bar.high - bar.low;
     const body = Math.abs(bar.close - bar.open);
+    const localWindow = bars.slice(Math.max(0, i - 30), i);
+    const medianSpread = Math.max(
+      median(localWindow.map((b) => b.high - b.low)),
+      Number.EPSILON,
+    );
+    const dispThreshold = medianSpread * cfg.displacementRatio;
     const clv =
       spread > 0 ? ((bar.close - bar.low) - (bar.high - bar.close)) / spread : 0;
     const isDisplacement =
@@ -390,8 +394,9 @@ function detectOrderBlocks(
     const lookbackStart = Math.max(0, obIndex - 8);
     let hadSweep = false;
     for (const swing of swings) {
-      if (swing.index < lookbackStart || swing.index > obIndex) continue;
-      for (let k = swing.index + 1; k <= obIndex; k++) {
+      const readyIdx = swing.confirmedAtIndex ?? swing.index;
+      if (swing.index < lookbackStart || readyIdx > obIndex) continue;
+      for (let k = readyIdx; k <= obIndex; k++) {
         const b = bars[k]!;
         if (swing.type === "low" && b.low < swing.price && b.close > swing.price) {
           hadSweep = true;
@@ -420,6 +425,7 @@ function detectOrderBlocks(
       high,
       mid: (low + high) / 2,
       formedAtIndex: obIndex,
+      displacementIndex: i,
       formedAtTime: obBar.time,
       status: "OPEN",
       hadLiquiditySweep: hadSweep,
@@ -432,7 +438,9 @@ function detectOrderBlocks(
     let touches = 0;
     let mitigated = false;
     let broken = false;
-    for (let j = ob.formedAtIndex + 1; j < bars.length; j++) {
+    // Start mitigation check strictly AFTER the displacement candle completes
+    const startIdx = Math.max(ob.formedAtIndex + 1, ob.displacementIndex + 1);
+    for (let j = startIdx; j < bars.length; j++) {
       const bar = bars[j]!;
       const overlaps =
         bar.low <= ob.high + atr * 0.05 && bar.high >= ob.low - atr * 0.05;
@@ -451,8 +459,9 @@ function detectOrderBlocks(
     else ob.status = "OPEN";
   }
 
-  const open = obs.filter((o) => o.status === "OPEN").reverse();
-  const rest = obs.filter((o) => o.status !== "OPEN").reverse();
+  const strip = ({ displacementIndex: _d, ...rest }: OrderBlock & { displacementIndex: number }): OrderBlock => rest;
+  const open = obs.filter((o) => o.status === "OPEN").reverse().map(strip);
+  const rest = obs.filter((o) => o.status !== "OPEN").reverse().map(strip);
   return [...open, ...rest].slice(0, cfg.maxZones);
 }
 
@@ -537,27 +546,32 @@ function buildLiquidity(
     }
   }
 
-  const levels: LiquidityLevel[] = deduped.map((level) => {
+  const levels: (LiquidityLevel & { priorSwept: boolean })[] = deduped.map((level) => {
     let swept = false;
+    let priorSwept = false;
     let sweptAtIndex: number | null = null;
-    const swingIdx =
-      swings.find(
-        (s) =>
-          Math.abs(s.price - level.price) <= tolerance &&
-          ((level.type === "BUY_SIDE" && s.type === "high") ||
-            (level.type === "SELL_SIDE" && s.type === "low")),
-      )?.index ?? 0;
+    const matchingSwings = swings.filter(
+      (s) =>
+        Math.abs(s.price - level.price) <= tolerance &&
+        ((level.type === "BUY_SIDE" && s.type === "high") ||
+          (level.type === "SELL_SIDE" && s.type === "low")),
+    );
+    const poolReadyIdx = matchingSwings.length
+      ? Math.max(...matchingSwings.map((s) => s.confirmedAtIndex ?? s.index))
+      : 0;
 
-    for (let j = swingIdx + 1; j < bars.length; j++) {
+    for (let j = poolReadyIdx + 1; j < bars.length; j++) {
       const bar = bars[j]!;
       if (level.type === "BUY_SIDE" && bar.high > level.price) {
         swept = true;
         sweptAtIndex = j;
+        if (j < bars.length - 1) priorSwept = true;
         break;
       }
       if (level.type === "SELL_SIDE" && bar.low < level.price) {
         swept = true;
         sweptAtIndex = j;
+        if (j < bars.length - 1) priorSwept = true;
         break;
       }
     }
@@ -576,6 +590,7 @@ function buildLiquidity(
       isEqual: level.isEqual,
       swept,
       sweptAtIndex,
+      priorSwept,
     };
   });
 
@@ -597,29 +612,28 @@ function buildLiquidity(
   const trimmedSweeps = recentSweeps.slice(0, 6);
 
   const last = bars.at(-1)!;
+  // Unswept directional liquidity resting strictly above (BUY_SIDE) or below (SELL_SIDE) current close
   const unsweptBuy = levels
-    .filter((l) => l.type === "BUY_SIDE" && !l.swept)
-    .sort((a, b) => Math.abs(last.close - a.price) - Math.abs(last.close - b.price));
+    .filter((l) => l.type === "BUY_SIDE" && !l.swept && l.price > last.close)
+    .sort((a, b) => a.price - b.price);
   const unsweptSell = levels
-    .filter((l) => l.type === "SELL_SIDE" && !l.swept)
-    .sort((a, b) => Math.abs(last.close - a.price) - Math.abs(last.close - b.price));
-  const nearestBuySide =
-    unsweptBuy[0]?.price ??
-    levels
-      .filter((l) => l.type === "BUY_SIDE")
-      .sort((a, b) => Math.abs(last.close - a.price) - Math.abs(last.close - b.price))[0]?.price ??
-    null;
-  const nearestSellSide =
-    unsweptSell[0]?.price ??
-    levels
-      .filter((l) => l.type === "SELL_SIDE")
-      .sort((a, b) => Math.abs(last.close - a.price) - Math.abs(last.close - b.price))[0]?.price ??
-    null;
+    .filter((l) => l.type === "SELL_SIDE" && !l.swept && l.price < last.close)
+    .sort((a, b) => b.price - a.price);
+  const nearestBuySide = unsweptBuy[0]?.price ?? null;
+  const nearestSellSide = unsweptSell[0]?.price ?? null;
+
+  // Check if a pool that was alive entering the last bar (!priorSwept) was swept and reclaimed on the last bar
+  const activeSellSweepOnLast = levels.some(
+    (l) => l.type === "SELL_SIDE" && !l.priorSwept && last.low < l.price && last.close > l.price,
+  );
+  const activeBuySweepOnLast = levels.some(
+    (l) => l.type === "BUY_SIDE" && !l.priorSwept && last.high > l.price && last.close < l.price,
+  );
 
   let sweep: LiquiditySide | null = null;
-  if (nearestSellSide != null && last.low < nearestSellSide && last.close > nearestSellSide) {
+  if (activeSellSweepOnLast) {
     sweep = "SELL_SIDE";
-  } else if (nearestBuySide != null && last.high > nearestBuySide && last.close < nearestBuySide) {
+  } else if (activeBuySweepOnLast) {
     sweep = "BUY_SIDE";
   } else {
     const recent = trimmedSweeps.find((s) => s.barIndex >= bars.length - 3 && s.reclaimed);
@@ -627,7 +641,10 @@ function buildLiquidity(
   }
 
   return {
-    levels: levels.sort((a, b) => b.strength - a.strength).slice(0, 16),
+    levels: levels
+      .map(({ priorSwept: _p, ...rest }) => rest)
+      .sort((a, b) => b.strength - a.strength)
+      .slice(0, 16),
     recentSweeps: trimmedSweeps,
     equalHighs: eqHighs.map((e) => e.price),
     equalLows: eqLows.map((e) => e.price),
@@ -640,17 +657,20 @@ function buildLiquidity(
 function analyzeVsa(bars: OhlcvBar[], cfg: MoneyFlowConfig): MoneyFlowAnalysis["vsa"] {
   const last = bars.at(-1)!;
   const previous = bars.at(-2)!;
-  const recent = bars.slice(-cfg.volumePeriod);
-  const spreads = recent.map((bar) => Math.max(bar.high - bar.low, Number.EPSILON));
-  const volumes = recent.map((bar) => Math.max(0, bar.volume));
+  // Exclude current bar from baseline window to prevent self-inclusion damping
+  const priorSlice =
+    bars.length > 2 ? bars.slice(-cfg.volumePeriod - 1, -1) : bars.slice(-cfg.volumePeriod);
+  const spreads = priorSlice.map((bar) => Math.max(bar.high - bar.low, Number.EPSILON));
+  const volumes = priorSlice.map((bar) => Math.max(0, bar.volume));
   const avgVolume = average(volumes);
   const avgSpread = average(spreads);
-  const rvol = avgVolume > 0 ? last.volume / avgVolume : null;
+  const hasRealVolume = avgVolume > 0 && last.volume > 0;
+  const rvol = hasRealVolume ? last.volume / avgVolume : null;
   const spread = Math.max(last.high - last.low, Number.EPSILON);
   const clv = ((last.close - last.low) - (last.high - last.close)) / spread;
   const result = (last.close - previous.close) / Math.max(previous.close, Number.EPSILON);
   const resultBaseline = average(
-    bars.slice(-Math.min(20, bars.length)).map((bar, index, arr) =>
+    priorSlice.map((bar, index, arr) =>
       index
         ? Math.abs(bar.close - arr[index - 1]!.close) / Math.max(arr[index - 1]!.close, Number.EPSILON)
         : 0,
@@ -693,7 +713,7 @@ function analyzeVsa(bars: OhlcvBar[], cfg: MoneyFlowConfig): MoneyFlowAnalysis["
   const isUpBar = last.close > last.open;
   const isDownBar = last.close < last.open;
   const narrowSpread = spread <= avgSpread * 0.7;
-  const lowVol = (rvol ?? 1) < 0.7;
+  const lowVol = rvol !== null && rvol < 0.7;
   const noDemand = isUpBar && narrowSpread && lowVol;
   const noSupply = isDownBar && narrowSpread && lowVol;
 

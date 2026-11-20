@@ -189,15 +189,22 @@ export function analyzeBottomReversal(
   const isExtended = extensionFromBottomPct > 8.5;
 
   // 2. Wyckoff Spring / Liquidity Sweep Detection
-  // Check if recent candles pierced support and closed with a long lower shadow
+  // Must occur near the 20-bar structural trough AND sweep below prior 5-bar support before reclaiming
   let isWyckoffSpring = false;
-  for (let i = Math.max(0, n - 6); i < n; i++) {
+  for (let i = Math.max(3, n - 6); i < n; i++) {
     const range = highs[i] - lows[i];
-    if (range > 0) {
+    if (range > 0 && lowestLow20 > 0) {
       const lowerShadow = Math.min(closes[i], bars[i].open) - lows[i];
       const lowerShadowRatio = lowerShadow / range;
-      // Pin-bar hammer or spring at bottom
-      if (lowerShadowRatio >= 0.48 && closes[i] >= lows[i] + range * 0.45) {
+      const priorSupport = Math.min(...lows.slice(Math.max(0, i - 5), i));
+      const nearStructuralBottom = lows[i] <= lowestLow20 * 1.015;
+      const sweptPriorSupport = lows[i] <= priorSupport * 1.003 && closes[i] >= priorSupport;
+      if (
+        nearStructuralBottom &&
+        sweptPriorSupport &&
+        lowerShadowRatio >= 0.48 &&
+        closes[i] >= lows[i] + range * 0.45
+      ) {
         isWyckoffSpring = true;
         break;
       }
@@ -392,20 +399,12 @@ export function evaluateApexQuant(input: ApexQuantInput | OhlcvBar[]): ApexQuant
   const candlePatterns = detectCandlePatterns(bars, { recentBars: 4, reversalOnly: true });
   const topBullCandle = candlePatterns.find(c => c.type === "bullish") ?? null;
 
-  let hasBullishDivergence = false;
-  let divSummary = "";
-  if (bars.length >= 18) {
-    try {
-      const divs = detectDivergences(bars, { ...SHORT_3_4D, lookback: Math.min(bars.length, 45) });
-      const bull = divs.find(d => d.kind.includes("bullish") && d.status !== "invalidated" && (d.barsAgo == null || d.barsAgo <= 6));
-      if (bull) {
-        hasBullishDivergence = true;
-        divSummary = `Phân kỳ ${bull.oscillator.toUpperCase()}`;
-      }
-    } catch {
-      // safe
-    }
-  }
+  const hasBullishDivergence = rev.isFreshBullishDivergence;
+  const divSummary = rev.isDualDivergenceFresh
+    ? "Phân kỳ kép RSI+MACD"
+    : rev.isFreshBullishDivergence
+      ? "Phân kỳ dương đảo chiều"
+      : "";
 
   // =========================================================================
   // PILLAR 1: Bottom Reversal, Wyckoff Spring & Volatility Squeeze (Weight: 30%)

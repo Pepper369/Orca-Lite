@@ -312,9 +312,32 @@ export function computeWyckoffRS(
 
   if (benchmarkBars && benchmarkBars.length >= 20) {
     const benchN = benchmarkBars.length;
+    // Build date key lookup ("YYYY-MM-DD") and sorted timestamp fallback to prevent index-drift on missing bars
+    const benchByDay = new Map<string, number>();
+    for (let b = 0; b < benchN; b++) {
+      const t = benchmarkBars[b]!.time;
+      const ms = t < 1e12 ? t * 1000 : t;
+      const dayKey = new Date(ms).toISOString().slice(0, 10);
+      benchByDay.set(dayKey, b);
+    }
     for (let k = n - pointsToCompute; k < n; k++) {
       const sRoc = calcWeightedRoc(stockBars, k);
-      const bIdx = Math.min(benchN - 1, Math.max(0, benchN - 1 - (n - 1 - k)));
+      const sTime = stockBars[k]!.time;
+      const sMs = sTime < 1e12 ? sTime * 1000 : sTime;
+      const dayKey = new Date(sMs).toISOString().slice(0, 10);
+      let bIdx = benchByDay.get(dayKey);
+      if (bIdx == null) {
+        // Fallback: binary/linear search for nearest benchmark bar with timestamp <= sTime
+        bIdx = Math.min(benchN - 1, Math.max(0, benchN - 1 - (n - 1 - k)));
+        for (let m = benchN - 1; m >= 0; m--) {
+          const bTime = benchmarkBars[m]!.time;
+          const bMs = bTime < 1e12 ? bTime * 1000 : bTime;
+          if (bMs <= sMs + 12 * 3600 * 1000) {
+            bIdx = m;
+            break;
+          }
+        }
+      }
       const bRoc = calcWeightedRoc(benchmarkBars, bIdx);
       rsLine.push(sRoc - bRoc);
     }
@@ -546,12 +569,14 @@ export function analyzeWyckoff(
       stPrice = bars[stIdx]!.low;
     }
 
-    // Best gentle slope cho kênh tích lũy
+    // Best gentle slope cho kênh tích lũy (chuẩn hóa theo % của scPrice/bar để bất biến theo mệnh giá tài sản)
     let maxScore = -1e9;
+    const baseRef = Math.max(scPrice, 1e-8);
     for (let idx = scIdx + 1; idx <= n - 3; idx++) {
       if (isSwLow[idx]) {
         const candSlope = (bars[idx]!.low - scPrice) / Math.max(1, idx - scIdx);
-        if (candSlope >= -0.003 && candSlope <= 0.008) {
+        const relSlopePerBar = candSlope / baseRef;
+        if (relSlopePerBar >= -0.003 && relSlopePerBar <= 0.008) {
           let score = 0;
           for (let k = scIdx; k < n; k++) {
             const testSup = scPrice + candSlope * (k - scIdx);

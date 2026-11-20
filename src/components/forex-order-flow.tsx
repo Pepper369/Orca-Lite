@@ -33,17 +33,17 @@ export function deriveOrderFlow(series: OhlcvBar[]) {
     sellVol += sellPart;
     cvd += buyPart - sellPart;
   }
-  const total = buyVol + sellVol || 1;
-  const avgVol = vols.reduce((a, b) => a + b, 0) / vols.length || 1;
+  const total = buyVol + sellVol;
+  const rawAvgVol = vols.length > 0 ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
   const lastVol = vols[vols.length - 1] ?? 0;
-  const hasVolume = avgVol > 0;
+  const hasVolume = rawAvgVol > 0 && total > 0;
   return {
     buyVol,
     sellVol,
     delta: buyVol - sellVol,
-    buyRatio: (buyVol / total) * 100,
+    buyRatio: total > 0 ? (buyVol / total) * 100 : 50,
     cvd,
-    rvol: hasVolume ? lastVol / avgVol : null,
+    rvol: hasVolume ? lastVol / rawAvgVol : null,
     hasVolume,
   };
 }
