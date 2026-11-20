@@ -24,6 +24,10 @@ import { detectDivergences, SHORT_3_4D } from "../engines/divergence";
 import { evaluateMtfConsensus } from "../engines/mtf-consensus";
 import { computeWyckoffRS } from "../engines/wyckoff-elliott";
 import { trainHistoricalPriceAction } from "../engines/historical-price-action-trainer";
+import { runDcf, defaultDcfScenarios } from "../engines/valuation-phase3";
+import { runResidualIncome } from "../engines/valuation-phase4";
+import { computeMultiFactorComposite } from "../engines/multi-factor-quant-composite";
+import { computeRrgTrail } from "../engines/rrg-engine";
 
 function makeBars(count: number, basePrice = 100, baseVol = 100000): OhlcvBar[] {
   const out: OhlcvBar[] = [];
@@ -310,5 +314,65 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
     assert.ok(Array.isArray(divs));
     const trained = trainHistoricalPriceAction(stockBars);
     assert.ok(trained.historicalEdgeScore >= 0 && trained.historicalEdgeScore <= 100);
+  });
+
+  it("VAL-01, VAL-02, FA-01 & RRG-01: DCF subtracts netDebt on fcf_proxy, Residual Income sustains ROE, Sloan Accrual normalizes decimal to %, and RRG trail stabilizes momentum", () => {
+    // VAL-01: fcf_proxy scenario must subtract netDebt when computing equityValue
+    const baseAssumptions = defaultDcfScenarios(0.125)[1]!;
+    const dcfNoDebt = runDcf({
+      baseFcf: 1000,
+      shares: 100,
+      currentPrice: 80,
+      netDebt: 0,
+      assumptions: baseAssumptions,
+    });
+    const dcfWithDebt = runDcf({
+      baseFcf: 1000,
+      shares: 100,
+      currentPrice: 80,
+      netDebt: 2500,
+      assumptions: baseAssumptions,
+    });
+    assert.equal(
+      (dcfNoDebt.equityValue ?? 0) - (dcfWithDebt.equityValue ?? 0),
+      2500,
+      "DCF fcf_proxy must deduct netDebt from Enterprise Value",
+    );
+
+    // VAL-02: High-ROE compounder (ROE = 22%, Ke = 12.5%, g = 5%) must maintain positive Residual Income through Year 5
+    const ri = runResidualIncome({
+      bookEquity: 10000,
+      netIncomeTtm: 2200,
+      costOfEquity: 0.125,
+      shares: 1000,
+      currentPrice: 25,
+      forecastYears: 5,
+      niGrowth: 0.05,
+      terminalGrowth: 0.02,
+    });
+    assert.ok(
+      ri.residualIncomes.every((row) => row.ri > 0),
+      "High-ROE compounder must not suffer artificial clean-surplus RI collapse in Year 5",
+    );
+
+    // FA-01: Decimal Sloan Accrual Ratio (0.18 = 18% of Total Assets) must trigger red flag (> 15%) and penalty
+    const highAccrual = computeMultiFactorComposite({
+      symbol: "ACCR",
+      fScore: 6,
+      roe: 15,
+      sloanAccrualRatio: 0.18, // 18% decimal from computeFundamentalMatrix
+    });
+    assert.ok(
+      highAccrual.redFlags.some((f) => f.includes("Sloan")),
+      "Decimal sloanAccrualRatio = 0.18 (18%) must trigger Sloan > 15% red flag",
+    );
+
+    // RRG-01: Short 15-bar series must still produce valid finite RRG trail points
+    const tPrices = Array.from({ length: 16 }, (_, i) => 100 + i * 1.1);
+    const bPrices = Array.from({ length: 16 }, (_, i) => 1000 + i * 5);
+    const dates = Array.from({ length: 16 }, (_, i) => `2026-11-${String(i + 1).padStart(2, "0")}`);
+    const trail = computeRrgTrail(tPrices, bPrices, dates, 5, 10);
+    assert.equal(trail.length, 5);
+    assert.ok(trail.every((pt) => Number.isFinite(pt.rsRatio) && Number.isFinite(pt.rsMomentum)));
   });
 });

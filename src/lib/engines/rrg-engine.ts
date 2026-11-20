@@ -184,7 +184,9 @@ export function computeRrgTrail(
   const startIdx = Math.max(0, rsRatioSeries.length - trailLength);
 
   for (let i = startIdx; i < rsRatioSeries.length; i++) {
-    const ratioWindow = rsRatioSeries.slice(Math.max(0, i - windowSize + 1), i + 1);
+    const winStart = Math.max(0, i - Math.min(windowSize, rsRatioSeries.length) + 1);
+    const ratioWindow =
+      i - winStart + 1 >= 3 ? rsRatioSeries.slice(winStart, i + 1) : rsRatioSeries.slice(0, Math.max(3, i + 1));
     const avgRatio = mean(ratioWindow);
     const sdRatio = stdDev(ratioWindow, avgRatio);
     const currentRatio = rsRatioSeries[i];

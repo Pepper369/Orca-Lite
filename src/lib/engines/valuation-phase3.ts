@@ -251,9 +251,9 @@ export function runDcf(input: {
   let equityValue: number | null = totalPv;
   const netDebt = finite(input.netDebt) ? input.netDebt! : null;
 
-  if (a.cashFlowType === "fcff") {
+  if (a.cashFlowType === "fcff" || a.cashFlowType === "fcf_proxy") {
     if (netDebt == null) {
-      notes.push("FCFF path thiếu net debt — equity value ≈ EV (chưa trừ nợ ròng)");
+      notes.push("FCFF/FCF path thiếu net debt — equity value ≈ EV (chưa trừ nợ ròng)");
     } else {
       equityValue = totalPv - netDebt;
     }

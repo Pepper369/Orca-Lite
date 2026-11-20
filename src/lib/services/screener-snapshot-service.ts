@@ -2509,16 +2509,36 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         const benchDates = indexBars.map((b: any) => new Date(b.time).toISOString().split("T")[0]);
 
         for (const secDef of VN_ICB_SECTORS) {
-          let targetPrices: number[] = [];
+          const memberSeries: number[][] = [];
           for (const sym of secDef.symbols) {
             const sBars = ohlcvMap.get(sym)?.bars;
             if (sBars && sBars.length >= 15) {
-              targetPrices = sBars.map((b: any) => b.close);
-              break;
+              memberSeries.push(sBars.map((b: any) => b.close));
+            }
+          }
+          let targetPrices: number[] = [];
+          if (memberSeries.length > 0) {
+            const commonLen = Math.min(benchCloses.length, ...memberSeries.map((s) => s.length));
+            if (commonLen >= 15) {
+              const trimmed = memberSeries.map((s) => s.slice(-commonLen));
+              for (let idx = 0; idx < commonLen; idx++) {
+                let relSum = 0;
+                let validMembers = 0;
+                for (const s of trimmed) {
+                  const base = s[0] ?? 0;
+                  if (base > 0) {
+                    relSum += (s[idx]! / base) * 100;
+                    validMembers++;
+                  }
+                }
+                targetPrices.push(validMembers > 0 ? relSum / validMembers : 100);
+              }
             }
           }
           if (targetPrices.length >= 15) {
-            const trail = computeRrgTrail(targetPrices, benchCloses, benchDates, 5);
+            const alignedBench = benchCloses.slice(-targetPrices.length);
+            const alignedDates = benchDates.slice(-targetPrices.length);
+            const trail = computeRrgTrail(targetPrices, alignedBench, alignedDates, 5);
             if (trail.length) {
               const latest = trail[trail.length - 1];
               const firstInTrail = trail[0];

@@ -265,14 +265,18 @@ export function scoreFundamentalPillar(input: MultiFactorInput): {
     signals.push("ROE tăng nhờ bẩy nợ cao (DuPont cờ vàng)");
   }
 
-  // 3. Forensic Accounting: Sloan Accrual Ratio
-  if (input.sloanAccrualRatio != null) {
-    if (input.sloanAccrualRatio <= 5.0) {
+  // 3. Forensic Accounting: Sloan Accrual Ratio (normalize decimal e.g. 0.045 -> 4.5%)
+  if (input.sloanAccrualRatio != null && Number.isFinite(input.sloanAccrualRatio)) {
+    const sloanPct =
+      Math.abs(input.sloanAccrualRatio) <= 1.0
+        ? input.sloanAccrualRatio * 100
+        : input.sloanAccrualRatio;
+    if (sloanPct <= 5.0) {
       score += 6;
-      signals.push(`Dồn tích sạch (Sloan ${input.sloanAccrualRatio.toFixed(1)}%)`);
-    } else if (input.sloanAccrualRatio > 10.0) {
+      signals.push(`Dồn tích sạch (Sloan ${sloanPct.toFixed(1)}%)`);
+    } else if (sloanPct > 10.0) {
       score -= 15;
-      signals.push(`Dồn tích cao (Sloan ${input.sloanAccrualRatio.toFixed(1)}% - Rủi ro lợi nhuận ảo)`);
+      signals.push(`Dồn tích cao (Sloan ${sloanPct.toFixed(1)}% - Rủi ro lợi nhuận ảo)`);
     }
   }
 
@@ -445,8 +449,14 @@ export function computeMultiFactorComposite(
     redFlags.push("Cảnh báo: Phải thu khác > 30% Tổng TS (Rủi ro ủy thác đầu tư mờ ám)");
   }
 
-  if (input.sloanAccrualRatio != null && input.sloanAccrualRatio > 15.0) {
-    redFlags.push("Cảnh báo Sloan: Tỷ lệ dồn tích > 15% (Lợi nhuận ảo nghiêm trọng)");
+  if (input.sloanAccrualRatio != null && Number.isFinite(input.sloanAccrualRatio)) {
+    const sloanPct =
+      Math.abs(input.sloanAccrualRatio) <= 1.0
+        ? input.sloanAccrualRatio * 100
+        : input.sloanAccrualRatio;
+    if (sloanPct > 15.0) {
+      redFlags.push("Cảnh báo Sloan: Tỷ lệ dồn tích > 15% (Lợi nhuận ảo nghiêm trọng)");
+    }
   }
 
   if (input.altmanZScore != null && input.altmanZScore < 1.1) {

@@ -445,7 +445,11 @@ export function computeFinancialHealth(
       assetTurnover: zz(div(revenue, assetsAvg ?? totalAssets), 2),
       inventoryDays:
         inventory != null && revenue != null && revenue > 0
-          ? zz(inventory / (revenue / 365), 0)
+          ? zz(
+              inventory /
+                ((grossProfit != null && revenue > grossProfit ? revenue - grossProfit : revenue) / 365),
+              0,
+            )
           : null,
       receivableDays:
         receivables != null && revenue != null && revenue > 0

@@ -112,7 +112,9 @@ export function runResidualIncome(input: {
       pv: round(pv, 0)!,
     });
     pvRi += pv;
-    book = book + ni;
+    // Clean-surplus sustainable retention: book equity compounds at sustainable growth niG (payout = 1 - g/ROE)
+    const retained = ni > 0 ? Math.min(ni, Math.max(0, book * niG)) : ni;
+    book = Math.max(1, book + retained);
   }
 
   const riN1 = rows[rows.length - 1]!.ri * (1 + gTerm);
