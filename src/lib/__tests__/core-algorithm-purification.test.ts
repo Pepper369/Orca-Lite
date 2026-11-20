@@ -28,6 +28,11 @@ import { runDcf, defaultDcfScenarios } from "../engines/valuation-phase3";
 import { runResidualIncome } from "../engines/valuation-phase4";
 import { computeMultiFactorComposite } from "../engines/multi-factor-quant-composite";
 import { computeRrgTrail } from "../engines/rrg-engine";
+import { computeSectorPercentileMap } from "../financial/fa-core";
+import {
+  evaluateMultiHorizonSectorFlow,
+  evaluateStockHorizonScores,
+} from "../engines/sector-horizon-flow-engine";
 
 function makeBars(count: number, basePrice = 100, baseVol = 100000): OhlcvBar[] {
   const out: OhlcvBar[] = [];
@@ -374,5 +379,91 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
     const trail = computeRrgTrail(tPrices, bPrices, dates, 5, 10);
     assert.equal(trail.length, 5);
     assert.ok(trail.every((pt) => Number.isFinite(pt.rsRatio) && Number.isFinite(pt.rsMomentum)));
+  });
+
+  it("Multi-Horizon Sector Money Flow (1-2W, 3W-2M, 2-6M, >6M) & Small-Sector Percentile Normalization", () => {
+    // 2-stock sector must span [1..99] so cheap P/E (<= 20 percentile) and high ROE (>= 80 percentile) filters work
+    const pctMap = computeSectorPercentileMap(
+      [
+        { key: "CHEAP", value: 8.5 },
+        { key: "EXPENSIVE", value: 22.0 },
+      ],
+      { higherIsBetter: true, requirePositive: true },
+    );
+    assert.equal(pctMap.get("CHEAP"), 1);
+    assert.equal(pctMap.get("EXPENSIVE"), 99);
+
+    // Stock horizon differentiation: Short-term momentum breakout vs Long-term compounder
+    const shortPick = evaluateStockHorizonScores({
+      symbol: "SSI",
+      sector: "Chứng khoán",
+      price: 34.5,
+      changePercent: 3.8,
+      volume: 25000000,
+      volRatio20: 1.85,
+      isBuyTriggerNow: true,
+      smartMoneySignal: "POCKET_PIVOT",
+      isSqueezeFiredBull: true,
+      foreignNetValBillion: 45,
+    });
+    assert.ok(
+      shortPick.short1_2w >= 80,
+      `Expected short-term breakout score >= 80, got ${shortPick.short1_2w}`,
+    );
+
+    const longCompounder = evaluateStockHorizonScores({
+      symbol: "FPT",
+      sector: "Công nghệ thông tin",
+      price: 138.0,
+      changePercent: 0.4,
+      volume: 3200000,
+      roe: 28.5,
+      roic: 24.5,
+      roiic3Y: 28.0,
+      isSuperCompounder: true,
+      isBuffettCompounder: true,
+      cfoToNetProfit: 1.35,
+      sloanAccrualRatio: 0.02,
+      isNetCash: true,
+      piotroskiFScore: 8,
+    });
+    assert.ok(
+      longCompounder.long6mPlus >= 85,
+      `Expected long-term compounder score >= 85, got ${longCompounder.long6mPlus}`,
+    );
+
+    // Multi-horizon sector evaluation across sectors
+    const multiSector = evaluateMultiHorizonSectorFlow([
+      {
+        symbol: "SSI",
+        sector: "Chứng khoán",
+        price: 34.5,
+        changePercent: 3.8,
+        volume: 25000000,
+        volRatio20: 1.85,
+        isBuyTriggerNow: true,
+        smartMoneySignal: "POCKET_PIVOT",
+        isSqueezeFiredBull: true,
+        foreignNetValBillion: 45,
+      },
+      {
+        symbol: "FPT",
+        sector: "Công nghệ thông tin",
+        price: 138.0,
+        changePercent: 0.5,
+        volume: 3500000,
+        roe: 28.5,
+        roic: 24.5,
+        roiic3Y: 28.0,
+        isSuperCompounder: true,
+        isBuffettCompounder: true,
+        cfoToNetProfit: 1.35,
+        isNetCash: true,
+        piotroskiFScore: 8,
+      },
+    ]);
+    assert.equal(multiSector.sectors.length, 2);
+    assert.equal(multiSector.horizonLeaders.SHORT_1_2W[0], "Chứng khoán");
+    assert.equal(multiSector.horizonLeaders.LONG_6M_PLUS[0], "Công nghệ thông tin");
   });
 });

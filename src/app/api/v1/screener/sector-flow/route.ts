@@ -1,32 +1,36 @@
 import { hubVnQuotes } from "@/lib/data-engine";
-import { VN_SECTORS, VN_SECURITIES, type VnSector } from "@/lib/vn/master";
+import { VN_SECURITIES } from "@/lib/vn/master";
 import { safeApi } from "@/lib/safe-api";
 import { WORKERS_BUDGET } from "@/lib/data-engine/workers-budget";
+import {
+  getLastMasterSnapshot,
+  getMasterScreenerSnapshot,
+  type ScreenerStockItem,
+} from "@/lib/services/screener-snapshot-service";
+import {
+  evaluateMultiHorizonSectorFlow,
+  type InvestmentHorizon,
+  type SectorHorizonFlowInputItem,
+  type SectorHorizonFlowResult,
+} from "@/lib/engines/sector-horizon-flow-engine";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 18;
 
-export interface SectorFlowItem {
-  sector: VnSector;
-  totalTurnoverBillion: number;
-  turnoverSharePct: number;
-  avgChangePercent: number;
-  gainersCount: number;
-  losersCount: number;
-  unchangedCount: number;
-  totalStocksCount: number;
-  quadrant: "Leading" | "Improving" | "Weakening" | "Lagging";
-  quadrantVi: string;
-  topStock: {
-    symbol: string;
-    price: number;
-    changePercent: number;
-    turnoverBillion: number;
-  } | null;
-}
+export type SectorFlowItem = SectorHorizonFlowResult;
 
-export async function GET() {
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const rawHorizon = (url.searchParams.get("horizon") ?? "COMPOSITE").toUpperCase();
+  const horizonSort: InvestmentHorizon | "COMPOSITE" =
+    rawHorizon === "SHORT_1_2W" ||
+    rawHorizon === "MEDIUM_3W_2M" ||
+    rawHorizon === "MED_LONG_2_6M" ||
+    rawHorizon === "LONG_6M_PLUS"
+      ? rawHorizon
+      : "COMPOSITE";
+
   return safeApi({
     label: "screener-sector-flow",
     guard: {
@@ -35,111 +39,136 @@ export async function GET() {
       maxConcurrent: 3,
     },
     produce: async () => {
-      // 1. Fetch live quotes across VN market
+      // 1. Fetch live quotes and Master Screener Snapshot (prefer hot L1 snapshot if already warm)
       const allSymbols = VN_SECURITIES.map((s) => s.symbol);
-      const quotesResult = await hubVnQuotes(allSymbols);
+      const [quotesResult, masterSnap] = await Promise.all([
+        hubVnQuotes(allSymbols).catch(() => null),
+        Promise.resolve(getLastMasterSnapshot()).then((hot) =>
+          hot && hot.items.length > 0
+            ? hot
+            : Promise.race([
+                getMasterScreenerSnapshot().catch(() => null),
+                new Promise<null>((r) => setTimeout(() => r(null), 4_500)),
+              ]),
+        ),
+      ]);
+
       const quotesRes = quotesResult?.quotes ?? [];
-      const quotesMap = new Map<string, { price: number; changePercent: number; volume: number; value: number }>();
-      
-      let totalMarketTurnoverBillion = 0;
+      const quotesMap = new Map<
+        string,
+        { price: number; changePercent: number; volume: number; valueBillion: number }
+      >();
 
       for (const q of quotesRes) {
         if (!q.symbol) continue;
         const price = q.price ?? 0;
         const vol = q.volume ?? 0;
-        // Turnover in Billion VND: (price * volume) / 1e9
         const standardPrice = price > 1000 ? price : price * 1000;
-        const valBillion = (standardPrice * vol) / 1e9;
+        const valBillion = Math.max(0, (standardPrice * vol) / 1e9);
 
         quotesMap.set(q.symbol.toUpperCase(), {
           price,
           changePercent: q.changePercent ?? 0,
           volume: vol,
-          value: Math.max(0, valBillion),
-        });
-
-        totalMarketTurnoverBillion += Math.max(0, valBillion);
-      }
-
-      if (totalMarketTurnoverBillion === 0) totalMarketTurnoverBillion = 1;
-
-      // 2. Aggregate metrics per sector
-      const sectorResults: SectorFlowItem[] = [];
-
-      for (const sec of VN_SECTORS) {
-        const securities = VN_SECURITIES.filter((s) => s.sector === sec);
-        if (securities.length === 0) continue;
-
-        let secTurnover = 0;
-        let sumChange = 0;
-        let countedChange = 0;
-        let gainers = 0;
-        let losers = 0;
-        let unchanged = 0;
-        let bestStock: SectorFlowItem["topStock"] = null;
-
-        for (const s of securities) {
-          const q = quotesMap.get(s.symbol.toUpperCase());
-          if (q) {
-            secTurnover += q.value;
-            sumChange += q.changePercent;
-            countedChange++;
-
-            if (q.changePercent > 0.1) gainers++;
-            else if (q.changePercent < -0.1) losers++;
-            else unchanged++;
-
-            if (!bestStock || q.value > bestStock.turnoverBillion) {
-              bestStock = {
-                symbol: s.symbol,
-                price: q.price,
-                changePercent: q.changePercent,
-                turnoverBillion: Number(q.value.toFixed(2)),
-              };
-            }
-          }
-        }
-
-        const avgChange = countedChange > 0 ? sumChange / countedChange : 0;
-        const sharePct = (secTurnover / totalMarketTurnoverBillion) * 100;
-
-        // Determine Quadrant
-        let quadrant: "Leading" | "Improving" | "Weakening" | "Lagging" = "Lagging";
-        let quadrantVi = "Tụt hậu";
-
-        if (avgChange >= 0.5 && sharePct >= 4) {
-          quadrant = "Leading";
-          quadrantVi = "Dẫn dắt (Leading)";
-        } else if (avgChange < 0 && sharePct >= 3.5) {
-          quadrant = "Improving";
-          quadrantVi = "Cải thiện (Improving)";
-        } else if (avgChange > 0 && sharePct < 3.5) {
-          quadrant = "Weakening";
-          quadrantVi = "Suy yếu (Weakening)";
-        }
-
-        sectorResults.push({
-          sector: sec,
-          totalTurnoverBillion: Number(secTurnover.toFixed(2)),
-          turnoverSharePct: Number(sharePct.toFixed(2)),
-          avgChangePercent: Number(avgChange.toFixed(2)),
-          gainersCount: gainers,
-          losersCount: losers,
-          unchangedCount: unchanged,
-          totalStocksCount: securities.length,
-          quadrant,
-          quadrantVi,
-          topStock: bestStock,
+          valueBillion: valBillion,
         });
       }
 
-      // Sort descending by turnover
-      sectorResults.sort((a, b) => b.totalTurnoverBillion - a.totalTurnoverBillion);
+      const snapItems: ScreenerStockItem[] = (masterSnap as { items?: ScreenerStockItem[] } | null)?.items ?? [];
+      const snapMap = new Map<string, ScreenerStockItem>(
+        snapItems.map((it) => [it.symbol.toUpperCase(), it]),
+      );
+
+      // 2. Build unified input items across all VN_SECURITIES enriched with TA/FA/Valuation/Orderflow from Master Snapshot
+      const flowInputs: SectorHorizonFlowInputItem[] = [];
+
+      for (const sec of VN_SECURITIES) {
+        const sym = sec.symbol.toUpperCase();
+        const q = quotesMap.get(sym);
+        const snap = snapMap.get(sym);
+        if (!q && !snap) continue;
+
+        const price = q?.price && q.price > 0 ? q.price : (snap?.price ?? 0);
+        const volume = q?.volume && q.volume > 0 ? q.volume : (snap?.volume ?? 0);
+        const changePercent = q ? q.changePercent : (snap?.changePercent ?? 0);
+        const stdPrice = price > 1000 ? price : price * 1000;
+        const turnoverBillion = q ? q.valueBillion : Math.max(0, (stdPrice * volume) / 1e9);
+
+        flowInputs.push({
+          symbol: sym,
+          sector: snap?.sector ?? sec.sector,
+          price,
+          changePercent,
+          volume,
+          turnoverBillion,
+          marketCap: snap?.marketCap ?? null,
+          foreignNetValBillion: snap?.foreignNetVal ?? null,
+          volRatio20: snap?.volRatio20 ?? null,
+          upDownVolRatio: snap?.upDownVolRatio ?? null,
+          rsRating: snap?.rsRating ?? null,
+          rsRating20: snap?.rsRating20 ?? null,
+          rsTrend: snap?.rsTrend ?? null,
+          maSignal: snap?.maSignal ?? null,
+          mtfConsensus: snap?.mtfConsensus ?? null,
+          isMtfAligned: snap?.isMtfAligned ?? null,
+          smartMoneyScore: snap?.smartMoneyScore ?? null,
+          smartMoneySignal: snap?.smartMoneySignal ?? null,
+          apexQuantScore: snap?.apexQuantScore ?? null,
+          orcaMasterScore: snap?.orcaMasterScore ?? null,
+          confluenceScore: snap?.confluenceScore ?? null,
+          historicalEdgeScore: snap?.historicalEdgeScore ?? null,
+          isBuyTriggerNow: snap?.isBuyTriggerNow ?? null,
+          buyZoneStatus: snap?.buyZoneStatus ?? null,
+          absBuyDiff: snap?.absBuyDiff ?? null,
+          riskReward: snap?.riskReward ?? null,
+          isSqueezeFiredBull: snap?.isSqueezeFiredBull ?? null,
+          isSqueezeOn: snap?.isSqueezeOn ?? null,
+          isTightCloses: snap?.isTightCloses ?? null,
+          isVolumeDryUp: snap?.isVolumeDryUp ?? null,
+          isWyckoffLps: snap?.isWyckoffLps ?? null,
+          isWyckoffSpring: snap?.isWyckoffSpring ?? null,
+          ouZScore: snap?.ouZScore ?? null,
+          ouHalfLife: snap?.ouHalfLife ?? null,
+          sectorRrgQuadrant: snap?.sectorRrgQuadrant ?? null,
+          sectorRsRatio: snap?.sectorRsRatio ?? null,
+          sectorRsMomentum: snap?.sectorRsMomentum ?? null,
+          roe: snap?.roe ?? null,
+          roic: snap?.roic ?? null,
+          roiic3Y: snap?.roiic3Y ?? null,
+          pe: snap?.pe ?? null,
+          pb: snap?.pb ?? null,
+          peg: snap?.peg ?? null,
+          dividendYield: snap?.dividendYield ?? null,
+          niYoyPct: snap?.niYoyPct ?? null,
+          revenueYoyPct: snap?.revenueYoyPct ?? null,
+          isQuarterlyInflection: snap?.isQuarterlyInflection ?? null,
+          piotroskiFScore: snap?.piotroskiFScore ?? null,
+          altmanZone: snap?.altmanZone ?? null,
+          cfoToNetProfit: snap?.cfoToNetProfit ?? null,
+          sloanAccrualRatio: snap?.sloanAccrualRatio ?? null,
+          isBeneishSafe: snap?.isBeneishSafe ?? null,
+          isNetCash: snap?.isNetCash ?? null,
+          isMertonSafe: snap?.isMertonSafe ?? null,
+          mertonDistanceToDefault: snap?.mertonDistanceToDefault ?? null,
+          isBuffettCompounder: snap?.isBuffettCompounder ?? null,
+          isSuperCompounder: snap?.isSuperCompounder ?? null,
+          isDividendAristocrat: snap?.isDividendAristocrat ?? null,
+          consensusUpsidePct: snap?.consensusUpsidePct ?? null,
+          reverseDcfMarginPct: snap?.reverseDcfMarginPct ?? null,
+          bankFairPbGordon: snap?.bankFairPbGordon ?? null,
+          rnavUpsidePct: snap?.rnavUpsidePct ?? null,
+          isBrokenSupport: snap?.isBrokenSupport ?? null,
+        });
+      }
+
+      const evaluated = evaluateMultiHorizonSectorFlow(flowInputs, horizonSort);
 
       return {
         data: {
-          sectors: sectorResults,
-          totalMarketTurnoverBillion: Number(totalMarketTurnoverBillion.toFixed(2)),
+          sectors: evaluated.sectors,
+          totalMarketTurnoverBillion: evaluated.totalMarketTurnoverBillion,
+          horizonLeaders: evaluated.horizonLeaders,
+          activeHorizon: horizonSort,
           timestamp: Date.now(),
         },
       };

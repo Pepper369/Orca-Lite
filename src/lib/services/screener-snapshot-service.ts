@@ -91,6 +91,10 @@ import {
   evaluateRealEstateValuation,
 } from "../engines/industry-specific-valuation";
 import {
+  evaluateStockHorizonScores,
+  type InvestmentHorizon,
+} from "../engines/sector-horizon-flow-engine";
+import {
   CANONICAL_PRESETS,
   FA_BIT,
   PRESET_ALIASES,
@@ -448,6 +452,13 @@ export type ScreenerStockItem = {
   rnavUpsidePct?: number | null;
   reverseDcfBasis?: "EV_FCFF" | "MCAP_FCFE" | "UNAVAILABLE";
   waccUsedPct?: number | null;
+  // Multi-Horizon Sector & Stock Money-Flow Scores (1-2W, 3W-2M, 2-6M, >6M)
+  horizonShortScore?: number | null;
+  horizonMediumScore?: number | null;
+  horizonMedLongScore?: number | null;
+  horizonLongScore?: number | null;
+  bestHorizon?: InvestmentHorizon | null;
+  bestHorizonVi?: string | null;
   bitFlags?: number;
   faBitFlags?: number;
   quantFaBitFlags?: number;
@@ -573,6 +584,9 @@ export type ScreenerFilterParams = {
   excludeSyntheticFa?: boolean;
   minSectorRoicPercentile?: number;
   maxSectorPbPercentile?: number;
+  // Multi-Horizon Sector & Stock Money-Flow Filter
+  investmentHorizon?: InvestmentHorizon | "ALL" | string;
+  minHorizonScore?: number;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -3699,6 +3713,80 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           rnavUpsidePct: entry.rnavUpsidePct,
           reverseDcfBasis: entry.faMatrix.reverseDcfBasis,
           waccUsedPct: entry.faMatrix.waccUsedPct,
+          ...(() => {
+            const hRes = evaluateStockHorizonScores({
+              symbol: entry.sym,
+              sector: entry.sec?.sector ?? sectorOf(entry.sym) ?? entry.vc?.sector ?? "Khác",
+              price: entry.price,
+              changePercent: entry.changePercent,
+              volume: entry.volume,
+              marketCap: entry.marketCap,
+              foreignNetValBillion: entry.foreignNetVal,
+              volRatio20: entry.techFeatures.volRatio20,
+              upDownVolRatio: entry.trainedHistorical.upDownVolRatio,
+              rsRating: entry.rsRating,
+              rsRating20: entry.rsRating20,
+              rsTrend: entry.rsTrend,
+              maSignal: entry.techFeatures.maSignal,
+              mtfConsensus: entry.techFeatures.mtfConsensus,
+              isMtfAligned: entry.techFeatures.isMtfAligned,
+              smartMoneyScore: entry.smartMoney.score,
+              smartMoneySignal: entry.smartMoney.signal,
+              apexQuantScore: entry.apexQuant.apexScore,
+              orcaMasterScore,
+              confluenceScore: entry.techFeatures.confluenceScore,
+              historicalEdgeScore: entry.trainedHistorical.historicalEdgeScore,
+              isBuyTriggerNow,
+              buyZoneStatus: entry.buyPointPlan.buyZoneStatus,
+              absBuyDiff: entry.buyPointPlan.absBuyDiff,
+              riskReward: entry.buyPointPlan.riskReward,
+              isSqueezeFiredBull: entry.techFeatures.isSqueezeFiredBull,
+              isSqueezeOn: entry.techFeatures.isSqueezeOn,
+              isTightCloses: entry.techFeatures.isTightCloses,
+              isVolumeDryUp: entry.techFeatures.isVolumeDryUp,
+              isWyckoffLps: entry.techFeatures.isWyckoffLps,
+              isWyckoffSpring: entry.apexQuant.reversalMetrics.isWyckoffSpring,
+              ouZScore: entry.quantFeatures.ouZScore,
+              ouHalfLife: entry.quantFeatures.ouHalfLife,
+              sectorRrgQuadrant: entry.sectorRrgQuadrant,
+              sectorRsRatio: entry.sectorRsRatio,
+              sectorRsMomentum: entry.sectorRsMomentum,
+              roe: entry.roe,
+              roic: entry.faMatrix.roic,
+              roiic3Y: entry.faMatrix.roiic3Y,
+              pe: entry.pe,
+              pb: entry.pb,
+              peg: entry.faMatrix.peg,
+              dividendYield: entry.dividendYield,
+              niYoyPct: entry.niYoyPct,
+              revenueYoyPct: entry.revenueYoyPct,
+              isQuarterlyInflection: entry.faMatrix.isQuarterlyInflection,
+              piotroskiFScore: entry.piotroskiFScore,
+              altmanZone: entry.altmanZone,
+              cfoToNetProfit: entry.faMatrix.cfoToNetProfit,
+              sloanAccrualRatio: entry.faMatrix.sloanAccrualRatio,
+              isBeneishSafe: entry.faMatrix.isBeneishSafe,
+              isNetCash: entry.faMatrix.isNetCash,
+              isMertonSafe: entry.faMatrix.isMertonSafe,
+              mertonDistanceToDefault: entry.faMatrix.mertonDistanceToDefault,
+              isBuffettCompounder: entry.faMatrix.isBuffettCompounder,
+              isSuperCompounder: entry.faMatrix.isSuperCompounder,
+              isDividendAristocrat: entry.faMatrix.isDividendAristocrat,
+              consensusUpsidePct: entry.faMatrix.consensusUpsidePct,
+              reverseDcfMarginPct: entry.faMatrix.reverseDcfMarginPct,
+              bankFairPbGordon: entry.bankFairPbGordon,
+              rnavUpsidePct: entry.rnavUpsidePct,
+              isBrokenSupport: Boolean(entry.buyPointPlan.buyZoneStatus === "BELOW_SUPPORT"),
+            });
+            return {
+              horizonShortScore: hRes.short1_2w,
+              horizonMediumScore: hRes.medium3w_2m,
+              horizonMedLongScore: hRes.medLong2_6m,
+              horizonLongScore: hRes.long6mPlus,
+              bestHorizon: hRes.bestHorizon,
+              bestHorizonVi: hRes.bestHorizonVi,
+            };
+          })(),
           faBitFlags: (() => {
             let fBit = 0;
             const hasAuth = entry.faProvenance !== "SECTOR_FALLBACK" && entry.faProvenance !== "MISSING";
@@ -4036,7 +4124,7 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
   // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.minSectorRoicPercentile ?? ""}:${params.maxSectorPbPercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.mertonSafeOnly ?? ""}:${params.minMertonDd ?? ""}:${params.excludeSyntheticFa ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.minSectorRoicPercentile ?? ""}:${params.maxSectorPbPercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.mertonSafeOnly ?? ""}:${params.minMertonDd ?? ""}:${params.excludeSyntheticFa ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.investmentHorizon || "ALL"}:${params.minHorizonScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -4412,6 +4500,24 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.smcOrderBlockOnly && !x.isSmcOrderBlock) continue;
     if (params.sniperTriggerSubtype && params.sniperTriggerSubtype !== "all" && x.sniperTriggerSubtype !== params.sniperTriggerSubtype) continue;
     if (params.minSniperRR != null && (x.sniperRiskReward == null || x.sniperRiskReward < params.minSniperRR)) continue;
+
+    // Multi-Horizon Sector & Stock Money-Flow Filtering (SHORT_1_2W, MEDIUM_3W_2M, MED_LONG_2_6M, LONG_6M_PLUS)
+    if (params.investmentHorizon && params.investmentHorizon !== "ALL") {
+      const h = params.investmentHorizon.toUpperCase();
+      const minH = params.minHorizonScore ?? 65;
+      if (h === "SHORT_1_2W" && (x.horizonShortScore ?? 0) < minH) continue;
+      if (h === "MEDIUM_3W_2M" && (x.horizonMediumScore ?? 0) < minH) continue;
+      if (h === "MED_LONG_2_6M" && (x.horizonMedLongScore ?? 0) < minH) continue;
+      if (h === "LONG_6M_PLUS" && (x.horizonLongScore ?? 0) < minH) continue;
+    } else if (params.minHorizonScore != null) {
+      const maxH = Math.max(
+        x.horizonShortScore ?? 0,
+        x.horizonMediumScore ?? 0,
+        x.horizonMedLongScore ?? 0,
+        x.horizonLongScore ?? 0,
+      );
+      if (maxH < params.minHorizonScore) continue;
+    }
 
     filtered.push(x);
   }

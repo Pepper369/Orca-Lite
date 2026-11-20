@@ -221,8 +221,19 @@ export function computeSectorPercentileMap(
   );
 
   const n = sorted.length;
+  let lastVal: number | null = null;
+  let lastPct = 50;
   for (let i = 0; i < n; i++) {
-    const pct = n === 1 ? 50 : Math.round(((i + 1) / n) * 100);
+    let pct = 50;
+    if (n > 1) {
+      if (lastVal !== null && Math.abs(sorted[i]!.value - lastVal) < 1e-9) {
+        pct = lastPct;
+      } else {
+        pct = Math.round(1 + (98 * i) / (n - 1));
+        lastVal = sorted[i]!.value;
+        lastPct = pct;
+      }
+    }
     out.set(sorted[i]!.key, Math.max(1, Math.min(100, pct)));
   }
   return out;

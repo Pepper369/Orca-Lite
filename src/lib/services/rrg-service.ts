@@ -56,21 +56,46 @@ export async function getRrgData(
       const items: RrgItem[] = [];
 
       if (mode === "sectors") {
-        // Chọn ra mã đại diện chính (Pacesetter) của từng ngành để tính giá ngành
-        const targetSectorSymbols = VN_ICB_SECTORS.map((s) => s.symbols[0]);
+        // Tổng hợp chỉ số bình quân gia quyền đều (base 100) của top 3 cổ phiếu trụ cột mỗi ngành ICB
+        const targetSectorSymbols = Array.from(
+          new Set(VN_ICB_SECTORS.flatMap((s) => s.symbols.slice(0, 3))),
+        );
         const ohlcvMap = await batchVnOhlcv(targetSectorSymbols, {
           bars: benchCloses.length,
           perSymbolMs: 3000,
         });
 
         for (const sector of VN_ICB_SECTORS) {
-          const leadSym = sector.symbols[0];
-          const pack = ohlcvMap.get(leadSym);
-          const bars = pack?.bars || [];
-          if (bars.length < 15) continue;
+          const memberSeries: number[][] = [];
+          for (const sym of sector.symbols.slice(0, 3)) {
+            const bars = ohlcvMap.get(sym)?.bars;
+            if (bars && bars.length >= 15) {
+              memberSeries.push(bars.map((b) => b.close));
+            }
+          }
+          if (memberSeries.length === 0) continue;
 
-          const targetPrices = bars.map((b) => b.close);
-          const trail = computeRrgTrail(targetPrices, benchCloses, benchDates, trailLength);
+          const commonLen = Math.min(benchCloses.length, ...memberSeries.map((s) => s.length));
+          if (commonLen < 15) continue;
+
+          const trimmed = memberSeries.map((s) => s.slice(-commonLen));
+          const targetPrices: number[] = [];
+          for (let idx = 0; idx < commonLen; idx++) {
+            let relSum = 0;
+            let count = 0;
+            for (const s of trimmed) {
+              const base = s[0] ?? 0;
+              if (base > 0) {
+                relSum += (s[idx]! / base) * 100;
+                count++;
+              }
+            }
+            targetPrices.push(count > 0 ? relSum / count : 100);
+          }
+
+          const alignedBench = benchCloses.slice(-commonLen);
+          const alignedDates = benchDates.slice(-commonLen);
+          const trail = computeRrgTrail(targetPrices, alignedBench, alignedDates, trailLength);
           if (!trail.length) continue;
 
           const latest = trail[trail.length - 1];

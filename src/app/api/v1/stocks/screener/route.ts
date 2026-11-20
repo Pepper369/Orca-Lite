@@ -146,6 +146,8 @@ export async function GET(req: Request) {
         : url.searchParams.get("excludeSyntheticFa") === "true"
           ? true
           : undefined,
+    investmentHorizon: url.searchParams.get("investmentHorizon") ?? undefined,
+    minHorizonScore: num(url.searchParams.get("minHorizonScore"), 0, 99),
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: (url.searchParams.get("sort") ?? "marketCap").slice(0, 40).replace(/[^a-zA-Z0-9_]/g, ""),
     order: (url.searchParams.get("order")
