@@ -1,96 +1,167 @@
-import { ok, badRequest, fail } from "@/lib/envelope";
+import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
-import { rateLimit } from "@/lib/rate-limit";
-import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
+import { getMasterTraderPerformance } from "@/lib/engines/copy-trade-engine";
+import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
+import { listBotExecutionOrders } from "@/lib/services/broker-vault-store";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
-import {
-  dispatchSignalToFollowers,
-  getCopyExecutionLogs,
-  type MasterTradeSignal,
-} from "@/lib/engines/copy-trade-engine";
+import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 export async function GET() {
-  const [forexHub, cryptoHub] = await Promise.all([
-    getForexSignalsHubData().catch(() => null),
-    getCryptoSignalsHubData().catch(() => null),
-  ]);
+  try {
+    const [fxRes, crRes, logs] = await Promise.allSettled([
+      getForexSignalsHubData(),
+      getCryptoSignalsHubData(),
+      listBotExecutionOrders(50),
+    ]);
 
-  const copyableForex = (forexHub?.data?.signals ?? [])
-    .filter((s) => s.action !== "WAIT" && !s.newsLockout)
-    .map((s) => ({
-      id: `sig-fx-${s.pair}`,
-      symbol: s.symbol,
-      pair: s.pair,
-      assetType: "FOREX" as const,
-      direction: s.direction as "BUY" | "SELL",
-      entryPrice: s.entryPrice ?? s.lastPrice,
-      stopLossPrice: s.stopLossPrice ?? s.lastPrice,
-      takeProfit1: s.tp1 ?? s.lastPrice,
-      takeProfit2: s.tp2 ?? s.lastPrice,
-      takeProfit3: s.tp3 ?? s.lastPrice,
-      recommendedLots: s.recommendedLots,
-      winrateScore: s.winrateScore ?? s.probability,
-      isHighWinrateVerified: s.isHighWinrateVerified ?? false,
-      liquiditySweep: s.liquiditySweepDetected ?? false,
-      evidence: s.evidence,
-    }));
+    const copyableSignals: Array<{
+      id: string;
+      symbol: string;
+      assetType: "FOREX" | "CRYPTO";
+      direction: "BUY" | "SELL";
+      entryPrice: number;
+      stopLossPrice: number;
+      tp1: number;
+      tp2: number | null;
+      tp3: number | null;
+      winrateScore: number;
+      setupGrade: string | null;
+      expectancyR: number | null;
+      recommendedLeverage: number;
+      status: string;
+      recommendedLotsOrMargin: string;
+      masterLotsOrQty: number;
+      updatedAt: number;
+    }> = [];
 
-  const copyableCrypto = (cryptoHub?.data?.signals ?? [])
-    .filter((s) => s.action !== "WAIT" && !s.circuitBreakerLockout)
-    .map((s) => ({
-      id: `sig-cr-${s.pair}`,
-      symbol: s.symbol,
-      pair: s.pair,
-      assetType: "CRYPTO" as const,
-      direction: s.direction as "BUY" | "SELL",
-      entryPrice: s.entryPrice ?? s.lastPrice,
-      stopLossPrice: s.stopLossPrice ?? s.lastPrice,
-      takeProfit1: s.tp1 ?? s.lastPrice,
-      takeProfit2: s.tp2 ?? s.lastPrice,
-      takeProfit3: s.tp3 ?? s.lastPrice,
-      recommendedLeverage: s.recommendedLeverage,
-      recommendedMarginUsd: s.recommendedMarginUsd,
-      winrateScore: s.winrateScore ?? s.probability,
-      isHighWinrateVerified: s.isHighWinrateVerified ?? false,
-      liquiditySweep: s.liquiditySweepDetected ?? false,
-      evidence: s.evidence,
-    }));
+    if (fxRes.status === "fulfilled") {
+      for (const s of fxRes.value.data.signals) {
+        if (
+          s.status === "ACTIVE" &&
+          (s.direction === "BUY" || s.direction === "SELL") &&
+          s.entryPrice &&
+          s.stopLossPrice &&
+          s.tp1
+        ) {
+          copyableSignals.push({
+            id: `fx_${s.pair}_${s.direction}`,
+            symbol: s.pair,
+            assetType: "FOREX",
+            direction: s.direction,
+            entryPrice: s.entryPrice,
+            stopLossPrice: s.stopLossPrice,
+            tp1: s.tp1,
+            tp2: s.tp2,
+            tp3: s.tp3,
+            winrateScore: s.winrateScore ?? s.probability,
+            setupGrade: s.setupGrade ?? null,
+            expectancyR: s.expectancyR ?? null,
+            recommendedLeverage: 1,
+            status: s.status,
+            recommendedLotsOrMargin: `${s.recommendedLots} Lots`,
+            masterLotsOrQty: Math.max(0.01, s.recommendedLots || 0.25),
+            updatedAt: s.updatedAt,
+          });
+        }
+      }
+    }
 
-  const logs = getCopyExecutionLogs();
+    if (crRes.status === "fulfilled") {
+      for (const s of crRes.value.data.signals) {
+        if (
+          s.status === "ACTIVE" &&
+          (s.direction === "BUY" || s.direction === "SELL") &&
+          s.entryPrice &&
+          s.stopLossPrice &&
+          s.tp1 &&
+          !s.circuitBreakerLockout
+        ) {
+          const baseQty =
+            s.entryPrice > 0
+              ? Math.max(0.001, (s.recommendedMarginUsd * Math.max(1, s.recommendedLeverage)) / s.entryPrice)
+              : 0.05;
+          copyableSignals.push({
+            id: `cr_${s.pair}_${s.direction}`,
+            symbol: s.pair,
+            assetType: "CRYPTO",
+            direction: s.direction,
+            entryPrice: s.entryPrice,
+            stopLossPrice: s.stopLossPrice,
+            tp1: s.tp1,
+            tp2: s.tp2,
+            tp3: s.tp3,
+            winrateScore: s.winrateScore ?? s.probability,
+            setupGrade: s.setupGrade ?? null,
+            expectancyR: s.expectancyR ?? null,
+            recommendedLeverage: s.recommendedLeverage,
+            status: s.status,
+            recommendedLotsOrMargin: `$${s.recommendedMarginUsd} (${s.recommendedLeverage}x)`,
+            masterLotsOrQty: Number(baseQty.toFixed(4)),
+            updatedAt: s.updatedAt,
+          });
+        }
+      }
+    }
 
-  return ok({
-    availableSignals: [...copyableForex, ...copyableCrypto],
-    executionLogs: logs,
-  });
+    copyableSignals.sort((a, b) => b.winrateScore - a.winrateScore);
+
+    return ok(
+      {
+        signals: copyableSignals,
+        executionLogs: logs.status === "fulfilled" ? logs.value : [],
+        performance: getMasterTraderPerformance(),
+      },
+      undefined,
+      { "Cache-Control": "no-store" },
+    );
+  } catch (err) {
+    return fail("COPYTRADE_ERROR", err instanceof Error ? err.message : "Failed to fetch copytrade signals", 500);
+  }
 }
 
 export async function POST(req: Request) {
-  const limited = await rateLimit(req, { name: "copytrade_signals_post", binding: "RL_AUTH", limit: 20, windowSec: 60 });
+  const limited = await rateLimit(req, {
+    name: "copytrade-dispatch-post",
+    binding: "RL_AUTH",
+    limit: 30,
+    windowSec: 60,
+  });
   if (limited) return limited;
-  if (process.env.NODE_ENV === "production") {
-    const session = await getSessionUser();
-    if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để thực thi phân phối tín hiệu Copy Trade", 401);
-  }
-  try {
-    const body = await req.json();
-    const signal: MasterTradeSignal = body.signal;
-    const currentPrice = body.currentMarketPrice;
 
-    if (!signal || !signal.symbol || !signal.entryPrice || !signal.direction) {
-      return badRequest("Thiếu thông tin MasterTradeSignal hợp lệ.");
+  try {
+    const session = await getSessionUser(req);
+    const body = (await req.json()) as {
+      signal?: DispatchableSignalInput;
+      currentMarketPrice?: number;
+      manualOverride?: boolean;
+      targetFollowerIds?: string[];
+    };
+
+    if (!body.signal || !body.signal.symbol || !body.signal.entryPrice || !body.signal.stopLossPrice || !body.signal.takeProfit1) {
+      return badRequest("Dữ liệu tín hiệu Master thiếu entryPrice, stopLossPrice hoặc takeProfit1");
     }
 
-    const executedOrders = dispatchSignalToFollowers(signal, currentPrice);
+    const orders = await dispatchSignalWithVault({
+      signal: body.signal,
+      currentMarketPrice: body.currentMarketPrice,
+      manualOverride: body.manualOverride ?? true,
+      userId: session?.id ?? null,
+      targetFollowerIds: body.targetFollowerIds,
+    });
+
+    const recentLogs = await listBotExecutionOrders(50);
 
     return ok({
-      dispatchedCount: executedOrders.length,
-      orders: executedOrders,
+      dispatchedOrders: orders,
+      executionLogs: recentLogs,
+      filledCount: orders.filter((o) => o.status === "FILLED" || o.status === "FILLED_PAPER").length,
+      pendingEaCount: orders.filter((o) => o.status === "PENDING_EA").length,
+      rejectedCount: orders.filter((o) => o.status !== "FILLED" && o.status !== "FILLED_PAPER" && o.status !== "PENDING_EA").length,
     });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Lỗi khi phân phối tín hiệu Copy Trade";
-    return badRequest(msg);
+  } catch (err) {
+    return fail("DISPATCH_ERROR", err instanceof Error ? err.message : "Lỗi đẩy lệnh Copy Trade", 500);
   }
 }

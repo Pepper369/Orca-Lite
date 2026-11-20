@@ -391,6 +391,11 @@ async function startUnifiedServer() {
         import("@/lib/services/fast-datafeed-hub")
           .then((m) => m.initFastDatafeedWorker())
           .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
+
+        // Start Auto-Trade Worker (idle until at least one account enables autoExecuteEnabled)
+        import("@/lib/services/auto-trade-worker")
+          .then((m) => m.initAutoTradeWorker())
+          .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
       },
     );
   } else {
@@ -428,6 +433,11 @@ async function startUnifiedServer() {
       import("@/lib/services/fast-datafeed-hub")
         .then((m) => m.initFastDatafeedWorker())
         .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
+
+      // Start Auto-Trade Worker (idle until at least one account enables autoExecuteEnabled)
+      import("@/lib/services/auto-trade-worker")
+        .then((m) => m.initAutoTradeWorker())
+        .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
     });
 
     const cleanup = async () => {

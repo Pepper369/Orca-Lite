@@ -4,148 +4,464 @@ import { useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
 import type {
-  FollowerAccount,
+  BrokerPlatform,
   CopyExecutionOrder,
+  CopyOrderStatus,
+  FollowerAccount,
   MasterTraderPerformance,
 } from "@/lib/engines/copy-trade-engine";
+import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import {
-  TrendingUp,
-  TrendingDown,
-  ShieldCheck,
-  Zap,
-  Users,
-  Download,
-  Plus,
-  Power,
-  RefreshCw,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Cpu,
-  Layers,
   Activity,
-  ArrowUpRight,
-  Target,
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Download,
+  KeyRound,
+  Lock,
+  PauseCircle,
+  PlayCircle,
+  Plus,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  TrendingDown,
+  TrendingUp,
+  Users,
+  X,
+  Zap,
 } from "lucide-react";
 
-interface CopyTradeData {
+interface CopyTradeAccountsPayload {
   accounts: FollowerAccount[];
-  masterStats: MasterTraderPerformance;
+  performance: MasterTraderPerformance;
+  totalManagedCapitalUsd: number;
+  activeCount: number;
+  verifiedLiveCount: number;
+  killSwitchedCount: number;
 }
 
-interface CopyTradeSignalsData {
-  availableSignals: Array<{
-    id: string;
-    symbol: string;
-    pair: string;
-    assetType: "FOREX" | "CRYPTO";
-    direction: "BUY" | "SELL";
-    entryPrice: number;
-    stopLossPrice: number;
-    takeProfit1: number;
-    recommendedLots?: number;
-    recommendedLeverage?: number;
-    winrateScore: number;
-    isHighWinrateVerified: boolean;
-    liquiditySweep: boolean;
-    evidence: string[];
-  }>;
+interface CopyableSignalItem {
+  id: string;
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+  direction: "BUY" | "SELL";
+  entryPrice: number;
+  stopLossPrice: number;
+  tp1: number;
+  tp2: number | null;
+  tp3: number | null;
+  winrateScore: number;
+  setupGrade: string | null;
+  expectancyR: number | null;
+  recommendedLeverage: number;
+  status: string;
+  recommendedLotsOrMargin: string;
+  masterLotsOrQty: number;
+  updatedAt: number;
+}
+
+interface CopyTradeSignalsPayload {
+  signals: CopyableSignalItem[];
   executionLogs: CopyExecutionOrder[];
+  performance: MasterTraderPerformance;
+}
+
+interface TestConnectionResult {
+  verified: boolean;
+  platform: string;
+  isTestnet: boolean;
+  balanceUsd: number | null;
+  availableMarginUsd: number | null;
+  canTrade: boolean;
+  positionMode?: string;
+  latencyMs: number;
+  rawMessage: string;
+}
+
+const PLATFORM_LABELS: Record<BrokerPlatform, string> = {
+  BINANCE_FUTURES: "Binance USDT-M Futures",
+  OKX_FUTURES: "OKX Futures / Swap v5",
+  MT5_EXNESS: "Exness MT5 (EA Bridge)",
+  MT5_XM: "XM MT5 (EA Bridge)",
+  MT5_EA: "MT5 Khác (EA Bridge)",
+  BYBIT_FUTURES: "Bybit Futures (Paper)",
+  TELEGRAM_1CLICK: "Telegram Alert Bot",
+};
+
+function statusBadgeTone(status?: FollowerAccount["connectionStatus"]): "up" | "down" | "warn" | "neutral" | "accent" {
+  switch (status) {
+    case "CONNECTED_VERIFIED":
+      return "up";
+    case "KILL_SWITCHED":
+    case "ERROR":
+      return "down";
+    case "AWAITING_EA":
+    case "UNVERIFIED":
+      return "warn";
+    case "PAPER_SIMULATED":
+      return "accent";
+    default:
+      return "neutral";
+  }
+}
+
+function statusLabel(status?: FollowerAccount["connectionStatus"]): string {
+  switch (status) {
+    case "CONNECTED_VERIFIED":
+      return "VERIFIED LIVE/TESTNET";
+    case "KILL_SWITCHED":
+      return "KILL-SWITCHED";
+    case "ERROR":
+      return "API ERROR";
+    case "AWAITING_EA":
+      return "CHỜ EA MT5 POLL";
+    case "UNVERIFIED":
+      return "CHƯA XÁC MINH";
+    case "PAPER_SIMULATED":
+      return "PAPER SANDBOX";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function orderStatusTone(status: CopyOrderStatus): "up" | "down" | "warn" | "neutral" | "accent" {
+  if (status === "FILLED") return "up";
+  if (status === "FILLED_PAPER") return "accent";
+  if (status === "PENDING_EA") return "warn";
+  return "down";
 }
 
 export function CopyTradePanel() {
-  const { data: accountsData, mutate: mutateAccounts } = useApi<CopyTradeData>(
+  const { data: accountsData, mutate: mutateAccounts } = useApi<CopyTradeAccountsPayload>(
     "/api/v1/copytrade/accounts",
-    { refreshInterval: 10_000, keepPreviousData: true }
+    { refreshInterval: 10_000, keepPreviousData: true },
   );
 
-  const { data: signalsData, mutate: mutateSignals } = useApi<CopyTradeSignalsData>(
+  const { data: signalsData, mutate: mutateSignals } = useApi<CopyTradeSignalsPayload>(
     "/api/v1/copytrade/signals",
-    { refreshInterval: 10_000, keepPreviousData: true }
+    { refreshInterval: 10_000, keepPreviousData: true },
   );
 
-  const [globalAutoCopy, setGlobalAutoCopy] = useState<boolean>(true);
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [banner, setBanner] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  const [testingConnId, setTestingConnId] = useState<string | null>(null);
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false);
 
-  // New follower form state
+  // Add broker form state
   const [formName, setFormName] = useState("");
-  const [formPlatform, setFormPlatform] = useState<FollowerAccount["platform"]>("MT5_EA");
+  const [formPlatform, setFormPlatform] = useState<BrokerPlatform>("BINANCE_FUTURES");
   const [formAccount, setFormAccount] = useState("");
-  const [formBalance, setFormBalance] = useState(2500);
+  const [formBalance, setFormBalance] = useState(1000);
   const [formRiskMult, setFormRiskMult] = useState(1.0);
-  const [formSlippage, setFormSlippage] = useState(3.0);
+  const [formSlippage, setFormSlippage] = useState(2.5);
+  const [formLeverageCap, setFormLeverageCap] = useState(5);
+  const [formMaxDailyLoss, setFormMaxDailyLoss] = useState(250);
+  const [formIsTestnet, setFormIsTestnet] = useState(true);
+  const [formAutoExecute, setFormAutoExecute] = useState(false);
+  const [formApiKey, setFormApiKey] = useState("");
+  const [formApiSecret, setFormApiSecret] = useState("");
+  const [formPassphrase, setFormPassphrase] = useState("");
+  const [modalSaving, setModalSaving] = useState(false);
+  const [modalTesting, setModalTesting] = useState(false);
+  const [modalTestRes, setModalTestRes] = useState<TestConnectionResult | null>(null);
+
+  // One-time MT5 EA Token modal
+  const [eaTokenModal, setEaTokenModal] = useState<{ name: string; platform: string; token: string } | null>(null);
+  const [copiedEaToken, setCopiedEaToken] = useState(false);
 
   const accounts = accountsData?.accounts ?? [];
-  const masterStats = accountsData?.masterStats;
-  const availableSignals = signalsData?.availableSignals ?? [];
+  const masterStats = accountsData?.performance ?? signalsData?.performance;
+  const availableSignals = signalsData?.signals ?? [];
   const executionLogs = signalsData?.executionLogs ?? [];
+  const anyKillSwitched = (accountsData?.killSwitchedCount ?? 0) > 0;
 
-  const handleToggleAccount = async (id: string) => {
+  const isRestExchange = formPlatform === "BINANCE_FUTURES" || formPlatform === "OKX_FUTURES";
+  const isMt5Bridge = formPlatform === "MT5_EXNESS" || formPlatform === "MT5_XM" || formPlatform === "MT5_EA";
+
+  const resetModalForm = () => {
+    setFormName("");
+    setFormAccount("");
+    setFormApiKey("");
+    setFormApiSecret("");
+    setFormPassphrase("");
+    setModalTestRes(null);
+  };
+
+  const handleTogglePatch = async (
+    id: string,
+    patch: { isActive?: boolean; autoExecuteEnabled?: boolean; killSwitched?: boolean },
+  ) => {
     try {
-      await fetch("/api/v1/copytrade/accounts", {
+      const res = await fetch("/api/v1/copytrade/accounts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, ...patch }),
       });
-      void mutateAccounts();
+      const json = (await res.json()) as { success?: boolean; error?: { message?: string } };
+      if (!res.ok || json.success === false) {
+        setBanner({ tone: "err", text: json.error?.message || "Không thể cập nhật trạng thái tài khoản" });
+      }
+      await mutateAccounts();
     } catch {
-      /* ignore */
+      setBanner({ tone: "err", text: "Lỗi kết nối máy chủ khi cập nhật tài khoản" });
+    }
+  };
+
+  const handleKillSwitch = async (engage: boolean) => {
+    setKillSwitchBusy(true);
+    try {
+      const res = await fetch("/api/v1/copytrade/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engage,
+          reason: engage ? "Người dùng nhấn Kill-Switch khẩn cấp" : undefined,
+        }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { message?: string; accounts?: FollowerAccount[] };
+        error?: { message?: string };
+      };
+      if (!res.ok || json.success === false) {
+        setBanner({ tone: "err", text: json.error?.message || "Thao tác Kill-Switch thất bại" });
+      } else {
+        setBanner({
+          tone: engage ? "warn" : "ok",
+          text: json.data?.message || (engage ? "Đã bật Kill-Switch khẩn cấp" : "Đã mở khóa bot"),
+        });
+        if (json.data?.accounts) {
+          const updatedAccounts = json.data.accounts;
+          await mutateAccounts(
+            (prev) =>
+              prev && prev.success
+                ? {
+                    ...prev,
+                    data: {
+                      ...prev.data,
+                      accounts: updatedAccounts,
+                      activeCount: updatedAccounts.filter((a) => a.isActive).length,
+                      verifiedLiveCount: updatedAccounts.filter(
+                        (a) => a.connectionStatus === "CONNECTED_VERIFIED",
+                      ).length,
+                      killSwitchedCount: updatedAccounts.filter((a) => a.killSwitched).length,
+                    },
+                  }
+                : prev,
+            { revalidate: true },
+          );
+          return;
+        }
+      }
+      await mutateAccounts(undefined, { revalidate: true });
+    } catch {
+      setBanner({ tone: "err", text: "Không thể gọi API Kill-Switch" });
+    } finally {
+      setKillSwitchBusy(false);
+    }
+  };
+
+  const handleTestExistingConnection = async (connectionId: string) => {
+    setTestingConnId(connectionId);
+    try {
+      const res = await fetch("/api/v1/copytrade/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { verification?: TestConnectionResult };
+        error?: { message?: string };
+      };
+      const v = json.data?.verification;
+      if (!res.ok || json.success === false || !v) {
+        setBanner({ tone: "err", text: json.error?.message || "Kiểm tra kết nối thất bại" });
+      } else {
+        setBanner({
+          tone: v.verified && v.canTrade ? "ok" : "warn",
+          text: `${v.rawMessage}${v.balanceUsd !== null ? ` · Số dư: $${v.balanceUsd.toLocaleString()}` : ""} (${v.latencyMs}ms)`,
+        });
+      }
+      await mutateAccounts();
+    } catch {
+      setBanner({ tone: "err", text: "Lỗi mạng khi ping API sàn" });
+    } finally {
+      setTestingConnId(null);
+    }
+  };
+
+  const handleModalDryTest = async () => {
+    if (!isRestExchange || !formApiKey.trim() || !formApiSecret.trim()) {
+      setBanner({ tone: "warn", text: "Vui lòng nhập đầy đủ API Key & API Secret trước khi kiểm tra" });
+      return;
+    }
+    setModalTesting(true);
+    setModalTestRes(null);
+    try {
+      const res = await fetch("/api/v1/copytrade/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: formPlatform,
+          apiKey: formApiKey.trim(),
+          apiSecret: formApiSecret.trim(),
+          passphrase: formPassphrase.trim() || undefined,
+          isTestnet: formIsTestnet,
+        }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { verification?: TestConnectionResult };
+        error?: { message?: string };
+      };
+      if (json.data?.verification) {
+        setModalTestRes(json.data.verification);
+        if (json.data.verification.verified && json.data.verification.balanceUsd) {
+          setFormBalance(Math.round(json.data.verification.balanceUsd));
+        }
+      } else {
+        setModalTestRes({
+          verified: false,
+          platform: formPlatform,
+          isTestnet: formIsTestnet,
+          balanceUsd: null,
+          availableMarginUsd: null,
+          canTrade: false,
+          latencyMs: 0,
+          rawMessage: json.error?.message || "Không thể kết nối sàn",
+        });
+      }
+    } catch {
+      setModalTestRes({
+        verified: false,
+        platform: formPlatform,
+        isTestnet: formIsTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs: 0,
+        rawMessage: "Lỗi mạng khi thử kết nối API sàn",
+      });
+    } finally {
+      setModalTesting(false);
     }
   };
 
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
+    setModalSaving(true);
     try {
-      await fetch("/api/v1/copytrade/accounts", {
+      const res = await fetch("/api/v1/copytrade/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: formName || "Tài khoản Copy Mới",
+          name: formName.trim() || `${PLATFORM_LABELS[formPlatform]} Bot`,
           platform: formPlatform,
-          accountNumberMasked: formAccount || "ACC-***99",
+          accountNumber: formAccount.trim() || undefined,
           balanceUsd: formBalance,
           riskMultiplier: formRiskMult,
           maxAllowedSlippagePips: formSlippage,
-          isActive: true,
+          leverageCap: formLeverageCap,
+          maxDailyLossUsd: formMaxDailyLoss,
+          isTestnet: formIsTestnet,
+          autoExecuteEnabled: formAutoExecute,
+          apiKey: isRestExchange && formApiKey.trim() ? formApiKey.trim() : undefined,
+          apiSecret: isRestExchange && formApiSecret.trim() ? formApiSecret.trim() : undefined,
+          passphrase: formPlatform === "OKX_FUTURES" && formPassphrase.trim() ? formPassphrase.trim() : undefined,
         }),
       });
+
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: {
+          account: FollowerAccount;
+          verification?: TestConnectionResult | null;
+          oneTimeEaToken?: string | null;
+        };
+        error?: { message?: string };
+      };
+
+      if (!res.ok || json.success === false || !json.data) {
+        setBanner({ tone: "err", text: json.error?.message || "Không thể lưu kết nối Broker Vault" });
+        return;
+      }
+
+      const { account, verification, oneTimeEaToken } = json.data;
       setShowAddModal(false);
-      setFormName("");
-      setFormAccount("");
-      void mutateAccounts();
+      resetModalForm();
+
+      if (oneTimeEaToken) {
+        setCopiedEaToken(false);
+        setEaTokenModal({ name: account.name, platform: account.platform, token: oneTimeEaToken });
+      }
+
+      if (verification) {
+        setBanner({
+          tone: verification.verified && verification.canTrade ? "ok" : "warn",
+          text: `Đã lưu "${account.name}" vào Vault AES-256-GCM · ${verification.rawMessage}`,
+        });
+      } else {
+        setBanner({
+          tone: "ok",
+          text: `Đã lưu kết nối "${account.name}" (${account.connectionStatus})`,
+        });
+      }
+
+      await mutateAccounts();
     } catch {
-      /* ignore */
+      setBanner({ tone: "err", text: "Lỗi khi tạo kết nối mới" });
+    } finally {
+      setModalSaving(false);
     }
   };
 
-  const handleManualDispatch = async (sig: (typeof availableSignals)[0]) => {
+  const handleDispatchSignal = async (sig: CopyableSignalItem) => {
     setDispatchingId(sig.id);
     try {
-      await fetch("/api/v1/copytrade/signals", {
+      const res = await fetch("/api/v1/copytrade/signals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           signal: {
             id: sig.id,
-            symbol: sig.pair,
+            symbol: sig.symbol,
             assetType: sig.assetType,
             direction: sig.direction,
             entryPrice: sig.entryPrice,
             stopLossPrice: sig.stopLossPrice,
-            takeProfit1: sig.takeProfit1,
-            takeProfit2: sig.takeProfit1 * 1.01,
-            takeProfit3: sig.takeProfit1 * 1.02,
-            masterLotsOrQty: sig.recommendedLots ?? 0.1,
+            takeProfit1: sig.tp1,
+            takeProfit2: sig.tp2 ?? undefined,
+            takeProfit3: sig.tp3 ?? undefined,
+            masterLotsOrQty: sig.masterLotsOrQty,
             masterCapitalUsd: 10_000,
             winrateScore: sig.winrateScore,
-            timestamp: Date.now(),
+            setupGrade: (sig.setupGrade as SetupGrade) ?? undefined,
+            recommendedLeverage: sig.recommendedLeverage,
+            timestamp: sig.updatedAt || Date.now(),
           },
           currentMarketPrice: sig.entryPrice,
+          manualOverride: true,
         }),
       });
-      void mutateSignals();
-      void mutateAccounts();
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { filledCount: number; pendingEaCount: number; rejectedCount: number };
+        error?: { message?: string };
+      };
+      if (!res.ok || json.success === false || !json.data) {
+        setBanner({ tone: "err", text: json.error?.message || "Đẩy lệnh thất bại" });
+      } else {
+        setBanner({
+          tone: json.data.rejectedCount > 0 && json.data.filledCount === 0 ? "warn" : "ok",
+          text: `Đẩy lệnh ${sig.symbol} ${sig.direction}: ${json.data.filledCount} khớp/paper, ${json.data.pendingEaCount} chờ MT5 EA, ${json.data.rejectedCount} bị chặn bởi guardrail.`,
+        });
+      }
+      await Promise.all([mutateSignals(), mutateAccounts()]);
+    } catch {
+      setBanner({ tone: "err", text: "Lỗi kết nối khi đẩy lệnh Copy Trade" });
     } finally {
       setDispatchingId(null);
     }
@@ -153,254 +469,328 @@ export function CopyTradePanel() {
 
   return (
     <div className="space-y-4">
-      {/* 1. MASTER TRADER PERFORMANCE METRICS */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-6">
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Tỷ lệ thắng (Winrate)</span>
-          <div className="num mt-0.5 text-xl font-black text-positive">
-            {masterStats ? `${masterStats.winratePct}%` : "81.4%"}
+      {/* Top KPI & Emergency Kill-Switch Control Strip */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
+          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
+            <span>Hiệu Suất Master Quant</span>
+            <Activity className="h-3.5 w-3.5 text-positive" />
           </div>
-          <span className="text-[10px] text-ink-3">Tối ưu qua 5 Confluence Gates</span>
-        </div>
-
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Profit Factor</span>
-          <div className="num mt-0.5 text-xl font-bold text-accent">
-            {masterStats ? masterStats.profitFactor : "2.85"}
-          </div>
-          <span className="text-[10px] text-ink-3">Lãi gộp / Lỗ gộp</span>
-        </div>
-
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Lợi Nhuận Tháng</span>
-          <div className="num mt-0.5 text-xl font-bold text-positive">
-            +{masterStats ? masterStats.monthlyReturnPct : "18.5"}%
-          </div>
-          <span className="text-[10px] text-ink-3">Lãi lũy kế ổn định</span>
-        </div>
-
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Sụt Giảm Tối Đa (DD)</span>
-          <div className="num mt-0.5 text-xl font-bold text-ink-1">
-            {masterStats ? `${masterStats.maxDrawdownPct}%` : "4.8%"}
-          </div>
-          <span className="text-[10px] text-ink-3">Kiểm soát rủi ro nghiêm ngặt</span>
-        </div>
-
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Tổng Lệnh Đã Copy</span>
-          <div className="num mt-0.5 text-xl font-bold text-ink-1">
-            {masterStats ? masterStats.totalTrades : "198"}
-          </div>
-          <span className="text-[10px] text-positive">
-            {masterStats ? `${masterStats.winningTrades} Thắng` : "161 Thắng"}
-          </span>
-        </div>
-
-        <div className="rounded-xl border border-line/70 bg-surface-1 p-3 flex flex-col justify-between">
-          <span className="text-[10px] text-ink-3 uppercase tracking-wider">Tự Động Sao Chép</span>
-          <div className="mt-1 flex items-center justify-between">
-            <span className={`text-[12px] font-bold ${globalAutoCopy ? "text-positive" : "text-ink-3"}`}>
-              {globalAutoCopy ? "ĐANG BẬT" : "TẠM TẮT"}
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl font-bold text-ink num">
+              {masterStats ? `${masterStats.winratePct.toFixed(1)}%` : "—"}
             </span>
-            <button
-              type="button"
-              onClick={() => setGlobalAutoCopy(!globalAutoCopy)}
-              className={`flex size-7 items-center justify-center rounded-lg transition-colors ${
-                globalAutoCopy ? "bg-positive text-white" : "bg-surface-3 text-ink-3"
-              }`}
-            >
-              <Power className="size-3.5" />
-            </button>
+            <Badge tone="up">PF {masterStats?.profitFactor?.toFixed(2) ?? "2.15"}</Badge>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-3">
+            Max DD {masterStats?.maxDrawdownPct?.toFixed(1) ?? "4.8"}% · Chuẩn lọc A+/A
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
+          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
+            <span>Vốn Quản Lý & Kết Nối</span>
+            <Users className="h-3.5 w-3.5 text-accent-primary" />
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl font-bold text-ink num">
+              ${(accountsData?.totalManagedCapitalUsd ?? 0).toLocaleString()}
+            </span>
+            <Badge tone={(accountsData?.verifiedLiveCount ?? 0) > 0 ? "up" : "accent"}>
+              {accountsData?.verifiedLiveCount ?? 0} Verified
+            </Badge>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-3">
+            {accountsData?.activeCount ?? 0}/{accounts.length} tài khoản đang hoạt động
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
+          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
+            <span>Broker Vault & Guardrails</span>
+            <Lock className="h-3.5 w-3.5 text-positive" />
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Badge tone="up">AES-256-GCM</Badge>
+            <Badge tone="accent">Idempotency</Badge>
+            <Badge tone="warn">Daily Loss Cap</Badge>
+          </div>
+          <p className="mt-1.5 text-[11px] text-ink-3">
+            Hỗ trợ Binance Futures, OKX Swap v5 &amp; Exness/XM MT5 EA
+          </p>
+        </div>
+
+        <div
+          className={`rounded-xl border p-3.5 flex flex-col justify-between ${
+            anyKillSwitched
+              ? "border-down/60 bg-down/10"
+              : "border-line/70 bg-surface-primary"
+          }`}
+        >
+          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
+            <span>Công Tắc Khẩn Cấp (Kill-Switch)</span>
+            <ShieldAlert className={`h-4 w-4 ${anyKillSwitched ? "text-down animate-pulse" : "text-warn"}`} />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {anyKillSwitched ? (
+              <button
+                type="button"
+                disabled={killSwitchBusy}
+                onClick={() => handleKillSwitch(false)}
+                className="w-full rounded-lg bg-positive px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-positive/90 transition-colors disabled:opacity-50"
+              >
+                {killSwitchBusy ? "Đang xử lý..." : "Mở Khóa An Toàn (Release)"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={killSwitchBusy}
+                onClick={() => handleKillSwitch(true)}
+                className="w-full rounded-lg bg-down px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-down/90 transition-colors disabled:opacity-50"
+              >
+                {killSwitchBusy ? "Đang khóa..." : "KILL-SWITCH: DỪNG TOÀN BỘ BOT"}
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* 2. VERIFIED HIGH-WINRATE COPYABLE SIGNALS */}
-      <div className="rounded-xl border border-line/70 bg-surface-1 p-4 shadow-sm">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-line/50 pb-3">
-          <div className="flex items-center gap-2">
-            <Zap className="size-4 text-accent" />
-            <h3 className="text-[13px] font-bold text-ink-1">
-              Tín Hiệu Đạt Chuẩn Winrate Cao (High-Winrate Confluence ≥ 75%)
-            </h3>
+      {/* Feedback Banner */}
+      {banner && (
+        <div
+          className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-[12px] ${
+            banner.tone === "ok"
+              ? "border-positive/40 bg-positive/10 text-positive"
+              : banner.tone === "warn"
+                ? "border-warn/40 bg-warn/10 text-warn"
+                : "border-down/40 bg-down/10 text-down"
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {banner.tone === "ok" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+            )}
+            <span className="truncate sm:whitespace-normal">{banner.text}</span>
           </div>
-          <span className="text-[11px] text-ink-3">
-            Đã lọc qua HTF Trend Gate · Quét thanh khoản (Judas Sweep) · Vùng giá OTE
-          </span>
+          <button
+            type="button"
+            onClick={() => setBanner(null)}
+            className="rounded p-0.5 hover:bg-surface-elevated"
+            aria-label="Đóng thông báo"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* High-Winrate Copyable Signals */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-[13px] font-bold text-ink">
+              Tín Hiệu Đạt Chuẩn Winrate Cao (High-Winrate Confluence &amp; Grade A+/A)
+            </h3>
+            <p className="mt-0.5 text-[11px] text-ink-3">
+              Auto-Bot chỉ tự động vào lệnh với tín hiệu Grade A+/A. Nhấn Copy Now để đẩy thủ công qua Risk Guardrails.
+            </p>
+          </div>
+          <Badge tone="accent">{availableSignals.length} Kèo Active</Badge>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {availableSignals.length === 0 ? (
-            <div className="col-span-full py-8 text-center text-[12px] text-ink-3">
-              Đang phân tích đa khung thời gian để tìm kiếm tín hiệu đạt chuẩn Winrate ≥ 75%...
-            </div>
-          ) : (
-            availableSignals.map((sig) => (
+        {availableSignals.length === 0 ? (
+          <div className="mt-3 rounded-lg border border-dashed border-line/60 bg-surface-elevated/40 p-5 text-center text-[12px] text-ink-3">
+            Hiện chưa có tín hiệu ACTIVE mới từ Forex &amp; Crypto Quant Hub (đang chờ setup xác suất cao).
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {availableSignals.slice(0, 6).map((sig) => (
               <div
                 key={sig.id}
-                className="flex flex-col justify-between rounded-xl border border-line/60 bg-surface-2/60 p-3.5"
+                className="flex flex-col justify-between rounded-xl border border-line/60 bg-surface-elevated/60 p-3.5"
               >
                 <div>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="text-[14px] font-bold text-ink-1">{sig.symbol}</span>
-                      <span className="ml-1.5 rounded-md bg-surface-3 px-1.5 py-0.5 text-[9.5px] font-semibold text-ink-2 uppercase">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[13px] font-bold text-ink">{sig.symbol}</span>
+                      <span className="rounded-md bg-panel-3 px-1.5 py-0.5 text-[9.5px] font-semibold text-ink-2 uppercase">
                         {sig.assetType}
                       </span>
+                      {sig.setupGrade && (
+                        <Badge tone={sig.setupGrade === "A+" || sig.setupGrade === "A" ? "up" : "warn"}>
+                          Grade {sig.setupGrade}
+                        </Badge>
+                      )}
                     </div>
-
-                    <div className="flex flex-col items-end">
-                      <Badge
-                        tone={sig.direction === "BUY" ? "up" : "down"}
-                        className="font-bold text-[10px] uppercase"
-                      >
-                        {sig.direction}
-                      </Badge>
-                      <span className="text-[10px] text-accent font-bold mt-0.5">
-                        Xác suất: {sig.winrateScore}%
-                      </span>
-                    </div>
+                    <Badge tone={sig.direction === "BUY" ? "up" : "down"}>
+                      {sig.direction === "BUY" ? (
+                        <TrendingUp className="h-3 w-3" />
+                      ) : (
+                        <TrendingDown className="h-3 w-3" />
+                      )}
+                      {sig.direction}
+                    </Badge>
                   </div>
 
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {sig.isHighWinrateVerified && (
-                      <span className="inline-flex items-center gap-0.5 rounded-md bg-positive/10 px-1.5 py-0.5 text-[9.5px] font-bold text-positive border border-positive/30">
-                        <CheckCircle2 className="size-2.5" /> WINRATE CAO
+                  <div className="mt-2.5 space-y-1 text-[11px] rounded-lg bg-surface-primary/70 p-2 border border-line/40">
+                    <div className="flex justify-between">
+                      <span className="text-ink-3">Entry / SL / TP1</span>
+                      <span className="font-mono text-ink">
+                        {sig.entryPrice} / <span className="text-down">{sig.stopLossPrice}</span> /{" "}
+                        <span className="text-positive">{sig.tp1}</span>
                       </span>
-                    )}
-                    {sig.liquiditySweep && (
-                      <span className="inline-flex items-center gap-0.5 rounded-md bg-accent/15 px-1.5 py-0.5 text-[9.5px] font-bold text-accent border border-accent/30">
-                        <Activity className="size-2.5" /> SWEEP XÁC NHẬN
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-ink-3">Winrate Score &amp; Size</span>
+                      <span className="font-semibold text-ink">
+                        {sig.winrateScore.toFixed(0)}% · {sig.recommendedLotsOrMargin}
                       </span>
-                    )}
-                  </div>
-
-                  <div className="mt-2.5 space-y-1 text-[11px] rounded-lg bg-surface-1/70 p-2 border border-line/40">
-                    <div className="flex justify-between text-ink-2">
-                      <span>Điểm vào (Entry):</span>
-                      <strong className="num text-ink-1">
-                        {sig.entryPrice >= 100 ? sig.entryPrice.toFixed(2) : sig.entryPrice.toFixed(4)}
-                      </strong>
-                    </div>
-                    <div className="flex justify-between text-negative">
-                      <span>Cắt lỗ (SL):</span>
-                      <strong className="num">
-                        {sig.stopLossPrice >= 100 ? sig.stopLossPrice.toFixed(2) : sig.stopLossPrice.toFixed(4)}
-                      </strong>
-                    </div>
-                    <div className="flex justify-between text-positive">
-                      <span>Chốt lời (TP1 - R:R 1.2):</span>
-                      <strong className="num">
-                        {sig.takeProfit1 >= 100 ? sig.takeProfit1.toFixed(2) : sig.takeProfit1.toFixed(4)}
-                      </strong>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-line/40 flex items-center justify-between">
-                  <span className="text-[10.5px] text-ink-3">Tự động kéo SL hòa vốn khi chạm TP1</span>
-                  <button
-                    type="button"
-                    disabled={dispatchingId === sig.id}
-                    onClick={() => handleManualDispatch(sig)}
-                    className="flex items-center gap-1 rounded-lg bg-accent px-3 py-1 text-[11px] font-bold text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
-                  >
-                    {dispatchingId === sig.id ? "Đang sao chép..." : "Sao chép ngay"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={dispatchingId === sig.id}
+                  onClick={() => handleDispatchSignal(sig)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  {dispatchingId === sig.id ? "Đang gửi lệnh..." : "Đẩy Lệnh (Copy Now)"}
+                </button>
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* 3. FOLLOWER ACCOUNTS MANAGER */}
-      <div className="rounded-xl border border-line/70 bg-surface-1 p-4 shadow-sm">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-line/50 pb-3">
-          <div className="flex items-center gap-2">
-            <Users className="size-4 text-accent" />
-            <h3 className="text-[13px] font-bold text-ink-1">
-              Danh Sách Tài Khoản Sao Chép (Follower Slave Accounts)
+      {/* Connected Broker & Follower Accounts */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-[13px] font-bold text-ink">
+              Danh Sách Tài Khoản Kết Nối (Encrypted Broker Vault &amp; MT5 Bridge)
             </h3>
+            <p className="mt-0.5 text-[11px] text-ink-3">
+              API Key Binance/OKX được mã hóa AES-256-GCM tại server. Exness/XM chạy qua Expert Advisor Bearer Token.
+            </p>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href="/ea/OrcaCopyTradeSlave.mq5"
               download
-              className="flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1 text-[11px] font-semibold text-ink-1 hover:bg-surface-3 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-2.5 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 transition-colors"
             >
-              <Download className="size-3 text-accent" /> Tải EA MT5 (.mq5)
+              <Download className="h-3.5 w-3.5 text-accent-primary" />
+              Tải EA MT5 (.mq5)
             </a>
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-accent/90 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity"
             >
-              <Plus className="size-3" /> Thêm Tài Khoản
+              <Plus className="h-3.5 w-3.5" />
+              Kết Nối Sàn / API Key
             </button>
           </div>
         </div>
 
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 overflow-x-auto rounded-lg border border-line/50">
           <table className="w-full text-left text-[11.5px]">
-            <thead className="bg-surface-2/60 text-[10px] uppercase text-ink-3">
+            <thead className="bg-surface-elevated/60 text-[10px] uppercase text-ink-3">
               <tr>
-                <th className="py-2 px-3">Tên tài khoản</th>
-                <th className="py-2 px-3">Nền tảng</th>
-                <th className="py-2 px-3">Số tài khoản</th>
-                <th className="py-2 px-3 text-right">Số dư vốn</th>
-                <th className="py-2 px-3 text-center">Hệ số rủi ro</th>
-                <th className="py-2 px-3 text-center">Trượt giá tối đa</th>
-                <th className="py-2 px-3 text-right">Lợi nhuận PnL</th>
-                <th className="py-2 px-3 text-center">Trạng thái</th>
+                <th className="px-3 py-2">Tài Khoản &amp; Sàn</th>
+                <th className="px-3 py-2">Trạng Thái Vault</th>
+                <th className="px-3 py-2">Vốn / Risk / Giới Hạn Lỗ</th>
+                <th className="px-3 py-2">Auto-Bot (A+/A)</th>
+                <th className="px-3 py-2 text-right">Hành Động</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line/30 bg-surface-1/40">
+            <tbody className="divide-y divide-line/30 bg-surface-primary/40">
               {accounts.map((acc) => (
-                <tr key={acc.id} className="hover:bg-surface-2/40 transition-colors">
-                  <td className="py-2.5 px-3 font-bold text-ink-1">{acc.name}</td>
-                  <td className="py-2.5 px-3">
-                    <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2">
-                      {acc.platform.replace("_", " ")}
-                    </span>
+                <tr key={acc.id} className="hover:bg-surface-elevated/40 transition-colors">
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-ink">{acc.name}</span>
+                      <span className="rounded bg-panel-3 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2">
+                        {acc.platform}
+                      </span>
+                      <Badge tone={acc.isTestnet ? "accent" : "warn"}>
+                        {acc.isTestnet ? "TESTNET/DEMO" : "LIVE REAL"}
+                      </Badge>
+                    </div>
+                    <div className="mt-0.5 text-[10.5px] font-mono text-ink-3">
+                      ID: {acc.accountNumberMasked} · Đã khớp {acc.totalCopiedTrades} lệnh
+                    </div>
                   </td>
-                  <td className="py-2.5 px-3 num text-ink-2 font-mono text-[11px]">
-                    {acc.accountNumberMasked}
+                  <td className="px-3 py-2.5">
+                    <Badge tone={statusBadgeTone(acc.connectionStatus)}>
+                      {statusLabel(acc.connectionStatus)}
+                    </Badge>
+                    {acc.lastError && (
+                      <div className="mt-1 max-w-[220px] truncate text-[10px] text-down" title={acc.lastError}>
+                        {acc.lastError}
+                      </div>
+                    )}
                   </td>
-                  <td className="py-2.5 px-3 num text-right font-semibold text-ink-1">
-                    ${acc.balanceUsd.toLocaleString()}
+                  <td className="px-3 py-2.5 font-mono">
+                    <div className="font-semibold text-ink">${acc.balanceUsd.toLocaleString()}</div>
+                    <div className="text-[10.5px] text-ink-3">
+                      {acc.riskMultiplier}x · Lev ≤{acc.leverageCap ?? 5}x · MaxLoss ${acc.maxDailyLossUsd ?? 500}/d
+                    </div>
                   </td>
-                  <td className="py-2.5 px-3 text-center num font-bold text-accent">
-                    {acc.riskMultiplier}x
-                  </td>
-                  <td className="py-2.5 px-3 text-center num text-ink-2">
-                    {acc.maxAllowedSlippagePips} pips
-                  </td>
-                  <td className="py-2.5 px-3 num text-right font-bold text-positive">
-                    +${acc.totalPnlUsd.toLocaleString()}
-                  </td>
-                  <td className="py-2.5 px-3 text-center">
+                  <td className="px-3 py-2.5">
                     <button
                       type="button"
-                      onClick={() => handleToggleAccount(acc.id)}
-                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10.5px] font-semibold transition-colors ${
-                        acc.isActive
-                          ? "bg-positive/10 text-positive border border-positive/30 hover:bg-positive/20"
-                          : "bg-surface-3 text-ink-3 border border-line hover:bg-surface-2"
+                      disabled={acc.killSwitched}
+                      onClick={() =>
+                        handleTogglePatch(acc.id, { autoExecuteEnabled: !acc.autoExecuteEnabled })
+                      }
+                      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10.5px] font-semibold transition-colors disabled:opacity-40 ${
+                        acc.autoExecuteEnabled && !acc.killSwitched
+                          ? "bg-positive/15 text-positive border border-positive/30"
+                          : "bg-panel-3 text-ink-3 border border-line hover:bg-surface-elevated"
                       }`}
                     >
-                      {acc.isActive ? (
-                        <>
-                          <CheckCircle2 className="size-3" /> Đang chép
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="size-3" /> Tạm dừng
-                        </>
-                      )}
+                      <Zap className="h-3 w-3" />
+                      {acc.autoExecuteEnabled && !acc.killSwitched ? "AUTO ON" : "AUTO OFF"}
                     </button>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <div className="inline-flex items-center gap-1.5">
+                      {acc.hasApiKey &&
+                        (acc.platform === "BINANCE_FUTURES" || acc.platform === "OKX_FUTURES") && (
+                          <button
+                            type="button"
+                            disabled={testingConnId === acc.id}
+                            onClick={() => handleTestExistingConnection(acc.id)}
+                            className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-elevated px-2 py-1 text-[10.5px] font-semibold text-ink hover:bg-panel-3 transition-colors disabled:opacity-50"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${testingConnId === acc.id ? "animate-spin" : ""}`} />
+                            Test API
+                          </button>
+                        )}
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePatch(acc.id, { isActive: !acc.isActive })}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10.5px] font-semibold transition-colors ${
+                          acc.isActive
+                            ? "bg-positive/15 text-positive border border-positive/30"
+                            : "bg-panel-3 text-ink-3 border border-line hover:bg-surface-elevated"
+                        }`}
+                      >
+                        {acc.isActive ? (
+                          <>
+                            <PlayCircle className="h-3 w-3" /> Đang bật
+                          </>
+                        ) : (
+                          <>
+                            <PauseCircle className="h-3 w-3" /> Tạm dừng
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -409,177 +799,367 @@ export function CopyTradePanel() {
         </div>
       </div>
 
-      {/* 4. RECENT COPY TRADE EXECUTION LOGS */}
-      <div className="rounded-xl border border-line/70 bg-surface-1 p-4 shadow-sm">
-        <div className="flex items-center justify-between border-b border-line/50 pb-2.5">
-          <div className="flex items-center gap-2">
-            <Activity className="size-4 text-positive" />
-            <h3 className="text-[13px] font-bold text-ink-1">
-              Nhật Ký Khớp Lệnh Sao Chép (Sub-second Execution Stream)
-            </h3>
-          </div>
-          <span className="text-[11px] text-ink-3">Bảo vệ trượt giá & xác thực khớp lệnh</span>
-        </div>
-
-        <div className="mt-3 space-y-2 max-h-56 overflow-y-auto">
-          {executionLogs.map((log) => (
-            <div
-              key={log.orderId}
-              className="flex items-center justify-between rounded-lg border border-line/40 bg-surface-2/60 px-3 py-2 text-[11px]"
-            >
-              <div className="flex items-center gap-2.5">
-                <span
-                  className={`flex size-6 items-center justify-center rounded-md font-bold text-[10px] ${
-                    log.direction === "BUY" ? "bg-positive/15 text-positive" : "bg-negative/15 text-negative"
-                  }`}
-                >
-                  {log.direction}
-                </span>
-                <div>
-                  <div className="font-bold text-ink-1 flex items-center gap-1.5">
-                    <span>{log.symbol}</span>
-                    <span className="text-[10px] text-ink-3">({log.followerName})</span>
-                  </div>
-                  <div className="text-[10px] text-ink-3">
-                    Khối lượng: <strong className="text-ink-2">{log.copiedLotsOrQty}</strong> | Trượt:{" "}
-                    <strong className="text-ink-2">{log.slippagePips} pip</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <span
-                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                    log.status === "FILLED"
-                      ? "bg-positive/10 text-positive border border-positive/30"
-                      : "bg-negative/10 text-negative border border-negative/30"
-                  }`}
-                >
-                  {log.status}
-                </span>
-                <div className="text-[9.5px] text-ink-3 mt-0.5">
-                  {new Date(log.timestamp).toLocaleTimeString()}
-                </div>
-              </div>
-            </div>
-          ))}
+      {/* Execution Audit Stream */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
+        <h3 className="text-[13px] font-bold text-ink">
+          Nhật Ký Khớp Lệnh Sao Chép (Sub-second Execution &amp; Guardrail Stream)
+        </h3>
+        <div className="mt-3 overflow-x-auto rounded-lg border border-line/50">
+          <table className="w-full text-left text-[11.5px]">
+            <thead className="bg-surface-elevated/60 text-[10px] uppercase text-ink-3">
+              <tr>
+                <th className="px-3 py-2">Cặp / Chiều</th>
+                <th className="px-3 py-2">Tài Khoản</th>
+                <th className="px-3 py-2">Khối Lượng &amp; Giá</th>
+                <th className="px-3 py-2">Trạng Thái</th>
+                <th className="px-3 py-2">Chi Tiết / Order ID</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line/30 bg-surface-primary/40">
+              {executionLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-5 text-center text-ink-3">
+                    Chưa có lệnh thực thi nào trong phiên hiện tại. Nhấn &quot;Đẩy Lệnh (Copy Now)&quot; hoặc bật Auto-Bot để kiểm chứng.
+                  </td>
+                </tr>
+              ) : (
+                executionLogs.slice(0, 20).map((log) => (
+                  <tr key={log.orderId} className="hover:bg-surface-elevated/40">
+                    <td className="px-3 py-2 font-semibold">
+                      <span className="text-ink">{log.symbol}</span>{" "}
+                      <Badge tone={log.direction === "BUY" ? "up" : "down"}>{log.direction}</Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="text-ink">{log.followerName}</div>
+                      <div className="text-[10px] text-ink-3">
+                        {log.platform} · {log.isTestnet ? "Testnet" : "Live"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-ink">
+                      {log.copiedLotsOrQty} @ {log.executionPrice}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge tone={orderStatusTone(log.status)}>{log.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-ink-2">
+                      <div>{log.message}</div>
+                      {log.exchangeOrderId && (
+                        <div className="text-[10px] font-mono text-ink-3">Order #{log.exchangeOrderId}</div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* 5. ADD FOLLOWER MODAL */}
+      {/* Add Exchange / Broker Vault Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl border border-line/80 bg-surface-1 p-5 shadow-2xl">
-            <div className="flex items-start justify-between border-b border-line/60 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs">
+          <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-line bg-surface-primary p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-ink-1">Thêm Tài Khoản Sao Chép Mới</h3>
+                <h3 className="text-base font-bold text-ink">Kết Nối Sàn Giao Dịch &amp; Broker Vault</h3>
                 <p className="mt-0.5 text-[12px] text-ink-3">
-                  Kết nối tài khoản MetaTrader 5, Binance Futures, Bybit hoặc Telegram Bot
+                  Hỗ trợ Binance USDT-M Futures, OKX v5 Swap (REST API) và Exness / XM (MT5 EA Bridge)
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAddModal(false)}
-                className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink-1"
+                className="rounded-lg p-1 text-ink-3 hover:bg-surface-elevated hover:text-ink"
               >
-                ✕
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             <form onSubmit={handleAddAccount} className="mt-4 space-y-3">
               <div>
-                <label className="text-[11px] font-semibold text-ink-2">Tên định danh tài khoản</label>
+                <label className="block text-[11px] font-semibold text-ink-2">Sàn giao dịch / Nền tảng</label>
+                <select
+                  value={formPlatform}
+                  onChange={(e) => {
+                    setFormPlatform(e.target.value as BrokerPlatform);
+                    setModalTestRes(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 text-[12.5px] text-ink"
+                >
+                  <option value="BINANCE_FUTURES">Binance USDT-M Futures (REST API Key)</option>
+                  <option value="OKX_FUTURES">OKX Futures / Swap v5 (API Key + Passphrase)</option>
+                  <option value="MT5_EXNESS">Exness MT5 (EA Bearer Bridge - Forex/Gold)</option>
+                  <option value="MT5_XM">XM MT5 (EA Bearer Bridge - Forex/Gold)</option>
+                  <option value="MT5_EA">MT5 Khác (EA Bearer Bridge)</option>
+                  <option value="BYBIT_FUTURES">Bybit Futures (Paper Sandbox)</option>
+                  <option value="TELEGRAM_1CLICK">Telegram 1-Click Signal Bot</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-2">Tên gợi nhớ kết nối</label>
                 <input
                   type="text"
-                  required
-                  placeholder="Ví dụ: Exness Pro Tài Khoản Phụ"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
+                  placeholder={`Ví dụ: ${PLATFORM_LABELS[formPlatform]} #1`}
+                  className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 text-[12.5px] text-ink"
                 />
               </div>
 
+              {isRestExchange && (
+                <div className="space-y-3 rounded-xl border border-warn/40 bg-warn/5 p-3">
+                  <div className="flex items-start gap-2 text-[11px] text-warn">
+                    <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Khuyến cáo an toàn:</strong> Chỉ bật quyền <strong>Read + Enable Futures / Trade</strong>, tuyệt đối <strong>TẮT Withdraw (Rút tiền)</strong> và bật whitelist IP khi dùng Mainnet. API Key được mã hóa AES-256-GCM.
+                    </span>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-[12px] font-semibold text-ink cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formIsTestnet}
+                      onChange={(e) => setFormIsTestnet(e.target.checked)}
+                      className="rounded border-line"
+                    />
+                    Chế độ Testnet / Demo Trading (An toàn trước khi đánh Live)
+                  </label>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-2">
+                      API Key (để trống nếu chỉ muốn chạy Paper Sandbox)
+                    </label>
+                    <input
+                      type="text"
+                      value={formApiKey}
+                      onChange={(e) => setFormApiKey(e.target.value)}
+                      placeholder="Nhập API Key từ Binance / OKX..."
+                      autoComplete="off"
+                      className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-2">API Secret</label>
+                    <input
+                      type="password"
+                      value={formApiSecret}
+                      onChange={(e) => setFormApiSecret(e.target.value)}
+                      placeholder="Nhập API Secret..."
+                      autoComplete="new-password"
+                      className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
+                    />
+                  </div>
+
+                  {formPlatform === "OKX_FUTURES" && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-ink-2">
+                        OKX Passphrase <span className="text-down">*</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={formPassphrase}
+                        onChange={(e) => setFormPassphrase(e.target.value)}
+                        placeholder="Passphrase bạn đặt lúc tạo OKX v5 API Key..."
+                        autoComplete="new-password"
+                        className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={modalTesting || !formApiKey.trim() || !formApiSecret.trim()}
+                      onClick={handleModalDryTest}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 disabled:opacity-40"
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                      {modalTesting ? "Đang ping sàn..." : "Kiểm tra kết nối API"}
+                    </button>
+                    {modalTestRes && (
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          modalTestRes.verified && modalTestRes.canTrade ? "text-positive" : "text-down"
+                        }`}
+                      >
+                        {modalTestRes.verified ? `OK ($${modalTestRes.balanceUsd ?? 0}, ${modalTestRes.latencyMs}ms)` : modalTestRes.rawMessage}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isMt5Bridge && (
+                <div className="space-y-2 rounded-xl border border-accent-primary/35 bg-accent-primary/10 p-3 text-[11.5px] text-ink-2">
+                  <div className="font-semibold text-ink">Hướng dẫn Exness / XM MT5 Bridge</div>
+                  <p>
+                    Sàn Forex Exness &amp; XM không cung cấp REST Trading API Key công khai. Sau khi bấm lưu, hệ thống sẽ cấp{" "}
+                    <strong>MT5 EA Bearer Token (1 lần duy nhất)</strong> để dán vào file{" "}
+                    <code className="font-mono text-ink">OrcaCopyTradeSlave.mq5</code> trên MetaTrader 5.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-ink-2">Số tài khoản MT5 (tùy chọn)</label>
+                    <input
+                      type="text"
+                      value={formAccount}
+                      onChange={(e) => setFormAccount(e.target.value)}
+                      placeholder="VD: 204958102"
+                      className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-semibold text-ink-2">Nền tảng giao dịch</label>
-                  <select
-                    value={formPlatform}
-                    onChange={(e) => setFormPlatform(e.target.value as FollowerAccount["platform"])}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
-                  >
-                    <option value="MT5_EA">MetaTrader 5 EA (Forex)</option>
-                    <option value="BINANCE_FUTURES">Binance USDT-M Futures (Crypto)</option>
-                    <option value="BYBIT_FUTURES">Bybit Futures (Crypto)</option>
-                    <option value="TELEGRAM_1CLICK">Telegram VIP 1-Click Copy</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-ink-2">Số tài khoản / API Key</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="MT5 ID hoặc Binance API"
-                    value={formAccount}
-                    onChange={(e) => setFormAccount(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-ink-2">Số dư vốn ($)</label>
+                  <label className="block text-[11px] font-semibold text-ink-2">Vốn phân bổ (USD)</label>
                   <input
                     type="number"
+                    min={10}
                     value={formBalance}
                     onChange={(e) => setFormBalance(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
+                    className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] text-ink"
                   />
                 </div>
-
                 <div>
-                  <label className="text-[11px] font-semibold text-ink-2">Hệ số rủi ro (Multiplier)</label>
-                  <select
-                    value={formRiskMult}
-                    onChange={(e) => setFormRiskMult(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
-                  >
-                    <option value={0.5}>0.5x (Thận trọng)</option>
-                    <option value={1.0}>1.0x (Chuẩn theo Master)</option>
-                    <option value={1.5}>1.5x</option>
-                    <option value={2.0}>2.0x (Tấn công)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-ink-2">Trượt tối đa (pips)</label>
+                  <label className="block text-[11px] font-semibold text-ink-2">Hệ số rủi ro (Risk Multiplier)</label>
                   <input
                     type="number"
-                    step="0.5"
-                    value={formSlippage}
-                    onChange={(e) => setFormSlippage(Number(e.target.value))}
-                    className="mt-1 w-full rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-[12px] text-ink-1 focus:border-accent focus:outline-hidden"
+                    step="any"
+                    min={0.1}
+                    max={5}
+                    value={formRiskMult}
+                    onChange={(e) => setFormRiskMult(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] text-ink"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-ink-2">Ngắt lỗ tối đa/ngày ($)</label>
+                  <input
+                    type="number"
+                    min={10}
+                    value={formMaxDailyLoss}
+                    onChange={(e) => setFormMaxDailyLoss(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] text-ink"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-ink-2">Trần đòn bẩy (1x - 20x)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={formLeverageCap}
+                    onChange={(e) => setFormLeverageCap(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] text-ink"
                   />
                 </div>
               </div>
 
-              <div className="mt-4 flex justify-end gap-2 pt-2 border-t border-line/50">
+              <div className="grid grid-cols-2 gap-3 items-center">
+                <div>
+                  <label className="block text-[11px] font-semibold text-ink-2">Max Slippage (Pips / %)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min={0.1}
+                    max={25}
+                    value={formSlippage}
+                    onChange={(e) => setFormSlippage(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] text-ink"
+                  />
+                </div>
+                <label className="mt-4 flex items-center gap-2 text-[11.5px] font-semibold text-ink cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formAutoExecute}
+                    onChange={(e) => setFormAutoExecute(e.target.checked)}
+                    className="rounded border-line"
+                  />
+                  Bật Auto-Trade kèo A+/A
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="rounded-lg bg-surface-2 px-4 py-1.5 text-[12px] font-semibold text-ink-1 hover:bg-surface-3"
+                  className="rounded-lg border border-line bg-surface-elevated px-3.5 py-1.5 text-[12px] font-semibold text-ink-2 hover:bg-panel-3"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-accent px-4 py-1.5 text-[12px] font-semibold text-white hover:bg-accent/90"
+                  disabled={modalSaving}
+                  className="rounded-lg bg-accent-primary px-4 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
                 >
-                  Lưu & Kích Hoạt
+                  {modalSaving ? "Đang mã hóa & Lưu..." : "Lưu Vào Broker Vault"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* One-time MT5 EA Bearer Token Modal */}
+      {eaTokenModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-2xl border border-warn/50 bg-surface-primary p-5 shadow-2xl space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-warn" />
+                <h3 className="text-base font-bold text-ink">EA Bearer Token (Hiển Thị 1 Lần)</h3>
+              </div>
+              <button
+                type="button"
+                aria-label="Đóng hộp thoại EA Token"
+                onClick={() => setEaTokenModal(null)}
+                className="rounded p-1 text-ink-3 hover:bg-surface-elevated"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-[12px] text-ink-2">
+              Token dùng để xác thực EA <strong>OrcaCopyTradeSlave.mq5</strong> cho tài khoản{" "}
+              <strong>{eaTokenModal.name}</strong> ({eaTokenModal.platform}). Server chỉ lưu bản băm SHA-256 nên sẽ{" "}
+              <span className="text-down font-semibold">không thể xem lại token này sau khi đóng</span>.
+            </p>
+
+            <div className="rounded-lg border border-line bg-surface-elevated p-2.5 font-mono text-[11.5px] break-all text-positive">
+              {eaTokenModal.token}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(eaTokenModal.token);
+                  setCopiedEaToken(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[12px] font-semibold text-white"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copiedEaToken ? "Đã Copy!" : "Copy Bearer Token"}
+              </button>
+              <a
+                href="/ea/OrcaCopyTradeSlave.mq5"
+                download
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] font-semibold text-ink"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Tải .mq5
+              </a>
+              <button
+                type="button"
+                onClick={() => setEaTokenModal(null)}
+                className="rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[12px] font-semibold text-ink hover:bg-panel-3"
+              >
+                Đã lưu &amp; Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

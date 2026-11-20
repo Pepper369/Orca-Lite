@@ -8,15 +8,46 @@
  * 4. Automated Breakeven Trailing execution
  */
 
+export type BrokerPlatform =
+  | "MT5_EXNESS"
+  | "MT5_XM"
+  | "MT5_EA"
+  | "BINANCE_FUTURES"
+  | "OKX_FUTURES"
+  | "BYBIT_FUTURES"
+  | "TELEGRAM_1CLICK";
+
+export type ConnectionStatus =
+  | "CONNECTED_VERIFIED"
+  | "PAPER_SIMULATED"
+  | "AWAITING_EA"
+  | "UNVERIFIED"
+  | "KILL_SWITCHED"
+  | "ERROR";
+
 export interface FollowerAccount {
   id: string;
   name: string;
-  platform: "MT5_EA" | "BINANCE_FUTURES" | "BYBIT_FUTURES" | "TELEGRAM_1CLICK";
+  platform: BrokerPlatform;
   accountNumberMasked: string;
   balanceUsd: number;
   riskMultiplier: number; // 0.5x (Safe), 1.0x (Standard), 2.0x (Aggressive)
   maxAllowedSlippagePips: number;
+  leverageCap?: number;
+  isTestnet?: boolean;
   isActive: boolean;
+  autoExecuteEnabled?: boolean;
+  killSwitched?: boolean;
+  connectionStatus?: ConnectionStatus;
+  maxDailyLossUsd?: number;
+  dailyRealizedPnlUsd?: number;
+  dailyPnlDate?: string;
+  maxOpenPositions?: number;
+  hasApiKey?: boolean;
+  hasPassphrase?: boolean;
+  hasEaToken?: boolean;
+  lastVerifiedAt?: number | null;
+  lastError?: string | null;
   totalCopiedTrades: number;
   winratePct: number;
   totalPnlUsd: number;
@@ -39,6 +70,19 @@ export interface MasterTradeSignal {
   timestamp: number;
 }
 
+export type CopyOrderStatus =
+  | "FILLED"
+  | "FILLED_PAPER"
+  | "REJECTED_SLIPPAGE"
+  | "REJECTED_EXCHANGE"
+  | "REJECTED_LOW_GRADE"
+  | "REJECTED_ASSET_MISMATCH"
+  | "BLOCKED_DAILY_LOSS"
+  | "BLOCKED_KILL_SWITCH"
+  | "SKIPPED_DUPLICATE"
+  | "PENDING_EA"
+  | "CANCELLED";
+
 export interface CopyExecutionOrder {
   orderId: string;
   followerId: string;
@@ -50,11 +94,17 @@ export interface CopyExecutionOrder {
   entryPrice: number;
   executionPrice: number;
   slippagePips: number;
-  status: "FILLED" | "REJECTED_SLIPPAGE" | "PENDING_EA" | "CANCELLED";
+  status: CopyOrderStatus;
   stopLossPrice: number;
   takeProfit1: number;
   timestamp: number;
   message: string;
+  signalId?: string;
+  idempotencyKey?: string;
+  exchangeOrderId?: string | null;
+  slOrderId?: string | null;
+  tpOrderId?: string | null;
+  isTestnet?: boolean;
 }
 
 export interface MasterTraderPerformance {

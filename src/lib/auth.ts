@@ -118,10 +118,39 @@ export interface SessionUser {
   sessionId?: string;
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+function extractCookieFromRequest(req: Request | undefined, name: string): string | null {
+  if (!req) return null;
+  const header = req.headers.get("cookie");
+  if (!header) return null;
+  const pairs = header.split(";");
+  for (const part of pairs) {
+    const idx = part.indexOf("=");
+    if (idx <= 0) continue;
+    const k = part.slice(0, idx).trim();
+    if (k === name) {
+      const v = part.slice(idx + 1).trim();
+      try {
+        return decodeURIComponent(v);
+      } catch {
+        return v;
+      }
+    }
+  }
+  return null;
+}
+
+export async function getSessionUser(req?: Request): Promise<SessionUser | null> {
   try {
-    const jar = await cookies();
-    const token = jar.get(COOKIE)?.value;
+    let token = extractCookieFromRequest(req, COOKIE);
+    if (!token) {
+      try {
+        const jar = await cookies();
+        token = jar.get(COOKIE)?.value ?? null;
+      } catch {
+        // Khi chạy trên Hono server/index.ts ngoài scope Next, cookies() throw — đã đọc từ req header ở trên.
+        token = null;
+      }
+    }
     if (!token) return null;
     const { payload } = await jwtVerify(token, getKey());
     if (!payload.sub) return null;

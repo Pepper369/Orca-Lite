@@ -75,6 +75,8 @@ export const env = {
   upstashRestToken: opt(process.env.UPSTASH_REDIS_REST_TOKEN),
   /** Không còn khóa mặc định: auth.ts tự quyết định (production thiếu → từ chối, dev → khóa cục bộ). */
   jwtSecret: opt(process.env.JWT_SECRET),
+  /** Khóa mã hóa AES-256-GCM cho API Key / Secret của sàn giao dịch (Binance, OKX). */
+  brokerEncryptionKey: opt(process.env.BROKER_ENCRYPTION_KEY),
 
   geminiApiKey: opt(process.env.GEMINI_API_KEY),
   openrouterApiKey: opt(process.env.OPENROUTER_API_KEY),
