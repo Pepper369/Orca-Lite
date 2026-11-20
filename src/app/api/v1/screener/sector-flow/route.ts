@@ -20,6 +20,15 @@ export const maxDuration = 18;
 
 export type SectorFlowItem = SectorHorizonFlowResult;
 
+interface CachedSectorFlowInputs {
+  flowInputs: SectorHorizonFlowInputItem[];
+  hasMasterSnap: boolean;
+  expiresAt: number;
+}
+
+let l1SectorFlowCache: CachedSectorFlowInputs | null = null;
+const SECTOR_FLOW_L1_TTL_MS = 30_000;
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const rawHorizon = (url.searchParams.get("horizon") ?? "COMPOSITE").toUpperCase();
@@ -39,18 +48,42 @@ export async function GET(req: Request) {
       maxConcurrent: 3,
     },
     produce: async () => {
+      const now = Date.now();
+      const hotSnap = getLastMasterSnapshot();
+      const hotHasItems = Boolean(hotSnap && hotSnap.items.length > 0);
+
+      // Fast L1 cache hit if cache is fresh and doesn't miss newly warmed master snapshot
+      if (
+        l1SectorFlowCache &&
+        now < l1SectorFlowCache.expiresAt &&
+        (l1SectorFlowCache.hasMasterSnap || !hotHasItems)
+      ) {
+        const evaluated = evaluateMultiHorizonSectorFlow(
+          l1SectorFlowCache.flowInputs,
+          horizonSort,
+        );
+        return {
+          data: {
+            sectors: evaluated.sectors,
+            totalMarketTurnoverBillion: evaluated.totalMarketTurnoverBillion,
+            horizonLeaders: evaluated.horizonLeaders,
+            activeHorizon: horizonSort,
+            timestamp: now,
+            cached: true,
+          },
+        };
+      }
+
       // 1. Fetch live quotes and Master Screener Snapshot (prefer hot L1 snapshot if already warm)
       const allSymbols = VN_SECURITIES.map((s) => s.symbol);
       const [quotesResult, masterSnap] = await Promise.all([
         hubVnQuotes(allSymbols).catch(() => null),
-        Promise.resolve(getLastMasterSnapshot()).then((hot) =>
-          hot && hot.items.length > 0
-            ? hot
-            : Promise.race([
-                getMasterScreenerSnapshot().catch(() => null),
-                new Promise<null>((r) => setTimeout(() => r(null), 4_500)),
-              ]),
-        ),
+        hotHasItems
+          ? Promise.resolve(hotSnap)
+          : Promise.race([
+              getMasterScreenerSnapshot().catch(() => null),
+              new Promise<null>((r) => setTimeout(() => r(null), 1_500)),
+            ]),
       ]);
 
       const quotesRes = quotesResult?.quotes ?? [];
@@ -161,6 +194,14 @@ export async function GET(req: Request) {
         });
       }
 
+      if (flowInputs.length > 0) {
+        l1SectorFlowCache = {
+          flowInputs,
+          hasMasterSnap: snapItems.length > 0,
+          expiresAt: Date.now() + SECTOR_FLOW_L1_TTL_MS,
+        };
+      }
+
       const evaluated = evaluateMultiHorizonSectorFlow(flowInputs, horizonSort);
 
       return {
@@ -170,6 +211,7 @@ export async function GET(req: Request) {
           horizonLeaders: evaluated.horizonLeaders,
           activeHorizon: horizonSort,
           timestamp: Date.now(),
+          cached: false,
         },
       };
     },
