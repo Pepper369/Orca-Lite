@@ -236,7 +236,6 @@ async function scanSingleCryptoPair(
       bars1h.length >= 5 ? bars1h : execBars.slice(-24),
       true,
     );
-    const atrExec = scalp?.atr ?? prelimAtrExec;
 
     const gradeFactor = setupGrade === "A+" ? 1.0 : setupGrade === "A" ? 0.8 : 0.6;
     const pairLevCap = pair === "BTCUSDT" || pair === "ETHUSDT" ? 15 : 8;
