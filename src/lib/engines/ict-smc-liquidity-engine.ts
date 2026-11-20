@@ -126,6 +126,12 @@ export function analyzeIctSmcLiquidity(params: {
   currentPrice?: number | null;
   assetType?: "FOREX" | "CRYPTO" | "STOCK";
   pipSize?: number;
+  precomputed?: {
+    closes?: number[];
+    ema9?: (number | null)[];
+    ema21?: (number | null)[];
+    atrVal?: number | null;
+  };
 }): IctSmcAnalysisResult {
   const {
     symbol,
@@ -133,6 +139,7 @@ export function analyzeIctSmcLiquidity(params: {
     currentPrice: inputPrice,
     assetType = "FOREX",
     pipSize: inputPipSize,
+    precomputed,
   } = params;
 
   const n = bars.length;
@@ -159,9 +166,13 @@ export function analyzeIctSmcLiquidity(params: {
   const recentSweeps = detectAdvancedSweeps(bars, allBslPools, allSslPools, pipSize, isForex);
 
   // 5. DEALING RANGE & OTE (Optimal Trade Entry)
-  const windowBars = bars.slice(-45);
-  const swingHigh = Math.max(...windowBars.map((b) => b.high));
-  const swingLow = Math.min(...windowBars.map((b) => b.low));
+  const winStart = Math.max(0, n - 45);
+  let swingHigh = -Infinity;
+  let swingLow = Infinity;
+  for (let i = winStart; i < n; i++) {
+    if (bars[i]!.high > swingHigh) swingHigh = bars[i]!.high;
+    if (bars[i]!.low < swingLow) swingLow = bars[i]!.low;
+  }
   const equilibrium = (swingHigh + swingLow) / 2;
   const rangeDiff = Math.max(1e-12, swingHigh - swingLow);
 
@@ -191,10 +202,12 @@ export function analyzeIctSmcLiquidity(params: {
   const lastSweep = recentSweeps[recentSweeps.length - 1];
 
   let lastMss: "BULLISH_MSS" | "BEARISH_MSS" | "NONE" = "NONE";
-  const recentHighs = bars.slice(-15, -2).map((b) => b.high);
-  const recentLows = bars.slice(-15, -2).map((b) => b.low);
-  const localHigh = Math.max(...recentHighs);
-  const localLow = Math.min(...recentLows);
+  let localHigh = -Infinity;
+  let localLow = Infinity;
+  for (let i = Math.max(0, n - 15); i < n - 2; i++) {
+    if (bars[i]!.high > localHigh) localHigh = bars[i]!.high;
+    if (bars[i]!.low < localLow) localLow = bars[i]!.low;
+  }
 
   if (lastBar.close > localHigh && (lastBar.close - lastBar.open) > (lastBar.high - lastBar.low) * 0.65) {
     lastMss = "BULLISH_MSS";
@@ -215,10 +228,10 @@ export function analyzeIctSmcLiquidity(params: {
       : "ERL_TO_IRL";
 
   // 7. BUILD OPTIMAL TRADE SETUP
-  const atrVal = atr(bars, 14) ?? rangeDiff * 0.15;
-  const closes = bars.map((b) => b.close);
-  const e9 = ema(closes, 9)[n - 1] ?? currentPrice;
-  const e21 = ema(closes, 21)[n - 1] ?? currentPrice;
+  const atrVal = precomputed?.atrVal ?? atr(bars, 14) ?? rangeDiff * 0.15;
+  const closes = precomputed?.closes ?? bars.map((b) => b.close);
+  const e9 = (precomputed?.ema9 ? precomputed.ema9[n - 1] : ema(closes, 9)[n - 1]) ?? currentPrice;
+  const e21 = (precomputed?.ema21 ? precomputed.ema21[n - 1] : ema(closes, 21)[n - 1]) ?? currentPrice;
   const trendDir: 1 | -1 | 0 = e9 > e21 && currentPrice >= e21 ? 1 : e9 < e21 && currentPrice <= e21 ? -1 : 0;
 
   const optimalTradeSetup = buildOteTradeSetup({

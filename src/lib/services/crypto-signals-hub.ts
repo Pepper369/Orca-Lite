@@ -6,7 +6,13 @@ import { analyzeScalpMulti } from "../engines/scalp";
 import { analyzeFundingRate, evaluateTrueLevel2Dom } from "../engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "../engines/crypto-news-shield";
 import { calculateCryptoPositionSize } from "../engines/crypto-position-sizer";
-import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
+import { atr as calcAtr } from "../technical";
+import { resampleOhlcvBars } from "../engines/asset-precision";
+import {
+  calculateCrossAssetKelly,
+  computeGarmanKlassLeverageCap,
+  detectCryptoLiquidationClusters,
+} from "../engines/unified-cross-asset-quant";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import type { Meta } from "../types";
@@ -45,6 +51,10 @@ export interface CryptoQuantSignalItem {
   recommendedSizeMultiplier?: number;
   recommendedMarginUsd: number;
   riskAmountUsd: number;
+  garmanKlassVolPct?: number;
+  volatilityRegime?: string;
+  liquidationMagnetPrice?: number | null;
+  liquidationExposure?: string;
   evidence: string[];
   riskNotes: string[];
   updatedAt: number;
@@ -88,7 +98,7 @@ async function scanSingleCryptoPair(
   calendarEvents: { name: string; currency: string; time: string; importance: string }[] = [],
 ): Promise<CryptoQuantSignalItem | null> {
   try {
-    const [klines15m, klines5m, ticker, funding, book] = await Promise.all([
+    const [klines15m, klines5m, ticker, funding, book, oi] = await Promise.all([
       binance.getKlines(pair, "15m", 120).catch(() => []),
       binance.getKlines(pair, "5m", 120).catch(() => []),
       binance.getSpotTicker(pair).catch(() => null),
@@ -104,6 +114,7 @@ async function scanSingleCryptoPair(
         bids: [],
         asks: [],
       })),
+      binance.getOpenInterest(pair).catch(() => ({ openInterest: 0, time: Date.now() })),
     ]);
 
     const execBars = klines5m.length >= 60 ? klines5m : klines15m;
@@ -193,11 +204,27 @@ async function scanSingleCryptoPair(
       evidence.push("Funding Rate âm sâu: Kích hoạt nhịp Short Squeeze");
     }
 
-    let recommendedLeverage = 5;
-    if (pair === "BTCUSDT" || pair === "ETHUSDT") {
-      recommendedLeverage = shield.isLockout ? 2 : setupGrade === "A+" ? 10 : 8;
-    } else {
-      recommendedLeverage = shield.isLockout ? 1 : setupGrade === "A+" ? 6 : 5;
+    const bars1h = resampleOhlcvBars(htfBars, 4);
+    const leverageGov = computeGarmanKlassLeverageCap(
+      bars1h.length >= 5 ? bars1h : execBars.slice(-24),
+      true,
+    );
+    const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
+    const atrExec = scalp?.atr ?? calcAtr(execBars, 14) ?? lastPrice * 0.015;
+    const liqClusters =
+      openInterestUsd > 0 ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, atrExec) : null;
+
+    const gradeFactor = setupGrade === "A+" ? 1.0 : setupGrade === "A" ? 0.8 : 0.6;
+    const pairLevCap = pair === "BTCUSDT" || pair === "ETHUSDT" ? 15 : 8;
+    const recommendedLeverage = shield.isLockout
+      ? 1
+      : Math.max(1, Math.min(pairLevCap, Math.round(leverageGov.maxRecommendedLeverage * gradeFactor)));
+
+    if (leverageGov.volatilityRegime === "FLASH_CRASH_SHOCK" || leverageGov.volatilityRegime === "EXPANDING_RISK") {
+      riskNotes.push(leverageGov.governorAdvisoryVi);
+    }
+    if (liqClusters?.primaryMagnetPrice != null) {
+      evidence.push(liqClusters.insightVi);
     }
 
     let entry: number | null = precision.entry ?? primarySetup?.entry ?? lastPrice;
@@ -209,31 +236,14 @@ async function scanSingleCryptoPair(
     const stopPct =
       entry && sl && entry > 0 ? Math.round((Math.abs(entry - sl) / entry) * 100 * 100) / 100 : null;
 
-    let isHighWinrateVerified = setupGrade === "A+";
-    let winrateScore = precision.precisionScore;
-    let liquiditySweepDetected = false;
+    const isHighWinrateVerified =
+      direction !== "NEUTRAL" && ((precision.isHighWinrateVerified ?? false) || setupGrade === "A+");
+    const winrateScore = Math.max(precision.precisionScore, precision.winrateScore ?? 0);
+    const liquiditySweepDetected = precision.liquiditySweepDetected ?? false;
 
-    if (direction !== "NEUTRAL" && entry && sl) {
-      const gate = evaluateHighWinrateGate({
-        symbol: pair,
-        series: execBars,
-        htfSeries: htfBars !== execBars ? htfBars : null,
-        candidateDirection: direction,
-        entryPrice: entry,
-        stopLossPrice: sl,
-        takeProfitPrice: tp2,
-        orderBookImbalance: domImbalance,
-        assetType: "CRYPTO",
-      });
-
-      isHighWinrateVerified = gate.isHighWinrateVerified || setupGrade === "A+";
-      winrateScore = Math.max(winrateScore, gate.winrateScore);
-      liquiditySweepDetected = gate.liquiditySweepDetected;
-
-      if (gate.isHighWinrateVerified) {
-        probability = Math.max(probability, Math.min(88, gate.winrateScore));
-        evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
-      }
+    if (isHighWinrateVerified) {
+      probability = Math.max(probability, Math.min(88, winrateScore));
+      evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
     }
 
     const action: "BUY" | "SELL" | "WAIT" = direction === "NEUTRAL" ? "WAIT" : direction;
@@ -256,11 +266,25 @@ async function scanSingleCryptoPair(
     }
 
     const sizeMult = action === "WAIT" ? 0 : precision.recommendedSizeMultiplier;
+    const kellySizing =
+      action !== "WAIT" && sizeMult > 0
+        ? calculateCrossAssetKelly({
+            winRate: probability / 100,
+            payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
+            isCrypto: true,
+            maxCapitalPerTrade: 0.02,
+          })
+        : null;
+    const effectiveRiskPct =
+      kellySizing && kellySizing.recommendedAllocation > 0
+        ? Number((Math.min(1.5, Math.max(0.25, kellySizing.recommendedAllocation * 100)) * sizeMult).toFixed(2))
+        : Number((1.0 * sizeMult).toFixed(2));
+
     let recommendedMarginUsd = 0;
-    if (entry && sl && action !== "WAIT" && sizeMult > 0) {
+    if (entry && sl && action !== "WAIT" && effectiveRiskPct > 0) {
       const sizer = calculateCryptoPositionSize({
         accountBalance: 10_000,
-        riskPercent: Number((1.0 * sizeMult).toFixed(2)),
+        riskPercent: effectiveRiskPct,
         entryPrice: entry,
         stopLossPrice: sl,
         leverage: recommendedLeverage,
@@ -304,7 +328,11 @@ async function scanSingleCryptoPair(
       netRiskReward: precision.netRiskReward,
       recommendedSizeMultiplier: sizeMult,
       recommendedMarginUsd,
-      riskAmountUsd: Math.round(100 * sizeMult),
+      riskAmountUsd: action === "WAIT" ? 0 : Math.round(100 * effectiveRiskPct),
+      garmanKlassVolPct: Math.round(leverageGov.garmanKlassVolAnnualized * 1000) / 10,
+      volatilityRegime: leverageGov.volatilityRegime,
+      liquidationMagnetPrice: liqClusters?.primaryMagnetPrice ?? null,
+      liquidationExposure: liqClusters?.dominantExposure,
       evidence: [...new Set(evidence)].slice(0, 8),
       riskNotes: [...new Set([...vetoReasons, ...riskNotes])].slice(0, 8),
       updatedAt: Date.now(),

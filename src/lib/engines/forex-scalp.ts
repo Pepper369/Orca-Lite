@@ -3,6 +3,7 @@ import type { OhlcvBar } from "../types";
 import { atr, supportResistance } from "../technical";
 import type { ForexScalpInput, ForexScalpSetup, ForexScalpSignal } from "./forex-scalp-types";
 import { evaluatePrecisionTradeSetup } from "./fx-crypto-precision-engine";
+import { buildSharedBarContext } from "./unified-ta-kernel";
 import {
   detectForexRegime,
   pipSize,
@@ -36,9 +37,12 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   if (input.barsM5.length < 40) return null;
   const pair = input.pair.toUpperCase().replace("/", "");
   const filter = runForexFilter(input);
-  const regime = detectForexRegime(input.barsM15.length >= 30 ? input.barsM15 : input.barsM5, pair);
+  const ctxM5 = buildSharedBarContext(input.barsM5);
+  const m15RegimeBars = input.barsM15.length >= 30 ? input.barsM15 : input.barsM5;
+  const ctxM15 = m15RegimeBars === input.barsM5 ? ctxM5 : buildSharedBarContext(m15RegimeBars);
+  const regime = detectForexRegime(m15RegimeBars, pair, ctxM15);
   const last = input.barsM5[input.barsM5.length - 1]?.close ?? 0;
-  const atrV = atr(input.barsM5, 14);
+  const atrV = ctxM5.atr14 ?? atr(input.barsM5, 14);
   const pip = pipSize(pair);
 
   const sessionSoft =
@@ -75,7 +79,7 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
         activeSetups.push(c);
       }
 
-      const tech = strategyTech(pair, input.barsM5, m15, regime, sessionSoft);
+      const tech = strategyTech(pair, input.barsM5, m15, regime, sessionSoft, ctxM5);
       if (tech) activeSetups.push(tech);
 
       if (regime.market === "RANGING") {
@@ -100,6 +104,7 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     barsExecution: input.barsM5,
     barsHtf: input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null,
     barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
+    sharedCtx: ctxM5,
     candidateDirection:
       prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL"
         ? prelimCandidate.direction

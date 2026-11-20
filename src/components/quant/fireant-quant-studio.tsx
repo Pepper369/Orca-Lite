@@ -41,6 +41,7 @@ import {
   runGridOptimization,
   type FireAntStrategy,
   type FullBacktestResult,
+  type RealBacktestSeries,
   type TradeRecord,
 } from "@/lib/quant/quant-engine";
 import { Badge, fmtNum, fmtCompact, Chg } from "@/components/ui";
@@ -50,6 +51,8 @@ type ActiveStudioTab = "overview" | "trades" | "monthly" | "symbols" | "optimize
 export function FireAntQuantStudio() {
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>("golden-cross");
   const [selectedUniverse, setSelectedUniverse] = useState<string>("HOSE_LIQUID");
+  const [dataSourceMode, setDataSourceMode] = useState<string>("FPT");
+  const [realOhlcvSeries, setRealOhlcvSeries] = useState<RealBacktestSeries | undefined>(undefined);
   const [startCapital, setStartCapital] = useState<number>(100000000);
   const [activeTab, setActiveTab] = useState<ActiveStudioTab>("overview");
   const [editorTab, setEditorTab] = useState<"code" | "params" | "copilot">("params");
@@ -65,6 +68,58 @@ export function FireAntQuantStudio() {
   const [customParams, setCustomParams] = useState<Record<string, any>>({});
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
 
+  // Fetch real VN historical OHLCV + VNINDEX benchmark when live-bar mode is chosen
+  useEffect(() => {
+    if (dataSourceMode === "GBM_SIM") {
+      setRealOhlcvSeries(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [assetRes, benchRes] = await Promise.all([
+          fetch(`/api/v1/chart/history?symbol=${encodeURIComponent(dataSourceMode)}&assetType=stock&timeframe=1d&limit=500`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch(`/api/v1/chart/history?symbol=VNINDEX&assetType=stock&timeframe=1d&limit=500`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ]);
+        if (cancelled) return;
+        const candles: { time: number; close: number }[] = assetRes?.data?.candles ?? [];
+        const benchCandles: { time: number; close: number }[] = benchRes?.data?.candles ?? [];
+        if (candles.length >= 60) {
+          const benchMap = new Map<string, number>();
+          for (const b of benchCandles) {
+            const ms = b.time > 1e12 ? b.time : b.time * 1000;
+            benchMap.set(new Date(ms).toISOString().slice(0, 10), b.close);
+          }
+          const dates: string[] = [];
+          const closes: number[] = [];
+          const benchCloses: number[] = [];
+          let lastBench = benchCandles[0]?.close ?? 1200;
+          for (const c of candles) {
+            const ms = c.time > 1e12 ? c.time : c.time * 1000;
+            const dStr = new Date(ms).toISOString().slice(0, 10);
+            const bClose = benchMap.get(dStr) ?? lastBench;
+            lastBench = bClose;
+            dates.push(dStr);
+            closes.push(c.close);
+            benchCloses.push(bClose);
+          }
+          setRealOhlcvSeries({ symbol: dataSourceMode, dates, closes, benchCloses });
+        } else {
+          setRealOhlcvSeries(undefined);
+        }
+      } catch {
+        if (!cancelled) setRealOhlcvSeries(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSourceMode]);
+
   // Sync code and default params when strategy changes
   useEffect(() => {
     setStrategyCode(currentStrategy.code);
@@ -78,8 +133,8 @@ export function FireAntQuantStudio() {
 
   // Execute Backtest Result
   const backtestResult = useMemo(() => {
-    return executeBacktest(currentStrategy, customParams, startCapital);
-  }, [currentStrategy, customParams, startCapital]);
+    return executeBacktest(currentStrategy, customParams, startCapital, realOhlcvSeries);
+  }, [currentStrategy, customParams, startCapital, realOhlcvSeries]);
 
   // Parameter definitions
   const paramDefs = useMemo(() => {
@@ -108,7 +163,7 @@ export function FireAntQuantStudio() {
       if (paramDefs[p1]?.type === "pct") p1Vals = [0.08, 0.12, 0.15, 0.18, 0.22];
       if (paramDefs[p2]?.type === "pct") p2Vals = [0.3, 0.5, 0.7, 0.9];
 
-      const opt = runGridOptimization(currentStrategy, p1, p1Vals, p2, p2Vals);
+      const opt = runGridOptimization(currentStrategy, p1, p1Vals, p2, p2Vals, realOhlcvSeries);
       setOptimizerRun(opt);
       setIsOptimizing(false);
     }, 400);
@@ -216,7 +271,11 @@ export function FireAntQuantStudio() {
                   FireAnt Quant AI Studio
                 </h2>
                 <Badge tone="accent">Quant DSL v2.4</Badge>
-                <Badge tone="up">Live Verified</Badge>
+                <Badge tone={realOhlcvSeries ? "up" : "neutral"}>
+                  {realOhlcvSeries
+                    ? `OHLCV Thực tế (${realOhlcvSeries.symbol} · ${realOhlcvSeries.closes.length}P)`
+                    : "Mô phỏng Deterministic"}
+                </Badge>
               </div>
               <p className="text-xs text-text-muted">
                 Hệ thống phân tích định lượng, backtest danh mục & tối ưu đa nhân tố từ FireAnt Platform
@@ -226,6 +285,22 @@ export function FireAntQuantStudio() {
 
           {/* Universe & Capital & Run button */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center rounded-lg border border-border-subtle bg-surface-elevated px-2.5 py-1.5 text-xs">
+              <span className="text-text-muted mr-1.5">Dữ liệu:</span>
+              <select
+                value={dataSourceMode}
+                onChange={(e) => setDataSourceMode(e.target.value)}
+                className="bg-transparent font-medium text-text-primary focus:outline-none cursor-pointer"
+              >
+                <option value="FPT">OHLCV: FPT vs VNINDEX</option>
+                <option value="VCB">OHLCV: VCB vs VNINDEX</option>
+                <option value="HPG">OHLCV: HPG vs VNINDEX</option>
+                <option value="MWG">OHLCV: MWG vs VNINDEX</option>
+                <option value="SSI">OHLCV: SSI vs VNINDEX</option>
+                <option value="GBM_SIM">Mô phỏng GBM 2018-2026</option>
+              </select>
+            </div>
+
             <div className="flex items-center rounded-lg border border-border-subtle bg-surface-elevated px-2.5 py-1.5 text-xs">
               <span className="text-text-muted mr-1.5">Rổ mã:</span>
               <select

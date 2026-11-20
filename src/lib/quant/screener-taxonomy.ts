@@ -37,6 +37,7 @@ export type CanonicalScreenerPreset =
   | "consensus_upside";
 
 export type LegacyOnlyPreset =
+  | "quant_kelly_edge"
   | "orca_apex_quant"
   | "historical_edge"
   | "sector_leading"
@@ -184,7 +185,7 @@ export const CANONICAL_PRESETS: CanonicalPresetMeta[] = [
     label: "Triple-Barrier R/R Cao",
     dotColor: "bg-amber-400",
     desc: "Tỷ lệ Lợi nhuận / Rủi ro bất đối xứng >= 1.8x theo mô hình biến động Triple-Barrier",
-    absorbs: [],
+    absorbs: ["quant_kelly_edge"],
   },
 
   // Fundamental & Valuation (8 orthogonal FA Archetypes)

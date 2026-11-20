@@ -1,6 +1,7 @@
 import type { OhlcvBar } from "../types";
-import { adx, atr, ema, macd, rsi, supportResistance } from "../technical";
+import { adx, atr, atrSeries, ema, macd, rsi, supportResistance } from "../technical";
 import { computeEfficiencyRatio } from "./asset-precision";
+import type { SharedBarContext } from "./unified-ta-kernel";
 import type {
   AssetFilterResult,
   AssetTier,
@@ -89,18 +90,24 @@ export function runAssetFilter(input: ScalpAnalyzeInput): AssetFilterResult {
   return { eligible, tier, reasons, spreadOk, volumeRatio, dataQualityOk };
 }
 
-export function detectRegime(barsM15: OhlcvBar[]): RegimeSnapshot {
+export function detectRegime(barsM15: OhlcvBar[], ctx?: SharedBarContext): RegimeSnapshot {
   const evidence: string[] = [];
-  const atrV = atr(barsM15, 14);
-  const last = barsM15[barsM15.length - 1]?.close ?? 0;
+  const closes = ctx?.closes ?? barsM15.map((b) => b.close);
+  const highs = ctx?.highs ?? barsM15.map((b) => b.high);
+  const lows = ctx?.lows ?? barsM15.map((b) => b.low);
+
+  // Single-pass O(N) Wilder ATR series (eliminates O(N^2) bar slicing)
+  const atrArr = ctx?.atr14Series ?? atrSeries(highs, lows, closes, 14);
+  const atrV = atrArr[atrArr.length - 1] ?? atr(barsM15, 14);
+  const last = closes[closes.length - 1] ?? 0;
   const atrPct = atrV != null && last > 0 ? (atrV / last) * 100 : null;
 
-  const atrSeries: number[] = [];
-  for (let i = 20; i <= barsM15.length; i += 2) {
-    const a = atr(barsM15.slice(0, i), 14);
-    if (a != null) atrSeries.push(a);
+  const atrHist: number[] = [];
+  for (let i = 19; i < atrArr.length; i += 2) {
+    const a = atrArr[i];
+    if (a != null) atrHist.push(a);
   }
-  const medAtr = median(atrSeries);
+  const medAtr = median(atrHist);
   const atrRatio = atrV != null && medAtr > 0 ? atrV / medAtr : null;
 
   let volatility: VolatilityRegime = "NORMAL";
@@ -113,9 +120,6 @@ export function detectRegime(barsM15: OhlcvBar[]): RegimeSnapshot {
     `ATR M15 ${atrV != null ? fmt(atrV) : "?"} (${atrPct?.toFixed(2) ?? "?"}%) | ratio ${atrRatio?.toFixed(2) ?? "?"} -> ${volatility}`,
   );
 
-  const closes = barsM15.map((b) => b.close);
-  const highs = barsM15.map((b) => b.high);
-  const lows = barsM15.map((b) => b.low);
   const look = Math.min(24, barsM15.length);
   const half = Math.floor(look / 2);
   const priorHighs = highs.slice(-look, -half);
@@ -127,17 +131,14 @@ export function detectRegime(barsM15: OhlcvBar[]): RegimeSnapshot {
   const lh = priorHighs.length > 0 && Math.max(...recentHighs) < Math.max(...priorHighs);
   const ll = priorLows.length > 0 && Math.min(...recentLows) < Math.min(...priorLows);
 
-  const ema9a = ema(closes, 9);
-  const ema21a = ema(closes, 21);
-  const e9 = ema9a[closes.length - 1];
-  const e21 = ema21a[closes.length - 1];
+  const e9 = ctx ? ctx.ema9[closes.length - 1] : ema(closes, 9)[closes.length - 1];
+  const e21 = ctx ? ctx.ema21[closes.length - 1] : ema(closes, 21)[closes.length - 1];
   const emaUp = e9 != null && e21 != null && e9 > e21;
   const emaDown = e9 != null && e21 != null && e9 < e21;
 
   const adxPeriod = highs.length >= 28 ? 14 : Math.max(5, Math.floor(highs.length / 2) - 1);
-  const adxArr = adx(highs, lows, closes, adxPeriod).adx;
-  const adxVal = adxArr[adxArr.length - 1];
-  const er = computeEfficiencyRatio(closes, 14);
+  const adxVal = ctx ? ctx.adx14 : adx(highs, lows, closes, adxPeriod).adx[closes.length - 1];
+  const er = ctx ? ctx.efficiencyRatio14 : computeEfficiencyRatio(closes, 14);
   const hasDirectionalStrength = (adxVal != null && adxVal >= 18) || er >= 0.28;
 
   const ret6 = closes.length > 7 ? Math.abs(closes[closes.length - 1] / closes[closes.length - 7] - 1) * 100 : 0;
@@ -506,12 +507,18 @@ export function strategyTechCrypto(
   barsM15: OhlcvBar[],
   barsM5: OhlcvBar[],
   regime: RegimeSnapshot,
-  opts: { fundingRate?: number | null; quoteVolume24h?: number | null } = {},
+  opts: {
+    fundingRate?: number | null;
+    quoteVolume24h?: number | null;
+    ctxM5?: SharedBarContext;
+    ctxM15?: SharedBarContext;
+  } = {},
 ): ScalpSetup | null {
   if (barsM5.length < 40 || barsM15.length < 25) return null;
   if (regime.volatility === "EXTREME_VOLATILITY" || regime.market === "CHAOTIC") return null;
 
-  const closes = barsM5.map((b) => b.close);
+  const { ctxM5, ctxM15 } = opts;
+  const closes = ctxM5?.closes ?? barsM5.map((b) => b.close);
   const last = barsM5[barsM5.length - 1]!;
   const prev = barsM5[barsM5.length - 2]!;
   const avgB = avgBody(barsM5, 12);
@@ -531,16 +538,15 @@ export function strategyTechCrypto(
   }
   const vwap = vv > 0 ? pv / vv : null;
 
-  const e9 = ema(closes, 9)[closes.length - 1];
-  const e21 = ema(closes, 21)[closes.length - 1];
-  const m15Closes = barsM15.map((b) => b.close);
-  const htfE9 = ema(m15Closes, 9)[m15Closes.length - 1];
-  const htfE21 = ema(m15Closes, 21)[m15Closes.length - 1];
-  const rsiArr = rsi(closes, 14);
-  const rsiLast = rsiArr[rsiArr.length - 1];
-  const macdHist = macd(closes).histogram;
+  const e9 = ctxM5 ? ctxM5.ema9[closes.length - 1] : ema(closes, 9)[closes.length - 1];
+  const e21 = ctxM5 ? ctxM5.ema21[closes.length - 1] : ema(closes, 21)[closes.length - 1];
+  const m15Closes = ctxM15?.closes ?? barsM15.map((b) => b.close);
+  const htfE9 = ctxM15 ? ctxM15.ema9[m15Closes.length - 1] : ema(m15Closes, 9)[m15Closes.length - 1];
+  const htfE21 = ctxM15 ? ctxM15.ema21[m15Closes.length - 1] : ema(m15Closes, 21)[m15Closes.length - 1];
+  const rsiLast = ctxM5 ? ctxM5.rsi14 : rsi(closes, 14)[closes.length - 1];
+  const macdHist = ctxM5?.macdFull.histogram ?? macd(closes).histogram;
   const histLast = macdHist[macdHist.length - 1];
-  const atrV = atr(barsM5, 14) ?? rangeOf(last);
+  const atrV = ctxM5?.atr14 ?? atr(barsM5, 14) ?? rangeOf(last);
 
   const medVol = median(barsM5.slice(-24, -1).map((b) => b.volume).filter((v) => v > 0));
   const volRatio = medVol > 0 ? last.volume / medVol : 1;

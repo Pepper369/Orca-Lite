@@ -51,6 +51,10 @@ export interface ForexScalpResult {
 
 export async function buildForexScalpSignal(
   pairRaw: string,
+  overrides?: {
+    calendarEvents?: Awaited<ReturnType<typeof getGlobalMacroShieldEvents>>;
+    csmBaseMinusQuote?: number | null;
+  },
 ): Promise<{ result: ForexScalpResult; meta: Meta } | null> {
   const cleanRaw = pairRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const pair = FOREX_SCALP_ALIAS[cleanRaw] ?? cleanRaw;
@@ -63,20 +67,24 @@ export async function buildForexScalpSignal(
       staleMs: 120_000,
       softSwr: true,
       producer: async () => {
-        const marketsBudget = Promise.race([
-          getForexMarkets().catch(() => null),
-          new Promise<null>((r) => setTimeout(() => r(null), 2_500)),
-        ]);
+        const hasCalOverride = overrides?.calendarEvents != null;
+        const hasCsmOverride = overrides?.csmBaseMinusQuote !== undefined;
+        const marketsBudget = hasCsmOverride
+          ? Promise.resolve(null)
+          : Promise.race([
+              getForexMarkets().catch(() => null),
+              new Promise<null>((r) => setTimeout(() => r(null), 2_500)),
+            ]);
         const [h1, m15, m5, m1, calendarEvents, marketsRes] = await Promise.all([
           fetchTf(pair, "1h", 80),
           fetchTf(pair, "15m", 120),
           fetchTf(pair, "5m", 200),
           fetchTf(pair, "1m", 120),
-          getGlobalMacroShieldEvents().catch(() => []),
+          hasCalOverride ? Promise.resolve(overrides!.calendarEvents!) : getGlobalMacroShieldEvents().catch(() => []),
           marketsBudget,
         ]);
 
-        let csmBaseMinusQuote: number | null = null;
+        let csmBaseMinusQuote: number | null = hasCsmOverride ? (overrides!.csmBaseMinusQuote ?? null) : null;
         if (marketsRes?.data?.rows?.length) {
           const csmInputs: PairPriceInput[] = marketsRes.data.rows
             .filter((r) => r.price > 0)

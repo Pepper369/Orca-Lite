@@ -5,9 +5,9 @@ import { calculateForexPositionSize } from "../engines/forex-position-sizer";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
-import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
+import { calculateCrossAssetKelly } from "../engines/unified-cross-asset-quant";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import { getForexDetail, getForexMarkets } from "./forex";
 import type { Meta } from "../types";
@@ -106,19 +106,10 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         { name: "New York (Mỹ)", hours: "12:00 - 21:00 UTC", isOpen: utcHour >= 12 && utcHour < 21 },
       ];
 
-      // Pre-load global macro calendar & CSM once per scan
-      const [calendarEvents, marketsRes, results] = await Promise.all([
+      // Pre-load global macro calendar & CSM once BEFORE pair fanout (prevents 8x duplicate provider calls)
+      const [calendarEvents, marketsRes] = await Promise.all([
         getGlobalMacroShieldEvents(now).catch(() => []),
         getForexMarkets().catch(() => null),
-        Promise.allSettled(
-          MONITORED_PAIRS.map(async (pair) => {
-            const [res, detail] = await Promise.all([
-              buildForexScalpSignal(pair),
-              getForexDetail(pair).catch(() => null),
-            ]);
-            return { pair, res, detail };
-          }),
-        ),
       ]);
 
       const csmScoreMap = new Map<string, number>();
@@ -136,24 +127,38 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         }
       }
 
+      const csmForPair = (p: string): number | null => {
+        const baseCurr = p.slice(0, 3);
+        const quoteCurr = p.slice(3, 6);
+        const baseScore = csmScoreMap.get(baseCurr);
+        const quoteScore = csmScoreMap.get(quoteCurr);
+        if (baseScore != null && quoteScore != null) {
+          return Number((baseScore - quoteScore).toFixed(1));
+        }
+        if (baseCurr === "XAU" && quoteScore != null) {
+          return Number((5.0 - quoteScore).toFixed(1));
+        }
+        return null;
+      };
+
+      const results = await Promise.allSettled(
+        MONITORED_PAIRS.map(async (pair) => {
+          const csmBaseMinusQuote = csmForPair(pair);
+          const [res, detail] = await Promise.all([
+            buildForexScalpSignal(pair, { calendarEvents, csmBaseMinusQuote }),
+            getForexDetail(pair).catch(() => null),
+          ]);
+          return { pair, res, detail, csmBaseMinusQuote };
+        }),
+      );
+
       const signals: ForexQuantSignalItem[] = [];
 
       for (const item of results) {
         if (item.status !== "fulfilled" || !item.value.res) continue;
-        const { pair, res, detail } = item.value;
+        const { pair, res, detail, csmBaseMinusQuote: csmSpread } = item.value;
         const sig = res.result.signal;
         const setup = sig.primarySetup;
-
-        const baseCurr = pair.slice(0, 3);
-        const quoteCurr = pair.slice(3, 6);
-        const baseScore = csmScoreMap.get(baseCurr);
-        const quoteScore = csmScoreMap.get(quoteCurr);
-        const csmSpread =
-          baseScore != null && quoteScore != null
-            ? Number((baseScore - quoteScore).toFixed(1))
-            : baseCurr === "XAU" && quoteScore != null
-              ? Number((5.0 - quoteScore).toFixed(1))
-              : null;
 
         // 1. Real Economic Calendar News Circuit Breaker Check (Anti-Slippage Shield)
         const cb = evaluateNewsCircuitBreaker(pair, Date.now(), calendarEvents);
@@ -167,19 +172,24 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         let vwap: number | null = null;
         let cmeTicker: string | undefined;
         let domImbalance: number | undefined;
-        let isHighWinrateVerified = false;
-        let liquiditySweepDetected = false;
+        let spreadLockoutReason: string | null = null;
 
         const evidence = [...sig.evidence];
         const riskNotes = [...sig.riskNotes];
         if (newsWarning) riskNotes.unshift(newsWarning);
 
         if (detailSeries.length >= 20) {
-          const flow = generateDeepFlowSignal(pair, detailSeries);
+          const spreadOpts =
+            sig.filter.spreadPips != null ? { currentSpreadPips: sig.filter.spreadPips } : undefined;
+          const flow = generateDeepFlowSignal(pair, detailSeries, spreadOpts);
           fii = flow.flowIntensityIndex;
           absorption = flow.absorption.type;
           vpoc = flow.volumeProfile.vpocPrice;
           vwap = flow.vwap.vwap;
+          if (flow.spreadSafety && !flow.spreadSafety.isSafe && flow.spreadSafety.lockoutReason) {
+            spreadLockoutReason = flow.spreadSafety.lockoutReason;
+            riskNotes.unshift(spreadLockoutReason);
+          }
 
           const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
           cmeTicker = dom.cmeContract?.cmeTicker;
@@ -194,34 +204,35 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           }
         }
 
-        // 2. Harmonized Precision Evaluation
-        const intradayPrecision = sig.precision;
-        const dailyPrecision =
-          detailSeries.length >= 30
+        // 2. Harmonized Precision Evaluation (use intraday directly when available; compute daily only as fallback)
+        const intradayPrecision = sig.precision ?? null;
+        const effectivePrecision =
+          intradayPrecision ??
+          (detailSeries.length >= 30
             ? evaluatePrecisionTradeSetup({
                 symbol: pair,
                 assetType: "FOREX",
                 barsExecution: detailSeries,
                 candidateDirection:
-                  intradayPrecision && intradayPrecision.direction !== "NEUTRAL"
-                    ? intradayPrecision.direction
-                    : setup?.direction === "BUY" || setup?.direction === "SELL"
-                      ? setup.direction
-                      : "AUTO",
+                  setup?.direction === "BUY" || setup?.direction === "SELL"
+                    ? setup.direction
+                    : "AUTO",
                 orderBookImbalance: domImbalance ?? null,
                 csmBaseMinusQuote: csmSpread,
                 sessionLabel: sig.filter.sessionLabel,
                 spreadPipsOrPct: sig.filter.spreadPips,
-                isNewsOrCascadeLockout: newsLockout,
-                lockoutReason: newsWarning,
+                isNewsOrCascadeLockout: newsLockout || Boolean(spreadLockoutReason),
+                lockoutReason: newsWarning ?? spreadLockoutReason,
               })
-            : null;
+            : null);
 
-        const effectivePrecision = intradayPrecision ?? dailyPrecision;
         const rawDir = effectivePrecision?.direction ?? (sig.direction === "watch-long" ? "BUY" : sig.direction === "watch-short" ? "SELL" : "NEUTRAL");
         const vetoReasons = [...(effectivePrecision?.vetoReasons ?? [])];
         if (newsLockout && newsWarning && !vetoReasons.includes(newsWarning)) {
           vetoReasons.unshift(newsWarning);
+        }
+        if (spreadLockoutReason && !vetoReasons.includes(spreadLockoutReason)) {
+          vetoReasons.unshift(spreadLockoutReason);
         }
 
         // Cross-check CSM conflict
@@ -232,7 +243,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         }
 
         let setupGrade: SetupGrade = effectivePrecision?.grade ?? "NO_TRADE";
-        if (newsLockout || vetoReasons.length > 0 || rawDir === "NEUTRAL") {
+        if (newsLockout || spreadLockoutReason || vetoReasons.length > 0 || rawDir === "NEUTRAL") {
           setupGrade = "NO_TRADE";
         }
 
@@ -251,33 +262,39 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
             : setup?.stopPips ?? 25;
 
         let probability = effectivePrecision?.calibratedWinRatePct ?? sig.probability ?? 50;
-        let winrateScore = effectivePrecision?.precisionScore ?? probability;
+        const isHighWinrateVerified =
+          direction !== "NEUTRAL" && ((effectivePrecision?.isHighWinrateVerified ?? false) || setupGrade === "A+");
+        const winrateScore = Math.max(
+          effectivePrecision?.precisionScore ?? probability,
+          effectivePrecision?.winrateScore ?? 0,
+        );
+        const liquiditySweepDetected = effectivePrecision?.liquiditySweepDetected ?? false;
 
-        if (direction !== "NEUTRAL" && detailSeries.length >= 30 && entry && sl) {
-          const gate = evaluateHighWinrateGate({
-            symbol: pair,
-            series: detailSeries,
-            candidateDirection: direction,
-            entryPrice: entry,
-            stopLossPrice: sl,
-            orderBookImbalance: domImbalance ?? 0,
-            assetType: "FOREX",
-          });
-          isHighWinrateVerified = gate.isHighWinrateVerified || setupGrade === "A+";
-          winrateScore = Math.max(winrateScore, gate.winrateScore);
-          liquiditySweepDetected = gate.liquiditySweepDetected;
-          if (gate.isHighWinrateVerified) {
-            probability = Math.max(probability, Math.min(86, gate.winrateScore));
-            evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
-          }
+        if (isHighWinrateVerified) {
+          probability = Math.max(probability, Math.min(86, winrateScore));
+          evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
         }
 
         const sizeMult = setupGrade === "NO_TRADE" ? 0 : effectivePrecision?.recommendedSizeMultiplier ?? 0.5;
+        const kellySizing =
+          action !== "WAIT" && sizeMult > 0
+            ? calculateCrossAssetKelly({
+                winRate: probability / 100,
+                payoffRatio: Math.max(1.0, effectivePrecision?.netRiskReward ?? effectivePrecision?.grossRiskReward ?? 1.8),
+                isCrypto: false,
+                maxCapitalPerTrade: 0.02,
+              })
+            : null;
+        const effectiveRiskPct =
+          kellySizing && kellySizing.recommendedAllocation > 0
+            ? Number((Math.min(1.5, Math.max(0.25, kellySizing.recommendedAllocation * 100)) * sizeMult).toFixed(2))
+            : Number((1.0 * sizeMult).toFixed(2));
+
         let recommendedLots = 0;
-        if (entry && sl && action !== "WAIT" && sizeMult > 0) {
+        if (entry && sl && action !== "WAIT" && effectiveRiskPct > 0) {
           const sizer = calculateForexPositionSize({
             accountBalance: 10_000,
-            riskPercent: Number((1.0 * sizeMult).toFixed(2)),
+            riskPercent: effectiveRiskPct,
             pair,
             entryPrice: entry,
             stopLossPrice: sl,
@@ -296,15 +313,16 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           direction,
           action,
           timeframe: "M15/H1",
-          status: newsLockout
-            ? "FILTERED_OUT"
-            : action === "WAIT"
-              ? "NEUTRAL"
-              : setup?.status === "TRIGGERED" || setup?.status === "ACTIVE" || setupGrade === "A+" || setupGrade === "A"
-                ? "ACTIVE"
-                : "AWAITING_BREAKOUT",
+          status:
+            newsLockout || spreadLockoutReason
+              ? "FILTERED_OUT"
+              : action === "WAIT"
+                ? "NEUTRAL"
+                : setup?.status === "TRIGGERED" || setup?.status === "ACTIVE" || setupGrade === "A+" || setupGrade === "A"
+                  ? "ACTIVE"
+                  : "AWAITING_BREAKOUT",
           strength: action === "WAIT" ? Math.min(35, winrateScore) : sig.strength,
-          probability: newsLockout ? 0 : probability,
+          probability: newsLockout || spreadLockoutReason ? 0 : probability,
           lastPrice: sig.last,
           entryPrice: action === "WAIT" ? null : entry,
           stopLossPrice: action === "WAIT" ? null : sl,
@@ -336,7 +354,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           recommendedSizeMultiplier: sizeMult,
           csmSpread,
           recommendedLots,
-          riskAmountUsd: Math.round(100 * sizeMult),
+          riskAmountUsd: action === "WAIT" ? 0 : Math.round(100 * effectiveRiskPct),
           evidence: [...new Set(evidence)].slice(0, 8),
           riskNotes: [...new Set([...vetoReasons, ...riskNotes])].slice(0, 8),
           updatedAt: Date.now(),

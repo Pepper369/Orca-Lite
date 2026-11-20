@@ -316,3 +316,84 @@ export function buildPrecomputedTaBundle(
     atr14,
   };
 }
+
+export interface SharedBarContext {
+  bars: OhlcvBar[];
+  n: number;
+  closes: number[];
+  highs: number[];
+  lows: number[];
+  volumes: number[];
+  ema9: (number | null)[];
+  ema21: (number | null)[];
+  atr14Series: (number | null)[];
+  atr14: number | null;
+  rsi14Series: (number | null)[];
+  rsi14: number | null;
+  adx14Series: (number | null)[];
+  adx14: number | null;
+  macdFull: { macd: (number | null)[]; signal: (number | null)[]; histogram: (number | null)[] };
+  efficiencyRatio14: number;
+}
+
+/**
+ * Single-pass O(N) shared microstructure & oscillator bundle for FX, Crypto & Derivatives.
+ * Eliminates repeated .map() passes and O(N^2) rolling indicator recalculations across gates.
+ */
+export function buildSharedBarContext(bars: OhlcvBar[]): SharedBarContext {
+  const n = bars.length;
+  const closes = new Array<number>(n);
+  const highs = new Array<number>(n);
+  const lows = new Array<number>(n);
+  const volumes = new Array<number>(n);
+
+  for (let i = 0; i < n; i++) {
+    const b = bars[i]!;
+    closes[i] = b.close;
+    highs[i] = b.high;
+    lows[i] = b.low;
+    volumes[i] = b.volume ?? 0;
+  }
+
+  const ema9 = n >= 9 ? ema(closes, 9) : new Array(n).fill(null);
+  const ema21 = n >= 21 ? ema(closes, 21) : new Array(n).fill(null);
+  const atr14Series = n >= 15 ? atrSeries(highs, lows, closes, 14) : new Array(n).fill(null);
+  const rsi14Series = n >= 15 ? rsi(closes, 14) : new Array(n).fill(null);
+  const adxPeriod = n >= 28 ? 14 : Math.max(5, Math.floor(n / 2) - 1);
+  const adx14Series = n >= 10 ? adx(highs, lows, closes, adxPeriod).adx : new Array(n).fill(null);
+  const macdFull = n >= 26 ? macd(closes) : {
+    macd: new Array(n).fill(null),
+    signal: new Array(n).fill(null),
+    histogram: new Array(n).fill(null),
+  };
+
+  let efficiencyRatio14 = 0.35;
+  if (n >= 15) {
+    const start = n - 15;
+    const netChange = Math.abs(closes[n - 1]! - closes[start]!);
+    let pathSum = 0;
+    for (let i = start + 1; i < n; i++) {
+      pathSum += Math.abs(closes[i]! - closes[i - 1]!);
+    }
+    efficiencyRatio14 = pathSum > 0 ? Math.min(1, netChange / pathSum) : 0;
+  }
+
+  return {
+    bars,
+    n,
+    closes,
+    highs,
+    lows,
+    volumes,
+    ema9,
+    ema21,
+    atr14Series,
+    atr14: n > 0 ? (atr14Series[n - 1] ?? null) : null,
+    rsi14Series,
+    rsi14: n > 0 ? (rsi14Series[n - 1] ?? null) : null,
+    adx14Series,
+    adx14: n > 0 ? (adx14Series[n - 1] ?? null) : null,
+    macdFull,
+    efficiencyRatio14,
+  };
+}

@@ -3,6 +3,7 @@ import type { OhlcvBar } from "../types";
 import { atr, ema, rsi, supportResistance } from "../technical";
 import type { ScalpAnalyzeInput, ScalpSetup, ScalpSignal } from "./scalp-types";
 import { evaluatePrecisionTradeSetup } from "./fx-crypto-precision-engine";
+import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
 import { detectRegime, runAssetFilter, strategyA, strategyB, strategyC, strategyTechCrypto } from "./scalp-modules";
 
 export type {
@@ -20,8 +21,8 @@ export type {
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 
-function legacyQuant(bars: OhlcvBar[]) {
-  const closes = bars.map((b) => b.close);
+function legacyQuant(bars: OhlcvBar[], ctx?: SharedBarContext) {
+  const closes = ctx?.closes ?? bars.map((b) => b.close);
   const last = closes[closes.length - 1];
   const session = bars.slice(-288);
   let pv = 0;
@@ -34,14 +35,14 @@ function legacyQuant(bars: OhlcvBar[]) {
   }
   const vwap = vv > 0 ? pv / vv : null;
   const vwapDistPct = vwap ? (last / vwap - 1) * 100 : null;
-  const ema9 = ema(closes, 9)[closes.length - 1] ?? null;
-  const ema21 = ema(closes, 21)[closes.length - 1] ?? null;
+  const ema9 = (ctx ? ctx.ema9[closes.length - 1] : ema(closes, 9)[closes.length - 1]) ?? null;
+  const ema21 = (ctx ? ctx.ema21[closes.length - 1] : ema(closes, 21)[closes.length - 1]) ?? null;
   const rsi7 = rsi(closes, 7)[closes.length - 1] ?? null;
-  const atrV = atr(bars, 14);
+  const atrV = ctx?.atr14 ?? atr(bars, 14);
   const atrPct = atrV != null ? (atrV / last) * 100 : null;
   const mom3 = closes.length > 4 ? (last / closes[closes.length - 4] - 1) * 100 : null;
   const mom6 = closes.length > 7 ? (last / closes[closes.length - 7] - 1) * 100 : null;
-  const vols = bars.map((b) => b.volume);
+  const vols = ctx?.volumes ?? bars.map((b) => b.volume);
   const medWin = vols
     .slice(-101, -1)
     .filter((v) => v > 0)
@@ -85,8 +86,10 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
   if (input.barsM5.length < 60) return null;
 
   const filter = runAssetFilter(input);
-  const regime = detectRegime(input.barsM15);
-  const quant = legacyQuant(input.barsM5.length >= 60 ? input.barsM5 : input.barsM15);
+  const ctxM5 = buildSharedBarContext(input.barsM5);
+  const ctxM15 = input.barsM15 === input.barsM5 ? ctxM5 : buildSharedBarContext(input.barsM15);
+  const regime = detectRegime(input.barsM15, ctxM15);
+  const quant = legacyQuant(input.barsM5, ctxM5);
 
   const activeSetups: ScalpSetup[] = [];
   let moduleBStatus: "AVAILABLE" | "ORDER_FLOW_UNAVAILABLE" = "ORDER_FLOW_UNAVAILABLE";
@@ -100,6 +103,8 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
       const techC = strategyTechCrypto(input.barsM15, input.barsM5, regime, {
         fundingRate: input.fundingRate,
         quoteVolume24h: input.quoteVolume24h,
+        ctxM5,
+        ctxM15,
       });
       if (techC) activeSetups.push(techC);
     }
@@ -151,6 +156,7 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     barsExecution: input.barsM5,
     barsHtf: input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null,
     barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
+    sharedCtx: ctxM5,
     candidateDirection:
       prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL"
         ? prelimCandidate.direction

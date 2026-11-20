@@ -3,7 +3,19 @@ import { buildMeta } from "../freshness";
 import type { Meta, OhlcvBar, QualityStatus } from "../types";
 import { getContractBySymbol, buildContractMaster } from "../providers/vsdc-spec";
 import { getDerivativeContractDetail, resolveVn30Spot, buildFlowForRow } from "./derivatives";
+import { getDerivHistory, recordDerivSample } from "./derivatives-history";
+import { getVnOrderBook } from "./stock-orderbook";
 import { atr, ema, rsi, supportResistance } from "../technical";
+import { buildSharedBarContext } from "../engines/unified-ta-kernel";
+import {
+  calibrateBasisOrnsteinUhlenbeck,
+  computeOrderFlowImbalance,
+  type BookQueueLevel,
+  type OFIResult,
+  type OUBasisCalibration,
+} from "../engines/unified-cross-asset-quant";
+
+const prevDerivBookLevels = new Map<string, BookQueueLevel[]>();
 
 export interface DerivativeScalpSetup {
   strategy: string;
@@ -50,6 +62,8 @@ export interface DerivativeScalpSignal {
     initialMarginPerLotVnd: number;
     effectiveLeverage: number;
   };
+  ouCalibration?: OUBasisCalibration;
+  orderFlowImbalance?: OFIResult;
   evidence: string[];
   riskNotes: string[];
 }
@@ -68,8 +82,10 @@ export async function buildDerivativeScalpSignal(
   const sym = symbolRaw.trim().toUpperCase();
   const contract = getContractBySymbol(sym);
 
-  const detailRes = await getDerivativeContractDetail(sym);
-  const spotRes = await resolveVn30Spot();
+  const [detailRes, spotRes] = await Promise.all([
+    getDerivativeContractDetail(sym),
+    resolveVn30Spot(),
+  ]);
 
   const spot = spotRes.price;
   const quote = detailRes?.data?.quote;
@@ -79,12 +95,33 @@ export async function buildDerivativeScalpSignal(
   const lastPrice = quote?.last ?? defaultBasePrice;
   const basis = quote?.last != null && spot != null ? quote.last - spot : (isCommodity ? 0 : spot ? 1.5 : 0);
 
+  if (quote?.last != null) {
+    recordDerivSample({
+      symbol: sym,
+      ts: Date.now(),
+      last: quote.last,
+      openInterest: quote.openInterest ?? null,
+      volume: quote.volume ?? null,
+      basis,
+      source: quote.source ?? "derivatives-scalp",
+    });
+  }
+
   // Lấy dòng tiền Flow
   const flowSignal = detailRes ? buildFlowForRow(detailRes.data) : null;
 
   // Chỉ dùng nến OHLCV thật (không sinh nến sin giả lập để phát tín hiệu scalping)
   const { getVnOhlcv } = await import("./stocks-board");
-  const realPack = await getVnOhlcv(sym, 90).catch(() => null);
+  const [realPack, vn30Pack, obRes] = await Promise.all([
+    getVnOhlcv(sym, 90).catch(() => null),
+    isCommodity ? Promise.resolve(null) : getVnOhlcv("VN30", 45).catch(() => null),
+    isCommodity
+      ? Promise.resolve(null)
+      : Promise.race([
+          getVnOrderBook(sym).catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 1500)),
+        ]),
+  ]);
   const bars = realPack?.bars ?? [];
   if (bars.length < 21) {
     const multiplier = contract.multiplier ?? 100_000;
@@ -136,9 +173,10 @@ export async function buildDerivativeScalpSignal(
       }),
     };
   }
-  const closes = bars.map((b) => b.close);
+  const ctx = buildSharedBarContext(bars);
+  const closes = ctx.closes;
 
-  // Tính các chỉ báo định lượng
+  // Tính các chỉ báo định lượng từ SharedBarContext (single-pass O(N))
   let pv = 0;
   let vv = 0;
   for (const b of bars.slice(-48)) {
@@ -148,13 +186,59 @@ export async function buildDerivativeScalpSignal(
     }
   }
   const vwap = vv > 0 ? Math.round((pv / vv) * 10) / 10 : lastPrice;
-  const ema9Arr = ema(closes, 9);
-  const ema21Arr = ema(closes, 21);
-  const ema9Val = ema9Arr[ema9Arr.length - 1] ?? lastPrice;
-  const ema21Val = ema21Arr[ema21Arr.length - 1] ?? lastPrice;
+  const ema9Val = ctx.ema9[closes.length - 1] ?? lastPrice;
+  const ema21Val = ctx.ema21[closes.length - 1] ?? lastPrice;
   const rsiArr = rsi(closes, 7);
   const rsi7Val = rsiArr[rsiArr.length - 1] ?? 50;
-  const atrVal = atr(bars, 14) ?? 2.8;
+  const atrVal = ctx.atr14 ?? atr(bars, 14) ?? 2.8;
+
+  // OU Basis calibration (intraday history first, date-aligned daily fallback)
+  let ouCalibration: OUBasisCalibration | undefined;
+  if (!isCommodity) {
+    let basisSeries = getDerivHistory(sym, 60)
+      .map((s) => s.basis)
+      .filter((b): b is number => b != null && Number.isFinite(b));
+    if (basisSeries.length < 15 && vn30Pack?.bars?.length) {
+      const spotByDay = new Map<string, number>();
+      for (const b of vn30Pack.bars) {
+        const ms = b.time > 1e12 ? b.time : b.time * 1000;
+        spotByDay.set(new Date(ms).toISOString().slice(0, 10), b.close);
+      }
+      const dailyBasis: number[] = [];
+      for (const b of bars) {
+        const ms = b.time > 1e12 ? b.time : b.time * 1000;
+        const sc = spotByDay.get(new Date(ms).toISOString().slice(0, 10));
+        if (sc != null) dailyBasis.push(Number((b.close - sc).toFixed(2)));
+      }
+      if (dailyBasis.length >= 15) {
+        dailyBasis[dailyBasis.length - 1] = basis;
+        basisSeries = dailyBasis;
+      }
+    }
+    if (basisSeries.length >= 15) {
+      ouCalibration = calibrateBasisOrnsteinUhlenbeck(basisSeries, 1);
+    }
+  }
+
+  // Level-2 Order Flow Imbalance (Cont-Kukanov-Stoikov OFI)
+  let orderFlowImbalance: OFIResult | undefined;
+  if (obRes?.book && obRes.book.bids.length > 0 && obRes.book.asks.length > 0) {
+    const depth = Math.min(3, obRes.book.bids.length, obRes.book.asks.length);
+    const currLevels: BookQueueLevel[] = [];
+    for (let i = 0; i < depth; i++) {
+      currLevels.push({
+        bidPrice: obRes.book.bids[i]!.price,
+        bidQty: obRes.book.bids[i]!.volume,
+        askPrice: obRes.book.asks[i]!.price,
+        askQty: obRes.book.asks[i]!.volume,
+      });
+    }
+    const prevLevels = prevDerivBookLevels.get(sym);
+    if (prevLevels && prevLevels.length > 0) {
+      orderFlowImbalance = computeOrderFlowImbalance(prevLevels, currLevels);
+    }
+    prevDerivBookLevels.set(sym, currLevels);
+  }
 
   // Điểm kỹ thuật (-3.0 đến +3.0)
   let score = 0;
@@ -193,9 +277,17 @@ export async function buildDerivativeScalpSignal(
     riskNotes.push(`RSI(7) = ${rsi7Val.toFixed(0)} chạm vùng quá bán — cẩn trọng phản ứng nảy kỹ thuật.`);
   }
 
-  // 3. Phân tích Basis (Đặc thù HĐTL VN30)
+  // 3. Phân tích Basis (Đặc thù HĐTL VN30 + Ornstein-Uhlenbeck)
   let basisStatus: "PREMIUM" | "DISCOUNT" | "FAIR" = "FAIR";
-  if (basis > 4.5) {
+  if (ouCalibration?.stationary && ouCalibration.signal === "STRONG_SHORT_BASIS_REVERSION") {
+    basisStatus = "PREMIUM";
+    score -= 0.5;
+    riskNotes.push(ouCalibration.signalRationaleVi);
+  } else if (ouCalibration?.stationary && ouCalibration.signal === "STRONG_LONG_BASIS_REVERSION") {
+    basisStatus = "DISCOUNT";
+    score += 0.6;
+    evidence.push(ouCalibration.signalRationaleVi);
+  } else if (basis > 4.5) {
     basisStatus = "PREMIUM";
     score -= 0.4; // Premium quá cao dễ bị ép bán đóng basis
     riskNotes.push(`Basis dương lớn (+${basis.toFixed(1)} điểm) — rủi ro áp lực Short ép basis về chỉ số cơ sở.`);
@@ -204,10 +296,23 @@ export async function buildDerivativeScalpSignal(
     score += 0.5; // Discount lớn là vùng hấp dẫn cho Long thu hẹp basis
     evidence.push(`Basis chiết khấu sâu (${basis.toFixed(1)} điểm) — kỳ vọng lực Long gom đón nhịp hội tụ.`);
   } else {
-    evidence.push(`Basis lành mạnh (${basis >= 0 ? "+" : ""}${basis.toFixed(1)} điểm) bám sát VN30.`);
+    evidence.push(
+      ouCalibration?.stationary
+        ? `${ouCalibration.signalRationaleVi} (t1/2=${ouCalibration.halfLifeMinutes}p)`
+        : `Basis lành mạnh (${basis >= 0 ? "+" : ""}${basis.toFixed(1)} điểm) bám sát VN30.`,
+    );
   }
 
-  // 4. Phân tích Flow & Open Interest
+  // 4. Phân tích Flow, Open Interest & Order Flow Imbalance (OFI)
+  if (orderFlowImbalance) {
+    if (orderFlowImbalance.institutionalPressure === "STRONG_BUY_PRESSURE") {
+      score += 0.35;
+      evidence.push(orderFlowImbalance.detailVi);
+    } else if (orderFlowImbalance.institutionalPressure === "STRONG_SELL_PRESSURE") {
+      score -= 0.35;
+      evidence.push(orderFlowImbalance.detailVi);
+    }
+  }
   if (flowSignal) {
     if (flowSignal.kind === "long_buildup") {
       score += 0.8;
@@ -338,6 +443,8 @@ export async function buildDerivativeScalpSignal(
       initialMarginPerLotVnd,
       effectiveLeverage,
     },
+    ouCalibration,
+    orderFlowImbalance,
     evidence,
     riskNotes,
   };

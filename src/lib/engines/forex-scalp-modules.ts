@@ -1,6 +1,7 @@
 import type { OhlcvBar } from "../types";
-import { adx, atr, ema, macd, rsi, supportResistance } from "../technical";
+import { adx, atr, atrSeries, ema, macd, rsi, supportResistance } from "../technical";
 import { computeEfficiencyRatio, getAssetPipSize } from "./asset-precision";
+import type { SharedBarContext } from "./unified-ta-kernel";
 import type {
   ForexFilterResult,
   ForexMarketRegime,
@@ -161,17 +162,23 @@ export function runForexFilter(input: ForexScalpInput): ForexFilterResult {
   };
 }
 
-export function detectForexRegime(barsM15: OhlcvBar[], pair: string): ForexRegimeSnapshot {
+export function detectForexRegime(barsM15: OhlcvBar[], pair: string, ctx?: SharedBarContext): ForexRegimeSnapshot {
   const evidence: string[] = [];
-  const atrV = atr(barsM15, 14);
+  const closes = ctx?.closes ?? barsM15.map((b) => b.close);
+  const highs = ctx?.highs ?? barsM15.map((b) => b.high);
+  const lows = ctx?.lows ?? barsM15.map((b) => b.low);
+
+  // Single-pass O(N) Wilder ATR series (replaces O(N^2) slice-and-recompute loop)
+  const atrArr = ctx?.atr14Series ?? atrSeries(highs, lows, closes, 14);
+  const atrV = atrArr[atrArr.length - 1] ?? atr(barsM15, 14);
   const atrPips = atrV != null ? toPips(pair, atrV) : null;
 
-  const atrSeries: number[] = [];
-  for (let i = 20; i <= barsM15.length; i += 2) {
-    const a = atr(barsM15.slice(0, i), 14);
-    if (a != null) atrSeries.push(a);
+  const atrHist: number[] = [];
+  for (let i = 19; i < atrArr.length; i += 2) {
+    const a = atrArr[i];
+    if (a != null) atrHist.push(a);
   }
-  const medAtr = median(atrSeries);
+  const medAtr = median(atrHist);
   const atrRatio = atrV != null && medAtr > 0 ? atrV / medAtr : null;
 
   let volatility: ForexVolatilityRegime = "NORMAL";
@@ -184,9 +191,6 @@ export function detectForexRegime(barsM15: OhlcvBar[], pair: string): ForexRegim
     `ATR M15 ${atrPips != null ? atrPips.toFixed(1) + " pip" : "?"} | ratio ${atrRatio?.toFixed(2) ?? "?"} -> ${volatility}`,
   );
 
-  const closes = barsM15.map((b) => b.close);
-  const highs = barsM15.map((b) => b.high);
-  const lows = barsM15.map((b) => b.low);
   const look = Math.min(24, barsM15.length);
   const half = Math.floor(look / 2);
   const priorHighs = highs.slice(-look, -half);
@@ -198,15 +202,16 @@ export function detectForexRegime(barsM15: OhlcvBar[], pair: string): ForexRegim
   const lh = priorHighs.length > 0 && Math.max(...recentHighs) < Math.max(...priorHighs);
   const ll = priorLows.length > 0 && Math.min(...recentLows) < Math.min(...priorLows);
 
-  const e9 = ema(closes, 9)[closes.length - 1];
-  const e21 = ema(closes, 21)[closes.length - 1];
+  const e9 = ctx ? ctx.ema9[closes.length - 1] : ema(closes, 9)[closes.length - 1];
+  const e21 = ctx ? ctx.ema21[closes.length - 1] : ema(closes, 21)[closes.length - 1];
   const emaUp = e9 != null && e21 != null && e9 > e21;
   const emaDown = e9 != null && e21 != null && e9 < e21;
 
   const adxPeriod = highs.length >= 28 ? 14 : Math.max(5, Math.floor(highs.length / 2) - 1);
-  const adxArr = adx(highs, lows, closes, adxPeriod).adx;
-  const adxVal = adxArr[adxArr.length - 1];
-  const er = computeEfficiencyRatio(closes, 14);
+  const adxVal = ctx
+    ? ctx.adx14
+    : adx(highs, lows, closes, adxPeriod).adx[closes.length - 1];
+  const er = ctx ? ctx.efficiencyRatio14 : computeEfficiencyRatio(closes, 14);
   const hasDirectionalStrength = (adxVal != null && adxVal >= 18) || er >= 0.28;
 
   const ret6 = closes.length > 7 ? Math.abs(closes[closes.length - 1] / closes[closes.length - 7] - 1) * 100 : 0;
@@ -274,12 +279,13 @@ export function strategyTech(
   barsM15: OhlcvBar[],
   regime: ForexRegimeSnapshot,
   sessionSoftPenalty: number,
+  ctx?: SharedBarContext,
 ): ForexScalpSetup | null {
   if (barsM5.length < 40) return null;
   if (regime.volatility === "EXTREME_VOLATILITY") return null;
 
   const bars = barsM5;
-  const closes = bars.map((b) => b.close);
+  const closes = ctx?.closes ?? bars.map((b) => b.close);
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
   const prev2 = bars[bars.length - 3];
@@ -288,12 +294,11 @@ export function strategyTech(
   const uW = upperWickOf(last);
   const lW = lowerWickOf(last);
 
-  const rsiArr = rsi(closes, 14);
-  const rsiLast = rsiArr[closes.length - 1];
-  const mRes = macd(closes);
+  const rsiLast = ctx ? ctx.rsi14 : rsi(closes, 14)[closes.length - 1];
+  const mRes = ctx?.macdFull ?? macd(closes);
   const macdRes = mRes.histogram.length > 0 ? { histogram: mRes.histogram[mRes.histogram.length - 1] } : null;
-  const e9 = ema(closes, 9)[closes.length - 1];
-  const e21 = ema(closes, 21)[closes.length - 1];
+  const e9 = ctx ? ctx.ema9[closes.length - 1] : ema(closes, 9)[closes.length - 1];
+  const e21 = ctx ? ctx.ema21[closes.length - 1] : ema(closes, 21)[closes.length - 1];
 
   let score = 0;
   const evidence: string[] = [];

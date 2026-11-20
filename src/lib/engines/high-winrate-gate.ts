@@ -22,6 +22,7 @@ import {
   type ReversalPaceMetrics,
   type TailMispricingMetrics,
 } from "./quant-reversal-pace";
+import type { SharedBarContext } from "./unified-ta-kernel";
 
 export type GateSetupGrade = "A+" | "A" | "B" | "NO_TRADE";
 
@@ -74,6 +75,7 @@ export function evaluateHighWinrateGate(params: {
   assetType?: "FOREX" | "CRYPTO";
   secondsRemaining?: number;
   timeframeSec?: number;
+  precomputed?: SharedBarContext;
 }): HighWinrateGateResult {
   const {
     series,
@@ -86,6 +88,7 @@ export function evaluateHighWinrateGate(params: {
     assetType = "FOREX",
     secondsRemaining = 60,
     timeframeSec = 300,
+    precomputed,
   } = params;
 
   const passedGates: string[] = [];
@@ -113,9 +116,9 @@ export function evaluateHighWinrateGate(params: {
     };
   }
 
-  const closes = series.map((b) => b.close);
-  const highs = series.map((b) => b.high);
-  const lows = series.map((b) => b.low);
+  const closes = precomputed?.closes ?? series.map((b) => b.close);
+  const highs = precomputed?.highs ?? series.map((b) => b.high);
+  const lows = precomputed?.lows ?? series.map((b) => b.low);
   const lastBar = series[series.length - 1];
   const pipSize = getAssetPipSize(params.symbol, assetType, lastBar.close);
 
@@ -158,8 +161,8 @@ export function evaluateHighWinrateGate(params: {
   }
 
   const adxPeriod = highs.length >= 28 ? 14 : Math.max(5, Math.floor(highs.length / 2) - 1);
-  const adxVal = adx(highs, lows, closes, adxPeriod).adx[closes.length - 1];
-  const erVal = computeEfficiencyRatio(closes, 14);
+  const adxVal = precomputed ? precomputed.adx14 : adx(highs, lows, closes, adxPeriod).adx[closes.length - 1];
+  const erVal = precomputed ? precomputed.efficiencyRatio14 : computeEfficiencyRatio(closes, 14);
   const isDeadChop = adxVal != null && adxVal < 16 && erVal < 0.20;
 
   const isBuy = candidateDirection === "BUY";
@@ -189,13 +192,17 @@ export function evaluateHighWinrateGate(params: {
   let sweptPrice: number | null = null;
   let wickRatio = 0;
 
-  // Inspect bars in [-3 .. -1] for a valid causal sweep against preceding 15-bar swing level
+  // Inspect bars in [-3 .. -1] for a valid causal sweep against preceding 15-bar swing level (zero allocation)
   for (let idx = series.length - 1; idx >= Math.max(15, series.length - 3); idx--) {
     const bar = series[idx]!;
-    const prior = series.slice(Math.max(0, idx - 15), idx);
-    if (prior.length < 5) continue;
-    const prevLow = Math.min(...prior.map((b) => b.low));
-    const prevHigh = Math.max(...prior.map((b) => b.high));
+    const pStart = Math.max(0, idx - 15);
+    if (idx - pStart < 5) continue;
+    let prevLow = Infinity;
+    let prevHigh = -Infinity;
+    for (let k = pStart; k < idx; k++) {
+      if (lows[k]! < prevLow) prevLow = lows[k]!;
+      if (highs[k]! > prevHigh) prevHigh = highs[k]!;
+    }
     const cRange = Math.max(1e-12, bar.high - bar.low);
 
     if (isBuy) {

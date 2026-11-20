@@ -10,6 +10,7 @@ import {
 import { analyzeIctSmcLiquidity } from "./ict-smc-liquidity-engine";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
 import { calculateRequiredSpeedPace } from "./quant-reversal-pace";
+import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
 
 export type SetupGrade = "A+" | "A" | "B" | "NO_TRADE";
 
@@ -31,6 +32,7 @@ export interface PrecisionSetupInput {
   lockoutReason?: string | null;
   timeframeSec?: number;
   secondsRemaining?: number;
+  sharedCtx?: SharedBarContext | null;
 }
 
 export interface PrecisionTradeSetup {
@@ -65,6 +67,9 @@ export interface PrecisionTradeSetup {
     moveSlToBeAtTp1: boolean;
     trailingAtrMult: number;
   };
+  isHighWinrateVerified: boolean;
+  winrateScore: number;
+  liquiditySweepDetected: boolean;
   summaryVi: string;
 }
 
@@ -92,8 +97,30 @@ function emptyPrecisionSetup(reason: string): PrecisionTradeSetup {
     gatesFailed: [reason],
     vetoReasons: [reason],
     breakevenPlan: { tp1ClosePct: 50, moveSlToBeAtTp1: true, trailingAtrMult: 1.0 },
+    isHighWinrateVerified: false,
+    winrateScore: 40,
+    liquiditySweepDetected: false,
     summaryVi: reason,
   };
+}
+
+function biasFromEmaArrays(
+  closes: number[],
+  fastArr: (number | null)[],
+  slowArr: (number | null)[],
+): "BULLISH" | "BEARISH" | "NEUTRAL" {
+  const n = closes.length;
+  if (n < 10) return "NEUTRAL";
+  const f = fastArr[n - 1];
+  const s = slowArr[n - 1];
+  const prevS = slowArr[n - 2];
+  const lastClose = closes[n - 1]!;
+  if (f == null || s == null) return "NEUTRAL";
+  const slopeUp = prevS == null || s >= prevS * 0.9998;
+  const slopeDown = prevS == null || s <= prevS * 1.0002;
+  if (f > s && lastClose >= s && slopeUp) return "BULLISH";
+  if (f < s && lastClose <= s && slopeDown) return "BEARISH";
+  return "NEUTRAL";
 }
 
 function inferEmaBias(bars: OhlcvBar[], fastP = 9, slowP = 21): "BULLISH" | "BEARISH" | "NEUTRAL" {
@@ -102,16 +129,7 @@ function inferEmaBias(bars: OhlcvBar[], fastP = 9, slowP = 21): "BULLISH" | "BEA
   const n = closes.length;
   const sP = Math.max(6, Math.min(slowP, n - 1));
   const fP = Math.max(3, Math.min(fastP, sP - 2));
-  const f = ema(closes, fP)[n - 1];
-  const s = ema(closes, sP)[n - 1];
-  const prevS = ema(closes, sP)[n - 2];
-  const lastClose = closes[n - 1]!;
-  if (f == null || s == null) return "NEUTRAL";
-  const slopeUp = prevS == null || s >= prevS * 0.9998;
-  const slopeDown = prevS == null || s <= prevS * 1.0002;
-  if (f > s && lastClose >= s && slopeUp) return "BULLISH";
-  if (f < s && lastClose <= s && slopeDown) return "BEARISH";
-  return "NEUTRAL";
+  return biasFromEmaArrays(closes, ema(closes, fP), ema(closes, sP));
 }
 
 function computeSessionVwap(bars: OhlcvBar[]): number | null {
@@ -149,6 +167,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     lockoutReason,
     timeframeSec = 300,
     secondsRemaining = 60,
+    sharedCtx,
   } = input;
 
   if (!barsExecution || barsExecution.length < 30) {
@@ -164,9 +183,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   const fmtP = (p: number) => roundPrice(p, symbol, assetType);
   const pip = getAssetPipSize(symbol, assetType, currentPrice);
-  const closes = barsExecution.map((b) => b.close);
-  const highs = barsExecution.map((b) => b.high);
-  const lows = barsExecution.map((b) => b.low);
+  const execCtx = sharedCtx && sharedCtx.bars === barsExecution ? sharedCtx : buildSharedBarContext(barsExecution);
+  const closes = execCtx.closes;
+  const highs = execCtx.highs;
+  const lows = execCtx.lows;
 
   // ------------------------------------------------------------------
   // 1. CAUSAL MULTI-TIMEFRAME RESAMPLING & REGIME DIAGNOSIS
@@ -174,18 +194,17 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const htf = barsHtf && barsHtf.length >= 16 ? barsHtf : resampleOhlcvBars(barsExecution, 4);
   const macro = barsMacro && barsMacro.length >= 12 ? barsMacro : resampleOhlcvBars(barsExecution, 12);
 
-  const atr14 = atr(barsExecution, 14) ?? Math.max(pip * 8, lastBar.high - lastBar.low);
+  const atr14 = execCtx.atr14 ?? Math.max(pip * 8, lastBar.high - lastBar.low);
   const longBaseline = barsExecution.length >= 40 ? barsExecution.slice(-65, -5) : barsExecution.slice(-30, -1);
   const histRanges = longBaseline.map((b) => Math.max(pip, b.high - b.low)).sort((a, b) => a - b);
   const medianRange = histRanges.length ? histRanges[Math.floor(histRanges.length / 2)]! : atr14;
   const lastRange = Math.max(0, lastBar.high - lastBar.low);
   const atrRatio = medianRange > 0 ? atr14 / medianRange : 1.0;
 
-  const adxPeriod = n >= 28 ? 14 : Math.max(5, Math.floor(n / 2) - 1);
-  const adxVal = adx(highs, lows, closes, adxPeriod).adx[n - 1] ?? 18;
-  const erVal = computeEfficiencyRatio(closes, 14);
+  const adxVal = execCtx.adx14 ?? 18;
+  const erVal = execCtx.efficiencyRatio14;
 
-  const e21Series = ema(closes, 21);
+  const e21Series = execCtx.ema21;
   let whipsawFlips = 0;
   let prevSign = 0;
   for (let i = Math.max(21, n - 14); i < n; i++) {
@@ -196,7 +215,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (sgn !== 0) prevSign = sgn;
   }
 
-  const execBias = inferEmaBias(barsExecution, 9, 21);
+  const execBias = biasFromEmaArrays(closes, execCtx.ema9, execCtx.ema21);
   const htfBias = htf.length >= 10 ? inferEmaBias(htf, 7, 16) : execBias;
   const macroBias = macro.length >= 10 ? inferEmaBias(macro, 5, 13) : htfBias;
 
@@ -226,14 +245,19 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     currentPrice,
     assetType,
     pipSize: pip,
+    precomputed: {
+      closes,
+      ema9: execCtx.ema9,
+      ema21: execCtx.ema21,
+      atrVal: atr14,
+    },
   });
 
   const realImbalance = orderBookImbalance != null ? orderBookImbalance : estimateClvOrderFlowImbalance(barsExecution, 12);
-  const e9 = ema(closes, 9)[n - 1] ?? currentPrice;
-  const e21 = ema(closes, 21)[n - 1] ?? currentPrice;
-  const rsiArr = rsi(closes, 14);
-  const rsi14 = rsiArr[n - 1] ?? 50;
-  const macdHist = macd(closes).histogram;
+  const e9 = execCtx.ema9[n - 1] ?? currentPrice;
+  const e21 = execCtx.ema21[n - 1] ?? currentPrice;
+  const rsi14 = execCtx.rsi14 ?? 50;
+  const macdHist = execCtx.macdFull.histogram;
   const histLast = macdHist[n - 1] ?? 0;
   const vwap = computeSessionVwap(barsExecution);
 
@@ -559,6 +583,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     assetType,
     secondsRemaining,
     timeframeSec,
+    precomputed: execCtx,
   });
 
   if (gateCheck.isHighWinrateVerified) {
@@ -616,6 +641,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       gatesFailed,
       vetoReasons,
       breakevenPlan: { tp1ClosePct: 50, moveSlToBeAtTp1: true, trailingAtrMult: 1.0 },
+      isHighWinrateVerified: gateCheck.isHighWinrateVerified,
+      winrateScore: gateCheck.winrateScore,
+      liquiditySweepDetected: gateCheck.liquiditySweepDetected,
       summaryVi: `${symbol}: NO_TRADE (${precisionScore}/100) — ${vetoReasons[0]}`,
     };
   }
@@ -653,6 +681,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed,
     vetoReasons,
     breakevenPlan: { tp1ClosePct: 50, moveSlToBeAtTp1: true, trailingAtrMult: 1.0 },
+    isHighWinrateVerified: gateCheck.isHighWinrateVerified,
+    winrateScore: gateCheck.winrateScore,
+    liquiditySweepDetected: gateCheck.liquiditySweepDetected,
     summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
   };
 }

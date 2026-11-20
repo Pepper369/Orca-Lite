@@ -22,6 +22,7 @@ import {
   ttmSqueeze,
   superTrend,
   rsi,
+  roundAdaptivePrice,
   buildPrecomputedTaBundle,
   type PrecomputedTaBundle,
 } from "../engines/unified-ta-kernel";
@@ -33,6 +34,17 @@ import {
   calculateTripleBarrierLevels,
   calculateVaRAndCVaR,
 } from "../engines/advanced-quant-math";
+import {
+  calculateCrossAssetKelly,
+  calculateT2SettlementRisk,
+  checkCeilingFloorHeadroom,
+} from "../engines/unified-cross-asset-quant";
+import {
+  determineMarketRegime,
+  calculateUniverseMultiFactor,
+  type MarketRegime,
+  type MultiFactorInput,
+} from "../engines/multi-factor-quant-composite";
 import { computeAsymmetricPlan, tickRound } from "../engines/asymmetric-quant-engine";
 import type { DetectedChartPattern } from "../engines/chart-patterns";
 import {
@@ -145,6 +157,7 @@ export type ScreenerPreset =
   | "quant_mean_revert"
   | "quant_low_beta"
   | "quant_asymmetric"
+  | "quant_kelly_edge"
   | "confluence"
   | "vcp"
   | "ttm_squeeze"
@@ -186,7 +199,7 @@ export const ALL_SCREENER_PRESETS: readonly ScreenerPreset[] = [
   "near_buy_point", "orca_master_elite", "smart_money_inflow", "mtf_candle_cluster",
   "vsa_no_supply", "rs_leaders", "piotroski_diamonds", "mtf_confluence",
   "bottom_confluence", "smc_golden_pocket", "flip_zone_retest", "quant_edge",
-  "quant_mean_revert", "quant_low_beta", "quant_asymmetric", "confluence", "vcp",
+  "quant_mean_revert", "quant_low_beta", "quant_asymmetric", "quant_kelly_edge", "confluence", "vcp",
   "ttm_squeeze", "canslim", "dividend", "growth", "value", "breakout", "ma_cross",
   "fa_fortress", "earnings_quality", "magic_formula", "consensus_upside",
   "tight_closes_vdu", "wyckoff_spring", "vcp_vdu", "canslim_accel",
@@ -319,6 +332,15 @@ export type ScreenerStockItem = {
   returnSkewness?: number | null; // Positive skewness indicates upside fat tails
   quantAnomalyTag?: string | null; // e.g. "OU Mean Reversion", "Low-Beta Anomaly", "Asymmetric R/R"
   beta?: number | null;
+  t2VaR95Pct?: number | null;
+  t2CVaR95Pct?: number | null;
+  t2ExcessiveTailRisk?: boolean;
+  kellyAllocationPct?: number | null;
+  halfKellyPct?: number | null;
+  ceilingHeadroomPct?: number | null;
+  isCeilingTrap?: boolean;
+  ouStationary?: boolean;
+  quantRegime?: MarketRegime;
   // Optimal Buy Point & Trade Execution
   buyPoint: number | null;
   buyPointDiffPct: number | null; // % difference: ((price - buyPoint) / price) * 100
@@ -546,6 +568,13 @@ export type ScreenerFilterParams = {
   minQuantScore?: number;
   maxOuZScore?: number;
   minRiskReward?: number;
+  maxT2VaR95?: number;
+  minKellyPct?: number;
+  minBeta?: number;
+  maxBeta?: number;
+  minReturnSkew?: number;
+  ouStationaryOnly?: boolean;
+  excludeCeilingTrap?: boolean;
   minOrcaMasterScore?: number;
   minSmartMoneyScore?: number;
   minRsRating?: number;
@@ -1109,6 +1138,9 @@ export function calculateBuyPointPlan(
   topChartPattern: DetectedChartPattern | null,
   confluenceScore: number,
   volRatio20: number | null,
+  ceilingPrice?: number | null,
+  floorPrice?: number | null,
+  historicalReturns?: number[] | null,
 ) {
   const { closes, highs, lows } = parsed;
   const n = closes.length;
@@ -1217,6 +1249,9 @@ export function calculateBuyPointPlan(
     sma50: ma50,
     trendScore: confluenceScore,
     volumeRatio20: volRatio20,
+    ceilingPrice: ceilingPrice ?? null,
+    floorPrice: floorPrice ?? null,
+    historicalReturns: historicalReturns ?? null,
   });
 
   const buyPoint = asym.entry;
@@ -1278,9 +1313,11 @@ function analyzeQuantFeatures(
   roe: number | null,
   debtEquity: number | null,
   volRatio20: number | null,
-  compositeScore: number
+  compositeScore: number,
+  ceilingPrice?: number | null,
+  floorPrice?: number | null,
 ) {
-  const { closes, highs, lows } = parsed;
+  const { closes } = parsed;
   if (closes.length < 15) {
     return {
       quantEdgeScore: compositeScore,
@@ -1295,37 +1332,63 @@ function analyzeQuantFeatures(
       returnSkewness: null,
       quantAnomalyTag: null,
       beta: beta != null ? Number(beta.toFixed(2)) : null,
+      t2VaR95Pct: null,
+      t2CVaR95Pct: null,
+      t2ExcessiveTailRisk: false,
+      kellyAllocationPct: null,
+      halfKellyPct: null,
+      ceilingHeadroomPct: null,
+      isCeilingTrap: false,
+      ouStationary: false,
+      returns: [] as number[],
     };
   }
 
-  const p = currentPrice ?? closes[closes.length - 1];
+  const p = currentPrice ?? closes[closes.length - 1]!;
 
   // 1. Ornstein-Uhlenbeck (OU) Mean Reversion Estimation on recent 60-bar regime window
   const ouResult = estimateOrnsteinUhlenbeck(closes.slice(-60));
   const ouZ = Number.isFinite(ouResult.currentZScore) ? Number(ouResult.currentZScore.toFixed(2)) : null;
   const ouHalfLife = Number.isFinite(ouResult.halfLife) && ouResult.halfLife < 100 ? ouResult.halfLife : null;
-  const ouMu = Number.isFinite(ouResult.mu) ? Math.round(ouResult.mu) : null;
+  const ouMu = Number.isFinite(ouResult.mu) ? roundAdaptivePrice(ouResult.mu, p) : null;
 
-  // 2. Daily Log Returns for Cornish-Fisher VaR & Kurtosis/Skewness
+  // 2. Daily Simple Returns (60-bar trailing) for Cornish-Fisher VaR, T+2 Tail Risk & Fractional Kelly
   const returns: number[] = [];
-  for (let i = 1; i < closes.length; i++) {
-    if (closes[i - 1] > 0) {
-      returns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+  for (let i = Math.max(1, closes.length - 60); i < closes.length; i++) {
+    if (closes[i - 1]! > 0 && closes[i]! > 0) {
+      returns.push((closes[i]! - closes[i - 1]!) / closes[i - 1]!);
     }
   }
   const riskMetrics = calculateVaRAndCVaR(returns);
+  const t2Risk = returns.length >= 10 ? calculateT2SettlementRisk(returns) : null;
 
   // 3. Dynamic Triple-Barrier Horizons (López de Prado AFML)
   const atr = parsed.atr14 ?? (p * 0.025);
   const atrPct = p > 0 ? (atr / p) * 100 : 2.5;
-
   const tripleBarrier = calculateTripleBarrierLevels(p, atrPct, 3.0, 1.5, 10);
 
+  // 3b. Statutory Ceiling/Floor Headroom Check (HoSE/HNX)
+  const ceilingCheck =
+    ceilingPrice != null && floorPrice != null && ceilingPrice > 0 && floorPrice > 0
+      ? checkCeilingFloorHeadroom(p, ceilingPrice, floorPrice)
+      : null;
+
+  // 3c. Fractional Kelly + Volatility Targeting
+  const upDays = returns.filter((r) => r > 0).length;
+  const empiricalWinProb = returns.length >= 10 ? upDays / returns.length : 0.52;
+  const mrPrior = ouResult.isStationary && (ouZ ?? 0) <= -1.0 ? 0.62 : 0.52;
+  const blendedWinProb = Math.min(0.75, Math.max(0.35, 0.5 * empiricalWinProb + 0.5 * mrPrior));
+  const kellyRes = calculateCrossAssetKelly({
+    winRate: blendedWinProb,
+    payoffRatio: tripleBarrier.riskRewardRatio,
+    returnsSeries: returns,
+    isCrypto: false,
+  });
+
   // 4. Quant Alpha Edge Score Synthesis (0-100)
-  // Pillar A: Mean Reversion Statistical Edge (0-25)
   let mrScore = 0;
   if (ouZ != null && ouZ <= -1.8 && ouHalfLife != null && ouHalfLife <= 25) {
-    mrScore += 25; // High confidence statistical oversold bounce
+    mrScore += 25;
   } else if (ouZ != null && ouZ <= -1.3 && ouHalfLife != null && ouHalfLife <= 35) {
     mrScore += 20;
   } else if (ouZ != null && ouZ <= -0.8 && ouResult.isStationary) {
@@ -1334,22 +1397,13 @@ function analyzeQuantFeatures(
     mrScore += 8;
   }
 
-  // Estimate Beta from returns volatility relative to VN-Index (benchmark daily vol ~ 1.15%, correlation ~ 0.62)
-  let finalBeta = beta;
-  if (finalBeta == null && returns.length >= 15) {
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (returns.length - 1);
-    const stockVol = Math.sqrt(variance);
-    finalBeta = Number(Math.max(0.35, Math.min(2.4, (0.62 * stockVol) / 0.0115)).toFixed(2));
-  }
-
-  // Pillar B: Factor Anomaly: Low-Beta & High-Quality (AQR / Fama-French) (0-25)
+  const finalBeta = beta;
   let factorScore = 0;
   const b = finalBeta ?? 1.0;
   const q = qualityScore ?? 65;
   const r = roe ?? 10;
   if (b <= 0.85 && q >= 70 && r >= 12) {
-    factorScore += 25; // Strong low-beta anomaly
+    factorScore += 25;
   } else if (b <= 0.95 && q >= 65) {
     factorScore += 18;
   } else if (b <= 1.1 && q >= 60) {
@@ -1358,16 +1412,18 @@ function analyzeQuantFeatures(
     factorScore += 6;
   }
 
-  // Pillar C: Asymmetric Payoff & Distribution Skew (0-25)
   let payoffScore = 0;
   if (tripleBarrier.riskRewardRatio >= 2.0) payoffScore += 15;
   else if (tripleBarrier.riskRewardRatio >= 1.5) payoffScore += 10;
   else payoffScore += 5;
 
-  if (riskMetrics.skewness > 0.3) payoffScore += 10; // Favorable positive skew
+  if (riskMetrics.skewness > 0.3) payoffScore += 10;
   else if (riskMetrics.skewness >= -0.2) payoffScore += 6;
 
-  // Pillar D: Quantitative Flow & Volume Momentum (0-25)
+  if (kellyRes.halfKelly >= 0.08 && !t2Risk?.excessiveTailRisk) payoffScore += 5;
+  if (t2Risk?.excessiveTailRisk) payoffScore = Math.max(0, payoffScore - 6);
+  if (ceilingCheck && !ceilingCheck.canEnterLong) payoffScore = Math.max(0, payoffScore - 8);
+
   let quantFlowScore = 0;
   if (volRatio20 != null && volRatio20 >= 1.5) quantFlowScore += 15;
   else if (volRatio20 != null && volRatio20 >= 1.1) quantFlowScore += 10;
@@ -1383,7 +1439,6 @@ function analyzeQuantFeatures(
   else if (quantEdgeScore >= 60) quantBadge = "QUANT_EDGE";
   else if (quantEdgeScore >= 48) quantBadge = "WATCH";
 
-  // Determine Primary Anomaly Tag
   let quantAnomalyTag = "Định lượng Trung tính";
   if (ouZ != null && ouZ <= -1.4 && ouHalfLife != null && ouHalfLife <= 25) {
     quantAnomalyTag = `Mean Reversion (Z=${ouZ}, t½=${ouHalfLife}d)`;
@@ -1410,6 +1465,15 @@ function analyzeQuantFeatures(
     returnSkewness: Number(riskMetrics.skewness.toFixed(2)),
     quantAnomalyTag,
     beta: finalBeta != null ? Number(finalBeta.toFixed(2)) : null,
+    t2VaR95Pct: t2Risk?.twoDayVaR95Pct ?? null,
+    t2CVaR95Pct: t2Risk?.twoDayCVaR95Pct ?? null,
+    t2ExcessiveTailRisk: t2Risk?.excessiveTailRisk ?? false,
+    kellyAllocationPct: Number((kellyRes.recommendedAllocation * 100).toFixed(1)),
+    halfKellyPct: Number((kellyRes.halfKelly * 100).toFixed(1)),
+    ceilingHeadroomPct: ceilingCheck?.ceilingHeadroomPct ?? null,
+    isCeilingTrap: ceilingCheck ? !ceilingCheck.canEnterLong : false,
+    ouStationary: ouResult.isStationary,
+    returns,
   };
 }
 
@@ -1473,6 +1537,9 @@ function detectPresets(item: {
   ouZScore?: number | null;
   ouHalfLife?: number | null;
   beta?: number | null;
+  halfKellyPct?: number | null;
+  t2VaR95Pct?: number | null;
+  isCeilingTrap?: boolean | null;
   qualityScore?: number | null;
   tripleBarrierRiskReward?: number | null;
   buyPointDiffPct?: number | null;
@@ -1754,6 +1821,15 @@ function detectPresets(item: {
   }
   if (!isBrokenSupport && item.tripleBarrierRiskReward != null && item.tripleBarrierRiskReward >= 1.8) {
     passes.push("quant_asymmetric");
+  }
+  if (
+    !isTechnicalSell &&
+    (item.halfKellyPct ?? 0) >= 8 &&
+    (item.t2VaR95Pct == null || item.t2VaR95Pct < 6.0) &&
+    !item.isCeilingTrap &&
+    (item.quantEdgeScore ?? 0) >= 70
+  ) {
+    passes.push("quant_kelly_edge");
   }
 
   // 2. CANSLIM
@@ -2481,18 +2557,32 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         ohlcvTask,
       ]);
 
-      const quotesMap = new Map<string, { price: number; change: number; changePercent: number; volume: number; name?: string }>();
+      const quotesMap = new Map<
+        string,
+        {
+          price: number;
+          change: number;
+          changePercent: number;
+          volume: number;
+          name?: string;
+          ceilingPrice?: number | null;
+          floorPrice?: number | null;
+        }
+      >();
       const quotesSource = (multiQuotesRes.quotes && multiQuotesRes.quotes.length > 0)
         ? multiQuotesRes.quotes
         : BOOTSTRAP_VN30_QUOTES;
       for (const q of quotesSource) {
         if (!q.symbol) continue;
+        const qExt = q as typeof q & { ceilingPrice?: number | null; floorPrice?: number | null };
         quotesMap.set(q.symbol.toUpperCase(), {
           price: typeof q.price === "number" ? q.price : 0,
           change: typeof q.change === "number" ? q.change : 0,
           changePercent: typeof q.changePercent === "number" ? q.changePercent : 0,
           volume: typeof q.volume === "number" ? q.volume : (typeof q.quoteVolume === "number" ? q.quoteVolume : 0),
           name: q.name ?? undefined,
+          ceilingPrice: typeof qExt.ceilingPrice === "number" ? qExt.ceilingPrice : null,
+          floorPrice: typeof qExt.floorPrice === "number" ? qExt.floorPrice : null,
         });
       }
 
@@ -2509,13 +2599,49 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       const { valMap, vietcapMap } = valResult;
       let failoverCount = valResult.failoverCount;
 
-      // Index benchmark performance for RS Rating (no synthetic fallback)
+      // Index benchmark performance for RS Rating, Market Regime, and Date-Aligned Covariance Beta
       const indexBars = ohlcvMap.get("VNINDEX")?.bars ?? [];
       let indexPerf20: number | null = null;
+      const vnRetByDay = new Map<string, number>();
+      let marketRegime: MarketRegime = "BULL_EXPANSION";
+
       if (indexBars.length >= 20) {
         const i0 = indexBars[indexBars.length - 20].close;
         const i1 = indexBars[indexBars.length - 1].close;
         if (i0 > 0) indexPerf20 = ((i1 - i0) / i0) * 100;
+
+        for (let k = Math.max(1, indexBars.length - 90); k < indexBars.length; k++) {
+          const prevC = indexBars[k - 1]?.close ?? 0;
+          const curC = indexBars[k]?.close ?? 0;
+          if (prevC > 0 && curC > 0) {
+            const ms = indexBars[k]!.time > 1e12 ? indexBars[k]!.time : indexBars[k]!.time * 1000;
+            vnRetByDay.set(new Date(ms).toISOString().slice(0, 10), (curC - prevC) / prevC);
+          }
+        }
+
+        const nIdx = indexBars.length;
+        let sum50 = 0;
+        const c50 = Math.min(50, nIdx);
+        for (let k = nIdx - c50; k < nIdx; k++) sum50 += indexBars[k]!.close;
+        const vnMa50 = sum50 / c50;
+
+        let sum200 = 0;
+        const c200 = Math.min(200, nIdx);
+        for (let k = nIdx - c200; k < nIdx; k++) sum200 += indexBars[k]!.close;
+        const vnMa200 = sum200 / c200;
+
+        let recentRange = 0;
+        const rLen = Math.min(10, nIdx);
+        for (let k = nIdx - rLen; k < nIdx; k++) recentRange += Math.abs(indexBars[k]!.high - indexBars[k]!.low);
+        recentRange /= rLen;
+
+        let baseRange = 0;
+        const bLen = Math.min(40, nIdx);
+        for (let k = nIdx - bLen; k < nIdx; k++) baseRange += Math.abs(indexBars[k]!.high - indexBars[k]!.low);
+        baseRange /= bLen;
+
+        const volRatioIdx = baseRange > 0 ? recentRange / baseRange : 1.0;
+        marketRegime = determineMarketRegime(i1, vnMa50, vnMa200, volRatioIdx);
       }
 
       // Pre-calculate William O'Neil Universe RS Ratings (1 - 99)
@@ -2585,6 +2711,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       // 4. Assemble merged items with 3-tier failover & MA analysis
       const items: ScreenerStockItem[] = [];
       const orcaInputs: OrcaMasterInput[] = [];
+      const multiFactorInputs: MultiFactorInput[] = [];
       const intermediateEntries: {
         sym: string;
         sec: ReturnType<typeof getSecurity>;
@@ -2817,19 +2944,24 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           foreignRow?.buyRatioPct,
         );
 
+        const rawCeil = q?.ceilingPrice ?? null;
+        const rawFloor = q?.floorPrice ?? null;
+        const ceilingNorm = rawCeil != null && rawCeil > 500 ? Number((rawCeil / 1000).toFixed(2)) : rawCeil;
+        const floorNorm = rawFloor != null && rawFloor > 500 ? Number((rawFloor / 1000).toFixed(2)) : rawFloor;
+
         let beta: number | null = null;
-        if (parsed.closes.length >= 20 && indexBars.length >= 20) {
-          const kLen = Math.min(60, parsed.closes.length - 1, indexBars.length - 1);
+        if (parsed.ohlcvBars.length >= 20 && vnRetByDay.size >= 15) {
           const sRets: number[] = [];
           const mRets: number[] = [];
-          for (let k = 0; k < kLen; k++) {
-            const sPrev = parsed.closes[parsed.closes.length - 1 - k - 1];
-            const sCur = parsed.closes[parsed.closes.length - 1 - k];
-            const mPrev = indexBars[indexBars.length - 1 - k - 1]?.close ?? 0;
-            const mCur = indexBars[indexBars.length - 1 - k]?.close ?? 0;
-            if (sPrev > 0 && mPrev > 0) {
+          const bStart = Math.max(1, parsed.ohlcvBars.length - 65);
+          for (let k = bStart; k < parsed.ohlcvBars.length; k++) {
+            const sPrev = parsed.ohlcvBars[k - 1]?.close ?? 0;
+            const sCur = parsed.ohlcvBars[k]?.close ?? 0;
+            const ms = parsed.ohlcvBars[k]!.time > 1e12 ? parsed.ohlcvBars[k]!.time : parsed.ohlcvBars[k]!.time * 1000;
+            const mRet = vnRetByDay.get(new Date(ms).toISOString().slice(0, 10));
+            if (sPrev > 0 && sCur > 0 && mRet != null) {
               sRets.push((sCur - sPrev) / sPrev);
-              mRets.push((mCur - mPrev) / mPrev);
+              mRets.push(mRet);
             }
           }
           if (sRets.length >= 15) {
@@ -2838,8 +2970,8 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
             let cov = 0;
             let varM = 0;
             for (let k = 0; k < sRets.length; k++) {
-              cov += (sRets[k] - meanS) * (mRets[k] - meanM);
-              varM += (mRets[k] - meanM) ** 2;
+              cov += (sRets[k]! - meanS) * (mRets[k]! - meanM);
+              varM += (mRets[k]! - meanM) ** 2;
             }
             if (varM > 1e-10) {
               beta = Number(Math.max(-0.5, Math.min(2.8, cov / varM)).toFixed(2));
@@ -2854,7 +2986,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           roe,
           debtEquity,
           techFeatures.volRatio20,
-          compositeScore
+          compositeScore,
+          ceilingNorm,
+          floorNorm,
         );
 
         // William O'Neil RS Rating 1 - 99
@@ -2960,7 +3094,10 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           techFeatures.ma50,
           techFeatures.topChartPattern,
           techFeatures.confluenceScore,
-          techFeatures.volRatio20
+          techFeatures.volRatio20,
+          ceilingNorm,
+          floorNorm,
+          quantFeatures.returns,
         );
 
         // Evaluate Smart Money Footprint (Keep foreignBuyRatioPct separate from market activeBuyRatioPct)
@@ -3007,6 +3144,31 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           maSignal: techFeatures.maSignal,
           historicalEdgeScore: trainedHistorical.historicalEdgeScore,
           upDownVolRatio: trainedHistorical.upDownVolRatio,
+        });
+
+        // Collect inputs for regime-adaptive Multi-Factor Quant Composite
+        multiFactorInputs.push({
+          symbol: sym,
+          sector: sec?.sector ?? sectorOf(sym) ?? "Khác",
+          price,
+          rsRating,
+          activeBuyRatio: foreignRow?.buyRatioPct != null ? foreignRow.buyRatioPct / 100 : null,
+          volumeAbsorptionRatio: techFeatures.volRatio20,
+          ouHalfLifeDays: quantFeatures.ouHalfLife,
+          atr14: parsed.atr14,
+          roe,
+          roic: faMatrix.roic,
+          cfoToNetProfit: faMatrix.cfoToNetProfit,
+          sloanAccrualRatio: faMatrix.sloanAccrualRatio,
+          cashConversionCycleDays: faMatrix.cashConversionCycleDays,
+          fScore: piotroskiFScore,
+          altmanZScore,
+          interestCoverage: faMatrix.interestCoverage,
+          netDebtToEbitda: faMatrix.netDebtToEbitda,
+          pe,
+          pb,
+          evEbitda,
+          fcfYieldPct: faMatrix.fcfYieldPct,
         });
 
         const mtfCandle = evaluateMtfCandleCluster({
@@ -3126,6 +3288,30 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
 
       // 4b. Multi-factor Universe Orca Master Composite percentile ranking (1 - 99)
       const orcaMasterMap = calculateUniverseOrcaMaster(orcaInputs);
+
+      // 4b-bis. Regime-Adaptive Universe Multi-Factor Quant Calibration (1 - 99)
+      const mfUniverseMap = calculateUniverseMultiFactor(multiFactorInputs, marketRegime);
+      const blendedQuantEntries = intermediateEntries.map((entry) => {
+        const mf = mfUniverseMap.get(entry.sym);
+        const statScore = entry.quantFeatures.quantEdgeScore;
+        const hybridRaw = mf ? 0.45 * statScore + 0.55 * mf.compositeScore : statScore;
+        return { entry, hybridRaw };
+      });
+      blendedQuantEntries.sort((a, b) => a.hybridRaw - b.hybridRaw);
+      const qTotal = blendedQuantEntries.length;
+      blendedQuantEntries.forEach(({ entry, hybridRaw }, idx) => {
+        const calibratedScore =
+          qTotal > 1 ? Math.round(1 + (98 * idx) / (qTotal - 1)) : Math.round(hybridRaw);
+        entry.quantFeatures.quantEdgeScore = calibratedScore;
+        entry.quantFeatures.quantBadge =
+          calibratedScore >= 80
+            ? "SUPER_QUANT"
+            : calibratedScore >= 65
+              ? "QUANT_EDGE"
+              : calibratedScore >= 48
+                ? "WATCH"
+                : "NEUTRAL";
+      });
 
       // 4c. Multi-factor Industry Sector Relative Percentile Ranking (6-Axis: P/E, P/B, EV/EBITDA, ROE, ROIC, Net Margin)
       type SectorRankMetrics = {
@@ -3252,6 +3438,9 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           ouZScore: entry.quantFeatures.ouZScore,
           ouHalfLife: entry.quantFeatures.ouHalfLife,
           beta: entry.quantFeatures.beta,
+          halfKellyPct: entry.quantFeatures.halfKellyPct,
+          t2VaR95Pct: entry.quantFeatures.t2VaR95Pct,
+          isCeilingTrap: entry.quantFeatures.isCeilingTrap,
           qualityScore: entry.qualityScore,
           tripleBarrierRiskReward: entry.quantFeatures.tripleBarrierRiskReward,
           buyPointDiffPct: entry.buyPointPlan.buyPointDiffPct,
@@ -3588,6 +3777,15 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
           returnSkewness: entry.quantFeatures.returnSkewness,
           quantAnomalyTag: entry.quantFeatures.quantAnomalyTag,
           beta: entry.quantFeatures.beta,
+          t2VaR95Pct: entry.quantFeatures.t2VaR95Pct,
+          t2CVaR95Pct: entry.quantFeatures.t2CVaR95Pct,
+          t2ExcessiveTailRisk: entry.quantFeatures.t2ExcessiveTailRisk,
+          kellyAllocationPct: entry.quantFeatures.kellyAllocationPct,
+          halfKellyPct: entry.quantFeatures.halfKellyPct,
+          ceilingHeadroomPct: entry.quantFeatures.ceilingHeadroomPct,
+          isCeilingTrap: entry.quantFeatures.isCeilingTrap,
+          ouStationary: entry.quantFeatures.ouStationary,
+          quantRegime: marketRegime,
           buyPoint: entry.buyPointPlan.buyPoint,
           buyPointDiffPct: entry.buyPointPlan.buyPointDiffPct,
           absBuyDiff: entry.buyPointPlan.absBuyDiff,
@@ -4314,6 +4512,13 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (minQuantScore != null && (x.quantEdgeScore == null || x.quantEdgeScore < minQuantScore)) continue;
     if (maxOuZScore != null && (x.ouZScore == null || x.ouZScore > maxOuZScore)) continue;
     if (minRiskReward != null && (x.tripleBarrierRiskReward == null || x.tripleBarrierRiskReward < minRiskReward)) continue;
+    if (params.maxT2VaR95 != null && (x.t2VaR95Pct == null || x.t2VaR95Pct > params.maxT2VaR95)) continue;
+    if (params.minKellyPct != null && (x.halfKellyPct == null || x.halfKellyPct < params.minKellyPct)) continue;
+    if (params.minBeta != null && (x.beta == null || x.beta < params.minBeta)) continue;
+    if (params.maxBeta != null && (x.beta == null || x.beta > params.maxBeta)) continue;
+    if (params.minReturnSkew != null && (x.returnSkewness == null || x.returnSkewness < params.minReturnSkew)) continue;
+    if (params.ouStationaryOnly && !x.ouStationary) continue;
+    if (params.excludeCeilingTrap && x.isCeilingTrap) continue;
 
     // Sprint 1 & 2 Institutional Indicators
     if (params.minOrcaMasterScore != null && (x.orcaMasterScore == null || x.orcaMasterScore < params.minOrcaMasterScore)) continue;

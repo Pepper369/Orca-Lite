@@ -1,5 +1,7 @@
 import { getVnIndices } from "../services/stocks";
 import { getDerivativeContractDetail } from "../services/derivatives";
+import { getDerivHistory, recordDerivSample } from "../services/derivatives-history";
+import { getVnOhlcv } from "../services/stocks-board";
 import {
   calibrateBasisOrnsteinUhlenbeck,
   type OUBasisCalibration,
@@ -140,10 +142,57 @@ export async function getDerivativesArbitrageSignal(
     stateDescription = "Thị trường ở trạng thái Backwardation nhẹ, nhà đầu tư cẩn trọng trước các biến động ngắn hạn.";
   }
 
+  if (contractQuote?.last != null) {
+    recordDerivSample({
+      symbol: sym,
+      ts: Date.now(),
+      last: contractQuote.last,
+      openInterest: contractQuote.openInterest ?? null,
+      volume: contractQuote.volume ?? null,
+      basis,
+      source: contractQuote.source ?? "derivatives-arbitrage-engine",
+    });
+  }
+
   // Continuous Ornstein-Uhlenbeck (OU) Mean-Reversion Calibration
+  let resolvedBasisSeries: number[] =
+    historicalBasisSeries && historicalBasisSeries.length >= 15
+      ? historicalBasisSeries
+      : getDerivHistory(sym, 60)
+          .map((s) => s.basis)
+          .filter((b): b is number => b != null && Number.isFinite(b));
+
+  if (resolvedBasisSeries.length < 15) {
+    const [futPack, vn30Pack] = await Promise.all([
+      withTimeout(getVnOhlcv(sym, 45), 2000, null).catch(() => null),
+      withTimeout(getVnOhlcv("VN30", 45), 2000, null).catch(() => null),
+    ]);
+    const futBars = futPack?.bars ?? [];
+    const spotBars = vn30Pack?.bars ?? [];
+    if (futBars.length >= 15 && spotBars.length >= 15) {
+      const spotByDay = new Map<string, number>();
+      for (const b of spotBars) {
+        const ms = b.time > 1e12 ? b.time : b.time * 1000;
+        spotByDay.set(new Date(ms).toISOString().slice(0, 10), b.close);
+      }
+      const dailyBasis: number[] = [];
+      for (const b of futBars) {
+        const ms = b.time > 1e12 ? b.time : b.time * 1000;
+        const sClose = spotByDay.get(new Date(ms).toISOString().slice(0, 10));
+        if (sClose != null && Number.isFinite(b.close)) {
+          dailyBasis.push(Number((b.close - sClose).toFixed(2)));
+        }
+      }
+      if (dailyBasis.length >= 15) {
+        dailyBasis[dailyBasis.length - 1] = basis;
+        resolvedBasisSeries = dailyBasis;
+      }
+    }
+  }
+
   let ouCalibration: OUBasisCalibration | undefined;
-  if (historicalBasisSeries && historicalBasisSeries.length >= 15) {
-    ouCalibration = calibrateBasisOrnsteinUhlenbeck(historicalBasisSeries, 1);
+  if (resolvedBasisSeries.length >= 15) {
+    ouCalibration = calibrateBasisOrnsteinUhlenbeck(resolvedBasisSeries, 1);
   }
 
   return {

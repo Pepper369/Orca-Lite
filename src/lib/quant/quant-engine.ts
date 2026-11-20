@@ -232,11 +232,19 @@ const VN30_SYMBOLS = [
   "POW", "HDB", "TPB", "VPB", "VIB", "LPB", "GVR", "DGC", "KDH", "PDR"
 ];
 
-// Run backtest calculation on strategy
+export interface RealBacktestSeries {
+  symbol?: string;
+  dates: string[];
+  closes: number[];
+  benchCloses?: number[];
+}
+
+// Run backtest calculation on strategy (O(N) rolling indicators; supports live historical OHLCV bars or deterministic fallback)
 export function executeBacktest(
   strategy: FireAntStrategy,
   customParams?: Record<string, any>,
-  startCapital: number = 100000000
+  startCapital: number = 100000000,
+  realData?: RealBacktestSeries,
 ): FullBacktestResult {
   const paramDefs = extractParamsFromCode(strategy.code);
   const activeParams: Record<string, any> = {};
@@ -302,21 +310,28 @@ export function executeBacktest(
     annualVol += 0.05;
   }
 
-  // Generate trading sessions from 2018-01-02 to 2026-11-06 (~2180 trading days)
+  // Determine price/benchmark source: real OHLCV series when provided (>= 60 bars), else deterministic GBM cycle
+  const useRealBars = Boolean(realData && realData.closes.length >= 60);
   const tradingDays: string[] = [];
   const startYear = 2018;
   const endYear = 2026;
 
-  for (let y = startYear; y <= endYear; y++) {
-    for (let m = 1; m <= 12; m++) {
-      if (y === 2026 && m > 11) break;
-      const daysInMonth = new Date(y, m, 0).getDate();
-      for (let d = 1; d <= daysInMonth; d++) {
-        const dateObj = new Date(y, m - 1, d);
-        const dayOfWeek = dateObj.getDay();
-        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-          const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-          tradingDays.push(dateStr);
+  if (useRealBars && realData) {
+    for (let i = 1; i < realData.closes.length; i++) {
+      tradingDays.push(realData.dates[i] ?? `bar-${i}`);
+    }
+  } else {
+    for (let y = startYear; y <= endYear; y++) {
+      for (let m = 1; m <= 12; m++) {
+        if (y === 2026 && m > 11) break;
+        const daysInMonth = new Date(y, m, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateObj = new Date(y, m - 1, d);
+          const dayOfWeek = dateObj.getDay();
+          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+            tradingDays.push(dateStr);
+          }
         }
       }
     }
@@ -324,9 +339,8 @@ export function executeBacktest(
 
   const sessionsCount = tradingDays.length;
   const dailyDt = 1 / 252;
-  const dailyBenchDrift = (0.12 - 0.5 * 0.20 * 0.20) * dailyDt; // VN-INDEX ~12% CAGR, 20% vol
+  const dailyBenchDrift = (0.12 - 0.5 * 0.20 * 0.20) * dailyDt;
 
-  // Generate underlying market & asset price trajectory (independent of strategy parameters)
   let baseSeed = 1337;
   for (let i = 0; i < strategy.id.length; i++) {
     baseSeed += strategy.id.charCodeAt(i) * (i + 7);
@@ -348,61 +362,62 @@ export function executeBacktest(
   const dailyBenchReturns: number[] = [];
   const drawdowns: number[] = [];
 
-  const assetPrices: number[] = [100];
-  const benchPrices: number[] = [1000];
+  const assetPrices: number[] = [useRealBars && realData ? realData.closes[0]! : 100];
+  const benchPrices: number[] = [
+    useRealBars && realData?.benchCloses?.length ? realData.benchCloses[0]! : 1000,
+  ];
   let inPosition = false;
-  let positionPeakPrice = 100;
+  let positionPeakPrice = assetPrices[0]!;
+
+  // O(1) sliding window accumulators (eliminates O(N * period) inner loops)
+  let fastSum = assetPrices[0]!;
+  let slowSum = assetPrices[0]!;
+  let benchSum50 = benchPrices[0]!;
+  const gainBuf = new Array<number>(14).fill(0);
+  const lossBuf = new Array<number>(14).fill(0);
+  let gainSum = 0;
+  let lossSum = 0;
+  let rsiBufIdx = 0;
 
   for (let i = 0; i < sessionsCount; i++) {
-    const date = tradingDays[i];
-    const u1 = Math.max(1e-7, marketRng());
-    const u2 = marketRng();
-    const z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-    const z2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
+    const date = tradingDays[i]!;
+    let rBench: number;
+    let rAsset: number;
 
-    // Market regime cycle + idiosyncratic alpha stream
-    const cycleWave = Math.sin(i / 45) * 0.0008 + Math.cos(i / 120) * 0.0005;
-    const rBench = dailyBenchDrift + cycleWave * 0.5 + 0.18 * Math.sqrt(dailyDt) * z1;
-    const rAsset = (0.16 * dailyDt) + cycleWave + 0.22 * Math.sqrt(dailyDt) * (0.65 * z1 + 0.76 * z2);
+    if (useRealBars && realData) {
+      const prevA = realData.closes[i]!;
+      const curA = realData.closes[i + 1]!;
+      rAsset = prevA > 0 ? (curA - prevA) / prevA : 0;
+      if (realData.benchCloses && i + 1 < realData.benchCloses.length) {
+        const prevB = realData.benchCloses[i]!;
+        const curB = realData.benchCloses[i + 1]!;
+        rBench = prevB > 0 ? (curB - prevB) / prevB : rAsset;
+      } else {
+        rBench = rAsset * 0.7;
+      }
+    } else {
+      const u1 = Math.max(1e-7, marketRng());
+      const u2 = marketRng();
+      const z1 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+      const z2 = Math.sqrt(-2.0 * Math.log(u1)) * Math.sin(2.0 * Math.PI * u2);
 
-    const nextBench = benchPrices[benchPrices.length - 1] * (1 + rBench);
-    const nextAsset = assetPrices[assetPrices.length - 1] * (1 + rAsset);
-    benchPrices.push(nextBench);
-    assetPrices.push(nextAsset);
+      const cycleWave = Math.sin(i / 45) * 0.0008 + Math.cos(i / 120) * 0.0005;
+      rBench = dailyBenchDrift + cycleWave * 0.5 + 0.18 * Math.sqrt(dailyDt) * z1;
+      rAsset = (0.16 * dailyDt) + cycleWave + 0.22 * Math.sqrt(dailyDt) * (0.65 * z1 + 0.76 * z2);
+    }
 
-    // Evaluate real rule-based signal on historical bars up to session i (before today's return)
-    const histLen = assetPrices.length - 1;
+    const histLen = assetPrices.length; // prefix available BEFORE session i executes (zero look-ahead)
+    const curPrice = assetPrices[histLen - 1]!;
+    const curBench = benchPrices[histLen - 1]!;
+
     let targetAllocation = 0.5;
     if (histLen >= slowPeriod) {
-      let fastSum = 0;
-      for (let k = histLen - fastPeriod; k < histLen; k++) fastSum += assetPrices[k];
       const fastMa = fastSum / fastPeriod;
-
-      let slowSum = 0;
-      for (let k = histLen - slowPeriod; k < histLen; k++) slowSum += assetPrices[k];
       const slowMa = slowSum / slowPeriod;
+      const curRsi = lossSum === 0 ? 100 : 100 - 100 / (1 + gainSum / lossSum);
+      const benchMa50 = histLen >= 50 ? benchSum50 / 50 : curBench;
+      const marketOk = !useMarketFilter || curBench >= benchMa50 * 0.985;
 
-      // 14-bar momentum RSI proxy on assetPrices
-      let gains = 0;
-      let losses = 0;
-      const rsiLb = Math.min(14, histLen - 1);
-      for (let k = histLen - rsiLb; k < histLen; k++) {
-        const d = assetPrices[k] - assetPrices[k - 1];
-        if (d >= 0) gains += d;
-        else losses -= d;
-      }
-      const curRsi = losses === 0 ? 100 : 100 - 100 / (1 + gains / losses);
-
-      // Market filter (VN-Index above 50-day average)
-      let benchMa50 = benchPrices[histLen - 1];
-      if (histLen >= 50) {
-        let bSum = 0;
-        for (let k = histLen - 50; k < histLen; k++) bSum += benchPrices[k];
-        benchMa50 = bSum / 50;
-      }
-      const marketOk = !useMarketFilter || benchPrices[histLen - 1] >= benchMa50 * 0.985;
-
-      const curPrice = assetPrices[histLen - 1];
       if (!inPosition) {
         const entrySignal =
           strategy.category === "Đảo chiều"
@@ -426,8 +441,32 @@ export function executeBacktest(
       targetAllocation = inPosition ? (marketOk ? 1.0 : 0.6) : 0.15;
     }
 
+    const nextBench = useRealBars && realData?.benchCloses?.[i + 1] != null
+      ? realData.benchCloses[i + 1]!
+      : curBench * (1 + rBench);
+    const nextAsset = useRealBars && realData
+      ? realData.closes[i + 1]!
+      : curPrice * (1 + rAsset);
+
+    const delta = nextAsset - curPrice;
+    const g = delta >= 0 ? delta : 0;
+    const l = delta < 0 ? -delta : 0;
+    gainSum += g - gainBuf[rsiBufIdx]!;
+    lossSum += l - lossBuf[rsiBufIdx]!;
+    gainBuf[rsiBufIdx] = g;
+    lossBuf[rsiBufIdx] = l;
+    rsiBufIdx = (rsiBufIdx + 1) % 14;
+
+    assetPrices.push(nextAsset);
+    benchPrices.push(nextBench);
+    const newLen = assetPrices.length;
+    fastSum += nextAsset - (newLen > fastPeriod ? assetPrices[newLen - 1 - fastPeriod]! : 0);
+    slowSum += nextAsset - (newLen > slowPeriod ? assetPrices[newLen - 1 - slowPeriod]! : 0);
+    benchSum50 += nextBench - (newLen > 50 ? benchPrices[newLen - 1 - 50]! : 0);
+
     const cashYield = (0.045 / 252) * (1 - targetAllocation);
-    const rStrat = targetAllocation * rAsset + cashYield + (expectedAnnualReturn - 0.16) * dailyDt * targetAllocation;
+    const alphaOffset = useRealBars ? 0 : (expectedAnnualReturn - 0.16) * dailyDt * targetAllocation;
+    const rStrat = targetAllocation * rAsset + cashYield + alphaOffset;
 
     benchEquity *= 1 + rBench;
     stratEquity *= 1 + rStrat;
@@ -538,24 +577,28 @@ export function executeBacktest(
   const trackingError = Math.sqrt(variance + benchVar - 2 * cov) * Math.sqrt(252);
   const informationRatio = trackingError > 0 ? (cagr - benchCagr) / trackingError : 0;
 
-  // Monthly Return Matrix
+  // Monthly Return Matrix (handles both simulated & real date ranges cleanly)
   const monthlyTable: MonthlyReturnRow[] = [];
+  const activeYears = useRealBars && tradingDays.length > 0
+    ? Array.from(new Set(tradingDays.map((d) => Number(d.slice(0, 4))).filter((y) => Number.isFinite(y)))).sort((a, b) => a - b)
+    : Array.from({ length: endYear - startYear + 1 }, (_, k) => startYear + k);
+
   let curDayIdx = 0;
-  for (let y = startYear; y <= endYear; y++) {
+  for (const y of activeYears) {
     const rowMonths: (number | null)[] = [];
     let yearCumReturn = 1.0;
     for (let m = 1; m <= 12; m++) {
-      if (y === 2026 && m > 11) {
+      if (!useRealBars && y === 2026 && m > 11) {
         rowMonths.push(null);
         continue;
       }
       let mReturn = 1.0;
       let monthSessions = 0;
       while (curDayIdx < sessionsCount) {
-        const dStr = tradingDays[curDayIdx];
+        const dStr = tradingDays[curDayIdx]!;
         const [dy, dm] = dStr.split("-").map(Number);
         if (dy !== y || dm !== m) break;
-        mReturn *= 1 + dailyStratReturns[curDayIdx];
+        mReturn *= 1 + dailyStratReturns[curDayIdx]!;
         monthSessions++;
         curDayIdx++;
       }
@@ -775,7 +818,8 @@ export function runGridOptimization(
   param1Name: string,
   param1Values: any[],
   param2Name?: string,
-  param2Values?: any[]
+  param2Values?: any[],
+  realData?: RealBacktestSeries,
 ): GridOptimizationResult {
   const matrix: { p1: any; p2?: any; sharpe: number; cagr: number; maxDd: number }[] = [];
   let bestSharpe = -999;
@@ -784,7 +828,7 @@ export function runGridOptimization(
   for (const v1 of param1Values) {
     if (param2Name && param2Values && param2Values.length > 0) {
       for (const v2 of param2Values) {
-        const testRes = executeBacktest(strategy, { [param1Name]: v1, [param2Name]: v2 });
+        const testRes = executeBacktest(strategy, { [param1Name]: v1, [param2Name]: v2 }, 100000000, realData);
         matrix.push({
           p1: v1,
           p2: v2,
@@ -803,7 +847,7 @@ export function runGridOptimization(
         }
       }
     } else {
-      const testRes = executeBacktest(strategy, { [param1Name]: v1 });
+      const testRes = executeBacktest(strategy, { [param1Name]: v1 }, 100000000, realData);
       matrix.push({
         p1: v1,
         sharpe: testRes.metrics.sharpe,

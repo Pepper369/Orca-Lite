@@ -1307,6 +1307,15 @@ export function VnScreener({
   const [smcOrderBlockFilter, setSmcOrderBlockFilter] = useState(false);
   const [sniperSubtypeFilter, setSniperSubtypeFilter] = useState<"all" | "SNIPER_PULLBACK" | "SQUEEZE_BREAKOUT" | "SWEEP_RECLAIM">("all");
   const [minSniperRRFilter, setMinSniperRRFilter] = useState("");
+  const [minQuantScore, setMinQuantScore] = useState("");
+  const [maxOuZScore, setMaxOuZScore] = useState("");
+  const [minRiskReward, setMinRiskReward] = useState("");
+  const [maxT2VaR95, setMaxT2VaR95] = useState("");
+  const [minKellyPct, setMinKellyPct] = useState("");
+  const [maxBeta, setMaxBeta] = useState("");
+  const [minReturnSkew, setMinReturnSkew] = useState("");
+  const [ouStationaryOnly, setOuStationaryOnly] = useState(false);
+  const [excludeCeilingTrap, setExcludeCeilingTrap] = useState(false);
 
   // Consolidated compound filter helper states
   const [buyPositionCombo, setBuyPositionCombo] = useState("ALL");
@@ -1482,6 +1491,15 @@ export function VnScreener({
     bookTaxSafeOnly: false,
     superCompounderOnly: false,
     minReverseDcfMargin: "",
+    minQuantScore: "",
+    maxOuZScore: "",
+    minRiskReward: "",
+    maxT2VaR95: "",
+    minKellyPct: "",
+    maxBeta: "",
+    minReturnSkew: "",
+    ouStationaryOnly: false,
+    excludeCeilingTrap: false,
   });
 
   // Synchronize when parent changes preset/view/sector (resolving legacy presets to canonical IDs)
@@ -1585,6 +1603,15 @@ export function VnScreener({
     if (applied.bookTaxSafeOnly) p.set("bookTaxSafeOnly", "true");
     if (applied.superCompounderOnly) p.set("superCompounderOnly", "true");
     if (applied.minReverseDcfMargin) p.set("minReverseDcfMargin", applied.minReverseDcfMargin);
+    if (applied.minQuantScore) p.set("minQuantScore", applied.minQuantScore);
+    if (applied.maxOuZScore) p.set("maxOuZScore", applied.maxOuZScore);
+    if (applied.minRiskReward) p.set("minRiskReward", applied.minRiskReward);
+    if (applied.maxT2VaR95) p.set("maxT2VaR95", applied.maxT2VaR95);
+    if (applied.minKellyPct) p.set("minKellyPct", applied.minKellyPct);
+    if (applied.maxBeta) p.set("maxBeta", applied.maxBeta);
+    if (applied.minReturnSkew) p.set("minReturnSkew", applied.minReturnSkew);
+    if (applied.ouStationaryOnly) p.set("ouStationaryOnly", "true");
+    if (applied.excludeCeilingTrap) p.set("excludeCeilingTrap", "true");
     p.set("sort", sortKey);
     p.set("order", sortOrder);
     p.set("limit", "150");
@@ -1665,6 +1692,15 @@ export function VnScreener({
       bookTaxSafeOnly,
       superCompounderOnly,
       minReverseDcfMargin,
+      minQuantScore,
+      maxOuZScore,
+      minRiskReward,
+      maxT2VaR95,
+      minKellyPct,
+      maxBeta,
+      minReturnSkew,
+      ouStationaryOnly,
+      excludeCeilingTrap,
     });
     void mutate();
   }, [
@@ -1727,6 +1763,15 @@ export function VnScreener({
     bookTaxSafeOnly,
     superCompounderOnly,
     minReverseDcfMargin,
+    minQuantScore,
+    maxOuZScore,
+    minRiskReward,
+    maxT2VaR95,
+    minKellyPct,
+    maxBeta,
+    minReturnSkew,
+    ouStationaryOnly,
+    excludeCeilingTrap,
     mutate,
   ]);
 
@@ -1913,6 +1958,15 @@ export function VnScreener({
     setBookTaxSafeOnly(false);
     setSuperCompounderOnly(false);
     setMinReverseDcfMargin("");
+    setMinQuantScore("");
+    setMaxOuZScore("");
+    setMinRiskReward("");
+    setMaxT2VaR95("");
+    setMinKellyPct("");
+    setMaxBeta("");
+    setMinReturnSkew("");
+    setOuStationaryOnly(false);
+    setExcludeCeilingTrap(false);
     setActiveCustomPresetName(null);
     setApplied({
       preset: "all",
@@ -1978,6 +2032,15 @@ export function VnScreener({
       bookTaxSafeOnly: false,
       superCompounderOnly: false,
       minReverseDcfMargin: "",
+      minQuantScore: "",
+      maxOuZScore: "",
+      minRiskReward: "",
+      maxT2VaR95: "",
+      minKellyPct: "",
+      maxBeta: "",
+      minReturnSkew: "",
+      ouStationaryOnly: false,
+      excludeCeilingTrap: false,
     });
     void mutate();
   }, [mutate]);
@@ -2038,7 +2101,13 @@ export function VnScreener({
       setViewTab("overview");
       setSortKey("rsRating");
       setSortOrder("desc");
-    } else if (p === "quant_edge" || p === "quant_mean_revert" || p === "quant_low_beta" || p === "quant_asymmetric") {
+    } else if (
+      p === "quant_edge" ||
+      p === "quant_mean_revert" ||
+      p === "quant_low_beta" ||
+      p === "quant_asymmetric" ||
+      p === "quant_kelly_edge"
+    ) {
       setViewTab("quant");
       setSortKey("quantEdgeScore");
       setSortOrder("desc");
@@ -2724,6 +2793,64 @@ export function VnScreener({
               <Field label="Buffett Score min" value={minBuffettScore} onChange={setMinBuffettScore} small placeholder="70" />
               <Field label="CCC max (ngày)" value={maxCccDays} onChange={setMaxCccDays} small placeholder="60" />
               <Field label="ROE Top Ngành (%)" value={minSectorRoePercentile} onChange={setMinSectorRoePercentile} small placeholder="75" />
+            </div>
+
+            {/* Row 2b: Institutional Quant Score, Tail Risk & Half-Kelly Filters */}
+            <div className="pt-2 border-t border-line/40 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-cyan-400">
+                  Bộ Lọc Định Lượng Quant (Cổ Phiếu)
+                </span>
+                <div className="flex flex-wrap items-center gap-4 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreset("quant_kelly_edge");
+                      setViewTab("quant");
+                      setSortKey("quantEdgeScore");
+                      setSortOrder("desc");
+                      setApplied((prev) => ({
+                        ...prev,
+                        preset: "quant_kelly_edge",
+                      }));
+                    }}
+                    className={`rounded border px-2 py-0.5 text-[10.5px] font-semibold transition-colors ${
+                      preset === "quant_kelly_edge"
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/50"
+                        : "bg-panel text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                    }`}
+                  >
+                    Preset: Half-Kelly ≥ 8% &amp; VaR T+2 &lt; 6%
+                  </button>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-cyan-300 hover:text-cyan-200 select-none">
+                    <input
+                      type="checkbox"
+                      checked={ouStationaryOnly}
+                      onChange={(e) => setOuStationaryOnly(e.target.checked)}
+                      className="rounded accent-cyan-500"
+                    />
+                    <span className="font-semibold">Chỉ OU Dừng (Mean-Reverting)</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-amber-300 hover:text-amber-200 select-none">
+                    <input
+                      type="checkbox"
+                      checked={excludeCeilingTrap}
+                      onChange={(e) => setExcludeCeilingTrap(e.target.checked)}
+                      className="rounded accent-amber-500"
+                    />
+                    <span className="font-semibold">Loại Bẫy Giá Trần (&lt;1.5% Trần)</span>
+                  </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                <Field label="Quant Score min" value={minQuantScore} onChange={setMinQuantScore} small placeholder="65" />
+                <Field label="OU Z-Score max" value={maxOuZScore} onChange={setMaxOuZScore} small placeholder="-1.0" />
+                <Field label="R/R Barrier min" value={minRiskReward} onChange={setMinRiskReward} small placeholder="1.8" />
+                <Field label="Half-Kelly min (%)" value={minKellyPct} onChange={setMinKellyPct} small placeholder="8" />
+                <Field label="VaR T+2 max (%)" value={maxT2VaR95} onChange={setMaxT2VaR95} small placeholder="6.0" />
+                <Field label="Beta tối đa" value={maxBeta} onChange={setMaxBeta} small placeholder="0.95" />
+                <Field label="Skew tối thiểu" value={minReturnSkew} onChange={setMinReturnSkew} small placeholder="0.0" />
+              </div>
             </div>
 
             {/* Row 3: Actionable Precision Switches (unique filters not duplicated in MatrixToolbar) */}
@@ -3545,16 +3672,22 @@ export function VnScreener({
                     </th>
                     <th className="py-2.5 text-right font-medium">Chốt lời / Dừng lỗ</th>
                     <th
+                      onClick={() => handleSort("halfKellyPct")}
+                      className="py-2.5 text-right font-medium cursor-pointer hover:text-emerald-400"
+                    >
+                      Half-Kelly {sortKey === "halfKellyPct" && (sortOrder === "desc" ? "↓" : "↑")}
+                    </th>
+                    <th
                       onClick={() => handleSort("beta")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-accent-primary"
                     >
                       Beta {sortKey === "beta" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th
-                      onClick={() => handleSort("cornishFisherVaR95")}
+                      onClick={() => handleSort("t2VaR95Pct")}
                       className="py-2.5 text-right font-medium cursor-pointer hover:text-rose-400"
                     >
-                      VaR 95% {sortKey === "cornishFisherVaR95" && (sortOrder === "desc" ? "↓" : "↑")}
+                      VaR T+2 {sortKey === "t2VaR95Pct" && (sortOrder === "desc" ? "↓" : "↑")}
                     </th>
                     <th className="py-2.5 pr-3.5 text-center font-medium">Mô phỏng</th>
                   </>
@@ -4313,9 +4446,26 @@ export function VnScreener({
                         <td className="num py-2.5 text-right text-[11px]">
                           {row.tripleBarrierUpper != null && row.tripleBarrierLower != null ? (
                             <span className="text-text-muted">
-                              <span className="text-emerald-400 font-medium">{fmtNum(row.tripleBarrierUpper / 1000, 1)}</span>
+                              <span className="text-emerald-400 font-medium">{fmtNum(row.tripleBarrierUpper, 2)}</span>
                               {" / "}
-                              <span className="text-rose-400 font-medium">{fmtNum(row.tripleBarrierLower / 1000, 1)}</span>
+                              <span className="text-rose-400 font-medium">{fmtNum(row.tripleBarrierLower, 2)}</span>
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="num py-2.5 text-right">
+                          {row.halfKellyPct != null ? (
+                            <span
+                              className={
+                                row.halfKellyPct >= 8
+                                  ? "text-emerald-400 font-bold"
+                                  : row.halfKellyPct > 0
+                                    ? "text-text-primary"
+                                    : "text-text-muted"
+                              }
+                            >
+                              {fmtNum(row.halfKellyPct, 1)}%
                             </span>
                           ) : (
                             "—"
@@ -4324,8 +4474,19 @@ export function VnScreener({
                         <td className="num py-2.5 text-right text-text-secondary">
                           {row.beta != null ? fmtNum(row.beta, 2) : "—"}
                         </td>
-                        <td className="num py-2.5 text-right text-text-secondary">
-                          {row.cornishFisherVaR95 != null ? `-${fmtNum(row.cornishFisherVaR95, 1)}%` : "—"}
+                        <td className="num py-2.5 text-right text-[11px]">
+                          {row.t2VaR95Pct != null ? (
+                            <span
+                              title={`1D VaR: ${row.cornishFisherVaR95 ?? "—"}% · T+2 CVaR: ${row.t2CVaR95Pct ?? "—"}%`}
+                              className={row.t2ExcessiveTailRisk ? "text-rose-400 font-semibold" : "text-text-secondary"}
+                            >
+                              -{fmtNum(row.t2VaR95Pct, 1)}%
+                            </span>
+                          ) : row.cornishFisherVaR95 != null ? (
+                            `-${fmtNum(row.cornishFisherVaR95, 1)}%`
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="py-2.5 pr-3.5 text-center">
                           <button

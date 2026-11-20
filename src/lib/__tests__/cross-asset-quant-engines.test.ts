@@ -14,6 +14,15 @@ import {
 import { computeAsymmetricPlan } from "../engines/asymmetric-quant-engine";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { buildCryptoDerivativesMetrics } from "../engines/crypto-derivatives-engine";
+import { buildSharedBarContext } from "../engines/unified-ta-kernel";
+import { detectForexRegime } from "../engines/forex-scalp-modules";
+import { detectRegime } from "../engines/scalp-modules";
+import { evaluatePrecisionTradeSetup } from "../engines/fx-crypto-precision-engine";
+import { analyzeForexScalp } from "../engines/forex-scalp";
+import { analyzeScalpMulti } from "../engines/scalp";
+import { FIREANT_RAW_STRATEGIES } from "../quant/fireant-strategies";
+import { executeBacktest } from "../quant/quant-engine";
+import { queryScreenerStocks } from "../services/screener-snapshot-service";
 import type { OhlcvBar } from "../types";
 
 describe("Unified Cross-Asset Quantitative Engines", () => {
@@ -260,5 +269,113 @@ describe("Unified Cross-Asset Quantitative Engines", () => {
     assert.ok(cryptoMetrics.liquidationClusters);
     assert.ok(cryptoMetrics.leverageGovernor.maxRecommendedLeverage <= 20);
     assert.ok(cryptoMetrics.liquidationClusters.primaryMagnetPrice !== null);
+  });
+
+  // ==========================================================================
+  // 7. Single-Pass SharedBarContext Parity & Latency Benchmark
+  // ==========================================================================
+  it("PHASE1-PARITY: SharedBarContext preserves bit-exact parity across FX, Crypto & Precision Engine", () => {
+    const m5Bars: OhlcvBar[] = Array.from({ length: 180 }, (_, i) => {
+      const wave = 1.08 + i * 0.00025 + Math.sin(i * 0.35) * 0.0012;
+      return {
+        time: 1700000000000 + i * 300_000,
+        open: wave - 0.0004,
+        high: wave + 0.0008,
+        low: wave - 0.0009,
+        close: wave,
+        volume: 1000 + (i % 7) * 180,
+      };
+    });
+    const ctx = buildSharedBarContext(m5Bars);
+
+    const regNoCtx = detectForexRegime(m5Bars, "EURUSD");
+    const regWithCtx = detectForexRegime(m5Bars, "EURUSD", ctx);
+    assert.deepEqual(regWithCtx, regNoCtx);
+
+    const cryptoRegNoCtx = detectRegime(m5Bars);
+    const cryptoRegWithCtx = detectRegime(m5Bars, ctx);
+    assert.deepEqual(cryptoRegWithCtx, cryptoRegNoCtx);
+
+    const precNoCtx = evaluatePrecisionTradeSetup({
+      symbol: "EURUSD",
+      assetType: "FOREX",
+      barsExecution: m5Bars,
+      spreadPipsOrPct: 0.9,
+    });
+    const precWithCtx = evaluatePrecisionTradeSetup({
+      symbol: "EURUSD",
+      assetType: "FOREX",
+      barsExecution: m5Bars,
+      spreadPipsOrPct: 0.9,
+      sharedCtx: ctx,
+    });
+    assert.equal(precWithCtx.grade, precNoCtx.grade);
+    assert.equal(precWithCtx.precisionScore, precNoCtx.precisionScore);
+    assert.equal(precWithCtx.entry, precNoCtx.entry);
+    assert.equal(precWithCtx.stopLoss, precNoCtx.stopLoss);
+    assert.equal(precWithCtx.isHighWinrateVerified, precNoCtx.isHighWinrateVerified);
+
+    // Performance check: 20 full FX/Crypto multi-TF analyses + O(N) backtest complete cleanly under budget
+    const t0 = performance.now();
+    for (let k = 0; k < 10; k++) {
+      analyzeForexScalp({ pair: "EURUSD", barsM15: m5Bars, barsM5: m5Bars, spreadPips: 0.9 });
+      analyzeScalpMulti({ symbol: "BTCUSDT", barsM15: m5Bars, barsM5: m5Bars, quoteVolume24h: 250_000_000 });
+    }
+    const elapsedMs = performance.now() - t0;
+    assert.ok(elapsedMs < 3000, `20 FX+Crypto scalp pipelines took ${elapsedMs.toFixed(1)}ms (>3000ms)`);
+  });
+
+  // ==========================================================================
+  // 8. O(N) FireAnt Backtest Engine & Real Historical OHLCV Mode
+  // ==========================================================================
+  it("PHASE3-BACKTEST: O(N) sliding window speedup & real historical OHLCV execution mode", () => {
+    const strat = FIREANT_RAW_STRATEGIES[0]!;
+    const dates = Array.from({ length: 120 }, (_, i) => {
+      const d = new Date(Date.UTC(2025, 0, 1 + i));
+      return d.toISOString().slice(0, 10);
+    });
+    const closes = dates.map((_, i) => 50 + i * 0.18 + Math.sin(i * 0.25) * 1.4);
+    const benchCloses = dates.map((_, i) => 1200 + i * 1.1 + Math.cos(i * 0.2) * 12);
+
+    const t0 = performance.now();
+    const resReal = executeBacktest(strat as any, { fast: 10, slow: 30, trail: 0.08 }, 100_000_000, {
+      symbol: "FPT",
+      dates,
+      closes,
+      benchCloses,
+    });
+    const elapsedMs = performance.now() - t0;
+    assert.ok(elapsedMs < 500, `Backtest took ${elapsedMs.toFixed(1)}ms`);
+    assert.ok(Number.isFinite(resReal.metrics.totalReturn));
+    assert.ok(Number.isFinite(resReal.metrics.sharpe));
+    assert.ok(resReal.equityCurve.length >= 40);
+    assert.deepEqual(
+      resReal.monthlyTable.map((m) => m.year),
+      [2025],
+      "Real OHLCV mode should only build monthly table rows for actual dates",
+    );
+  });
+
+  // ==========================================================================
+  // 9. Stock Screener Quant Score Unification & Quant Filter Enforcement
+  // ==========================================================================
+  it("PHASE3-SCREENER-QUANT: enforces maxT2VaR95, minKellyPct, maxBeta, excludeCeilingTrap & regime telemetry", async () => {
+    const res = await queryScreenerStocks({
+      minQuantScore: 55,
+      maxT2VaR95: 12,
+      minKellyPct: 1,
+      maxBeta: 1.8,
+      excludeCeilingTrap: true,
+      limit: 20,
+    });
+    assert.ok(Array.isArray(res.items));
+    for (const item of res.items) {
+      assert.ok((item.quantEdgeScore ?? 0) >= 55);
+      assert.ok(item.t2VaR95Pct != null && item.t2VaR95Pct <= 12);
+      assert.ok(item.halfKellyPct != null && item.halfKellyPct >= 1);
+      assert.ok(item.beta != null && item.beta <= 1.8);
+      assert.ok(!item.isCeilingTrap);
+      assert.ok(item.quantRegime != null);
+    }
   });
 });
