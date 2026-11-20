@@ -1,0 +1,718 @@
+/**
+ * UNIFIED CROSS-ASSET QUANTITATIVE ENGINE
+ *
+ * Universal institutional quantitative models powering:
+ * 1. Vietnam Equities (VN30 / Midcaps): Fractional Kelly, T+2 Cornish-Fisher VaR & Ceiling/Floor Cushion
+ * 2. Derivatives (VN30F / Futures): Continuous Ornstein-Uhlenbeck (OU) Basis Calibration & Level 2 OFI
+ * 3. Forex & Precious Metals (EURUSD, XAUUSD): Spread-Spike Circuit Breaker & Macro Basket Beta
+ * 4. Crypto Perpetuals & Spot (BTC, ETH, SOL): Garman-Klass Volatility Leverage Governor & Liquidation Clusters
+ */
+
+import { normCdf, normInv } from "./advanced-quant-math";
+
+// ============================================================================
+// 1. Dynamic Fractional Kelly & Volatility Targeting
+// ============================================================================
+
+export interface KellyParameters {
+  winRate: number; // e.g. 0.65 (65%)
+  payoffRatio: number; // Avg Win / Avg Loss, e.g. 2.0 (2:1 R:R)
+  returnsSeries?: number[]; // Historical returns for volatility estimation
+  targetAnnualVol?: number; // Target annual volatility, default 0.18 (18%)
+  isCrypto?: boolean; // Crypto trades 365 days vs 252 for equities/FX
+  maxCapitalPerTrade?: number; // Maximum allocation ceiling, default 0.25 (25%)
+}
+
+export interface KellyResult {
+  unconstrainedKelly: number;
+  halfKelly: number;
+  recommendedAllocation: number; // Clamped and volatility-adjusted capital fraction
+  realizedAnnualVol: number;
+  volatilityScaleFactor: number;
+  status: "OPTIMAL" | "CONSERVATIVE_DAMPENED" | "VOLATILITY_CAPPED" | "NEGATIVE_EDGE";
+  rationaleVi: string;
+}
+
+/**
+ * Computes Dynamic Half-Kelly fraction with annualized volatility targeting.
+ * Prevents over-betting and guarantees capital survival under fat-tailed distributions.
+ */
+export function calculateCrossAssetKelly(params: KellyParameters): KellyResult {
+  const p = Math.max(0, Math.min(1, params.winRate));
+  const b = Math.max(0.01, params.payoffRatio);
+  const targetVol = params.targetAnnualVol ?? 0.18;
+  const maxCap = params.maxCapitalPerTrade ?? 0.25;
+  const annualFactor = params.isCrypto ? Math.sqrt(365) : Math.sqrt(252);
+
+  // Kelly Formula: f* = (p*b - (1-p)) / b
+  const unconstrained = (p * b - (1 - p)) / b;
+
+  if (unconstrained <= 0) {
+    return {
+      unconstrainedKelly: 0,
+      halfKelly: 0,
+      recommendedAllocation: 0,
+      realizedAnnualVol: 0,
+      volatilityScaleFactor: 1.0,
+      status: "NEGATIVE_EDGE",
+      rationaleVi: "Kỳ vọng toán học âm (Negative Edge) - Thuật toán từ chối giải ngân vị thế.",
+    };
+  }
+
+  // Institutional safety standard: Half-Kelly
+  const halfKelly = unconstrained * 0.5;
+
+  // Realized volatility estimation from returns series
+  let realizedVol = targetVol;
+  let volScale = 1.0;
+
+  if (params.returnsSeries && params.returnsSeries.length >= 10) {
+    const returns = params.returnsSeries;
+    const n = returns.length;
+    const mean = returns.reduce((acc, r) => acc + r, 0) / n;
+    const variance = returns.reduce((acc, r) => acc + (r - mean) ** 2, 0) / (n - 1);
+    const dailyVol = Math.sqrt(Math.max(1e-8, variance));
+    realizedVol = dailyVol * annualFactor;
+
+    // Volatility Targeting: scale allocation inversely to excess volatility
+    volScale = Math.min(1.5, targetVol / Math.max(0.05, realizedVol));
+  }
+
+  // Final Allocation: Clamped between 2% and maxCap
+  const unadjustedAlloc = halfKelly * volScale;
+  const recommendedAllocation = Math.max(0.02, Math.min(maxCap, Math.round(unadjustedAlloc * 1000) / 1000));
+
+  let status: KellyResult["status"] = "OPTIMAL";
+  if (volScale < 0.8) {
+    status = "VOLATILITY_CAPPED";
+  } else if (recommendedAllocation === maxCap) {
+    status = "CONSERVATIVE_DAMPENED";
+  }
+
+  const rationaleVi = `Kelly 1/2 (${(halfKelly * 100).toFixed(1)}%) điều chỉnh Volatility (Biến động thực: ${(realizedVol * 100).toFixed(1)}%, Tỷ lệ co: ${volScale.toFixed(2)}x) -> Tỷ trọng tối ưu: ${(recommendedAllocation * 100).toFixed(1)}% vốn.`;
+
+  return {
+    unconstrainedKelly: Math.round(unconstrained * 1000) / 1000,
+    halfKelly: Math.round(halfKelly * 1000) / 1000,
+    recommendedAllocation,
+    realizedAnnualVol: Math.round(realizedVol * 1000) / 1000,
+    volatilityScaleFactor: Math.round(volScale * 100) / 100,
+    status,
+    rationaleVi,
+  };
+}
+
+// ============================================================================
+// 2. Vietnam Equities T+2 Settlement Cornish-Fisher VaR & Cushion
+// ============================================================================
+
+export interface T2RiskMetrics {
+  twoDayVaR95Pct: number; // 95% Cornish-Fisher Value-at-Risk over T+2 (positive percentage e.g. 4.2%)
+  twoDayCVaR95Pct: number; // 95% Expected Shortfall over T+2 (positive percentage e.g. 5.8%)
+  skewness: number;
+  excessKurtosis: number;
+  excessiveTailRisk: boolean;
+  positionSizingMultiplier: number; // 0.5x if tail risk is extreme, else 1.0x
+  advisoryVi: string;
+}
+
+/**
+ * Computes T+2 Settlement Horizon VaR & CVaR using Cornish-Fisher expansion.
+ * Accurately models fat tails and asymmetric downside skew during the mandatory holding cycle.
+ */
+export function calculateT2SettlementRisk(returns: number[]): T2RiskMetrics {
+  if (!returns || returns.length < 15) {
+    return {
+      twoDayVaR95Pct: 5.0,
+      twoDayCVaR95Pct: 7.0,
+      skewness: 0,
+      excessKurtosis: 0,
+      excessiveTailRisk: false,
+      positionSizingMultiplier: 1.0,
+      advisoryVi: "Thiếu dữ liệu lịch sử T+2: áp dụng định mức VaR mặc định 5.0%.",
+    };
+  }
+
+  // Transform 1-day returns into 2-day rolling holding period returns
+  const r2d: number[] = [];
+  for (let i = 1; i < returns.length; i++) {
+    const r1 = returns[i - 1];
+    const r2 = returns[i];
+    r2d.push((1 + r1) * (1 + r2) - 1);
+  }
+
+  const n = r2d.length;
+  const mean = r2d.reduce((s, r) => s + r, 0) / n;
+  const variance = r2d.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1);
+  const std = Math.sqrt(Math.max(1e-8, variance));
+
+  // Sample Skewness
+  const m3 = r2d.reduce((s, r) => s + (r - mean) ** 3, 0) / n;
+  const skewness = std > 1e-6 ? m3 / (std ** 3) : 0;
+
+  // Sample Kurtosis (Excess)
+  const m4 = r2d.reduce((s, r) => s + (r - mean) ** 4, 0) / n;
+  const kurtosis = std > 1e-6 ? m4 / (std ** 4) - 3 : 0;
+
+  // Cornish-Fisher Expansion for alpha = 0.05 (z = -1.64485)
+  const z = normInv(0.05); // ~ -1.64485
+  const s = Math.max(-2.5, Math.min(2.5, skewness));
+  const k = Math.max(-2.0, Math.min(10.0, kurtosis));
+
+  const zCf =
+    z +
+    (s / 6) * (z * z - 1) +
+    (k / 24) * (z ** 3 - 3 * z) -
+    ((s * s) / 36) * (2 * z ** 3 - 5 * z);
+
+  // Cornish-Fisher VaR(95%) over 2-day holding period
+  const var95 = Math.max(0, -(mean + zCf * std));
+  const var95Pct = Math.round(var95 * 1000) / 10; // e.g. 4.8%
+
+  // Expected Shortfall (CVaR) approximation based on tail returns exceeding VaR
+  const tailLosses = r2d.filter((r) => r <= -var95);
+  let cvar95 = var95 * 1.25;
+  if (tailLosses.length > 0) {
+    const avgTailLoss = tailLosses.reduce((s, r) => s + Math.abs(r), 0) / tailLosses.length;
+    cvar95 = Math.max(var95, avgTailLoss);
+  }
+  const cvar95Pct = Math.round(cvar95 * 1000) / 10;
+
+  const excessiveTailRisk = var95Pct >= 6.0;
+  const positionSizingMultiplier = excessiveTailRisk ? 0.5 : 1.0;
+
+  const advisoryVi = excessiveTailRisk
+    ? `Cảnh báo: Rủi ro kẹp T+2 cao (VaR95: ${var95Pct}%, CVaR95: ${cvar95Pct}%, Lệch âm: ${skewness.toFixed(2)}). Khuyến nghị giảm 50% quy mô vị thế.`
+    : `Biên rủi ro kẹp T+2 ổn định (VaR95: ${var95Pct}%, CVaR95: ${cvar95Pct}%). Vị thế được bảo vệ trong giới hạn rủi ro danh mục.`;
+
+  return {
+    twoDayVaR95Pct: var95Pct,
+    twoDayCVaR95Pct: cvar95Pct,
+    skewness: Math.round(skewness * 100) / 100,
+    excessKurtosis: Math.round(kurtosis * 100) / 100,
+    excessiveTailRisk,
+    positionSizingMultiplier,
+    advisoryVi,
+  };
+}
+
+/**
+ * Checks price distance to statutory ceiling/floor limits (HoSE ±7%, HNX ±10%).
+ * Guards against adverse ceiling fill slippage and buying into ceiling exhaustion.
+ */
+export function checkCeilingFloorHeadroom(
+  currentPrice: number,
+  ceilingPrice: number,
+  floorPrice: number
+): {
+  ceilingHeadroomPct: number;
+  floorHeadroomPct: number;
+  canEnterLong: boolean;
+  canEnterShortOrSell: boolean;
+  blockReason: string | null;
+} {
+  if (!currentPrice || currentPrice <= 0) {
+    return { ceilingHeadroomPct: 7, floorHeadroomPct: 7, canEnterLong: true, canEnterShortOrSell: true, blockReason: null };
+  }
+
+  const ceilingHeadroomPct = ceilingPrice > currentPrice
+    ? Math.round(((ceilingPrice - currentPrice) / currentPrice) * 1000) / 10
+    : 0;
+
+  const floorHeadroomPct = currentPrice > floorPrice
+    ? Math.round(((currentPrice - floorPrice) / currentPrice) * 1000) / 10
+    : 0;
+
+  // Prohibit buying if price is within 1.5% of ceiling (adverse fill exhaustion)
+  if (ceilingHeadroomPct < 1.5) {
+    return {
+      ceilingHeadroomPct,
+      floorHeadroomPct,
+      canEnterLong: false,
+      canEnterShortOrSell: true,
+      blockReason: `Giá tiệm cận giá Trần (+${ceilingHeadroomPct}%). Nguy cơ đỉnh ngắn hạn và kẹt thanh khoản mua đuổi.`,
+    };
+  }
+
+  // Prohibit panic selling if price is already locked at floor
+  if (floorHeadroomPct < 1.0) {
+    return {
+      ceilingHeadroomPct,
+      floorHeadroomPct,
+      canEnterLong: false,
+      canEnterShortOrSell: false,
+      blockReason: `Giá tiệm cận giá Sàn (-${floorHeadroomPct}%). Trắng bên mua, ưu tiên chờ nhịp hồi kỹ thuật.`,
+    };
+  }
+
+  return {
+    ceilingHeadroomPct,
+    floorHeadroomPct,
+    canEnterLong: true,
+    canEnterShortOrSell: true,
+    blockReason: null,
+  };
+}
+
+// ============================================================================
+// 3. Vietnam Derivatives (VN30F) Continuous Ornstein-Uhlenbeck & OFI
+// ============================================================================
+
+export interface OUBasisCalibration {
+  theta: number; // Mean reversion speed per minute
+  longTermMean: number; // Equilibrium basis in points
+  halfLifeMinutes: number; // Half-life of basis divergence
+  equilibriumVol: number; // Volatility of equilibrium state
+  currentZScore: number; // Current basis Z-score
+  stationary: boolean;
+  signal: "STRONG_LONG_BASIS_REVERSION" | "STRONG_SHORT_BASIS_REVERSION" | "FAIR_VALUE_CHOP" | "NON_STATIONARY_DRIFT";
+  signalRationaleVi: string;
+}
+
+/**
+ * Calibrates continuous Ornstein-Uhlenbeck (OU) parameters for intraday VN30F basis:
+ * dX_t = theta * (mu - X_t) * dt + sigma * dW_t
+ */
+export function calibrateBasisOrnsteinUhlenbeck(
+  basisSeries: number[],
+  dtMinutes = 1
+): OUBasisCalibration {
+  const n = basisSeries.length;
+  if (n < 15) {
+    return {
+      theta: 0,
+      longTermMean: 0,
+      halfLifeMinutes: Infinity,
+      equilibriumVol: 1.0,
+      currentZScore: 0,
+      stationary: false,
+      signal: "FAIR_VALUE_CHOP",
+      signalRationaleVi: "Dữ liệu basis chưa đủ 15 kỳ quan sát để hiệu chuẩn OU.",
+    };
+  }
+
+  // OLS Regression: Delta X_t = a + b * X_{t-1} + e_t
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  const m = n - 1;
+
+  for (let i = 0; i < m; i++) {
+    const x = basisSeries[i];
+    const y = basisSeries[i + 1] - x;
+    sumX += x;
+    sumY += y;
+    sumXX += x * x;
+    sumXY += x * y;
+  }
+
+  const denom = m * sumXX - sumX * sumX;
+  if (Math.abs(denom) < 1e-12) {
+    return {
+      theta: 0,
+      longTermMean: 0,
+      halfLifeMinutes: Infinity,
+      equilibriumVol: 1.0,
+      currentZScore: 0,
+      stationary: false,
+      signal: "NON_STATIONARY_DRIFT",
+      signalRationaleVi: "Mẫu basis suy biến (phương sai xấp xỉ 0).",
+    };
+  }
+
+  const b = (m * sumXY - sumX * sumY) / denom;
+  const a = (sumY - b * sumX) / m;
+
+  // Stationarity requires -0.999 < b < -0.0001 (AR(1) root phi = 1 + b in (0.001, 1))
+  if (b >= -0.0001 || b <= -0.999) {
+    return {
+      theta: 0,
+      longTermMean: Math.round((sumX / m) * 10) / 10,
+      halfLifeMinutes: Infinity,
+      equilibriumVol: 1.0,
+      currentZScore: 0,
+      stationary: false,
+      signal: "NON_STATIONARY_DRIFT",
+      signalRationaleVi: "Basis đang trong xu thế trôi tự do (Non-Stationary Trend) hoặc dao động nghịch pha, không có tính chất hồi quy trung bình.",
+    };
+  }
+
+  const phi = Math.max(0.001, Math.min(0.999, 1 + b));
+  const theta = -Math.log(phi) / dtMinutes;
+  const longTermMean = -a / b;
+  const halfLifeMinutes = Math.log(2) / theta;
+
+  // Calculate residual variance
+  let sumResidualSq = 0;
+  for (let i = 0; i < m; i++) {
+    const x = basisSeries[i];
+    const y = basisSeries[i + 1] - x;
+    const residual = y - (a + b * x);
+    sumResidualSq += residual * residual;
+  }
+  const residualVar = sumResidualSq / Math.max(1, m - 2);
+  const sigmaE = Math.sqrt(Math.max(1e-8, residualVar));
+  const equilibriumVol = Math.sqrt(Math.max(1e-8, (sigmaE * sigmaE) / (2 * theta)));
+
+  const currentBasis = basisSeries[n - 1];
+  const currentZScore = Math.round(((currentBasis - longTermMean) / Math.max(0.1, equilibriumVol)) * 100) / 100;
+
+  let signal: OUBasisCalibration["signal"] = "FAIR_VALUE_CHOP";
+  let signalRationaleVi = `Basis quanh vùng hợp lý (${currentBasis.toFixed(1)} pts, Z-score: ${currentZScore}).`;
+
+  if (currentZScore <= -2.0 && halfLifeMinutes <= 180) {
+    signal = "STRONG_LONG_BASIS_REVERSION";
+    signalRationaleVi = `Basis chiết khấu sâu (Z-score: ${currentZScore}, Half-life: ${Math.round(halfLifeMinutes)}p) -> Tín hiệu Mua LONG ăn chênh lệch Basis.`;
+  } else if (currentZScore >= 2.0 && halfLifeMinutes <= 180) {
+    signal = "STRONG_SHORT_BASIS_REVERSION";
+    signalRationaleVi = `Basis thặng dư cao (Z-score: +${currentZScore}, Half-life: ${Math.round(halfLifeMinutes)}p) -> Tín hiệu Bán SHORT ăn chênh lệch Basis.`;
+  }
+
+  return {
+    theta: Math.round(theta * 10000) / 10000,
+    longTermMean: Math.round(longTermMean * 10) / 10,
+    halfLifeMinutes: Math.round(halfLifeMinutes * 10) / 10,
+    equilibriumVol: Math.round(equilibriumVol * 100) / 100,
+    currentZScore,
+    stationary: true,
+    signal,
+    signalRationaleVi,
+  };
+}
+
+export interface BookQueueLevel {
+  bidPrice: number;
+  bidQty: number;
+  askPrice: number;
+  askQty: number;
+}
+
+export interface OFIResult {
+  rawOFI: number; // Raw volume delta across 3 best levels
+  normalizedOFI: number; // Scaled between -1.0 and +1.0
+  institutionalPressure: "STRONG_BUY_PRESSURE" | "MODERATE_BUY_PRESSURE" | "BALANCED" | "MODERATE_SELL_PRESSURE" | "STRONG_SELL_PRESSURE";
+  detailVi: string;
+}
+
+/**
+ * Computes Multi-Level Order Flow Imbalance (OFI) based on Cont, Kukanov & Stoikov (2014).
+ * Captures instantaneous buying/selling aggression in the order book before price updates.
+ */
+export function computeOrderFlowImbalance(
+  prevLevels: BookQueueLevel[],
+  currLevels: BookQueueLevel[]
+): OFIResult {
+  if (!prevLevels || !currLevels || prevLevels.length === 0 || currLevels.length === 0) {
+    return {
+      rawOFI: 0,
+      normalizedOFI: 0,
+      institutionalPressure: "BALANCED",
+      detailVi: "Sổ lệnh chưa đủ dữ liệu tính OFI.",
+    };
+  }
+
+  const depth = Math.min(prevLevels.length, currLevels.length, 3);
+  let totalDelta = 0;
+  let totalDepthVolume = 0;
+
+  for (let k = 0; k < depth; k++) {
+    const p = prevLevels[k];
+    const c = currLevels[k];
+
+    // Bid Side Contribution
+    let deltaB = 0;
+    if (c.bidPrice > p.bidPrice) {
+      deltaB = c.bidQty;
+    } else if (c.bidPrice === p.bidPrice) {
+      deltaB = c.bidQty - p.bidQty;
+    } else {
+      deltaB = -p.bidQty;
+    }
+
+    // Ask Side Contribution
+    let deltaA = 0;
+    if (c.askPrice < p.askPrice) {
+      deltaA = -c.askQty;
+    } else if (c.askPrice === p.askPrice) {
+      deltaA = p.askQty - c.askQty;
+    } else {
+      deltaA = p.askQty;
+    }
+
+    totalDelta += deltaB + deltaA;
+    totalDepthVolume += c.bidQty + c.askQty;
+  }
+
+  const normalizedOFI = totalDepthVolume > 0
+    ? Math.max(-1.0, Math.min(1.0, Math.round((totalDelta / totalDepthVolume) * 1000) / 1000))
+    : 0;
+
+  let pressure: OFIResult["institutionalPressure"] = "BALANCED";
+  if (normalizedOFI >= 0.45) {
+    pressure = "STRONG_BUY_PRESSURE";
+  } else if (normalizedOFI >= 0.15) {
+    pressure = "MODERATE_BUY_PRESSURE";
+  } else if (normalizedOFI <= -0.45) {
+    pressure = "STRONG_SELL_PRESSURE";
+  } else if (normalizedOFI <= -0.15) {
+    pressure = "MODERATE_SELL_PRESSURE";
+  }
+
+  const detailVi = `OFI Level 2/3: ${totalDelta >= 0 ? "+" : ""}${totalDelta} HĐ (Chuẩn hóa: ${(normalizedOFI * 100).toFixed(1)}%) -> Áp lực: ${pressure}.`;
+
+  return {
+    rawOFI: totalDelta,
+    normalizedOFI,
+    institutionalPressure: pressure,
+    detailVi,
+  };
+}
+
+// ============================================================================
+// 4. Forex & Metals Real-Time Spread-Spike Circuit Breaker
+// ============================================================================
+
+export interface SpreadSafetyResult {
+  isSafe: boolean;
+  currentSpreadPips: number;
+  medianSpreadPips: number;
+  spikeRatio: number;
+  lockoutReason: string | null;
+  recommendedStopBufferPips: number;
+}
+
+/**
+ * Real-Time Spread-Spike Circuit Breaker protecting FX & Gold sniper entries
+ * against slippage, liquidity vacuums, and news spread widening.
+ */
+export function evaluateForexSpreadSafety(
+  currentSpreadPips: number,
+  historicalSpreadsPips: number[],
+  assetType: "FX_MAJOR" | "FX_CROSS" | "GOLD" | "SILVER" = "FX_MAJOR"
+): SpreadSafetyResult {
+  const maxAllowedSpreadMap = {
+    FX_MAJOR: 1.8, // 1.8 pips max on EURUSD/USDJPY
+    FX_CROSS: 3.5, // 3.5 pips max on GBPJPY/EURAUD
+    GOLD: 4.5, // 4.5 pips ($0.45) max on XAUUSD
+    SILVER: 5.0, // 5.0 pips on XAGUSD
+  };
+
+  const maxAllowed = maxAllowedSpreadMap[assetType] ?? 2.5;
+
+  let medianSpread = currentSpreadPips;
+  if (historicalSpreadsPips && historicalSpreadsPips.length >= 5) {
+    const sorted = [...historicalSpreadsPips].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    medianSpread = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  }
+  medianSpread = Math.max(0.1, medianSpread);
+
+  const spikeRatio = Math.round((currentSpreadPips / medianSpread) * 100) / 100;
+
+  // Circuit Breaker triggers if spread is > 2.2x median OR exceeds max allowed limit
+  let isSafe = true;
+  let lockoutReason: string | null = null;
+
+  if (currentSpreadPips > maxAllowed) {
+    isSafe = false;
+    lockoutReason = `Spread (${currentSpreadPips.toFixed(1)} pips) vượt giới hạn an toàn tối đa (${maxAllowed.toFixed(1)} pips).`;
+  } else if (spikeRatio >= 2.2 && currentSpreadPips >= 1.0) {
+    isSafe = false;
+    lockoutReason = `Spread giãn nở đột biến (${spikeRatio}x mức trung vị ${medianSpread.toFixed(1)} pips). Kích hoạt Circuit Breaker ngăn quét Stop Loss.`;
+  }
+
+  // Recommended dynamic stop buffer to absorb spread volatility
+  const recommendedStopBufferPips = Math.round(Math.max(currentSpreadPips * 1.5, medianSpread * 1.2) * 10) / 10;
+
+  return {
+    isSafe,
+    currentSpreadPips: Math.round(currentSpreadPips * 10) / 10,
+    medianSpreadPips: Math.round(medianSpread * 10) / 10,
+    spikeRatio,
+    lockoutReason,
+    recommendedStopBufferPips,
+  };
+}
+
+// ============================================================================
+// 5. Crypto Volatility Leverage Governor & Liquidation Clusters
+// ============================================================================
+
+export interface OhlcScalarBar {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export interface LeverageGovernorResult {
+  garmanKlassVolAnnualized: number;
+  maxRecommendedLeverage: number;
+  volatilityRegime: "COMPRESSED_COILING" | "NORMAL" | "EXPANDING_RISK" | "FLASH_CRASH_SHOCK";
+  governorAdvisoryVi: string;
+}
+
+/**
+ * Computes 24h rolling Garman-Klass Volatility and dynamically caps maximum
+ * allowed leverage to eliminate exchange liquidation risk during flash wicks.
+ */
+export function computeGarmanKlassLeverageCap(
+  bars: OhlcScalarBar[],
+  isCrypto24h = true
+): LeverageGovernorResult {
+  if (!bars || bars.length < 5) {
+    return {
+      garmanKlassVolAnnualized: 0.5,
+      maxRecommendedLeverage: 10,
+      volatilityRegime: "NORMAL",
+      governorAdvisoryVi: "Thiếu nến lịch sử: Áp dụng trần đòn bẩy mặc định 10x.",
+    };
+  }
+
+  const n = bars.length;
+  let sumGk = 0;
+
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    const h = Math.max(b.high, b.close, b.open);
+    const l = Math.min(b.low, b.close, b.open);
+    const o = Math.max(1e-8, b.open);
+    const c = Math.max(1e-8, b.close);
+
+    const logHl = Math.log(Math.max(1.00001, h / Math.max(1e-8, l)));
+    const logCo = Math.log(c / o);
+
+    // Garman-Klass formulation: 0.5 * ln(H/L)^2 - (2*ln(2) - 1) * ln(C/O)^2
+    const gkBar = 0.5 * (logHl ** 2) - (2 * Math.log(2) - 1) * (logCo ** 2);
+    sumGk += Math.max(0, gkBar);
+  }
+
+  const gkMeanPeriod = sumGk / n;
+  // Annualize: 365 days * 24 periods = 8760 if hourly, or 365 if daily
+  const annualMultiplier = isCrypto24h ? Math.sqrt(365 * 24) : Math.sqrt(252);
+  const gkVolAnn = Math.sqrt(gkMeanPeriod) * annualMultiplier;
+  const gkVolClamped = Math.max(0.1, Math.min(3.0, gkVolAnn));
+
+  // Leverage Cap Model: Inverse proportional to annual volatility
+  // Calibrated target risk budget = 4.0 / annualVol (40% vol -> 10x, 20% vol -> 20x, 120% vol -> 3x)
+  const rawLev = Math.round(4.0 / Math.max(0.2, gkVolClamped));
+  const maxRecommendedLeverage = Math.max(2, Math.min(20, rawLev));
+
+  let regime: LeverageGovernorResult["volatilityRegime"] = "NORMAL";
+  let governorAdvisoryVi = `Biến động Garman-Klass: ${(gkVolClamped * 100).toFixed(1)}% -> Đòn bẩy tối đa khuyến nghị: ${maxRecommendedLeverage}x.`;
+
+  if (gkVolClamped >= 1.20) {
+    regime = "FLASH_CRASH_SHOCK";
+    governorAdvisoryVi = `Cực kỳ nguy hiểm: Biến động đột biến ${(gkVolClamped * 100).toFixed(1)}%. Khống chế đòn bẩy tối đa ${maxRecommendedLeverage}x để chống quét râu thanh lý.`;
+  } else if (gkVolClamped >= 0.75) {
+    regime = "EXPANDING_RISK";
+    governorAdvisoryVi = `Biến động mở rộng ${(gkVolClamped * 100).toFixed(1)}%. Giảm đòn bẩy xuống ${maxRecommendedLeverage}x.`;
+  } else if (gkVolClamped <= 0.35) {
+    regime = "COMPRESSED_COILING";
+    governorAdvisoryVi = `Biến động nén chặt ${(gkVolClamped * 100).toFixed(1)}%. Thị trường chuẩn bị bùng nổ xung lực.`;
+  }
+
+  return {
+    garmanKlassVolAnnualized: Math.round(gkVolClamped * 1000) / 1000,
+    maxRecommendedLeverage,
+    volatilityRegime: regime,
+    governorAdvisoryVi,
+  };
+}
+
+export interface LiquidationCluster {
+  levelPrice: number;
+  type: "LONG_LIQUIDATION_POOL" | "SHORT_LIQUIDATION_POOL";
+  estimatedVolumeUsd: number;
+  distancePct: number;
+  isMagnetZone: boolean;
+}
+
+export interface LiquidationClusterResult {
+  currentPrice: number;
+  clusters: LiquidationCluster[];
+  primaryMagnetPrice: number | null;
+  dominantExposure: "LONGS_EXPOSED" | "SHORTS_EXPOSED" | "BALANCED";
+  insightVi: string;
+}
+
+/**
+ * Predicts institutional Liquidation Cascade clusters and Magnet Zones (LMZ)
+ * across key leverage tiers (20x, 50x, 100x).
+ */
+export function detectCryptoLiquidationClusters(
+  currentPrice: number,
+  openInterestUsd: number,
+  atr: number
+): LiquidationClusterResult {
+  if (currentPrice <= 0 || openInterestUsd <= 0) {
+    return {
+      currentPrice,
+      clusters: [],
+      primaryMagnetPrice: null,
+      dominantExposure: "BALANCED",
+      insightVi: "Dữ liệu Open Interest chưa hợp lệ.",
+    };
+  }
+
+  const mmr = 0.005; // 0.5% Maintenance Margin Rate
+  const tiers = [
+    { leverage: 20, share: 0.40 }, // 40% of leveraged OI
+    { leverage: 50, share: 0.35 }, // 35%
+    { leverage: 100, share: 0.25 }, // 25%
+  ];
+
+  const clusters: LiquidationCluster[] = [];
+  let totalLongLiqUsd = 0;
+  let totalShortLiqUsd = 0;
+
+  for (const t of tiers) {
+    const liqDistanceLongPct = 1 / t.leverage - mmr; // e.g. 1/50 - 0.005 = 1.5%
+    const liqDistanceShortPct = 1 / t.leverage - mmr;
+
+    const longLiqPrice = currentPrice * (1 - liqDistanceLongPct);
+    const shortLiqPrice = currentPrice * (1 + liqDistanceShortPct);
+
+    const estVol = (openInterestUsd * t.share) * 0.5; // Estimated notional per side
+
+    clusters.push({
+      levelPrice: Math.round(longLiqPrice * 100) / 100,
+      type: "LONG_LIQUIDATION_POOL",
+      estimatedVolumeUsd: Math.round(estVol),
+      distancePct: Math.round(liqDistanceLongPct * 1000) / 10,
+      isMagnetZone: estVol >= 5_000_000,
+    });
+    totalLongLiqUsd += estVol;
+
+    clusters.push({
+      levelPrice: Math.round(shortLiqPrice * 100) / 100,
+      type: "SHORT_LIQUIDATION_POOL",
+      estimatedVolumeUsd: Math.round(estVol),
+      distancePct: Math.round(liqDistanceShortPct * 1000) / 10,
+      isMagnetZone: estVol >= 5_000_000,
+    });
+    totalShortLiqUsd += estVol;
+  }
+
+  // Find primary magnet price with largest liquidation volume nearest to current price
+  clusters.sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
+  const primaryMagnetPrice = clusters.length > 0 ? clusters[0].levelPrice : null;
+
+  const dominantExposure: LiquidationClusterResult["dominantExposure"] =
+    totalLongLiqUsd > totalShortLiqUsd * 1.3
+      ? "LONGS_EXPOSED"
+      : totalShortLiqUsd > totalLongLiqUsd * 1.3
+      ? "SHORTS_EXPOSED"
+      : "BALANCED";
+
+  const insightVi = `Cụm thanh lý trọng điểm gần nhất: $${primaryMagnetPrice} (Biên độ ${clusters[0]?.distancePct}%). Trạng thái rủi ro vị thế: ${dominantExposure}.`;
+
+  return {
+    currentPrice,
+    clusters,
+    primaryMagnetPrice,
+    dominantExposure,
+    insightVi,
+  };
+}

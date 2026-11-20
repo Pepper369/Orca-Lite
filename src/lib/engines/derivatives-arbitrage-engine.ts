@@ -1,5 +1,9 @@
 import { getVnIndices } from "../services/stocks";
 import { getDerivativeContractDetail } from "../services/derivatives";
+import {
+  calibrateBasisOrnsteinUhlenbeck,
+  type OUBasisCalibration,
+} from "./unified-cross-asset-quant";
 
 export interface DerivativesArbitrageSignal {
   symbol: string;
@@ -18,6 +22,7 @@ export interface DerivativesArbitrageSignal {
     description: string;
     expectedGainPts: number;
   };
+  ouCalibration?: OUBasisCalibration;
   daysToExpiry: number;
   expiryDateStr: string;
   updatedAt: string;
@@ -75,7 +80,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   ]);
 }
 
-export async function getDerivativesArbitrageSignal(symbol = "VN30F1M"): Promise<DerivativesArbitrageSignal> {
+export async function getDerivativesArbitrageSignal(
+  symbol = "VN30F1M",
+  historicalBasisSeries?: number[]
+): Promise<DerivativesArbitrageSignal> {
   const sym = symbol.toUpperCase();
 
   // 1. Fetch live quotes concurrently with strict timeouts
@@ -132,6 +140,12 @@ export async function getDerivativesArbitrageSignal(symbol = "VN30F1M"): Promise
     stateDescription = "Thị trường ở trạng thái Backwardation nhẹ, nhà đầu tư cẩn trọng trước các biến động ngắn hạn.";
   }
 
+  // Continuous Ornstein-Uhlenbeck (OU) Mean-Reversion Calibration
+  let ouCalibration: OUBasisCalibration | undefined;
+  if (historicalBasisSeries && historicalBasisSeries.length >= 15) {
+    ouCalibration = calibrateBasisOrnsteinUhlenbeck(historicalBasisSeries, 1);
+  }
+
   return {
     symbol: sym,
     underlyingSymbol: "VN30",
@@ -149,6 +163,7 @@ export async function getDerivativesArbitrageSignal(symbol = "VN30F1M"): Promise
       description,
       expectedGainPts,
     },
+    ouCalibration,
     daysToExpiry: days,
     expiryDateStr: dateStr,
     updatedAt: new Date().toISOString(),

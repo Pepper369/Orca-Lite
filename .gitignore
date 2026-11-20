@@ -39,6 +39,8 @@ CLAUDE.md
 
 # Graphify output
 graphify-out/
+test-results/
+playwright-report/
 
 # Local LLM / GGUF weights & binaries (never push >100MB binaries to GitHub)
 models/*.gguf

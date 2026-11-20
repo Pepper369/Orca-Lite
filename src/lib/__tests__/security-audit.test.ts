@@ -104,3 +104,21 @@ test("Security Audit: SSRF Guard blocks internal, metadata, loopback, and non-ma
     assert.equal(res.ok, false, `Expected SSRF block for ${url}`);
   }
 });
+
+test("Security Audit: Rate Limiter enforces limit and returns 429 with Retry-After via fallback store", async () => {
+  const { rateLimit } = await import("../rate-limit");
+  const uniqueName = `audit_test_${Date.now()}`;
+  const req = new Request("https://orca.local/api/v1/test", {
+    headers: { "x-forwarded-for": "203.0.113.42" },
+  });
+
+  const r1 = await rateLimit(req, { name: uniqueName, binding: "RL_AI", limit: 2, windowSec: 60 });
+  const r2 = await rateLimit(req, { name: uniqueName, binding: "RL_AI", limit: 2, windowSec: 60 });
+  const r3 = await rateLimit(req, { name: uniqueName, binding: "RL_AI", limit: 2, windowSec: 60 });
+
+  assert.equal(r1, null);
+  assert.equal(r2, null);
+  assert.ok(r3 instanceof Response);
+  assert.equal(r3.status, 429);
+  assert.ok(Number(r3.headers.get("Retry-After")) >= 1);
+});

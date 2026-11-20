@@ -19,6 +19,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "tsx --conditions=react-server --test src/lib/__tests__/pillar*.test.ts src/lib/__tests__/security-audit.test.ts",
+    "test:all": "tsx --conditions=react-server --test src/lib/__tests__/*.test.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

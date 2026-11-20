@@ -1,7 +1,7 @@
 {
-  "feature": "002-core-algorithm-moneyflow-purification",
-  "specDir": "specs/002-core-algorithm-moneyflow-purification",
-  "title": "Project-Wide Core Algorithm, Numerical Precision & Money-Flow Purification",
+  "feature": "003-unified-cross-asset-quant-enhancement",
+  "specDir": "specs/003-unified-cross-asset-quant-enhancement",
+  "title": "Unified Cross-Asset Quantitative Trading Architecture: Equities, Derivatives, Forex & Crypto",
   "status": "planned",
-  "updatedAt": "2026-11-20T09:30:00+07:00"
+  "updatedAt": "2026-11-20T11:30:00+07:00"
 }

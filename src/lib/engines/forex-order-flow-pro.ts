@@ -11,6 +11,10 @@
  */
 
 import type { OhlcvBar } from "../types";
+import {
+  evaluateForexSpreadSafety,
+  type SpreadSafetyResult,
+} from "./unified-cross-asset-quant";
 
 export interface VolumeProfileBin {
   price: number;
@@ -101,6 +105,7 @@ export interface InstitutionalFlowSignal {
   };
   lastDelta: number;
   cvdDivergence: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE";
+  spreadSafety?: SpreadSafetyResult;
   summary: string;
 }
 
@@ -593,7 +598,8 @@ export function detectLiquidityPools(pair: string, bars: OhlcvBar[]): {
  */
 export function generateDeepFlowSignal(
   pair: string,
-  bars: OhlcvBar[]
+  bars: OhlcvBar[],
+  spreadOptions?: { currentSpreadPips: number; historicalSpreadsPips?: number[] }
 ): InstitutionalFlowSignal {
   const cleanPair = pair.toUpperCase().replace("/", "").replace("-", "");
   const pip = getPipScale(cleanPair);
@@ -785,6 +791,23 @@ export function generateDeepFlowSignal(
       ? "Khoảng cắt lỗ khá rộng (>35 pips). Khuyến nghị chia nhỏ lệnh thành 2 phần (50% Market, 50% Limit tại VWAP)."
       : "Khoảng cắt lỗ đạt chuẩn Sniper (<25 pips). Đi đúng khối lượng tính toán.";
 
+  let spreadSafety: SpreadSafetyResult | undefined;
+  if (spreadOptions) {
+    const isGold = cleanPair.includes("XAU") || cleanPair.includes("GOLD");
+    const isSilver = cleanPair.includes("XAG") || cleanPair.includes("SILVER");
+    const assetType = isGold ? "GOLD" : isSilver ? "SILVER" : "FX_MAJOR";
+    spreadSafety = evaluateForexSpreadSafety(
+      spreadOptions.currentSpreadPips,
+      spreadOptions.historicalSpreadsPips ?? [],
+      assetType
+    );
+
+    if (!spreadSafety.isSafe && spreadSafety.lockoutReason) {
+      direction = "STAND_ASIDE";
+      rationale.unshift(`[CIRCUIT BREAKER SPREAD] ${spreadSafety.lockoutReason}`);
+    }
+  }
+
   const summary = `Flow Index: ${fii > 0 ? "+" : ""}${fii} (${flowState}) | VPOC: ${profile.vpocPrice >= 100 ? profile.vpocPrice.toFixed(2) : profile.vpocPrice.toFixed(4)} | VWAP: ${vwap.vwap >= 100 ? vwap.vwap.toFixed(2) : vwap.vwap.toFixed(4)}`;
 
   return {
@@ -811,6 +834,7 @@ export function generateDeepFlowSignal(
     },
     lastDelta,
     cvdDivergence,
+    spreadSafety,
     summary,
   };
 }

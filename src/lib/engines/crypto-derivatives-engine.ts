@@ -9,6 +9,13 @@
  */
 
 import type { OrderBookSnapshot } from "../providers/binance";
+import {
+  computeGarmanKlassLeverageCap,
+  detectCryptoLiquidationClusters,
+  type LeverageGovernorResult,
+  type LiquidationClusterResult,
+  type OhlcScalarBar,
+} from "./unified-cross-asset-quant";
 
 export interface CryptoDomLevel {
   level: number;
@@ -40,6 +47,8 @@ export interface CryptoDerivativesMetrics {
     nearestSellWallPrice: number | null;
   };
   squeezeRiskScore: number; // 0 to 100
+  leverageGovernor?: LeverageGovernorResult;
+  liquidationClusters?: LiquidationClusterResult;
   commentary: string;
 }
 
@@ -175,14 +184,24 @@ export function buildCryptoDerivativesMetrics(params: {
   priceChange24hPct?: number;
   oiChange24hPct?: number;
   orderBook: OrderBookSnapshot;
+  recentBars?: OhlcScalarBar[];
+  atr?: number;
 }): CryptoDerivativesMetrics {
-  const { symbol, markPrice, indexPrice, fundingRate, openInterest, priceChange24hPct = 0, oiChange24hPct = 0, orderBook } = params;
+  const { symbol, markPrice, indexPrice, fundingRate, openInterest, priceChange24hPct = 0, oiChange24hPct = 0, orderBook, recentBars, atr } = params;
 
   const fundingAnalysis = analyzeFundingRate(fundingRate);
   const oiState = analyzeOpenInterestTrend(priceChange24hPct, oiChange24hPct);
   const domAnalysis = evaluateTrueLevel2Dom(orderBook, 5);
 
   const openInterestUsd = Math.round(openInterest * markPrice);
+
+  const leverageGovernor = recentBars && recentBars.length >= 5
+    ? computeGarmanKlassLeverageCap(recentBars, true)
+    : undefined;
+
+  const liquidationClusters = openInterestUsd > 0
+    ? detectCryptoLiquidationClusters(markPrice, openInterestUsd, atr ?? markPrice * 0.02)
+    : undefined;
 
   let commentary = "";
   if (fundingAnalysis.fundingBias === "EXTREME_LONG_OVERHEAT") {
@@ -209,6 +228,8 @@ export function buildCryptoDerivativesMetrics(params: {
     oiState,
     orderBook: domAnalysis,
     squeezeRiskScore: fundingAnalysis.squeezeRiskScore,
+    leverageGovernor,
+    liquidationClusters,
     commentary,
   };
 }

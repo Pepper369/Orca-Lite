@@ -5,6 +5,14 @@
  * trong khi biên độ chốt lời mở rộng tối đa lên Trần Kháng Cự (12-25%+), R:R >= 1:3.5.
  */
 
+import {
+  calculateCrossAssetKelly,
+  calculateT2SettlementRisk,
+  checkCeilingFloorHeadroom,
+  type KellyResult,
+  type T2RiskMetrics,
+} from "./unified-cross-asset-quant";
+
 export interface AsymmetricPlanInput {
   last: number;
   atr14?: number | null;
@@ -21,6 +29,10 @@ export interface AsymmetricPlanInput {
   low52w?: number | null;
   volumeRatio20?: number | null;
   trendScore?: number | null;
+  ceilingPrice?: number | null;
+  floorPrice?: number | null;
+  historicalReturns?: number[] | null;
+  winRate?: number | null;
 }
 
 export interface SupportConfluenceCluster {
@@ -47,6 +59,15 @@ export interface AsymmetricPlanResult {
   confluenceBasis: string[];
   currentPriceDiffPct: number; // % chênh lệch giữa Entry vs Giá hiện tại
   actionVerdict: string;
+  t2Risk?: T2RiskMetrics;
+  kellyAllocation?: KellyResult;
+  ceilingFloorCheck?: {
+    ceilingHeadroomPct: number;
+    floorHeadroomPct: number;
+    canEnterLong: boolean;
+    canEnterShortOrSell: boolean;
+    blockReason: string | null;
+  };
 }
 
 /** Làm tròn bước giá chuẩn VN */
@@ -268,6 +289,29 @@ export function computeAsymmetricPlan(input: AsymmetricPlanInput): AsymmetricPla
     `Mục tiêu trần lợi nhuận mở rộng: +${rewardPct}% (Tỷ suất bất đối xứng 1 ăn ${riskReward})`,
   ];
 
+  // T+2 Risk & Cornish-Fisher VaR assessment
+  const t2Risk = input.historicalReturns && input.historicalReturns.length >= 10
+    ? calculateT2SettlementRisk(input.historicalReturns)
+    : undefined;
+
+  // Dynamic Half-Kelly Capital Sizing
+  const winRate = input.winRate ?? 0.60;
+  const kellyAllocation = calculateCrossAssetKelly({
+    winRate,
+    payoffRatio: riskReward,
+    returnsSeries: input.historicalReturns ?? undefined,
+    isCrypto: false,
+  });
+
+  // Boundary Ceiling/Floor Headroom Check
+  let ceilingFloorCheck: AsymmetricPlanResult["ceilingFloorCheck"];
+  if (input.ceilingPrice && input.floorPrice) {
+    ceilingFloorCheck = checkCeilingFloorHeadroom(last, input.ceilingPrice, input.floorPrice);
+    if (!ceilingFloorCheck.canEnterLong && ceilingFloorCheck.blockReason) {
+      actionVerdict = `[CHẶN MUA THEO QUY TẮC RỦI RO BIÊN ĐỘ] ${ceilingFloorCheck.blockReason}`;
+    }
+  }
+
   return {
     entry: optimalEntry,
     entryZone: [entryMin, entryMax],
@@ -285,5 +329,8 @@ export function computeAsymmetricPlan(input: AsymmetricPlanInput): AsymmetricPla
     confluenceBasis,
     currentPriceDiffPct,
     actionVerdict,
+    t2Risk,
+    kellyAllocation,
+    ceilingFloorCheck,
   };
 }
