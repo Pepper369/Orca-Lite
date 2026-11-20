@@ -1,6 +1,6 @@
 import "server-only";
 import { buildMeta } from "../freshness";
-import { sma } from "../technical";
+import { scalarSmaAt, scalarPctReturn, scalarAvgVolume } from "../engines/unified-ta-kernel";
 import { getVnQuotes } from "./stocks";
 import { LIQUID_BOARD } from "../providers/public-vn-feed";
 import { batchVnOhlcv } from "./ohlcv-batch";
@@ -80,32 +80,19 @@ export const CRITERION_LABELS_VI: Record<keyof MinerviniCriteria, string> = {
 };
 
 function lastSma(closes: number[], period: number): number | null {
-  if (closes.length < period) return null;
-  const series = sma(closes, period);
-  const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : v;
+  return scalarSmaAt(closes, period, 0);
 }
 
 function smaAt(closes: number[], period: number, offsetFromEnd: number): number | null {
-  if (closes.length < period + offsetFromEnd) return null;
-  const slice = closes.slice(0, closes.length - offsetFromEnd);
-  if (slice.length < period) return null;
-  return lastSma(slice, period);
+  return scalarSmaAt(closes, period, offsetFromEnd);
 }
 
 function pctRet(closes: number[], lookback: number): number | null {
-  if (closes.length < lookback + 1) return null;
-  const a = closes[closes.length - 1 - lookback];
-  const b = closes[closes.length - 1];
-  if (a == null || b == null || a <= 0) return null;
-  return ((b - a) / a) * 100;
+  return scalarPctReturn(closes, lookback);
 }
 
 function avgVol(bars: OhlcvBar[], n: number): number | null {
-  if (bars.length < n) return null;
-  const slice = bars.slice(-n);
-  const sum = slice.reduce((s, b) => s + (b.volume ?? 0), 0);
-  return sum / n;
+  return bars.length < n ? null : scalarAvgVolume(bars, n);
 }
 
 interface RawPack {

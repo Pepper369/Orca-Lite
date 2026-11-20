@@ -236,6 +236,99 @@ export function horizonLabelVi(h: InvestmentHorizon): string {
 }
 
 /**
+ * Shared zero-copy adapter converting any stock snapshot/entry into SectorHorizonFlowInputItem.
+ * Eliminates repetitive 65-field object literal mappings across services and API routes.
+ */
+export function toSectorHorizonInput(
+  src: Record<string, any>,
+  overrides?: Partial<SectorHorizonFlowInputItem>,
+): SectorHorizonFlowInputItem {
+  const hasPrecomputed =
+    src.horizonShortScore != null &&
+    src.horizonMediumScore != null &&
+    src.horizonMedLongScore != null &&
+    src.horizonLongScore != null &&
+    src.bestHorizon != null;
+
+  return {
+    symbol: String(src.symbol ?? src.sym ?? "").toUpperCase(),
+    sector: src.sector ?? null,
+    price: src.price ?? null,
+    changePercent: src.changePercent ?? null,
+    volume: src.volume ?? null,
+    turnoverBillion: src.turnoverBillion ?? null,
+    marketCap: src.marketCap ?? null,
+    foreignNetValBillion: src.foreignNetValBillion ?? src.foreignNetVal ?? null,
+    volRatio20: src.volRatio20 ?? null,
+    upDownVolRatio: src.upDownVolRatio ?? null,
+    rsRating: src.rsRating ?? null,
+    rsRating20: src.rsRating20 ?? null,
+    rsTrend: src.rsTrend ?? null,
+    maSignal: src.maSignal ?? null,
+    mtfConsensus: src.mtfConsensus ?? null,
+    isMtfAligned: src.isMtfAligned ?? null,
+    smartMoneyScore: src.smartMoneyScore ?? null,
+    smartMoneySignal: src.smartMoneySignal ?? null,
+    apexQuantScore: src.apexQuantScore ?? null,
+    orcaMasterScore: src.orcaMasterScore ?? null,
+    confluenceScore: src.confluenceScore ?? null,
+    historicalEdgeScore: src.historicalEdgeScore ?? null,
+    isBuyTriggerNow: src.isBuyTriggerNow ?? null,
+    buyZoneStatus: src.buyZoneStatus ?? null,
+    absBuyDiff: src.absBuyDiff ?? null,
+    riskReward: src.riskReward ?? null,
+    isSqueezeFiredBull: src.isSqueezeFiredBull ?? null,
+    isSqueezeOn: src.isSqueezeOn ?? null,
+    isTightCloses: src.isTightCloses ?? null,
+    isVolumeDryUp: src.isVolumeDryUp ?? null,
+    isWyckoffLps: src.isWyckoffLps ?? null,
+    isWyckoffSpring: src.isWyckoffSpring ?? null,
+    ouZScore: src.ouZScore ?? null,
+    ouHalfLife: src.ouHalfLife ?? null,
+    sectorRrgQuadrant: src.sectorRrgQuadrant ?? null,
+    sectorRsRatio: src.sectorRsRatio ?? null,
+    sectorRsMomentum: src.sectorRsMomentum ?? null,
+    roe: src.roe ?? null,
+    roic: src.roic ?? null,
+    roiic3Y: src.roiic3Y ?? null,
+    pe: src.pe ?? null,
+    pb: src.pb ?? null,
+    peg: src.peg ?? null,
+    dividendYield: src.dividendYield ?? null,
+    niYoyPct: src.niYoyPct ?? null,
+    revenueYoyPct: src.revenueYoyPct ?? null,
+    isQuarterlyInflection: src.isQuarterlyInflection ?? null,
+    piotroskiFScore: src.piotroskiFScore ?? null,
+    altmanZone: src.altmanZone ?? null,
+    cfoToNetProfit: src.cfoToNetProfit ?? null,
+    sloanAccrualRatio: src.sloanAccrualRatio ?? null,
+    isBeneishSafe: src.isBeneishSafe ?? null,
+    isNetCash: src.isNetCash ?? null,
+    isMertonSafe: src.isMertonSafe ?? null,
+    mertonDistanceToDefault: src.mertonDistanceToDefault ?? null,
+    isBuffettCompounder: src.isBuffettCompounder ?? null,
+    isSuperCompounder: src.isSuperCompounder ?? null,
+    isDividendAristocrat: src.isDividendAristocrat ?? null,
+    consensusUpsidePct: src.consensusUpsidePct ?? null,
+    reverseDcfMarginPct: src.reverseDcfMarginPct ?? null,
+    bankFairPbGordon: src.bankFairPbGordon ?? null,
+    rnavUpsidePct: src.rnavUpsidePct ?? null,
+    isBrokenSupport: src.isBrokenSupport ?? null,
+    precomputedHorizonScores: hasPrecomputed
+      ? {
+          short1_2w: src.horizonShortScore,
+          medium3w_2m: src.horizonMediumScore,
+          medLong2_6m: src.horizonMedLongScore,
+          long6mPlus: src.horizonLongScore,
+          bestHorizon: src.bestHorizon,
+          bestHorizonVi: src.bestHorizonVi ?? "Đa khung",
+        }
+      : null,
+    ...overrides,
+  };
+}
+
+/**
  * Computes stock-level score for each of the 4 investment horizons (1 - 99).
  */
 export function evaluateStockHorizonScores(item: SectorHorizonFlowInputItem): {

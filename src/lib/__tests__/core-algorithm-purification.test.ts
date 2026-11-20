@@ -478,6 +478,12 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
       calcMacdSnapshot,
       calcBollingerSnapshot,
       calcMfiScalar,
+      scalarSmaAt,
+      scalarEmaLast,
+      scalarAvgVolume,
+      scalarPctReturn,
+      sma,
+      ema,
     } = await import("../engines/unified-ta-kernel");
 
     const bars = makeBars(120, 50, 1_200_000);
@@ -489,6 +495,15 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
     assert.equal(bundle.sma50Series.length, 120);
     assert.equal(bundle.volSma20Series.length, 120);
     assert.ok(bundle.atr14 != null && bundle.atr14 > 0);
+
+    // Verify Zero-Allocation Scalar Primitives match full series exactly
+    const fullSma20 = sma(bundle.closes, 20);
+    const fullEma20 = ema(bundle.closes, 20);
+    assert.ok(Math.abs((scalarSmaAt(bundle.closes, 20, 0) ?? 0) - (fullSma20[119] ?? 0)) < 1e-9);
+    assert.ok(Math.abs((scalarSmaAt(bundle.closes, 20, 3) ?? 0) - (fullSma20[116] ?? 0)) < 1e-9);
+    assert.ok(Math.abs((scalarEmaLast(bundle.closes, 20) ?? 0) - (fullEma20[119] ?? 0)) < 1e-9);
+    assert.ok((scalarAvgVolume(bars, 20) ?? 0) > 0);
+    assert.ok(scalarPctReturn(bundle.closes, 20) != null);
 
     const rsiVal = calcRsiScalar(bundle.closes, 14);
     const macdSnap = calcMacdSnapshot(bundle.closes, 12, 26, 9);

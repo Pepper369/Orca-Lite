@@ -215,40 +215,30 @@ export interface MaCandleConfluenceRow {
   sniperTrigger: SniperBuyTrigger;
 }
 
-function roundPrice(val: number, refPrice: number): number {
-  if (!Number.isFinite(val) || !Number.isFinite(refPrice)) return 0;
-  if (refPrice < 0.05) return +val.toFixed(6);
-  if (refPrice < 2) return +val.toFixed(5);
-  if (refPrice < 20) return +val.toFixed(3);
-  return +val.toFixed(2);
-}
+import {
+  scalarSmaAt,
+  scalarEmaLast,
+  scalarAvgVolume,
+  roundAdaptivePrice as roundPrice,
+} from "./unified-ta-kernel";
 
 function lastSma(closes: number[], period: number): number | null {
-  if (closes.length < period) return null;
-  const series = sma(closes, period);
-  const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
+  const v = scalarSmaAt(closes, period, 0);
+  return v == null ? null : roundPrice(v, v);
 }
 
 function prevSma(closes: number[], period: number, barsAgo = 1): number | null {
-  if (closes.length < period + barsAgo) return null;
-  const series = sma(closes, period);
-  const v = series[series.length - 1 - barsAgo];
-  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
+  const v = scalarSmaAt(closes, period, barsAgo);
+  return v == null ? null : roundPrice(v, v);
 }
 
 function lastEma(closes: number[], period: number): number | null {
-  if (closes.length < period) return null;
-  const series = ema(closes, period);
-  const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : roundPrice(v, v);
+  const v = scalarEmaLast(closes, period);
+  return v == null ? null : roundPrice(v, v);
 }
 
 function avgVol(bars: OhlcvBar[], n = 20): number | null {
-  if (bars.length < n) return null;
-  const slice = bars.slice(-n);
-  const sum = slice.reduce((s, b) => s + (b.volume ?? 0), 0);
-  return sum / n;
+  return bars.length < n ? null : scalarAvgVolume(bars, n);
 }
 
 export function analyzeMaCandleRow(

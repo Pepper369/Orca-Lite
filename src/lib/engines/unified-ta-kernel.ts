@@ -45,6 +45,89 @@ export function lastFinite(arr: (number | null | undefined)[]): number | null {
 }
 
 /**
+ * Zero-allocation O(period) scalar Simple Moving Average at `barsAgo` from the end of `values`.
+ * Eliminates full O(N) array allocations when only single point-in-time SMA values are needed.
+ */
+export function scalarSmaAt(
+  values: number[],
+  period: number,
+  barsAgo = 0,
+  decimals?: number,
+): number | null {
+  const endIdx = values.length - 1 - barsAgo;
+  if (period <= 0 || endIdx < period - 1) return null;
+  let sum = 0;
+  const startIdx = endIdx - period + 1;
+  for (let i = startIdx; i <= endIdx; i++) {
+    sum += values[i]!;
+  }
+  const avg = sum / period;
+  if (!Number.isFinite(avg)) return null;
+  if (decimals != null) {
+    const f = 10 ** decimals;
+    return Math.round(avg * f) / f;
+  }
+  return avg;
+}
+
+/**
+ * Zero-allocation O(N) scalar Exponential Moving Average at the latest bar.
+ */
+export function scalarEmaLast(values: number[], period: number): number | null {
+  if (period <= 0 || values.length < period) return null;
+  const k = 2 / (period + 1);
+  let prev = 0;
+  for (let i = 0; i < period; i++) prev += values[i]!;
+  prev /= period;
+  for (let i = period; i < values.length; i++) {
+    prev = values[i]! * k + prev * (1 - k);
+  }
+  return Number.isFinite(prev) ? prev : null;
+}
+
+/**
+ * Zero-allocation O(period) average volume ending at `endInclusive`.
+ */
+export function scalarAvgVolume(
+  bars: OhlcvBar[],
+  period = 20,
+  endInclusive = bars.length - 1,
+): number | null {
+  if (!bars.length || endInclusive < 0) return null;
+  const end = Math.min(bars.length - 1, endInclusive);
+  const start = Math.max(0, end - period + 1);
+  const count = end - start + 1;
+  if (count <= 0) return null;
+  let sum = 0;
+  for (let i = start; i <= end; i++) {
+    sum += bars[i]?.volume ?? 0;
+  }
+  return sum / count;
+}
+
+/**
+ * Zero-allocation O(1) percentage return over `lookback` bars.
+ */
+export function scalarPctReturn(values: number[], lookback: number): number | null {
+  if (values.length < lookback + 1) return null;
+  const a = values[values.length - 1 - lookback];
+  const b = values[values.length - 1];
+  if (a == null || b == null || a <= 0) return null;
+  return ((b - a) / a) * 100;
+}
+
+/**
+ * Canonical scale-aware price rounding across VN Equities, Forex, and Crypto.
+ */
+export function roundAdaptivePrice(val: number, refPrice = val): number {
+  if (!Number.isFinite(val) || !Number.isFinite(refPrice)) return 0;
+  if (refPrice < 0.05) return +val.toFixed(6);
+  if (refPrice < 2) return +val.toFixed(5);
+  if (refPrice < 20) return +val.toFixed(3);
+  return +val.toFixed(2);
+}
+
+/**
  * Canonical Wilder RSI scalar value (0..100, rounded to 0.1).
  */
 export function calcRsiScalar(values: number[], period = 14, fallback = 50): number {

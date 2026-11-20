@@ -1,6 +1,6 @@
 import "server-only";
 import { buildMeta } from "../freshness";
-import { sma } from "../technical";
+import { scalarSmaAt, scalarAvgVolume } from "../engines/unified-ta-kernel";
 import { getVnQuotes } from "./stocks";
 import { LIQUID_BOARD } from "../providers/public-vn-feed";
 import { batchVnOhlcv } from "./ohlcv-batch";
@@ -137,24 +137,15 @@ export interface MaScreenRow {
 }
 
 function lastSma(closes: number[], period: number): number | null {
-  if (closes.length < period) return null;
-  const series = sma(closes, period);
-  const v = series[series.length - 1];
-  return v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+  return scalarSmaAt(closes, period, 0, 2);
 }
 
 function prevSma(closes: number[], period: number, barsAgo = 1): number | null {
-  if (closes.length < period + barsAgo) return null;
-  const series = sma(closes, period);
-  const v = series[series.length - 1 - barsAgo];
-  return v == null || !Number.isFinite(v) ? null : Number(v.toFixed(2));
+  return scalarSmaAt(closes, period, barsAgo, 2);
 }
 
 function avgVol(bars: OhlcvBar[], n: number): number | null {
-  if (bars.length < n) return null;
-  const slice = bars.slice(-n);
-  const sum = slice.reduce((s, b) => s + (b.volume ?? 0), 0);
-  return sum / n;
+  return bars.length < n ? null : scalarAvgVolume(bars, n);
 }
 
 function analyzeMaRow(symbol: string, bars: OhlcvBar[], quote?: Quote): MaScreenRow | null {

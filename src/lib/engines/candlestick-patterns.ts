@@ -110,11 +110,10 @@ function priorTrend(
   return "sideways";
 }
 
+import { scalarAvgVolume, roundAdaptivePrice } from "./unified-ta-kernel";
+
 function avgVolume(bars: OhlcvBar[], endInclusive: number, n = 20): number {
-  const start = Math.max(0, endInclusive - n + 1);
-  const slice = bars.slice(start, endInclusive + 1);
-  if (!slice.length) return 0;
-  return slice.reduce((a, b) => a + (b.volume ?? 0), 0) / slice.length;
+  return scalarAvgVolume(bars, n, endInclusive) ?? 0;
 }
 
 function avgBody(cs: C[], n = 10): number {
@@ -1125,12 +1124,7 @@ export type CandleTradeSetup = {
   setupQuality: "A+" | "A" | "B";
 };
 
-function roundPrice(val: number, refPrice: number): number {
-  if (!Number.isFinite(val) || !Number.isFinite(refPrice)) return 0;
-  if (refPrice < 2) return +val.toFixed(4);
-  if (refPrice < 20) return +val.toFixed(3);
-  return +val.toFixed(2);
-}
+const roundPrice = roundAdaptivePrice;
 
 export function buildCandleTradeSetup(
   pattern: DetectedCandlePattern,

@@ -101,6 +101,7 @@ import {
 import {
   evaluateStockHorizonScores,
   evaluateMultiHorizonSectorFlow,
+  toSectorHorizonInput,
   type InvestmentHorizon,
   type HorizonFlowSignal,
   type SectorInstitutionalRegime,
@@ -179,6 +180,30 @@ export type ScreenerPreset =
   | "trend_alignment"
   | "garp_growth"
   | "deep_value";
+
+export const ALL_SCREENER_PRESETS: readonly ScreenerPreset[] = [
+  "all", "apex_buy_now", "orca_apex_quant", "historical_edge", "sector_leading",
+  "near_buy_point", "orca_master_elite", "smart_money_inflow", "mtf_candle_cluster",
+  "vsa_no_supply", "rs_leaders", "piotroski_diamonds", "mtf_confluence",
+  "bottom_confluence", "smc_golden_pocket", "flip_zone_retest", "quant_edge",
+  "quant_mean_revert", "quant_low_beta", "quant_asymmetric", "confluence", "vcp",
+  "ttm_squeeze", "canslim", "dividend", "growth", "value", "breakout", "ma_cross",
+  "fa_fortress", "earnings_quality", "magic_formula", "consensus_upside",
+  "tight_closes_vdu", "wyckoff_spring", "vcp_vdu", "canslim_accel",
+  "triple_confluence", "swing_divergence", "beneish_safe", "buffett_compounder",
+  "lynch_fast_grower", "graham_ncav", "cash_conversion_cycle", "dividend_aristocrat",
+  "super_compounder", "book_tax_clean", "mispriced_growth", "merton_safe",
+  "reversal_confluence", "smc_structure", "volatility_breakout", "trend_alignment",
+  "garp_growth", "deep_value",
+];
+
+export function createEmptyPresetsCount(allCount = 0): Record<ScreenerPreset, number> {
+  const out = {} as Record<ScreenerPreset, number>;
+  for (const p of ALL_SCREENER_PRESETS) {
+    out[p] = p === "all" ? allCount : 0;
+  }
+  return out;
+}
 
 export const SCREENER_BIT = {
   SWEET_ZONE: 1 << 0,
@@ -3880,85 +3905,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
 
       // Single-pass Unified Sector Money-Flow & Intra-Sector Ranking (reuses precomputed stock horizon scores)
       const sectorEval = evaluateMultiHorizonSectorFlow(
-        items.map((it) => ({
-          symbol: it.symbol,
-          sector: it.sector,
-          price: it.price,
-          changePercent: it.changePercent,
-          volume: it.volume,
-          marketCap: it.marketCap,
-          foreignNetValBillion: it.foreignNetVal,
-          volRatio20: it.volRatio20,
-          upDownVolRatio: it.upDownVolRatio,
-          rsRating: it.rsRating,
-          rsRating20: it.rsRating20,
-          rsTrend: it.rsTrend,
-          maSignal: it.maSignal,
-          mtfConsensus: it.mtfConsensus,
-          isMtfAligned: it.isMtfAligned,
-          smartMoneyScore: it.smartMoneyScore,
-          smartMoneySignal: it.smartMoneySignal,
-          apexQuantScore: it.apexQuantScore,
-          orcaMasterScore: it.orcaMasterScore,
-          confluenceScore: it.confluenceScore,
-          historicalEdgeScore: it.historicalEdgeScore,
-          isBuyTriggerNow: it.isBuyTriggerNow,
-          buyZoneStatus: it.buyZoneStatus,
-          absBuyDiff: it.absBuyDiff,
-          riskReward: it.riskReward,
-          isSqueezeFiredBull: it.isSqueezeFiredBull,
-          isSqueezeOn: it.isSqueezeOn,
-          isTightCloses: it.isTightCloses,
-          isVolumeDryUp: it.isVolumeDryUp,
-          isWyckoffLps: it.isWyckoffLps,
-          isWyckoffSpring: it.isWyckoffSpring,
-          ouZScore: it.ouZScore,
-          ouHalfLife: it.ouHalfLife,
-          sectorRrgQuadrant: it.sectorRrgQuadrant,
-          sectorRsRatio: it.sectorRsRatio,
-          sectorRsMomentum: it.sectorRsMomentum,
-          roe: it.roe,
-          roic: it.roic,
-          roiic3Y: it.roiic3Y,
-          pe: it.pe,
-          pb: it.pb,
-          peg: it.peg,
-          dividendYield: it.dividendYield,
-          niYoyPct: it.niYoyPct,
-          revenueYoyPct: it.revenueYoyPct,
-          isQuarterlyInflection: it.isQuarterlyInflection,
-          piotroskiFScore: it.piotroskiFScore,
-          altmanZone: it.altmanZone,
-          cfoToNetProfit: it.cfoToNetProfit,
-          sloanAccrualRatio: it.sloanAccrualRatio,
-          isBeneishSafe: it.isBeneishSafe,
-          isNetCash: it.isNetCash,
-          isMertonSafe: it.isMertonSafe,
-          mertonDistanceToDefault: it.mertonDistanceToDefault,
-          isBuffettCompounder: it.isBuffettCompounder,
-          isSuperCompounder: it.isSuperCompounder,
-          isDividendAristocrat: it.isDividendAristocrat,
-          consensusUpsidePct: it.consensusUpsidePct,
-          reverseDcfMarginPct: it.reverseDcfMarginPct,
-          bankFairPbGordon: it.bankFairPbGordon,
-          rnavUpsidePct: it.rnavUpsidePct,
-          isBrokenSupport: it.isBrokenSupport,
-          precomputedHorizonScores:
-            it.horizonShortScore != null &&
-            it.horizonMediumScore != null &&
-            it.horizonMedLongScore != null &&
-            it.horizonLongScore != null &&
-            it.bestHorizon != null
-              ? {
-                  short1_2w: it.horizonShortScore,
-                  medium3w_2m: it.horizonMediumScore,
-                  medLong2_6m: it.horizonMedLongScore,
-                  long6mPlus: it.horizonLongScore,
-                  bestHorizon: it.bestHorizon,
-                  bestHorizonVi: it.bestHorizonVi ?? "Đa khung",
-                }
-              : null,
-        })),
+        items.map((it) => toSectorHorizonInput(it)),
       );
 
       for (const it of items) {
@@ -3984,63 +3931,7 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
       const allSourcesUsed = Array.from(new Set([...quoteProviders, ...valuationProviders]));
 
       // Precompute Presets Count & Sectors Available once during snapshot construction
-      const presetsCount: Record<ScreenerPreset, number> = {
-        all: items.length,
-        apex_buy_now: 0,
-        orca_apex_quant: 0,
-        historical_edge: 0,
-        sector_leading: 0,
-        orca_master_elite: 0,
-        smart_money_inflow: 0,
-        near_buy_point: 0,
-        mtf_candle_cluster: 0,
-        vsa_no_supply: 0,
-        rs_leaders: 0,
-        piotroski_diamonds: 0,
-        mtf_confluence: 0,
-        bottom_confluence: 0,
-        smc_golden_pocket: 0,
-        flip_zone_retest: 0,
-        quant_edge: 0,
-        quant_mean_revert: 0,
-        quant_low_beta: 0,
-        quant_asymmetric: 0,
-        confluence: 0,
-        vcp: 0,
-        ttm_squeeze: 0,
-        canslim: 0,
-        dividend: 0,
-        growth: 0,
-        value: 0,
-        breakout: 0,
-        ma_cross: 0,
-        fa_fortress: 0,
-        earnings_quality: 0,
-        magic_formula: 0,
-        consensus_upside: 0,
-        tight_closes_vdu: 0,
-        wyckoff_spring: 0,
-        vcp_vdu: 0,
-        canslim_accel: 0,
-        triple_confluence: 0,
-        swing_divergence: 0,
-        beneish_safe: 0,
-        buffett_compounder: 0,
-        lynch_fast_grower: 0,
-        graham_ncav: 0,
-        cash_conversion_cycle: 0,
-        dividend_aristocrat: 0,
-        super_compounder: 0,
-        book_tax_clean: 0,
-        mispriced_growth: 0,
-        merton_safe: 0,
-        reversal_confluence: 0,
-        smc_structure: 0,
-        volatility_breakout: 0,
-        trend_alignment: 0,
-        garp_growth: 0,
-        deep_value: 0,
-      };
+      const presetsCount = createEmptyPresetsCount(items.length);
 
       const sectorSet = new Set<string>();
       for (let i = 0; i < items.length; i++) {
@@ -4083,63 +3974,7 @@ function buildSnapshotOutput(
   isCached: boolean,
   isStale: boolean,
 ): MasterSnapshotPayload {
-  const defaultPresetsCount: Record<ScreenerPreset, number> = {
-    all: snapshotData?.items?.length ?? 0,
-    apex_buy_now: 0,
-    orca_apex_quant: 0,
-    historical_edge: 0,
-    sector_leading: 0,
-    orca_master_elite: 0,
-    smart_money_inflow: 0,
-    near_buy_point: 0,
-    mtf_candle_cluster: 0,
-    vsa_no_supply: 0,
-    rs_leaders: 0,
-    piotroski_diamonds: 0,
-    mtf_confluence: 0,
-    bottom_confluence: 0,
-    smc_golden_pocket: 0,
-    flip_zone_retest: 0,
-    quant_edge: 0,
-    quant_mean_revert: 0,
-    quant_low_beta: 0,
-    quant_asymmetric: 0,
-    confluence: 0,
-    vcp: 0,
-    ttm_squeeze: 0,
-    canslim: 0,
-    dividend: 0,
-    growth: 0,
-    value: 0,
-    breakout: 0,
-    ma_cross: 0,
-    fa_fortress: 0,
-    earnings_quality: 0,
-    magic_formula: 0,
-    consensus_upside: 0,
-    tight_closes_vdu: 0,
-    wyckoff_spring: 0,
-    vcp_vdu: 0,
-    canslim_accel: 0,
-    triple_confluence: 0,
-    swing_divergence: 0,
-    beneish_safe: 0,
-    buffett_compounder: 0,
-    lynch_fast_grower: 0,
-    graham_ncav: 0,
-    cash_conversion_cycle: 0,
-    dividend_aristocrat: 0,
-    super_compounder: 0,
-    book_tax_clean: 0,
-    mispriced_growth: 0,
-    merton_safe: 0,
-    reversal_confluence: 0,
-    smc_structure: 0,
-    volatility_breakout: 0,
-    trend_alignment: 0,
-    garp_growth: 0,
-    deep_value: 0,
-  };
+  const defaultPresetsCount = createEmptyPresetsCount(snapshotData?.items?.length ?? 0);
 
   const output: MasterSnapshotPayload = {
     items: snapshotData?.items ?? [],
@@ -4233,8 +4068,8 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
   const snapshot = await getMasterScreenerSnapshot();
   const { items: allItems, sourcesUsed, redundancyInfo, meta, presetsCount, sectorsAvailable, version } = snapshot;
 
-  // L1 Query Result Cache (normalized key)
-  const qKey = `${version}:${params.preset || "all"}:${params.exchange || "ALL"}:${params.sector || ""}:${params.q || ""}:${params.maSignal || "ALL"}:${params.minPrice ?? ""}:${params.maxPrice ?? ""}:${params.minChg ?? ""}:${params.maxChg ?? ""}:${params.minVol ?? ""}:${params.maxVol ?? ""}:${params.minTradingValue ?? ""}:${params.minMarketCap ?? ""}:${params.maxMarketCap ?? ""}:${params.minPe ?? ""}:${params.maxPe ?? ""}:${params.minPb ?? ""}:${params.maxPb ?? ""}:${params.minRoe ?? ""}:${params.maxRoe ?? ""}:${params.minRoa ?? ""}:${params.maxRoa ?? ""}:${params.minDivYield ?? ""}:${params.maxDivYield ?? ""}:${params.maxDe ?? ""}:${params.minQualityScore ?? ""}:${params.minRevenueYoy ?? ""}:${params.minNiYoy ?? ""}:${params.minQuantScore ?? ""}:${params.maxOuZScore ?? ""}:${params.minRiskReward ?? ""}:${params.minOrcaMasterScore ?? ""}:${params.minSmartMoneyScore ?? ""}:${params.minRsRating ?? ""}:${params.minPiotroskiScore ?? ""}:${params.maxBuyDiff ?? ""}:${params.buyZoneStatus || "ALL"}:${params.buyPosition || "ALL"}:${params.volatilityCoil || "ALL"}:${params.vsaPattern || "ALL"}:${params.faProfile || "ALL"}:${params.techPattern || "ALL"}:${params.minRoic ?? ""}:${params.minInterestCoverage ?? ""}:${params.minCfoToNp ?? ""}:${params.minConsensusUpside ?? ""}:${params.maxPeg ?? ""}:${params.netCashOnly ?? ""}:${params.beneishSafeOnly ?? ""}:${params.buffettCompounderOnly ?? ""}:${params.lynchGrowerOnly ?? ""}:${params.grahamNcavOnly ?? ""}:${params.workingCapOnly ?? ""}:${params.dividendAristocratOnly ?? ""}:${params.quarterlyInflectionOnly ?? ""}:${params.minSectorRoePercentile ?? ""}:${params.maxSectorPePercentile ?? ""}:${params.minSectorRoicPercentile ?? ""}:${params.maxSectorPbPercentile ?? ""}:${params.maxCccDays ?? ""}:${params.minBuffettScore ?? ""}:${params.superCompounderOnly ?? ""}:${params.bookTaxSafeOnly ?? ""}:${params.minRoiic ?? ""}:${params.maxImpliedGrowth ?? ""}:${params.minReverseDcfMargin ?? ""}:${params.mertonSafeOnly ?? ""}:${params.minMertonDd ?? ""}:${params.excludeSyntheticFa ?? ""}:${params.tightClosesOnly ?? ""}:${params.vduOnly ?? ""}:${params.rsNewHighOnly ?? ""}:${params.wyckoffLpsOnly ?? ""}:${params.setupGradeOnly || "ALL"}:${params.goldenPocketOnly ?? ""}:${params.flipZoneOnly ?? ""}:${params.smcOrderBlockOnly ?? ""}:${params.sniperTriggerSubtype || "ALL"}:${params.minSniperRR ?? ""}:${params.mtfOnly ?? ""}:${params.mtfConsensus || "ALL"}:${params.mtfCandleOnly ?? ""}:${params.minMtfCandleScore ?? ""}:${params.vsaOnly ?? ""}:${params.minOverheadRoom ?? ""}:${params.buyTriggerOnly ?? ""}:${params.minBuyTriggerScore ?? ""}:${params.investmentHorizon || "ALL"}:${params.minHorizonScore ?? ""}:${params.sort || "marketCap"}:${params.order || "desc"}:${params.limit || 50}:${params.offset || 0}`;
+  // L1 Query Result Cache (deterministic normalized key over all filter parameters)
+  const qKey = `${version}:${JSON.stringify(params)}`;
 
   const cached = queryL1Cache.get(qKey);
   if (cached && Date.now() < cached.exp) {
@@ -4508,7 +4343,6 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     }
 
     // Multi-Timeframe filters
-    if (params.mtfOnly && !x.isMtfAligned) continue;
     if (params.mtfConsensus && params.mtfConsensus !== "ALL" && x.mtfConsensus !== params.mtfConsensus) continue;
 
     // MTF Candlestick & VSA Clusters
@@ -4522,20 +4356,11 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
     if (params.minHistoricalWinRate != null && (x.historicalWinRate == null || x.historicalWinRate < params.minHistoricalWinRate)) continue;
     if (params.minUpDownVolRatio != null && (x.upDownVolRatio == null || x.upDownVolRatio < params.minUpDownVolRatio)) continue;
 
-    // Apex Quant Confluence & Reversal Filters
+    // Apex Quant Confluence & Reversal Numeric Filters (boolean flags handled by requiredBitMask)
     if (params.minApexScore != null && (x.apexQuantScore == null || x.apexQuantScore < params.minApexScore)) continue;
     if (params.maxExtensionBottom != null && (x.extensionFromBottomPct == null || x.extensionFromBottomPct > params.maxExtensionBottom)) continue;
-    if (params.sweetZoneOnly && !x.isSweetLaunchZone) continue;
-
-    // Real-Time Actionable Buy Trigger Filters
-    if (params.buyTriggerOnly && !x.isBuyTriggerNow) continue;
     if (params.minBuyTriggerScore != null && (x.buyTriggerScore == null || x.buyTriggerScore < params.minBuyTriggerScore)) continue;
-
-    // Sector RRG & Volatility Squeeze Filters (Biên độ 1 & 2)
     if (params.rrgQuadrant && params.rrgQuadrant !== "all" && x.sectorRrgQuadrant !== params.rrgQuadrant) continue;
-    if (params.sectorLeadingOnly && !x.isSectorLeading) continue;
-    if (params.squeezeOnly && !x.isSqueezeOn) continue;
-    if (params.squeezeFiredOnly && !x.isSqueezeFiredBull) continue;
 
     // Consolidated Volatility Coil Filter (TTM + Ribbon Squeeze)
     if (params.volatilityCoil && params.volatilityCoil !== "ALL") {
@@ -4545,13 +4370,6 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
       if (params.volatilityCoil === "COIL_SUPER" && (!x.isSqueezeOn || !x.isMaRibbonSqueeze)) continue;
     }
 
-    // MA Geometry, Volume Absorption & Precision MTF Filters (Biên độ 3, 4, 5)
-    if (params.maRibbonSqueezeOnly && !x.isMaRibbonSqueeze) continue;
-    if (params.maReclaimOnly && !x.isMaReclaimSpring) continue;
-    if (params.absorptionSpikeOnly && !x.isAbsorptionSpike) continue;
-    if (params.vsaNoSupplyOnly && !x.isVsaNoSupplyTest) continue;
-    if (params.precisionMtfOnly && !x.isPrecisionMtfAligned) continue;
-
     // Consolidated VSA Pattern Filter (Absorption + No Supply + Active Buy)
     if (params.vsaPattern && params.vsaPattern !== "ALL") {
       if (params.vsaPattern === "ABSORPTION" && !x.isAbsorptionSpike && x.vsaSignal !== "ABSORPTION") continue;
@@ -4559,36 +4377,22 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
       if (params.vsaPattern === "ACTIVE_BUY" && (x.activeBuyRatioPct == null || x.activeBuyRatioPct < 55)) continue;
     }
 
-    // Consolidated Fundamental Quant Matrix Filters (FA)
-    if (params.faProfile && params.faProfile !== "ALL") {
-      if (x.faCategory !== params.faProfile) continue;
-    }
+    // Consolidated Fundamental Quant Matrix Numeric Filters (boolean flags handled by requiredFaBitMask)
+    if (params.faProfile && params.faProfile !== "ALL" && x.faCategory !== params.faProfile) continue;
     if (params.minRoic != null && (x.roic == null || x.roic < params.minRoic)) continue;
     if (params.minInterestCoverage != null && (x.interestCoverage == null || x.interestCoverage < params.minInterestCoverage)) continue;
     if (params.minCfoToNp != null && (x.cfoToNetProfit == null || x.cfoToNetProfit < params.minCfoToNp)) continue;
     if (params.minConsensusUpside != null && (x.consensusUpsidePct == null || x.consensusUpsidePct < params.minConsensusUpside)) continue;
     if (params.maxPeg != null && (x.peg == null || x.peg > params.maxPeg)) continue;
-    if (params.netCashOnly && !x.isNetCash) continue;
-    if (params.beneishSafeOnly && !x.isBeneishSafe) continue;
-    if (params.buffettCompounderOnly && !x.isBuffettCompounder) continue;
-    if (params.lynchGrowerOnly && !x.isLynchFastGrower) continue;
-    if (params.grahamNcavOnly && !x.isGrahamNcav) continue;
-    if (params.workingCapOnly && !x.isWorkingCapitalChampion) continue;
-    if (params.dividendAristocratOnly && !x.isDividendAristocrat) continue;
-    if (params.quarterlyInflectionOnly && !x.isQuarterlyInflection) continue;
     if (params.minSectorRoePercentile != null && (x.sectorRoePercentile == null || x.sectorRoePercentile < params.minSectorRoePercentile)) continue;
     if (params.maxSectorPePercentile != null && (x.sectorPePercentile == null || x.sectorPePercentile > params.maxSectorPePercentile)) continue;
     if (params.minSectorRoicPercentile != null && (x.sectorRoicPercentile == null || x.sectorRoicPercentile < params.minSectorRoicPercentile)) continue;
     if (params.maxSectorPbPercentile != null && (x.sectorPbPercentile == null || x.sectorPbPercentile > params.maxSectorPbPercentile)) continue;
     if (params.maxCccDays != null && (x.cashConversionCycleDays == null || x.cashConversionCycleDays > params.maxCccDays)) continue;
     if (params.minBuffettScore != null && (x.buffettScore == null || x.buffettScore < params.minBuffettScore)) continue;
-    // Quantitative FA Optimization Filters (Phase 1 & 2)
-    if (params.superCompounderOnly && !x.isSuperCompounder) continue;
-    if (params.bookTaxSafeOnly && !x.isBookTaxSafe) continue;
     if (params.minRoiic != null && (x.roiic3Y == null || x.roiic3Y < params.minRoiic)) continue;
     if (params.maxImpliedGrowth != null && (x.impliedGrowthPct == null || x.impliedGrowthPct > params.maxImpliedGrowth)) continue;
     if (params.minReverseDcfMargin != null && (x.reverseDcfMarginPct == null || x.reverseDcfMarginPct < params.minReverseDcfMargin)) continue;
-    if (params.mertonSafeOnly && !x.isMertonSafe) continue;
     if (params.minMertonDd != null && (x.mertonDistanceToDefault == null || x.mertonDistanceToDefault < params.minMertonDd)) continue;
 
     // Advanced Technical Pattern Recognition Filters
@@ -4598,16 +4402,9 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
       if (params.techPattern === "RS_NEW_HIGH" && !x.isRsNewHigh20) continue;
       if (params.techPattern === "WYCKOFF_LPS" && !x.isWyckoffLps) continue;
     }
-    if (params.tightClosesOnly && !x.isTightCloses) continue;
-    if (params.vduOnly && !x.isVolumeDryUp) continue;
-    if (params.rsNewHighOnly && !x.isRsNewHigh20) continue;
-    if (params.wyckoffLpsOnly && !x.isWyckoffLps) continue;
 
     // Confluence 2.0 & Sniper Buy Trigger Cross-Filters (Giai đoạn 2)
     if (params.setupGradeOnly && params.setupGradeOnly !== "all" && x.setupGrade !== params.setupGradeOnly) continue;
-    if (params.goldenPocketOnly && !x.isGoldenPocket) continue;
-    if (params.flipZoneOnly && !x.isFlipZoneSupport) continue;
-    if (params.smcOrderBlockOnly && !x.isSmcOrderBlock) continue;
     if (params.sniperTriggerSubtype && params.sniperTriggerSubtype !== "all" && x.sniperTriggerSubtype !== params.sniperTriggerSubtype) continue;
     if (params.minSniperRR != null && (x.sniperRiskReward == null || x.sniperRiskReward < params.minSniperRR)) continue;
 

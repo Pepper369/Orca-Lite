@@ -6,8 +6,13 @@ import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { useApi } from "@/lib/hooks";
 import { fmtCompact, Loading, Panel, Unavailable, ErrorState, EmptyState, FreshnessAlertBanner } from "@/components/ui";
+import dynamic from "next/dynamic";
 import { financialsApiUrl, type FinTablePayload } from "@/components/stocks/financials-table-data";
-import { AiFinancialPanel } from "@/components/stocks/ai-financial-panel";
+
+const AiFinancialPanel = dynamic(
+  () => import("@/components/stocks/ai-financial-panel").then((m) => m.AiFinancialPanel),
+  { ssr: false },
+);
 
 type TabKey = "income" | "balance" | "cashflow" | "ratios";
 

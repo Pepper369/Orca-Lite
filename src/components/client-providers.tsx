@@ -182,10 +182,8 @@ function IdleChunkPreloader() {
     });
 
     const preloadHeavyChunks = () => {
-      void import("@/components/orca-chart");
       void import("@/components/stocks/tech-reco-panel");
       void import("@/components/stocks/pattern-analysis-hub");
-      void import("@/components/stocks/ai-financial-panel");
       void import("@/components/rrg-chart");
       void import("@/components/sector-flow-screener");
       void import("@/components/oquant-quant-studio");

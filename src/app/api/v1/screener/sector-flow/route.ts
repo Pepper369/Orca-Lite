@@ -9,6 +9,7 @@ import {
 } from "@/lib/services/screener-snapshot-service";
 import {
   evaluateMultiHorizonSectorFlow,
+  toSectorHorizonInput,
   type InvestmentHorizon,
   type SectorHorizonFlowInputItem,
   type SectorHorizonFlowResult,
@@ -127,86 +128,16 @@ export async function GET(req: Request) {
         const stdPrice = price > 1000 ? price : price * 1000;
         const turnoverBillion = q ? q.valueBillion : Math.max(0, (stdPrice * volume) / 1e9);
 
-        flowInputs.push({
-          symbol: sym,
-          sector: snap?.sector ?? sec.sector,
-          price,
-          changePercent,
-          volume,
-          turnoverBillion,
-          marketCap: snap?.marketCap ?? null,
-          foreignNetValBillion: snap?.foreignNetVal ?? null,
-          volRatio20: snap?.volRatio20 ?? null,
-          upDownVolRatio: snap?.upDownVolRatio ?? null,
-          rsRating: snap?.rsRating ?? null,
-          rsRating20: snap?.rsRating20 ?? null,
-          rsTrend: snap?.rsTrend ?? null,
-          maSignal: snap?.maSignal ?? null,
-          mtfConsensus: snap?.mtfConsensus ?? null,
-          isMtfAligned: snap?.isMtfAligned ?? null,
-          smartMoneyScore: snap?.smartMoneyScore ?? null,
-          smartMoneySignal: snap?.smartMoneySignal ?? null,
-          apexQuantScore: snap?.apexQuantScore ?? null,
-          orcaMasterScore: snap?.orcaMasterScore ?? null,
-          confluenceScore: snap?.confluenceScore ?? null,
-          historicalEdgeScore: snap?.historicalEdgeScore ?? null,
-          isBuyTriggerNow: snap?.isBuyTriggerNow ?? null,
-          buyZoneStatus: snap?.buyZoneStatus ?? null,
-          absBuyDiff: snap?.absBuyDiff ?? null,
-          riskReward: snap?.riskReward ?? null,
-          isSqueezeFiredBull: snap?.isSqueezeFiredBull ?? null,
-          isSqueezeOn: snap?.isSqueezeOn ?? null,
-          isTightCloses: snap?.isTightCloses ?? null,
-          isVolumeDryUp: snap?.isVolumeDryUp ?? null,
-          isWyckoffLps: snap?.isWyckoffLps ?? null,
-          isWyckoffSpring: snap?.isWyckoffSpring ?? null,
-          ouZScore: snap?.ouZScore ?? null,
-          ouHalfLife: snap?.ouHalfLife ?? null,
-          sectorRrgQuadrant: snap?.sectorRrgQuadrant ?? null,
-          sectorRsRatio: snap?.sectorRsRatio ?? null,
-          sectorRsMomentum: snap?.sectorRsMomentum ?? null,
-          roe: snap?.roe ?? null,
-          roic: snap?.roic ?? null,
-          roiic3Y: snap?.roiic3Y ?? null,
-          pe: snap?.pe ?? null,
-          pb: snap?.pb ?? null,
-          peg: snap?.peg ?? null,
-          dividendYield: snap?.dividendYield ?? null,
-          niYoyPct: snap?.niYoyPct ?? null,
-          revenueYoyPct: snap?.revenueYoyPct ?? null,
-          isQuarterlyInflection: snap?.isQuarterlyInflection ?? null,
-          piotroskiFScore: snap?.piotroskiFScore ?? null,
-          altmanZone: snap?.altmanZone ?? null,
-          cfoToNetProfit: snap?.cfoToNetProfit ?? null,
-          sloanAccrualRatio: snap?.sloanAccrualRatio ?? null,
-          isBeneishSafe: snap?.isBeneishSafe ?? null,
-          isNetCash: snap?.isNetCash ?? null,
-          isMertonSafe: snap?.isMertonSafe ?? null,
-          mertonDistanceToDefault: snap?.mertonDistanceToDefault ?? null,
-          isBuffettCompounder: snap?.isBuffettCompounder ?? null,
-          isSuperCompounder: snap?.isSuperCompounder ?? null,
-          isDividendAristocrat: snap?.isDividendAristocrat ?? null,
-          consensusUpsidePct: snap?.consensusUpsidePct ?? null,
-          reverseDcfMarginPct: snap?.reverseDcfMarginPct ?? null,
-          bankFairPbGordon: snap?.bankFairPbGordon ?? null,
-          rnavUpsidePct: snap?.rnavUpsidePct ?? null,
-          isBrokenSupport: snap?.isBrokenSupport ?? null,
-          precomputedHorizonScores:
-            snap?.horizonShortScore != null &&
-            snap?.horizonMediumScore != null &&
-            snap?.horizonMedLongScore != null &&
-            snap?.horizonLongScore != null &&
-            snap?.bestHorizon != null
-              ? {
-                  short1_2w: snap.horizonShortScore,
-                  medium3w_2m: snap.horizonMediumScore,
-                  medLong2_6m: snap.horizonMedLongScore,
-                  long6mPlus: snap.horizonLongScore,
-                  bestHorizon: snap.bestHorizon,
-                  bestHorizonVi: snap.bestHorizonVi ?? "Đa khung",
-                }
-              : null,
-        });
+        flowInputs.push(
+          toSectorHorizonInput(snap ?? {}, {
+            symbol: sym,
+            sector: snap?.sector ?? sec.sector,
+            price,
+            changePercent,
+            volume,
+            turnoverBillion,
+          }),
+        );
       }
 
       if (flowInputs.length > 0) {

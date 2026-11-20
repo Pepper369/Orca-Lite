@@ -67,10 +67,10 @@ const BCTC_MIN_LEFT_MS = 3_500;
 const CANSLIM_RESULT_TTL_MS = 4 * 60_000;
 const CANSLIM_RESULT_STALE_MS = 20 * 60_000;
 
+import { scalarSmaAt } from "../engines/unified-ta-kernel";
+
 function sma(closes: number[], n: number): number | null {
-  if (closes.length < n) return null;
-  const slice = closes.slice(-n);
-  return slice.reduce((a, b) => a + b, 0) / n;
+  return scalarSmaAt(closes, n, 0);
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
