@@ -4,6 +4,11 @@ import * as binance from "../providers/binance";
 import { analyzeScalpMulti } from "../engines/scalp";
 import { evaluateCryptoShield } from "../engines/crypto-news-shield";
 import type { SetupGrade } from "../engines/fx-crypto-precision-engine";
+import {
+  buildCryptoLiquidityContext,
+  detectCryptoLiquidationClusters,
+} from "../engines/unified-cross-asset-quant";
+import { atr as calcAtr } from "../technical";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import type { Meta } from "../types";
 
@@ -116,7 +121,7 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) return null;
 
   try {
-    const [book, trades, klines, klines15m, klines1h, ticker, funding, calendarEvents] = await Promise.all([
+    const [book, trades, klines, klines15m, klines1h, ticker, funding, oi, calendarEvents] = await Promise.all([
       binance.getOrderBook(symbol, 20),
       binance.getAggTrades(symbol, 100),
       binance.getKlines(symbol, "5m", 120).catch(() => null),
@@ -124,6 +129,7 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
       binance.getKlines(symbol, "1h", 60).catch(() => null),
       binance.getSpotTicker(symbol).catch(() => null),
       binance.getFundingRate(symbol).catch(() => null),
+      binance.getOpenInterest(symbol).catch(() => ({ openInterest: 0, time: Date.now() })),
       getGlobalMacroShieldEvents().catch(() => []),
     ]);
 
@@ -199,6 +205,20 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
         calendarEvents,
       });
 
+      const domObiPct = Math.round(imbalance * 100);
+      const openInterestUsd = oi.openInterest > 0 && mid > 0 ? Math.round(oi.openInterest * mid) : 0;
+      const atrEst = calcAtr(klines, 14) ?? mid * 0.015;
+      const liqClusters =
+        openInterestUsd > 0
+          ? detectCryptoLiquidationClusters(mid, openInterestUsd, atrEst, {
+              symbol,
+              fundingRate: funding?.fundingRate ?? null,
+              priceChange24hPct: ticker ? Number(ticker.priceChangePercent) || null : null,
+              orderBookImbalance: domObiPct,
+            })
+          : null;
+      const { liquidationClusterAligned, externalMagnets } = buildCryptoLiquidityContext(liqClusters);
+
       const scalp = analyzeScalpMulti({
         symbol,
         barsM15: klines15m && klines15m.length >= 30 ? klines15m : klines,
@@ -206,8 +226,11 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
         barsH1: klines1h && klines1h.length >= 20 ? klines1h : null,
         quoteVolume24h: ticker ? Number(ticker.quoteVolume) : null,
         fundingRate: funding?.fundingRate ?? null,
-        spreadPct: spreadBps / 100,
-        orderBookImbalance: Math.round(imbalance * 100),
+        spreadPct: spreadBps / 10_000,
+        orderBookImbalance: domObiPct,
+        flowIntensityIndex: flowScore,
+        liquidationClusterAligned,
+        externalMagnets,
         isLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
       });

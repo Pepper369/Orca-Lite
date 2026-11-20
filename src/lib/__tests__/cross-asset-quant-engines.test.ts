@@ -436,4 +436,38 @@ describe("Unified Cross-Asset Quantitative Engines", () => {
     assert.ok(cryptoSig.precision!.gatesPassed.some((g) => g.includes("FII")));
     assert.ok(cryptoSig.precision!.gatesPassed.some((g) => g.includes("Liquidation Magnet")));
   });
+
+  // ==========================================================================
+  // 11. Asymmetric Crypto Liquidation Clusters & External Magnet Forecast
+  // ==========================================================================
+  it("PHASE4-LIQUIDITY-SKEW: breaks 50/50 symmetry in detectCryptoLiquidationClusters & preserves micro-coin decimals", () => {
+    const longCrowded = detectCryptoLiquidationClusters(92000, 300_000_000, 1400, {
+      symbol: "BTCUSDT",
+      fundingRate: 0.00075,
+      priceChange24hPct: 5.2,
+      oiChange24hPct: 6.0,
+      orderBookImbalance: -35,
+    });
+    assert.equal(longCrowded.dominantExposure, "LONGS_EXPOSED");
+    assert.ok((longCrowded.longExposureSharePct ?? 50) > 60);
+    assert.ok(longCrowded.primaryMagnetPrice != null && longCrowded.primaryMagnetPrice < 92000);
+
+    const shortSqueezed = detectCryptoLiquidationClusters(92000, 300_000_000, 1400, {
+      symbol: "BTCUSDT",
+      fundingRate: -0.00065,
+      priceChange24hPct: -4.8,
+      oiChange24hPct: 5.5,
+      orderBookImbalance: 40,
+    });
+    assert.equal(shortSqueezed.dominantExposure, "SHORTS_EXPOSED");
+    assert.ok((shortSqueezed.longExposureSharePct ?? 50) < 40);
+    assert.ok(shortSqueezed.primaryMagnetPrice != null && shortSqueezed.primaryMagnetPrice > 92000);
+
+    // Micro-coin precision preservation (must NOT round PEPEUSDT to 0.00)
+    const pepeLiq = detectCryptoLiquidationClusters(0.00000842, 45_000_000, 0.00000018, {
+      symbol: "PEPEUSDT",
+      fundingRate: -0.0005,
+    });
+    assert.ok(pepeLiq.primaryMagnetPrice != null && pepeLiq.primaryMagnetPrice > 0.000007 && pepeLiq.primaryMagnetPrice < 0.000011);
+  });
 });

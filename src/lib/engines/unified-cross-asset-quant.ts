@@ -9,6 +9,7 @@
  */
 
 import { normCdf, normInv } from "./advanced-quant-math";
+import { roundPrice } from "./asset-precision";
 
 // ============================================================================
 // 1. Dynamic Fractional Kelly & Volatility Targeting
@@ -629,22 +630,32 @@ export interface LiquidationCluster {
   isMagnetZone: boolean;
 }
 
+export interface LiquidationSkewContext {
+  symbol?: string;
+  fundingRate?: number | null;
+  priceChange24hPct?: number | null;
+  oiChange24hPct?: number | null;
+  orderBookImbalance?: number | null; // -100 to +100
+}
+
 export interface LiquidationClusterResult {
   currentPrice: number;
   clusters: LiquidationCluster[];
   primaryMagnetPrice: number | null;
   dominantExposure: "LONGS_EXPOSED" | "SHORTS_EXPOSED" | "BALANCED";
+  longExposureSharePct?: number;
   insightVi: string;
 }
 
 /**
- * Predicts institutional Liquidation Cascade clusters and Magnet Zones (LMZ)
- * across key leverage tiers (20x, 50x, 100x).
+ * Predicts asymmetric institutional Liquidation Cascade clusters and Magnet Zones (LMZ)
+ * across key leverage tiers (20x, 50x, 100x), weighting exposure by funding/OI/OBI skew and ATR reach density.
  */
 export function detectCryptoLiquidationClusters(
   currentPrice: number,
   openInterestUsd: number,
-  atr: number
+  atr: number,
+  skewContext?: LiquidationSkewContext,
 ): LiquidationClusterResult {
   if (currentPrice <= 0 || openInterestUsd <= 0) {
     return {
@@ -652,6 +663,7 @@ export function detectCryptoLiquidationClusters(
       clusters: [],
       primaryMagnetPrice: null,
       dominantExposure: "BALANCED",
+      longExposureSharePct: 50,
       insightVi: "Dữ liệu Open Interest chưa hợp lệ.",
     };
   }
@@ -663,56 +675,142 @@ export function detectCryptoLiquidationClusters(
     { leverage: 100, share: 0.25 }, // 25%
   ];
 
-  const clusters: LiquidationCluster[] = [];
+  // Asymmetric positioning skew: positive funding & rising price+OI crowd Longs below market;
+  // negative funding & falling price with rising OI crowd Shorts above market.
+  const fundingNorm =
+    skewContext?.fundingRate != null ? Math.tanh(skewContext.fundingRate / 0.00035) : 0;
+  const pricePct = skewContext?.priceChange24hPct ?? 0;
+  const oiPct = skewContext?.oiChange24hPct ?? 0;
+  const trendCrowding =
+    skewContext?.priceChange24hPct != null
+      ? Math.tanh((pricePct * (oiPct < -1 ? -0.5 : 1.0)) / 3.5)
+      : 0;
+  const obiNorm =
+    skewContext?.orderBookImbalance != null
+      ? Math.max(-1, Math.min(1, skewContext.orderBookImbalance / 100))
+      : 0;
+
+  const hasSkewSignal =
+    skewContext != null &&
+    (skewContext.fundingRate != null ||
+      skewContext.priceChange24hPct != null ||
+      skewContext.orderBookImbalance != null);
+
+  const rawLongShare = hasSkewSignal
+    ? 0.5 + 0.19 * fundingNorm + 0.11 * trendCrowding - 0.07 * obiNorm
+    : 0.5;
+  const longShare = Math.max(0.20, Math.min(0.80, rawLongShare));
+  const shortShare = 1 - longShare;
+
+  const effAtr = Math.max(1e-12, atr > 0 ? atr : currentPrice * 0.015);
+  const symHint = skewContext?.symbol ?? "COINUSDT";
+
+  const scoredClusters: { cluster: LiquidationCluster; magnetDensity: number }[] = [];
   let totalLongLiqUsd = 0;
   let totalShortLiqUsd = 0;
 
   for (const t of tiers) {
-    const liqDistanceLongPct = 1 / t.leverage - mmr; // e.g. 1/50 - 0.005 = 1.5%
-    const liqDistanceShortPct = 1 / t.leverage - mmr;
+    const liqDistancePct = 1 / t.leverage - mmr; // e.g. 1/50 - 0.005 = 1.5%
+    const longLiqPrice = roundPrice(currentPrice * (1 - liqDistancePct), symHint, "CRYPTO");
+    const shortLiqPrice = roundPrice(currentPrice * (1 + liqDistancePct), symHint, "CRYPTO");
 
-    const longLiqPrice = currentPrice * (1 - liqDistanceLongPct);
-    const shortLiqPrice = currentPrice * (1 + liqDistanceShortPct);
+    const estLongVol = openInterestUsd * t.share * longShare;
+    const estShortVol = openInterestUsd * t.share * shortShare;
 
-    const estVol = (openInterestUsd * t.share) * 0.5; // Estimated notional per side
+    const longDistAtr = Math.max(0.35, Math.abs(currentPrice - longLiqPrice) / effAtr);
+    const shortDistAtr = Math.max(0.35, Math.abs(shortLiqPrice - currentPrice) / effAtr);
 
-    clusters.push({
-      levelPrice: Math.round(longLiqPrice * 100) / 100,
-      type: "LONG_LIQUIDATION_POOL",
-      estimatedVolumeUsd: Math.round(estVol),
-      distancePct: Math.round(liqDistanceLongPct * 1000) / 10,
-      isMagnetZone: estVol >= 5_000_000,
+    scoredClusters.push({
+      cluster: {
+        levelPrice: longLiqPrice,
+        type: "LONG_LIQUIDATION_POOL",
+        estimatedVolumeUsd: Math.round(estLongVol),
+        distancePct: Math.round(liqDistancePct * 1000) / 10,
+        isMagnetZone: estLongVol >= 5_000_000,
+      },
+      magnetDensity: estLongVol / Math.pow(longDistAtr, 0.85),
     });
-    totalLongLiqUsd += estVol;
+    totalLongLiqUsd += estLongVol;
 
-    clusters.push({
-      levelPrice: Math.round(shortLiqPrice * 100) / 100,
-      type: "SHORT_LIQUIDATION_POOL",
-      estimatedVolumeUsd: Math.round(estVol),
-      distancePct: Math.round(liqDistanceShortPct * 1000) / 10,
-      isMagnetZone: estVol >= 5_000_000,
+    scoredClusters.push({
+      cluster: {
+        levelPrice: shortLiqPrice,
+        type: "SHORT_LIQUIDATION_POOL",
+        estimatedVolumeUsd: Math.round(estShortVol),
+        distancePct: Math.round(liqDistancePct * 1000) / 10,
+        isMagnetZone: estShortVol >= 5_000_000,
+      },
+      magnetDensity: estShortVol / Math.pow(shortDistAtr, 0.85),
     });
-    totalShortLiqUsd += estVol;
+    totalShortLiqUsd += estShortVol;
   }
 
-  // Find primary magnet price with largest liquidation volume nearest to current price
-  clusters.sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
-  const primaryMagnetPrice = clusters.length > 0 ? clusters[0].levelPrice : null;
+  // Rank by ATR-normalized magnetic pull density, tie-breaking by proximity
+  scoredClusters.sort((a, b) => {
+    if (Math.abs(b.magnetDensity - a.magnetDensity) > 1e-3) {
+      return b.magnetDensity - a.magnetDensity;
+    }
+    return Math.abs(a.cluster.distancePct) - Math.abs(b.cluster.distancePct);
+  });
+  const clusters = scoredClusters.map((x) => x.cluster);
+  const primaryMagnetPrice = clusters.length > 0 ? clusters[0]!.levelPrice : null;
 
   const dominantExposure: LiquidationClusterResult["dominantExposure"] =
-    totalLongLiqUsd > totalShortLiqUsd * 1.3
+    totalLongLiqUsd > totalShortLiqUsd * 1.2
       ? "LONGS_EXPOSED"
-      : totalShortLiqUsd > totalLongLiqUsd * 1.3
-      ? "SHORTS_EXPOSED"
-      : "BALANCED";
+      : totalShortLiqUsd > totalLongLiqUsd * 1.2
+        ? "SHORTS_EXPOSED"
+        : "BALANCED";
 
-  const insightVi = `Cụm thanh lý trọng điểm gần nhất: $${primaryMagnetPrice} (Biên độ ${clusters[0]?.distancePct}%). Trạng thái rủi ro vị thế: ${dominantExposure}.`;
+  const longExposureSharePct = Math.round(longShare * 100);
+  const insightVi = `Cụm thanh lý trọng điểm gần nhất: $${primaryMagnetPrice} (Biên độ ${clusters[0]?.distancePct}%, ${clusters[0]?.type === "SHORT_LIQUIDATION_POOL" ? "Quét Short" : "Quét Long"}). Trạng thái: ${dominantExposure} (Long ${longExposureSharePct}% / Short ${100 - longExposureSharePct}%).`;
 
   return {
     currentPrice,
     clusters,
     primaryMagnetPrice,
     dominantExposure,
+    longExposureSharePct,
     insightVi,
   };
+}
+
+/**
+ * Maps a LiquidationClusterResult into unified precision-engine direction alignment
+ * and external magnet targets for Forward Liquidity Forecasting.
+ */
+export function buildCryptoLiquidityContext(liqClusters: LiquidationClusterResult | null): {
+  liquidationClusterAligned: "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
+  externalMagnets:
+    | {
+        price: number;
+        side: "BUY_SIDE" | "SELL_SIDE";
+        type: "SHORT_LIQ_CLUSTER" | "LONG_LIQ_CLUSTER";
+        notionalUsd: number;
+        isDominant: boolean;
+      }[]
+    | null;
+} {
+  if (!liqClusters) {
+    return { liquidationClusterAligned: null, externalMagnets: null };
+  }
+  const liquidationClusterAligned =
+    liqClusters.dominantExposure === "SHORTS_EXPOSED"
+      ? "SHORT_SQUEEZE_UP"
+      : liqClusters.dominantExposure === "LONGS_EXPOSED"
+        ? "LONG_FLUSH_DOWN"
+        : "BALANCED";
+  const externalMagnets = liqClusters.clusters.slice(0, 4).map((c) => ({
+    price: c.levelPrice,
+    side: c.type === "SHORT_LIQUIDATION_POOL" ? ("BUY_SIDE" as const) : ("SELL_SIDE" as const),
+    type:
+      c.type === "SHORT_LIQUIDATION_POOL"
+        ? ("SHORT_LIQ_CLUSTER" as const)
+        : ("LONG_LIQ_CLUSTER" as const),
+    notionalUsd: c.estimatedVolumeUsd,
+    isDominant:
+      (c.type === "SHORT_LIQUIDATION_POOL" && liqClusters.dominantExposure === "SHORTS_EXPOSED") ||
+      (c.type === "LONG_LIQUIDATION_POOL" && liqClusters.dominantExposure === "LONGS_EXPOSED"),
+  }));
+  return { liquidationClusterAligned, externalMagnets };
 }

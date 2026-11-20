@@ -9,6 +9,7 @@
  */
 
 import type { OhlcvBar } from "../types";
+import { getAssetPipSize, roundPrice } from "./asset-precision";
 
 export interface CmeFuturesMapping {
   spotPair: string;
@@ -128,7 +129,7 @@ export function reconstructSyntheticDom(
   const clean = pair.toUpperCase().replace("/", "").replace("-", "");
   const mapping = CME_FOREX_MAPPINGS[clean] ?? null;
 
-  const pip = clean.includes("JPY") ? 0.01 : clean.startsWith("XAU") ? 0.1 : 0.0001;
+  const pip = getAssetPipSize(clean, "FOREX");
 
   if (bars.length < 5) {
     const fallbackPrice = 1.0;
@@ -161,18 +162,33 @@ export function reconstructSyntheticDom(
   const bestBid = curPrice - halfSpread;
   const bestAsk = curPrice + halfSpread;
 
-  // Compute Garman-Klass Micro-volatility estimate
+  // Compute Garman-Klass Micro-volatility estimate & 5-bar volume-weighted CLV skew
   let logHlSum = 0;
-  for (let i = bars.length - 5; i < bars.length; i++) {
-    const b = bars[i];
+  let avgVol = 0;
+  const winLen = Math.min(5, bars.length);
+  const winStart = bars.length - winLen;
+  for (let i = winStart; i < bars.length; i++) {
+    const b = bars[i]!;
     const logHl = Math.log(b.high / Math.max(1e-8, b.low));
     logHlSum += logHl * logHl;
+    avgVol += b.volume > 0 ? b.volume : 1;
   }
-  const microVol = Math.sqrt(logHlSum / 5);
+  const microVol = Math.sqrt(logHlSum / winLen);
+  avgVol /= winLen;
 
-  // CLV directional skew
-  const candleRange = Math.max(1e-8, lastBar.high - lastBar.low);
-  const clv = ((lastBar.close - lastBar.low) - (lastBar.high - lastBar.close)) / candleRange;
+  let weightedClvSum = 0;
+  let weightTotal = 0;
+  for (let i = winStart; i < bars.length; i++) {
+    const b = bars[i]!;
+    const idx = i - winStart + 1;
+    const candleRange = Math.max(1e-10, b.high - b.low);
+    const barClv = ((b.close - b.low) - (b.high - b.close)) / candleRange;
+    const volRatio = avgVol > 0 ? Math.min(2.2, Math.max(0.5, (b.volume > 0 ? b.volume : 1) / avgVol)) : 1;
+    const w = idx * volRatio;
+    weightedClvSum += barClv * w;
+    weightTotal += w;
+  }
+  const clv = weightTotal > 0 ? Math.max(-1, Math.min(1, weightedClvSum / weightTotal)) : 0;
 
   // Base depth per level in standard lots
   const baseDepth = clean.startsWith("XAU") ? 15 : 45;
@@ -182,8 +198,8 @@ export function reconstructSyntheticDom(
   let totalAsk = 0;
 
   for (let lvl = 1; lvl <= 5; lvl++) {
-    const bidPrice = bestBid - (lvl - 1) * pip * 1.0;
-    const askPrice = bestAsk + (lvl - 1) * pip * 1.0;
+    const bidPrice = roundPrice(bestBid - (lvl - 1) * pip * 1.0, clean, "FOREX");
+    const askPrice = roundPrice(bestAsk + (lvl - 1) * pip * 1.0, clean, "FOREX");
 
     // Decay and skew factor
     const decay = 1.0 + Math.log(lvl) * 0.45;
@@ -201,10 +217,10 @@ export function reconstructSyntheticDom(
 
     levels.push({
       level: lvl,
-      bidPrice: Math.round(bidPrice * 10000) / 10000,
+      bidPrice,
       bidSizeLots,
       bidVolume,
-      askPrice: Math.round(askPrice * 10000) / 10000,
+      askPrice,
       askSizeLots,
       askVolume,
     });
@@ -239,8 +255,8 @@ export function reconstructSyntheticDom(
     cmeContract: mapping,
     spreadPips,
     topOfBook: {
-      bestBid: Math.round(bestBid * 10000) / 10000,
-      bestAsk: Math.round(bestAsk * 10000) / 10000,
+      bestBid: roundPrice(bestBid, clean, "FOREX"),
+      bestAsk: roundPrice(bestAsk, clean, "FOREX"),
     },
     levels,
     depthLevels: levels,

@@ -109,7 +109,8 @@ export interface InstitutionalFlowSignal {
   summary: string;
 }
 
-import { getAssetPipSize } from "./asset-precision";
+import { getAssetPipSize, getPriceDecimals, roundPrice } from "./asset-precision";
+import { extractCausalLiquidityPools } from "./ict-smc-liquidity-engine";
 
 /**
  * Helper to get pip scale for a pair.
@@ -468,94 +469,64 @@ export function detectCvdAndAbsorption(
 }
 
 /**
- * 4. LIQUIDITY POOLS HUNTER (EQH / EQL & ROUND NUMBERS)
+ * 4. LIQUIDITY POOLS HUNTER (SSOT-delegated EQH / EQL + Asset-Aware Round Numbers)
  */
 export function detectLiquidityPools(pair: string, bars: OhlcvBar[]): {
   bslTargets: LiquidityPool[];
   sslTargets: LiquidityPool[];
 } {
-  const pip = getPipScale(pair);
   const n = bars.length;
   if (n < 20) return { bslTargets: [], sslTargets: [] };
 
   const currentPrice = bars[n - 1].close;
+  const pip = getAssetPipSize(pair, "FOREX", currentPrice);
+  const dec = getPriceDecimals(currentPrice, pair, "FOREX");
+  const { allBslPools, allSslPools } = extractCausalLiquidityPools(bars, pip);
+
   const bslTargets: LiquidityPool[] = [];
   const sslTargets: LiquidityPool[] = [];
 
-  // Swing Highs (Buy-Side Liquidity - BSL)
-  const highs: { price: number; time: number }[] = [];
-  for (let i = 2; i < n - 2; i++) {
-    if (
-      bars[i].high > bars[i - 1].high &&
-      bars[i].high > bars[i - 2].high &&
-      bars[i].high > bars[i + 1].high &&
-      bars[i].high > bars[i + 2].high
-    ) {
-      highs.push({ price: bars[i].high, time: bars[i].time });
-    }
+  for (const p of allBslPools) {
+    if (p.status !== "UNTOUCHED" || p.price <= currentPrice) continue;
+    const distPips = Math.round(((p.price - currentPrice) / pip) * 10) / 10;
+    const isEqh = p.type === "EQH";
+    bslTargets.push({
+      type: "BSL_POOL",
+      price: roundPrice(p.price, pair, "FOREX"),
+      strengthPips: isEqh ? 2.5 : 1.0,
+      touches: isEqh ? 2 : 1,
+      distancePips: distPips,
+      status: "UNTOUCHED",
+      label: isEqh ? `EQH Buy-Side Pool (+${distPips} pips)` : `BSL Swing Pool (+${distPips} pips)`,
+    });
   }
 
-  // Detect Equal Highs (EQH) within 2.5 pips
-  for (let i = 0; i < highs.length; i++) {
-    for (let j = i + 1; j < highs.length; j++) {
-      const diffPips = Math.abs(highs[i].price - highs[j].price) / pip;
-      if (diffPips <= 2.5) {
-        const poolPrice = Math.max(highs[i].price, highs[j].price);
-        const distPips = Math.round(((poolPrice - currentPrice) / pip) * 10) / 10;
-        if (distPips > 0) {
-          bslTargets.push({
-            type: "BSL_POOL",
-            price: poolPrice,
-            strengthPips: diffPips,
-            touches: 2,
-            distancePips: distPips,
-            status: "UNTOUCHED",
-            label: `EQH Buy-Side Liquidity Pool (+${distPips} pips)`,
-          });
-        }
-      }
-    }
+  for (const p of allSslPools) {
+    if (p.status !== "UNTOUCHED" || p.price >= currentPrice) continue;
+    const distPips = Math.round(((currentPrice - p.price) / pip) * 10) / 10;
+    const isEql = p.type === "EQL";
+    sslTargets.push({
+      type: "SSL_POOL",
+      price: roundPrice(p.price, pair, "FOREX"),
+      strengthPips: isEql ? 2.5 : 1.0,
+      touches: isEql ? 2 : 1,
+      distancePips: distPips,
+      status: "UNTOUCHED",
+      label: isEql ? `EQL Sell-Side Pool (-${distPips} pips)` : `SSL Swing Pool (-${distPips} pips)`,
+    });
   }
 
-  // Swing Lows (Sell-Side Liquidity - SSL)
-  const lows: { price: number; time: number }[] = [];
-  for (let i = 2; i < n - 2; i++) {
-    if (
-      bars[i].low < bars[i - 1].low &&
-      bars[i].low < bars[i - 2].low &&
-      bars[i].low < bars[i + 1].low &&
-      bars[i].low < bars[i + 2].low
-    ) {
-      lows.push({ price: bars[i].low, time: bars[i].time });
-    }
-  }
-
-  // Detect Equal Lows (EQL) within 2.5 pips
-  for (let i = 0; i < lows.length; i++) {
-    for (let j = i + 1; j < lows.length; j++) {
-      const diffPips = Math.abs(lows[i].price - lows[j].price) / pip;
-      if (diffPips <= 2.5) {
-        const poolPrice = Math.min(lows[i].price, lows[j].price);
-        const distPips = Math.round(((currentPrice - poolPrice) / pip) * 10) / 10;
-        if (distPips > 0) {
-          sslTargets.push({
-            type: "SSL_POOL",
-            price: poolPrice,
-            strengthPips: diffPips,
-            touches: 2,
-            distancePips: distPips,
-            status: "UNTOUCHED",
-            label: `EQL Sell-Side Liquidity Pool (-${distPips} pips)`,
-          });
-        }
-      }
-    }
-  }
-
-  // Add nearest round psychological number (e.g. 1.0800, 1.0850, 155.00, 2650)
-  const roundStep = pair.includes("JPY") ? 0.5 : pair.startsWith("XAU") ? 10.0 : 0.005;
-  const roundAbove = Math.ceil(currentPrice / roundStep) * roundStep;
-  const roundBelow = Math.floor(currentPrice / roundStep) * roundStep;
+  // Adaptive institutional psychological round level (EURUSD 0.005, JPY 0.50, XAU 10.0, OIL 1.0)
+  const clean = pair.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const roundStep = clean.startsWith("XAU")
+    ? 10.0
+    : clean.includes("OIL")
+      ? 1.0
+      : clean.includes("JPY")
+        ? 0.5
+        : pip * 50;
+  const roundAbove = roundPrice(Math.ceil(currentPrice / roundStep) * roundStep, pair, "FOREX");
+  const roundBelow = roundPrice(Math.floor(currentPrice / roundStep) * roundStep, pair, "FOREX");
 
   if (roundAbove > currentPrice) {
     const dist = Math.round(((roundAbove - currentPrice) / pip) * 10) / 10;
@@ -566,7 +537,7 @@ export function detectLiquidityPools(pair: string, bars: OhlcvBar[]): {
       touches: 1,
       distancePips: dist,
       status: "UNTOUCHED",
-      label: `Round Level ${roundAbove.toFixed(4)} (+${dist} pips)`,
+      label: `Round Level ${roundAbove.toFixed(dec)} (+${dist} pips)`,
     });
   }
 
@@ -579,11 +550,10 @@ export function detectLiquidityPools(pair: string, bars: OhlcvBar[]): {
       touches: 1,
       distancePips: dist,
       status: "UNTOUCHED",
-      label: `Round Level ${roundBelow.toFixed(4)} (-${dist} pips)`,
+      label: `Round Level ${roundBelow.toFixed(dec)} (-${dist} pips)`,
     });
   }
 
-  // Sort by closest distance
   bslTargets.sort((a, b) => a.distancePips - b.distancePips);
   sslTargets.sort((a, b) => a.distancePips - b.distancePips);
 

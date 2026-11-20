@@ -9,6 +9,7 @@
  */
 
 import type { OhlcvBar } from "../types";
+import { getAssetPipSize, getPriceDecimals, roundPrice } from "./asset-precision";
 
 export interface FairValueGap {
   index: number;
@@ -73,7 +74,10 @@ export interface SmcScanResult {
  */
 export function scanForexSmc(pair: string, bars: OhlcvBar[]): SmcScanResult {
   const cleanPair = pair.toUpperCase().replace("/", "").replace("-", "");
-  const pipFactor = cleanPair.includes("JPY") ? 0.01 : cleanPair.startsWith("XAU") ? 0.1 : 0.0001;
+  const refPrice = bars[bars.length - 1]?.close ?? 1;
+  const pipFactor = getAssetPipSize(cleanPair, "FOREX", refPrice);
+  const dec = getPriceDecimals(refPrice, cleanPair, "FOREX");
+  const fmtS = (v: number) => roundPrice(v, cleanPair, "FOREX").toFixed(dec);
 
   if (bars.length < 25) {
     return {
@@ -327,28 +331,28 @@ export function scanForexSmc(pair: string, bars: OhlcvBar[]): SmcScanResult {
 
     if (nearestOb) {
       setupType = "SMC_ORDER_BLOCK";
-      entry = nearestOb.midpoint;
-      entryZone = [nearestOb.low, nearestOb.high];
-      tightStopLoss = nearestOb.low - 5 * pipFactor;
-      rationale.push(`Hồi quy về Bullish Order Block (${nearestOb.high.toFixed(4)} - ${nearestOb.low.toFixed(4)}).`);
+      entry = roundPrice(nearestOb.midpoint, cleanPair, "FOREX");
+      entryZone = [roundPrice(nearestOb.low, cleanPair, "FOREX"), roundPrice(nearestOb.high, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(nearestOb.low - 5 * pipFactor, cleanPair, "FOREX");
+      rationale.push(`Hồi quy về Bullish Order Block (${fmtS(nearestOb.high)} - ${fmtS(nearestOb.low)}).`);
     } else if (nearestFvg) {
       setupType = "SMC_FVG_PULLBACK";
-      entry = nearestFvg.midpoint;
-      entryZone = [nearestFvg.bottom, nearestFvg.top];
-      tightStopLoss = nearestFvg.bottom - 4 * pipFactor;
-      rationale.push(`Khai thác vùng mất cân bằng Bullish FVG (${nearestFvg.bottom.toFixed(4)} - ${nearestFvg.top.toFixed(4)}).`);
+      entry = roundPrice(nearestFvg.midpoint, cleanPair, "FOREX");
+      entryZone = [roundPrice(nearestFvg.bottom, cleanPair, "FOREX"), roundPrice(nearestFvg.top, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(nearestFvg.bottom - 4 * pipFactor, cleanPair, "FOREX");
+      rationale.push(`Khai thác vùng mất cân bằng Bullish FVG (${fmtS(nearestFvg.bottom)} - ${fmtS(nearestFvg.top)}).`);
     } else if (lastSweep?.type === "SSL_SWEEP") {
       setupType = "SMC_LIQUIDITY_GRAB";
-      entry = currentPrice;
-      entryZone = [lastSweep.wickExtreme, currentPrice];
-      tightStopLoss = lastSweep.wickExtreme - 3 * pipFactor;
+      entry = roundPrice(currentPrice, cleanPair, "FOREX");
+      entryZone = [roundPrice(lastSweep.wickExtreme, cleanPair, "FOREX"), roundPrice(currentPrice, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(lastSweep.wickExtreme - 3 * pipFactor, cleanPair, "FOREX");
       rationale.push(`Quét sạch thanh khoản Sell-Side (${lastSweep.sweepPips} pips SSL sweep).`);
     }
 
     if (entry && tightStopLoss) {
       const riskDist = entry - tightStopLoss;
-      targetTP1 = entry + riskDist * 1.5;
-      targetTP2 = entry + riskDist * 2.8;
+      targetTP1 = roundPrice(entry + riskDist * 1.5, cleanPair, "FOREX");
+      targetTP2 = roundPrice(entry + riskDist * 2.8, cleanPair, "FOREX");
     }
   } else if (bias === "BEARISH") {
     direction = "SELL";
@@ -357,28 +361,28 @@ export function scanForexSmc(pair: string, bars: OhlcvBar[]): SmcScanResult {
 
     if (nearestOb) {
       setupType = "SMC_ORDER_BLOCK";
-      entry = nearestOb.midpoint;
-      entryZone = [nearestOb.low, nearestOb.high];
-      tightStopLoss = nearestOb.high + 5 * pipFactor;
-      rationale.push(`Hồi quy kiểm tra Bearish Order Block (${nearestOb.low.toFixed(4)} - ${nearestOb.high.toFixed(4)}).`);
+      entry = roundPrice(nearestOb.midpoint, cleanPair, "FOREX");
+      entryZone = [roundPrice(nearestOb.low, cleanPair, "FOREX"), roundPrice(nearestOb.high, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(nearestOb.high + 5 * pipFactor, cleanPair, "FOREX");
+      rationale.push(`Hồi quy kiểm tra Bearish Order Block (${fmtS(nearestOb.low)} - ${fmtS(nearestOb.high)}).`);
     } else if (nearestFvg) {
       setupType = "SMC_FVG_PULLBACK";
-      entry = nearestFvg.midpoint;
-      entryZone = [nearestFvg.bottom, nearestFvg.top];
-      tightStopLoss = nearestFvg.top + 4 * pipFactor;
-      rationale.push(`Khai thác vùng mất cân bằng Bearish FVG (${nearestFvg.bottom.toFixed(4)} - ${nearestFvg.top.toFixed(4)}).`);
+      entry = roundPrice(nearestFvg.midpoint, cleanPair, "FOREX");
+      entryZone = [roundPrice(nearestFvg.bottom, cleanPair, "FOREX"), roundPrice(nearestFvg.top, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(nearestFvg.top + 4 * pipFactor, cleanPair, "FOREX");
+      rationale.push(`Khai thác vùng mất cân bằng Bearish FVG (${fmtS(nearestFvg.bottom)} - ${fmtS(nearestFvg.top)}).`);
     } else if (lastSweep?.type === "BSL_SWEEP") {
       setupType = "SMC_LIQUIDITY_GRAB";
-      entry = currentPrice;
-      entryZone = [currentPrice, lastSweep.wickExtreme];
-      tightStopLoss = lastSweep.wickExtreme + 3 * pipFactor;
+      entry = roundPrice(currentPrice, cleanPair, "FOREX");
+      entryZone = [roundPrice(currentPrice, cleanPair, "FOREX"), roundPrice(lastSweep.wickExtreme, cleanPair, "FOREX")];
+      tightStopLoss = roundPrice(lastSweep.wickExtreme + 3 * pipFactor, cleanPair, "FOREX");
       rationale.push(`Bẫy thanh khoản Buy-Side (${lastSweep.sweepPips} pips BSL Turtle Soup).`);
     }
 
     if (entry && tightStopLoss) {
       const riskDist = tightStopLoss - entry;
-      targetTP1 = entry - riskDist * 1.5;
-      targetTP2 = entry - riskDist * 2.8;
+      targetTP1 = roundPrice(entry - riskDist * 1.5, cleanPair, "FOREX");
+      targetTP2 = roundPrice(entry - riskDist * 2.8, cleanPair, "FOREX");
     }
   }
 
@@ -404,7 +408,7 @@ export function scanForexSmc(pair: string, bars: OhlcvBar[]): SmcScanResult {
       targetTP1,
       targetTP2,
       riskRewardRatio: rrRatio,
-      invalidationReason: tightStopLoss ? `Phá vỡ cấu trúc vi mô nếu giá đóng nến vượt qua ${tightStopLoss.toFixed(4)}` : "Chưa có setup hợp lưu SMC rõ rệt",
+      invalidationReason: tightStopLoss ? `Phá vỡ cấu trúc vi mô nếu giá đóng nến vượt qua ${fmtS(tightStopLoss)}` : "Chưa có setup hợp lưu SMC rõ rệt",
       rationale: rationale.length ? rationale : ["Chờ thanh khoản quét qua các đỉnh/đáy chính."],
     },
     summary,

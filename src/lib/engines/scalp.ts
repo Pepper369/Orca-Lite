@@ -170,6 +170,7 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     absorptionType: input.absorptionType ?? null,
     volumeDeltaDivergence: input.volumeDeltaDivergence ?? null,
     liquidationClusterAligned: input.liquidationClusterAligned ?? null,
+    externalMagnets: input.externalMagnets ?? null,
     isNewsOrCascadeLockout: Boolean(input.isLockout || !filter.eligible),
     lockoutReason:
       input.lockoutReason ?? (!filter.eligible ? filter.reasons[0] ?? "Asset Filter blocked" : null),

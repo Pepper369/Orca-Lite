@@ -1,5 +1,6 @@
 import type { OhlcvBar } from "../types";
 import type { PrecisionTradeSetup, SetupGrade } from "./fx-crypto-precision-engine";
+import type { ExternalLiquidityMagnet } from "./ict-smc-liquidity-engine";
 
 export type AssetTier = "A" | "B" | "C" | "EXCLUDED";
 export type VolatilityRegime = "LOW_VOLATILITY" | "NORMAL" | "HIGH_VOLATILITY" | "EXTREME_VOLATILITY";
@@ -107,6 +108,7 @@ export interface ScalpAnalyzeInput {
   absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
   volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
   liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
+  externalMagnets?: ExternalLiquidityMagnet[] | null;
   isLockout?: boolean;
   lockoutReason?: string | null;
 }

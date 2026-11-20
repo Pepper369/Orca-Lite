@@ -242,3 +242,34 @@ test("Precision FR-006: Catches Turtle Soup sweep bar causally & blocks post-exh
   assert.equal(fallingKnifeEval.grade, "NO_TRADE");
   assert.ok(fallingKnifeEval.vetoReasons.some((v) => v.includes("rơi dao")));
 });
+
+test("Precision FR-007: Causal Forward Liquidity Pool Flow Forecast & Volume Annotation", () => {
+  const eurSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "EURUSD")!;
+  const { bars } = generateRegimeBars(eurSpec, "CLEAN_UPTREND_PULLBACK", 101, 100);
+  const res = analyzeIctSmcLiquidity({
+    symbol: "EURUSD",
+    bars: bars.slice(0, 75),
+    assetType: "FOREX",
+    flowContext: {
+      flowIntensityIndex: 42,
+      orderBookImbalance: 28,
+      csmBaseMinusQuote: 1.8,
+    },
+  });
+
+  // Verify volumeNearPool is populated causally
+  for (const p of [...res.liquidityMap.buySidePools, ...res.liquidityMap.sellSidePools]) {
+    assert.ok(p.volumeNearPool != null && p.volumeNearPool > 0, `Pool ${p.id} missing volumeNearPool`);
+  }
+
+  const fwd = res.forwardLiquidityForecast;
+  assert.ok(fwd != null, "Expected forwardLiquidityForecast to be populated");
+  assert.equal(fwd!.horizonBars, 12);
+  assert.ok(fwd!.directionalFlowThrust > 0, `Expected bullish flow thrust, got ${fwd!.directionalFlowThrust}`);
+  assert.equal(fwd!.flowBias, "BULLISH_MAGNET_PULL");
+  if (fwd!.primaryTarget) {
+    assert.ok(fwd!.primaryTarget.reachProbabilityPct >= 5 && fwd!.primaryTarget.reachProbabilityPct <= 95);
+    assert.ok(fwd!.primaryTarget.etaBars >= 1 && fwd!.primaryTarget.etaBars <= 24);
+    assert.ok(fwd!.primaryTarget.pathImpedance >= 0 && fwd!.primaryTarget.pathImpedance <= 0.85);
+  }
+});

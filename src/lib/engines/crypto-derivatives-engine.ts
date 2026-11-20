@@ -200,7 +200,13 @@ export function buildCryptoDerivativesMetrics(params: {
     : undefined;
 
   const liquidationClusters = openInterestUsd > 0
-    ? detectCryptoLiquidationClusters(markPrice, openInterestUsd, atr ?? markPrice * 0.02)
+    ? detectCryptoLiquidationClusters(markPrice, openInterestUsd, atr ?? markPrice * 0.02, {
+        symbol,
+        fundingRate,
+        priceChange24hPct,
+        oiChange24hPct,
+        orderBookImbalance: domAnalysis.imbalanceRatio,
+      })
     : undefined;
 
   let commentary = "";

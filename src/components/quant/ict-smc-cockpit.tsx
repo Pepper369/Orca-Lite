@@ -55,6 +55,7 @@ export function IctSmcCockpit({
     bias,
     overallScore,
     liquidityMap,
+    forwardLiquidityForecast,
     recentSweeps,
     activeFvgList,
     orderBlocks,
@@ -118,12 +119,64 @@ export function IctSmcCockpit({
           <div className="p-3 rounded-lg border border-border/40 bg-surface-muted/20">
             <div className="flex justify-between items-center mb-2">
               <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <Magnet className="size-3.5 text-accent-primary" /> Bản đồ Thanh khoản (Liquidity Pools)
+                <Magnet className="size-3.5 text-accent-primary" /> Bản đồ &amp; Dự báo Bể Thanh khoản
               </span>
               <span className="text-muted-foreground text-[10px]">
                 {dealingRange.currentZone} Zone
               </span>
             </div>
+
+            {forwardLiquidityForecast?.primaryTarget && (
+              <div className="mb-2 p-2 rounded-lg border border-accent-primary/35 bg-accent-primary/10 text-[10px]">
+                <div className="flex items-center justify-between gap-1 font-bold">
+                  <span className="text-accent-primary flex items-center gap-1">
+                    <Zap className="size-3" /> Mục tiêu Hút Thanh khoản (H={forwardLiquidityForecast.horizonBars} nến):
+                  </span>
+                  <span className="text-foreground">
+                    {forwardLiquidityForecast.primaryTarget.poolType} @{" "}
+                    {fmtNum(forwardLiquidityForecast.primaryTarget.price, digits)}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+                  <span>
+                    P(Chạm):{" "}
+                    <b className="text-foreground">
+                      {forwardLiquidityForecast.primaryTarget.reachProbabilityPct}%
+                    </b>{" "}
+                    (~{forwardLiquidityForecast.primaryTarget.etaBars} nến)
+                  </span>
+                  <span>
+                    Thrust:{" "}
+                    <b
+                      className={
+                        forwardLiquidityForecast.directionalFlowThrust >= 0
+                          ? "text-positive"
+                          : "text-negative"
+                      }
+                    >
+                      {forwardLiquidityForecast.directionalFlowThrust > 0 ? "+" : ""}
+                      {forwardLiquidityForecast.directionalFlowThrust}
+                    </b>
+                  </span>
+                  <Badge
+                    tone={
+                      forwardLiquidityForecast.primaryTarget.expectedReaction === "SWEEP_REVERSAL"
+                        ? "warn"
+                        : forwardLiquidityForecast.primaryTarget.expectedReaction === "EXPANSION_BREAKOUT"
+                          ? "bull"
+                          : "neutral"
+                    }
+                    className="text-[9px]"
+                  >
+                    {forwardLiquidityForecast.primaryTarget.expectedReaction === "SWEEP_REVERSAL"
+                      ? "Quét đảo chiều"
+                      : forwardLiquidityForecast.primaryTarget.expectedReaction === "EXPANSION_BREAKOUT"
+                        ? "Bứt phá tiếp diễn"
+                        : "Hấp thụ dần"}
+                  </Badge>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2 text-[11px]">
               {/* Buy Side Liquidity */}

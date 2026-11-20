@@ -9,6 +9,7 @@ import { calculateCryptoPositionSize } from "../engines/crypto-position-sizer";
 import { atr as calcAtr } from "../technical";
 import { resampleOhlcvBars } from "../engines/asset-precision";
 import {
+  buildCryptoLiquidityContext,
   calculateCrossAssetKelly,
   computeGarmanKlassLeverageCap,
   detectCryptoLiquidationClusters,
@@ -140,15 +141,15 @@ async function scanSingleCryptoPair(
     const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
     const prelimAtrExec = calcAtr(execBars, 14) ?? lastPrice * 0.015;
     const liqClusters =
-      openInterestUsd > 0 ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, prelimAtrExec) : null;
-    const liquidationClusterAligned =
-      liqClusters?.dominantExposure === "SHORTS_EXPOSED"
-        ? "SHORT_SQUEEZE_UP"
-        : liqClusters?.dominantExposure === "LONGS_EXPOSED"
-          ? "LONG_FLUSH_DOWN"
-          : liqClusters
-            ? "BALANCED"
-            : null;
+      openInterestUsd > 0
+        ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, prelimAtrExec, {
+            symbol: pair,
+            fundingRate: funding.fundingRate,
+            priceChange24hPct: Number(ticker.priceChangePercent) || null,
+            orderBookImbalance: domImbalance,
+          })
+        : null;
+    const { liquidationClusterAligned, externalMagnets } = buildCryptoLiquidityContext(liqClusters);
 
     // News & Liquidation Cascade Shield Check (wired with Economic Calendar)
     const nExec = execBars.length;
@@ -177,6 +178,7 @@ async function scanSingleCryptoPair(
             spreadPct: liveSpreadPct,
             orderBookImbalance: domImbalance,
             liquidationClusterAligned,
+            externalMagnets,
             isLockout: shield.isLockout,
             lockoutReason: shield.warningMessage,
           })
@@ -194,6 +196,7 @@ async function scanSingleCryptoPair(
         orderBookImbalance: domImbalance,
         fundingRate: funding.fundingRate,
         liquidationClusterAligned,
+        externalMagnets,
         isNewsOrCascadeLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
       });

@@ -11,7 +11,8 @@
 
 import type { OhlcvBar } from "../types";
 import { atr, ema } from "../technical";
-import { getAssetPipSize, normalizeEpochMs, roundPrice } from "./asset-precision";
+import { normCdf } from "./advanced-quant-math";
+import { estimateClvOrderFlowImbalance, getAssetPipSize, normalizeEpochMs, roundPrice } from "./asset-precision";
 
 export interface LiquidityPool {
   id: string;
@@ -95,6 +96,41 @@ export interface OteTradeSetup {
   rationale: string;
 }
 
+export interface ExternalLiquidityMagnet {
+  price: number;
+  side: "BUY_SIDE" | "SELL_SIDE";
+  type: "SHORT_LIQ_CLUSTER" | "LONG_LIQ_CLUSTER";
+  notionalUsd: number;
+  isDominant?: boolean;
+}
+
+export interface LiquidityMagnetTarget {
+  id: string;
+  side: "BUY_SIDE" | "SELL_SIDE";
+  poolType: "BSL" | "SSL" | "EQH" | "EQL" | "SHORT_LIQ_CLUSTER" | "LONG_LIQ_CLUSTER";
+  price: number;
+  distanceAtr: number;
+  distancePipsOrPct: number;
+  poolStrength: number; // 0 - 100
+  pathImpedance: number; // 0 - 0.85 (obstacle density from opposing OB/FVG)
+  gravityScore: number;
+  reachProbabilityPct: number; // 5 - 95% first-passage barrier reach estimate
+  etaBars: number; // 1 - 24 bars
+  expectedReaction: "SWEEP_REVERSAL" | "EXPANSION_BREAKOUT" | "ABSORPTION_STALL";
+  rationaleVi: string;
+}
+
+export interface ForwardLiquidityForecast {
+  horizonBars: number;
+  directionalFlowThrust: number; // -100 to +100
+  flowBias: "BULLISH_MAGNET_PULL" | "BEARISH_MAGNET_PULL" | "BALANCED_RANGE";
+  primaryTarget: LiquidityMagnetTarget | null;
+  aboveTarget: LiquidityMagnetTarget | null;
+  belowTarget: LiquidityMagnetTarget | null;
+  candidates: LiquidityMagnetTarget[];
+  summaryVi: string;
+}
+
 export interface IctSmcAnalysisResult {
   symbol: string;
   bias: "STRONG_BULLISH" | "BULLISH" | "STRONG_BEARISH" | "BEARISH" | "NEUTRAL";
@@ -105,6 +141,7 @@ export interface IctSmcAnalysisResult {
     nearestBsl: LiquidityPool | null;
     nearestSsl: LiquidityPool | null;
   };
+  forwardLiquidityForecast?: ForwardLiquidityForecast;
   recentSweeps: AdvancedSweepEvent[];
   activeFvgList: IctFvgZone[];
   orderBlocks: IctOrderBlockZone[];
@@ -117,8 +154,17 @@ export interface IctSmcAnalysisResult {
   summaryVi: string;
 }
 
+export interface LiquidityFlowContext {
+  flowIntensityIndex?: number | null;
+  orderBookImbalance?: number | null;
+  fundingRate?: number | null;
+  csmBaseMinusQuote?: number | null;
+  externalMagnets?: ExternalLiquidityMagnet[] | null;
+}
+
 /**
- * Main Analysis Engine: Evaluates OHLCV candlestick series through full ICT & SMC suite.
+ * Main Analysis Engine: Evaluates OHLCV candlestick series through full ICT & SMC suite
+ * plus causal Forward Liquidity Pool Money-Flow forecasting.
  */
 export function analyzeIctSmcLiquidity(params: {
   symbol: string;
@@ -126,6 +172,7 @@ export function analyzeIctSmcLiquidity(params: {
   currentPrice?: number | null;
   assetType?: "FOREX" | "CRYPTO" | "STOCK";
   pipSize?: number;
+  flowContext?: LiquidityFlowContext;
   precomputed?: {
     closes?: number[];
     ema9?: (number | null)[];
@@ -139,6 +186,7 @@ export function analyzeIctSmcLiquidity(params: {
     currentPrice: inputPrice,
     assetType = "FOREX",
     pipSize: inputPipSize,
+    flowContext,
     precomputed,
   } = params;
 
@@ -153,8 +201,10 @@ export function analyzeIctSmcLiquidity(params: {
 
   // 1. LIQUIDITY MAP (BSL / SSL / EQH / EQL)
   const { allBslPools, allSslPools, buySidePools, sellSidePools } = detectLiquidityPools(bars, pipSize);
-  const nearestBsl = buySidePools.find((p) => p.price > currentPrice && p.status === "UNTOUCHED") ?? null;
-  const nearestSsl = sellSidePools.find((p) => p.price < currentPrice && p.status === "UNTOUCHED") ?? null;
+  const bslAbove = allBslPools.filter((p) => p.price > currentPrice && p.status === "UNTOUCHED");
+  const sslBelow = allSslPools.filter((p) => p.price < currentPrice && p.status === "UNTOUCHED");
+  const nearestBsl = bslAbove.length > 0 ? bslAbove.reduce((a, b) => (b.price < a.price ? b : a)) : null;
+  const nearestSsl = sslBelow.length > 0 ? sslBelow.reduce((a, b) => (b.price > a.price ? b : a)) : null;
 
   // 2. FAIR VALUE GAPS (FVG & BPR)
   const activeFvgList = detectFairValueGaps(bars, pipSize);
@@ -280,6 +330,21 @@ export function analyzeIctSmcLiquidity(params: {
         : "BEARISH"
       : "NEUTRAL";
 
+  const forwardLiquidityForecast = forecastForwardLiquidityFlow({
+    symbol,
+    assetType,
+    bars,
+    currentPrice,
+    pipSize,
+    atr14: atrVal,
+    trendDir,
+    allBslPools,
+    allSslPools,
+    activeFvgList,
+    orderBlocks,
+    flowContext,
+  });
+
   const summaryVi = generateSummaryNarrative({
     symbol,
     bias,
@@ -299,6 +364,7 @@ export function analyzeIctSmcLiquidity(params: {
       nearestBsl,
       nearestSsl,
     },
+    forwardLiquidityForecast,
     recentSweeps,
     activeFvgList,
     orderBlocks,
@@ -308,6 +374,271 @@ export function analyzeIctSmcLiquidity(params: {
       displacementDetected,
       flowCycle,
     },
+    summaryVi,
+  };
+}
+
+/**
+ * Computes causal Forward Liquidity Pool Money-Flow Forecast (Draw on Liquidity):
+ * Estimates magnetic pull gravity, path impedance (opposing OB/FVG vs FVG vacuum),
+ * First-Passage barrier reach probability over H=12 bars, and Sweep-Reversal vs Breakout reaction.
+ */
+export function forecastForwardLiquidityFlow(params: {
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO" | "STOCK";
+  bars: OhlcvBar[];
+  currentPrice: number;
+  pipSize: number;
+  atr14: number;
+  trendDir: 1 | -1 | 0;
+  allBslPools: LiquidityPool[];
+  allSslPools: LiquidityPool[];
+  activeFvgList: IctFvgZone[];
+  orderBlocks: IctOrderBlockZone[];
+  flowContext?: LiquidityFlowContext;
+}): ForwardLiquidityForecast {
+  const {
+    symbol,
+    assetType,
+    bars,
+    currentPrice,
+    pipSize,
+    atr14,
+    trendDir,
+    allBslPools,
+    allSslPools,
+    activeFvgList,
+    orderBlocks,
+    flowContext,
+  } = params;
+
+  const n = bars.length;
+  const horizonBars = 12;
+  const effAtr = Math.max(pipSize * 2, atr14 > 0 ? atr14 : currentPrice * 0.005);
+  const fmtP = (p: number) => roundPrice(p, symbol, assetType);
+
+  // 1. Strictly causal directional money-flow thrust [-100 .. +100]
+  const clv12 = estimateClvOrderFlowImbalance(bars, 12);
+  const clv4 = estimateClvOrderFlowImbalance(bars, 4);
+
+  let recentDeltaSum = 0;
+  let totalRecentVol = 0;
+  for (let i = Math.max(0, n - 5); i < n; i++) {
+    const b = bars[i]!;
+    const v = b.volume > 0 ? b.volume : 1;
+    const rng = Math.max(1e-12, b.high - b.low);
+    const barClv = ((b.close - b.low) - (b.high - b.close)) / rng;
+    recentDeltaSum += v * barClv;
+    totalRecentVol += v;
+  }
+  const cvdSlopeNorm = totalRecentVol > 0 ? Math.max(-100, Math.min(100, (recentDeltaSum / totalRecentVol) * 120)) : 0;
+
+  let rawThrust = clv12 * 0.35 + clv4 * 0.28 + cvdSlopeNorm * 0.22 + trendDir * 15;
+  if (flowContext?.flowIntensityIndex != null) {
+    rawThrust = rawThrust * 0.72 + flowContext.flowIntensityIndex * 0.28;
+  }
+  if (flowContext?.orderBookImbalance != null) {
+    rawThrust += Math.max(-22, Math.min(22, flowContext.orderBookImbalance * 0.22));
+  }
+  if (assetType === "FOREX" && flowContext?.csmBaseMinusQuote != null) {
+    rawThrust += Math.max(-16, Math.min(16, flowContext.csmBaseMinusQuote * 4));
+  }
+  if (assetType === "CRYPTO" && flowContext?.fundingRate != null) {
+    // Deep negative funding accelerates upside short-squeeze pull; extreme positive threatens downside long flush
+    rawThrust -= Math.tanh(flowContext.fundingRate / 0.0005) * 12;
+  }
+  const directionalFlowThrust = Math.round(Math.max(-100, Math.min(100, rawThrust)));
+
+  const flowBias: ForwardLiquidityForecast["flowBias"] =
+    directionalFlowThrust >= 14
+      ? "BULLISH_MAGNET_PULL"
+      : directionalFlowThrust <= -14
+        ? "BEARISH_MAGNET_PULL"
+        : "BALANCED_RANGE";
+
+  // Reference volume for pool normalization
+  const vols = bars.map((b) => (b.volume > 0 ? b.volume : 1)).sort((a, b) => a - b);
+  const medianVol = vols[Math.floor(vols.length / 2)] || 1;
+
+  // Build candidate pool records above and below currentPrice
+  interface RawPoolCandidate {
+    id: string;
+    side: "BUY_SIDE" | "SELL_SIDE";
+    poolType: LiquidityMagnetTarget["poolType"];
+    price: number;
+    baseStrength: number;
+    recencyBonus: number;
+    volBoost: number;
+    isExternalSqueeze: boolean;
+  }
+
+  const rawCandidates: RawPoolCandidate[] = [];
+  for (const p of allBslPools) {
+    if (p.status !== "UNTOUCHED" || p.price <= currentPrice + pipSize * 0.5) continue;
+    const base = p.significance === "HIGH_EXTERNAL" ? 72 : p.significance === "MEDIUM_INTERNAL" ? 56 : 45;
+    const recency = Math.exp(-Math.max(0, n - 1 - p.barIndex) / 45) * 10;
+    const volBoost = p.volumeNearPool != null ? Math.min(18, (p.volumeNearPool / Math.max(1, medianVol * 2.5)) * 12) : 0;
+    rawCandidates.push({
+      id: p.id,
+      side: "BUY_SIDE",
+      poolType: p.type === "EQH" ? "EQH" : "BSL",
+      price: p.price,
+      baseStrength: base,
+      recencyBonus: recency,
+      volBoost,
+      isExternalSqueeze: false,
+    });
+  }
+
+  for (const p of allSslPools) {
+    if (p.status !== "UNTOUCHED" || p.price >= currentPrice - pipSize * 0.5) continue;
+    const base = p.significance === "HIGH_EXTERNAL" ? 72 : p.significance === "MEDIUM_INTERNAL" ? 56 : 45;
+    const recency = Math.exp(-Math.max(0, n - 1 - p.barIndex) / 45) * 10;
+    const volBoost = p.volumeNearPool != null ? Math.min(18, (p.volumeNearPool / Math.max(1, medianVol * 2.5)) * 12) : 0;
+    rawCandidates.push({
+      id: p.id,
+      side: "SELL_SIDE",
+      poolType: p.type === "EQL" ? "EQL" : "SSL",
+      price: p.price,
+      baseStrength: base,
+      recencyBonus: recency,
+      volBoost,
+      isExternalSqueeze: false,
+    });
+  }
+
+  if (flowContext?.externalMagnets?.length) {
+    for (const m of flowContext.externalMagnets) {
+      if (m.price <= 0 || Math.abs(m.price - currentPrice) < pipSize) continue;
+      const validSide =
+        (m.side === "BUY_SIDE" && m.price > currentPrice) ||
+        (m.side === "SELL_SIDE" && m.price < currentPrice);
+      if (!validSide) continue;
+      const sizeBoost = m.notionalUsd > 0 ? Math.min(18, Math.max(0, Math.log10(m.notionalUsd) * 2)) : 6;
+      rawCandidates.push({
+        id: `ext_${m.type}_${Math.round(m.price * 1e6)}`,
+        side: m.side,
+        poolType: m.type,
+        price: m.price,
+        baseStrength: m.isDominant ? 76 : 60,
+        recencyBonus: 8,
+        volBoost: sizeBoost,
+        isExternalSqueeze: Boolean(m.isDominant),
+      });
+    }
+  }
+
+  const scored: LiquidityMagnetTarget[] = [];
+  for (const c of rawCandidates) {
+    const isAbove = c.side === "BUY_SIDE";
+    const dirSign = isAbove ? 1 : -1;
+    const rawDist = Math.abs(c.price - currentPrice);
+    const distanceAtr = rawDist / effAtr;
+    if (distanceAtr > 8.5) continue; // Ignore remote historical outliers beyond realistic 12-bar horizon
+
+    // Path Impedance: opposing unmitigated Order Blocks & FVGs between currentPrice and pool slow flow down,
+    // while same-direction unmitigated FVGs act as low-resistance liquidity vacuums.
+    const loP = Math.min(currentPrice, c.price);
+    const hiP = Math.max(currentPrice, c.price);
+    let impedance = 0;
+    for (const ob of orderBlocks) {
+      if (ob.meanThreshold <= loP || ob.meanThreshold >= hiP) continue;
+      if ((isAbove && ob.direction === "BEARISH") || (!isAbove && ob.direction === "BULLISH")) {
+        impedance += ob.status === "FRESH" ? 0.22 : 0.12;
+      }
+    }
+    for (const fvg of activeFvgList) {
+      if (fvg.consequentEncroachment <= loP || fvg.consequentEncroachment >= hiP) continue;
+      if ((isAbove && fvg.direction === "BEARISH_FVG") || (!isAbove && fvg.direction === "BULLISH_FVG")) {
+        impedance += 0.15;
+      } else {
+        impedance -= 0.08;
+      }
+    }
+    const pathImpedance = Number(Math.max(0, Math.min(0.85, impedance)).toFixed(2));
+    const poolStrength = Math.round(Math.min(100, c.baseStrength + c.recencyBonus + c.volBoost));
+
+    // Stochastic First-Passage Barrier Reach Probability over H = 12 bars
+    const alignedThrust = (dirSign * directionalFlowThrust) / 100;
+    const mu = alignedThrust * 0.42 * (1 - 0.45 * pathImpedance);
+    const d = Math.max(0.12, distanceAtr);
+    const rootH = Math.sqrt(horizonBars);
+    const z1 = (mu * horizonBars - d) / rootH;
+    const z2 = (-mu * horizonBars - d) / rootH;
+    const expTerm = Math.exp(Math.max(-12, Math.min(4, 2 * mu * d)));
+    const pReach = Math.max(0.05, Math.min(0.95, normCdf(z1) + expTerm * normCdf(z2)));
+    const reachProbabilityPct = Math.round(pReach * 100);
+
+    const etaBars = Math.max(
+      1,
+      Math.min(24, Math.round(d / Math.max(0.18, 0.36 + mu))),
+    );
+
+    const flowAlignFactor = 1 + 0.55 * Math.max(0, alignedThrust) - 0.25 * Math.max(0, -alignedThrust);
+    const gravityScore = Number(
+      ((poolStrength * flowAlignFactor) / (Math.pow(Math.max(0.45, distanceAtr), 1.1) * (1 + pathImpedance))).toFixed(1),
+    );
+
+    let expectedReaction: LiquidityMagnetTarget["expectedReaction"] = "ABSORPTION_STALL";
+    if (
+      dirSign * directionalFlowThrust >= 24 &&
+      pathImpedance <= 0.30 &&
+      (trendDir === dirSign || c.isExternalSqueeze)
+    ) {
+      expectedReaction = "EXPANSION_BREAKOUT";
+    } else if (
+      (c.poolType === "EQH" || c.poolType === "EQL" || poolStrength >= 68) &&
+      (trendDir !== dirSign || pathImpedance >= 0.25 || distanceAtr >= 1.15)
+    ) {
+      expectedReaction = "SWEEP_REVERSAL";
+    }
+
+    const distancePipsOrPct =
+      assetType === "CRYPTO"
+        ? Number(((rawDist / Math.max(1e-12, currentPrice)) * 100).toFixed(2))
+        : Number((rawDist / pipSize).toFixed(1));
+    const unitLabel = assetType === "CRYPTO" ? "%" : " pips";
+    const reactionText =
+      expectedReaction === "SWEEP_REVERSAL"
+        ? "Khả năng quét râu đảo chiều"
+        : expectedReaction === "EXPANSION_BREAKOUT"
+          ? "Dòng tiền thuận pha dễ xuyên thủng"
+          : "Có vùng cản hấp thụ trung gian";
+
+    scored.push({
+      id: c.id,
+      side: c.side,
+      poolType: c.poolType,
+      price: fmtP(c.price),
+      distanceAtr: Number(distanceAtr.toFixed(2)),
+      distancePipsOrPct,
+      poolStrength,
+      pathImpedance,
+      gravityScore,
+      reachProbabilityPct,
+      etaBars,
+      expectedReaction,
+      rationaleVi: `${c.poolType} @ ${fmtP(c.price)} (${isAbove ? "+" : "-"}${distancePipsOrPct}${unitLabel}, ${distanceAtr.toFixed(1)} ATR): P(chạm)=${reachProbabilityPct}% trong ~${etaBars} nến — ${reactionText}.`,
+    });
+  }
+
+  scored.sort((a, b) => b.gravityScore - a.gravityScore);
+  const aboveTarget = scored.find((t) => t.side === "BUY_SIDE") ?? null;
+  const belowTarget = scored.find((t) => t.side === "SELL_SIDE") ?? null;
+  const primaryTarget = scored[0] ?? null;
+
+  const summaryVi = primaryTarget
+    ? `Nam châm thanh khoản ưu tiên: ${primaryTarget.poolType} @ ${primaryTarget.price} (${primaryTarget.reachProbabilityPct}% chạm trong ~${primaryTarget.etaBars} nến · ${primaryTarget.expectedReaction === "SWEEP_REVERSAL" ? "Cảnh báo quét đảo chiều" : primaryTarget.expectedReaction === "EXPANSION_BREAKOUT" ? "Kịch bản bứt phá" : "Hấp thụ dần"}).`
+    : "Chưa có bể thanh khoản gần trong bán kính biến động dự báo.";
+
+  return {
+    horizonBars,
+    directionalFlowThrust,
+    flowBias,
+    primaryTarget,
+    aboveTarget,
+    belowTarget,
+    candidates: scored.slice(0, 6),
     summaryVi,
   };
 }
@@ -388,22 +719,31 @@ function detectLiquidityPools(
   }
 
   // Strictly causal sweep status: only mark SWEPT from bars AFTER the pivot confirmed (j > pool.barIndex + 3)
-  for (const pool of buySidePools) {
+  let rangeSum = 0;
+  const rngStart = Math.max(0, n - 20);
+  for (let k = rngStart; k < n; k++) rangeSum += Math.max(pipSize, bars[k]!.high - bars[k]!.low);
+  const avgRange = rangeSum / Math.max(1, n - rngStart);
+  const proxBand = Math.max(pipSize * 3, avgRange * 0.35);
+
+  const annotatePool = (pool: LiquidityPool, isBsl: boolean) => {
     for (let j = pool.barIndex + 4; j < n; j++) {
-      if (bars[j].high > pool.price) {
+      if (isBsl ? bars[j].high > pool.price : bars[j].low < pool.price) {
         pool.status = "SWEPT";
         break;
       }
     }
-  }
-  for (const pool of sellSidePools) {
-    for (let j = pool.barIndex + 4; j < n; j++) {
-      if (bars[j].low < pool.price) {
-        pool.status = "SWEPT";
-        break;
+    let volSum = 0;
+    for (let k = 0; k < n; k++) {
+      const b = bars[k]!;
+      if (b.high >= pool.price - proxBand && b.low <= pool.price + proxBand) {
+        volSum += b.volume > 0 ? b.volume : 1;
       }
     }
-  }
+    pool.volumeNearPool = Math.round(volSum);
+  };
+
+  for (const pool of buySidePools) annotatePool(pool, true);
+  for (const pool of sellSidePools) annotatePool(pool, false);
 
   return {
     allBslPools: buySidePools,
@@ -412,6 +752,8 @@ function detectLiquidityPools(
     sellSidePools: sellSidePools.slice(-6),
   };
 }
+
+export const extractCausalLiquidityPools = detectLiquidityPools;
 
 /**
  * 2. Detects Fair Value Gaps (FVG) and computes Consequent Encroachment (50%)

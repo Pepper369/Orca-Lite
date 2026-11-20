@@ -7,7 +7,11 @@ import {
   resampleOhlcvBars,
   roundPrice,
 } from "./asset-precision";
-import { analyzeIctSmcLiquidity } from "./ict-smc-liquidity-engine";
+import {
+  analyzeIctSmcLiquidity,
+  type ExternalLiquidityMagnet,
+  type ForwardLiquidityForecast,
+} from "./ict-smc-liquidity-engine";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
 import { calculateRequiredSpeedPace } from "./quant-reversal-pace";
 import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
@@ -31,6 +35,7 @@ export interface PrecisionSetupInput {
   absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;
   volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
   liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
+  externalMagnets?: ExternalLiquidityMagnet[] | null;
   sessionLabel?: string | null;
   isNewsOrCascadeLockout?: boolean;
   lockoutReason?: string | null;
@@ -74,6 +79,7 @@ export interface PrecisionTradeSetup {
   isHighWinrateVerified: boolean;
   winrateScore: number;
   liquiditySweepDetected: boolean;
+  forwardLiquidity?: ForwardLiquidityForecast | null;
   summaryVi: string;
 }
 
@@ -315,6 +321,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     absorptionType = null,
     volumeDeltaDivergence = null,
     liquidationClusterAligned = null,
+    externalMagnets = null,
     sessionLabel,
     isNewsOrCascadeLockout = false,
     lockoutReason,
@@ -398,6 +405,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     currentPrice,
     assetType,
     pipSize: pip,
+    flowContext: {
+      flowIntensityIndex,
+      orderBookImbalance: orderBookImbalance ?? null,
+      fundingRate: fundingRate ?? null,
+      csmBaseMinusQuote: csmBaseMinusQuote ?? null,
+      externalMagnets,
+    },
     precomputed: {
       closes,
       ema9: execCtx.ema9,
@@ -718,6 +732,39 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 4 (Liquidation Magnet): Cụm thanh lý ${liquidationClusterAligned} hút giá thuận chiều`);
   }
 
+  // Forward Liquidity Pool Money-Flow Alignment & Stop-Hunt Ceiling Guard
+  const fwdLiq = ict.forwardLiquidityForecast ?? null;
+  const fwdSameSideTarget = isBuy ? fwdLiq?.aboveTarget : fwdLiq?.belowTarget;
+  if (fwdLiq?.primaryTarget) {
+    const primaryMatchesDir =
+      (isBuy && fwdLiq.primaryTarget.side === "BUY_SIDE") ||
+      (!isBuy && fwdLiq.primaryTarget.side === "SELL_SIDE");
+    if (
+      primaryMatchesDir &&
+      fwdLiq.primaryTarget.reachProbabilityPct >= 62 &&
+      ((isBuy && fwdLiq.directionalFlowThrust >= 18) || (!isBuy && fwdLiq.directionalFlowThrust <= -18))
+    ) {
+      precisionScore += 4;
+      gatesPassed.push(
+        `Gate 4 (Draw-on-Liquidity): Dòng tiền hướng tới ${fwdLiq.primaryTarget.poolType} (${fwdLiq.primaryTarget.reachProbabilityPct}% trong ~${fwdLiq.primaryTarget.etaBars} nến)`,
+      );
+    }
+  }
+  if (
+    fwdSameSideTarget &&
+    fwdSameSideTarget.distanceAtr > 0.05 &&
+    fwdSameSideTarget.distanceAtr < 0.42 &&
+    fwdSameSideTarget.expectedReaction === "SWEEP_REVERSAL" &&
+    fwdSameSideTarget.poolStrength >= 70 &&
+    fwdSameSideTarget.reachProbabilityPct >= 55 &&
+    !hasSweep
+  ) {
+    precisionScore -= 8;
+    gatesFailed.push(
+      `Gate 3c: Cận kề bể thanh khoản ${fwdSameSideTarget.poolType} dễ quét râu đảo chiều (${fwdSameSideTarget.distanceAtr.toFixed(2)} ATR)`,
+    );
+  }
+
   if (assetType === "FOREX" && csmBaseMinusQuote != null) {
     if ((isBuy && csmBaseMinusQuote >= 1.2) || (!isBuy && csmBaseMinusQuote <= -1.2)) {
       precisionScore += 6;
@@ -833,16 +880,28 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   );
   const rawSl = isBuy ? rawEntry - stopDist : rawEntry + stopDist;
 
-  // Liquidity targets from Support/Resistance & Ict Pools
+  // Liquidity targets from Support/Resistance, ICT Pools & Forward Liquidity Forecast
   const sr = supportResistance(barsExecution, 72);
   let target2Dist = stopDist * 2.1;
   if (isBuy) {
-    const candidates = [...sr.resistance, ict.liquidityMap.nearestBsl?.price ?? 0]
+    const fwdPrice =
+      fwdSameSideTarget != null
+        ? fwdSameSideTarget.expectedReaction === "EXPANSION_BREAKOUT"
+          ? fwdSameSideTarget.price + atr14 * 0.35
+          : fwdSameSideTarget.price - pip * 1.5
+        : 0;
+    const candidates = [...sr.resistance, ict.liquidityMap.nearestBsl?.price ?? 0, fwdPrice]
       .filter((p) => p > rawEntry + stopDist * 1.65 && p <= rawEntry + stopDist * 2.8)
       .sort((a, b) => a - b);
     if (candidates.length > 0) target2Dist = candidates[0]! - rawEntry;
   } else {
-    const candidates = [...sr.support, ict.liquidityMap.nearestSsl?.price ?? 0]
+    const fwdPrice =
+      fwdSameSideTarget != null
+        ? fwdSameSideTarget.expectedReaction === "EXPANSION_BREAKOUT"
+          ? fwdSameSideTarget.price - atr14 * 0.35
+          : fwdSameSideTarget.price + pip * 1.5
+        : 0;
+    const candidates = [...sr.support, ict.liquidityMap.nearestSsl?.price ?? 0, fwdPrice]
       .filter((p) => p > 0 && p < rawEntry - stopDist * 1.65 && p >= rawEntry - stopDist * 2.8)
       .sort((a, b) => b - a);
     if (candidates.length > 0) target2Dist = rawEntry - candidates[0]!;
@@ -945,6 +1004,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       isHighWinrateVerified: gateCheck.isHighWinrateVerified,
       winrateScore: gateCheck.winrateScore,
       liquiditySweepDetected: gateCheck.liquiditySweepDetected,
+      forwardLiquidity: fwdLiq,
       summaryVi: `${symbol}: NO_TRADE (${precisionScore}/100) — ${vetoReasons[0]}`,
     };
   }
@@ -985,6 +1045,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     isHighWinrateVerified: gateCheck.isHighWinrateVerified,
     winrateScore: gateCheck.winrateScore,
     liquiditySweepDetected: gateCheck.liquiditySweepDetected,
+    forwardLiquidity: fwdLiq,
     summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
   };
 }
