@@ -191,6 +191,21 @@ export async function GET(req: Request) {
           bankFairPbGordon: snap?.bankFairPbGordon ?? null,
           rnavUpsidePct: snap?.rnavUpsidePct ?? null,
           isBrokenSupport: snap?.isBrokenSupport ?? null,
+          precomputedHorizonScores:
+            snap?.horizonShortScore != null &&
+            snap?.horizonMediumScore != null &&
+            snap?.horizonMedLongScore != null &&
+            snap?.horizonLongScore != null &&
+            snap?.bestHorizon != null
+              ? {
+                  short1_2w: snap.horizonShortScore,
+                  medium3w_2m: snap.horizonMediumScore,
+                  medLong2_6m: snap.horizonMedLongScore,
+                  long6mPlus: snap.horizonLongScore,
+                  bestHorizon: snap.bestHorizon,
+                  bestHorizonVi: snap.bestHorizonVi ?? "Đa khung",
+                }
+              : null,
         });
       }
 

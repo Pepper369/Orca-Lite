@@ -46,6 +46,10 @@ const SectorFlowScreener = dynamic(
   () => import("@/components/sector-flow-screener").then((m) => m.SectorFlowScreener),
   { ssr: false, loading: PanelFallback },
 );
+const SectorLeaderScreener = dynamic(
+  () => import("@/components/sector-leader-screener").then((m) => m.SectorLeaderScreener),
+  { ssr: false, loading: PanelFallback },
+);
 const ScreenerBacktestModal = dynamic(
   () => import("@/components/screener-backtest-modal").then((m) => m.ScreenerBacktestModal),
   { ssr: false },
@@ -397,7 +401,8 @@ function ScreenerInner() {
           <div>
             <SubTabBar
               tabs={[
-                { id: "sector-flow", label: "Dòng tiền Ngành" },
+                { id: "sector-flow", label: "Dòng tiền Ngành (4 Tầm nhìn)" },
+                { id: "sector-leaders", label: "Bộ lọc Cổ phiếu Theo Sóng Ngành" },
                 { id: "rrg-rotation", label: "Vòng xoay RRG" },
                 { id: "macro-radar", label: "Radar Vĩ mô & Chu kỳ" },
                 { id: "systemic-radar", label: "Radar Rủi ro Hệ thống" },
@@ -405,7 +410,9 @@ function ScreenerInner() {
               active={tab}
               onSelect={(id) => setSubTabMap((p) => ({ ...p, "macro-sector-flow": id }))}
             />
-            {tab === "rrg-rotation" ? (
+            {tab === "sector-leaders" ? (
+              <SectorLeaderScreener defaultSector={sector} />
+            ) : tab === "rrg-rotation" ? (
               <RrgChart />
             ) : tab === "macro-radar" ? (
               <MacroRadarCard />

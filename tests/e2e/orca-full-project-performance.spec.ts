@@ -109,10 +109,10 @@ test.describe("Orca-Lite Project-Wide Dynamic Performance & E2E Verification Sui
       secShortData.sectors[secShortData.sectors.length - 1].horizonScores.short1_2w,
     );
 
-    // 1.3 Unified Stocks Screener Pro with Multi-Horizon Filter
+    // 1.3 Unified Stocks Screener Pro with Multi-Horizon & Intra-Sector Leader Filter
     const tScr0 = performance.now();
     const scrRes = await request.get(
-      "/api/v1/stocks/screener?investmentHorizon=LONG_6M_PLUS&minHorizonScore=65&limit=20",
+      "/api/v1/stocks/screener?investmentHorizon=LONG_6M_PLUS&minHorizonScore=65&maxRankInSector=3&limit=20",
     );
     const scrMs = Math.round(performance.now() - tScr0);
     expect(scrRes.ok()).toBeTruthy();
@@ -121,6 +121,9 @@ test.describe("Orca-Lite Project-Wide Dynamic Performance & E2E Verification Sui
     expect(scrItems.length).toBeGreaterThan(0);
     for (const item of scrItems) {
       expect(item.horizonLongScore).toBeGreaterThanOrEqual(65);
+      expect(item.rankInSector).toBeLessThanOrEqual(3);
+      expect(item.sectorFlowScore).toBeDefined();
+      expect(item.sectorInstitutionalRegime).toBeDefined();
       expect(item.horizonShortScore).toBeDefined();
       expect(item.horizonMediumScore).toBeDefined();
       expect(item.horizonMedLongScore).toBeDefined();
@@ -172,6 +175,14 @@ test.describe("Orca-Lite Project-Wide Dynamic Performance & E2E Verification Sui
     await tabLong.click();
     await expect(page.getByText(/Bản đồ Xếp hạng Dòng tiền Ngành — Dài hạn/i)).toBeVisible();
     const switchTotalMs = Math.round(performance.now() - tSwitch0);
+
+    // Switch to the new Sector Leader Screener tab ("Bộ lọc Cổ phiếu Theo Sóng Ngành")
+    const tabSectorLeaders = page.getByRole("button", { name: /Bộ lọc Cổ phiếu Theo Sóng Ngành/i });
+    await expect(tabSectorLeaders).toBeVisible();
+    await tabSectorLeaders.click();
+    await expect(
+      page.getByText(/Bộ Lọc Cổ Phiếu Dẫn Sóng Nhóm Ngành & Đồng Thuận Dòng Tiền Tổ Chức/i),
+    ).toBeVisible();
 
     console.log(
       `[UI BENCHMARK /screener?universe=sector-flow] Nav=${perf.wallNavMs}ms | Hydrated=${perf.hydratedReadyMs}ms | FCP=${perf.fcpMs}ms | DOMNodes=${perf.domNodesCount} | Heap=${perf.jsHeapUsedMB}MB | 4-Horizon-Tab-Switch=${switchTotalMs}ms`,

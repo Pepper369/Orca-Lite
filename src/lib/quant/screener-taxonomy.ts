@@ -422,6 +422,8 @@ export const UNIVERSE_ALIASES: Record<string, UniverseAliasResolution> = {
   "macro-radar": { workspace: "macro-sector-flow", subTab: "macro-radar" },
   "rrg-rotation": { workspace: "macro-sector-flow", subTab: "rrg-rotation" },
   "sector-flow": { workspace: "macro-sector-flow", subTab: "sector-flow" },
+  "sector-leaders": { workspace: "macro-sector-flow", subTab: "sector-leaders" },
+  "sector-screener": { workspace: "macro-sector-flow", subTab: "sector-leaders" },
 };
 
 export function resolveUniverseRoute(raw: string | null | undefined): UniverseAliasResolution {

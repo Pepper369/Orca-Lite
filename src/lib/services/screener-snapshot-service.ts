@@ -100,7 +100,10 @@ import {
 } from "../engines/industry-specific-valuation";
 import {
   evaluateStockHorizonScores,
+  evaluateMultiHorizonSectorFlow,
   type InvestmentHorizon,
+  type HorizonFlowSignal,
+  type SectorInstitutionalRegime,
 } from "../engines/sector-horizon-flow-engine";
 import {
   CANONICAL_PRESETS,
@@ -467,6 +470,20 @@ export type ScreenerStockItem = {
   horizonLongScore?: number | null;
   bestHorizon?: InvestmentHorizon | null;
   bestHorizonVi?: string | null;
+  // Unified Intra-Sector Money-Flow & Institutional Regime Fields (Zero-Overlap)
+  rankInSector?: number | null;
+  isSectorFlowLeader?: boolean;
+  sectorFlowScore?: number | null;
+  sectorShortFlowScore?: number | null;
+  sectorMediumFlowScore?: number | null;
+  sectorMedLongFlowScore?: number | null;
+  sectorLongFlowScore?: number | null;
+  sectorFlowSignal?: HorizonFlowSignal | null;
+  sectorFlowSignalVi?: string | null;
+  sectorInstitutionalRegime?: SectorInstitutionalRegime | null;
+  sectorInstitutionalRegimeVi?: string | null;
+  sectorVolSurgeRatio?: number | null;
+  sectorSmartMoneyBreadthPct?: number | null;
   bitFlags?: number;
   faBitFlags?: number;
   quantFaBitFlags?: number;
@@ -595,6 +612,11 @@ export type ScreenerFilterParams = {
   // Multi-Horizon Sector & Stock Money-Flow Filter
   investmentHorizon?: InvestmentHorizon | "ALL" | string;
   minHorizonScore?: number;
+  sectorFlowSignal?: HorizonFlowSignal | "INFLOW_ANY" | "ALL" | string;
+  sectorInstitutionalRegime?: SectorInstitutionalRegime | "ALL" | string;
+  minSectorFlowScore?: number;
+  maxRankInSector?: number;
+  sectorFlowLeaderOnly?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   limit?: number;
@@ -3856,6 +3878,107 @@ async function produceMasterScreenerSnapshotInternal(): Promise<MasterSnapshotPa
         });
       }
 
+      // Single-pass Unified Sector Money-Flow & Intra-Sector Ranking (reuses precomputed stock horizon scores)
+      const sectorEval = evaluateMultiHorizonSectorFlow(
+        items.map((it) => ({
+          symbol: it.symbol,
+          sector: it.sector,
+          price: it.price,
+          changePercent: it.changePercent,
+          volume: it.volume,
+          marketCap: it.marketCap,
+          foreignNetValBillion: it.foreignNetVal,
+          volRatio20: it.volRatio20,
+          upDownVolRatio: it.upDownVolRatio,
+          rsRating: it.rsRating,
+          rsRating20: it.rsRating20,
+          rsTrend: it.rsTrend,
+          maSignal: it.maSignal,
+          mtfConsensus: it.mtfConsensus,
+          isMtfAligned: it.isMtfAligned,
+          smartMoneyScore: it.smartMoneyScore,
+          smartMoneySignal: it.smartMoneySignal,
+          apexQuantScore: it.apexQuantScore,
+          orcaMasterScore: it.orcaMasterScore,
+          confluenceScore: it.confluenceScore,
+          historicalEdgeScore: it.historicalEdgeScore,
+          isBuyTriggerNow: it.isBuyTriggerNow,
+          buyZoneStatus: it.buyZoneStatus,
+          absBuyDiff: it.absBuyDiff,
+          riskReward: it.riskReward,
+          isSqueezeFiredBull: it.isSqueezeFiredBull,
+          isSqueezeOn: it.isSqueezeOn,
+          isTightCloses: it.isTightCloses,
+          isVolumeDryUp: it.isVolumeDryUp,
+          isWyckoffLps: it.isWyckoffLps,
+          isWyckoffSpring: it.isWyckoffSpring,
+          ouZScore: it.ouZScore,
+          ouHalfLife: it.ouHalfLife,
+          sectorRrgQuadrant: it.sectorRrgQuadrant,
+          sectorRsRatio: it.sectorRsRatio,
+          sectorRsMomentum: it.sectorRsMomentum,
+          roe: it.roe,
+          roic: it.roic,
+          roiic3Y: it.roiic3Y,
+          pe: it.pe,
+          pb: it.pb,
+          peg: it.peg,
+          dividendYield: it.dividendYield,
+          niYoyPct: it.niYoyPct,
+          revenueYoyPct: it.revenueYoyPct,
+          isQuarterlyInflection: it.isQuarterlyInflection,
+          piotroskiFScore: it.piotroskiFScore,
+          altmanZone: it.altmanZone,
+          cfoToNetProfit: it.cfoToNetProfit,
+          sloanAccrualRatio: it.sloanAccrualRatio,
+          isBeneishSafe: it.isBeneishSafe,
+          isNetCash: it.isNetCash,
+          isMertonSafe: it.isMertonSafe,
+          mertonDistanceToDefault: it.mertonDistanceToDefault,
+          isBuffettCompounder: it.isBuffettCompounder,
+          isSuperCompounder: it.isSuperCompounder,
+          isDividendAristocrat: it.isDividendAristocrat,
+          consensusUpsidePct: it.consensusUpsidePct,
+          reverseDcfMarginPct: it.reverseDcfMarginPct,
+          bankFairPbGordon: it.bankFairPbGordon,
+          rnavUpsidePct: it.rnavUpsidePct,
+          isBrokenSupport: it.isBrokenSupport,
+          precomputedHorizonScores:
+            it.horizonShortScore != null &&
+            it.horizonMediumScore != null &&
+            it.horizonMedLongScore != null &&
+            it.horizonLongScore != null &&
+            it.bestHorizon != null
+              ? {
+                  short1_2w: it.horizonShortScore,
+                  medium3w_2m: it.horizonMediumScore,
+                  medLong2_6m: it.horizonMedLongScore,
+                  long6mPlus: it.horizonLongScore,
+                  bestHorizon: it.bestHorizon,
+                  bestHorizonVi: it.bestHorizonVi ?? "Đa khung",
+                }
+              : null,
+        })),
+      );
+
+      for (const it of items) {
+        const sr = sectorEval.stockRankMap.get(it.symbol.toUpperCase());
+        if (!sr) continue;
+        it.rankInSector = sr.rankInSector;
+        it.isSectorFlowLeader = sr.isSectorFlowLeader;
+        it.sectorFlowScore = sr.sectorFlowScore;
+        it.sectorShortFlowScore = sr.sectorShortFlowScore;
+        it.sectorMediumFlowScore = sr.sectorMediumFlowScore;
+        it.sectorMedLongFlowScore = sr.sectorMedLongFlowScore;
+        it.sectorLongFlowScore = sr.sectorLongFlowScore;
+        it.sectorFlowSignal = sr.sectorFlowSignal;
+        it.sectorFlowSignalVi = sr.sectorFlowSignalVi;
+        it.sectorInstitutionalRegime = sr.sectorInstitutionalRegime;
+        it.sectorInstitutionalRegimeVi = sr.sectorInstitutionalRegimeVi;
+        it.sectorVolSurgeRatio = sr.sectorVolSurgeRatio;
+        it.sectorSmartMoneyBreadthPct = sr.sectorSmartMoneyBreadthPct;
+      }
+
       const quoteProviders = multiQuotesRes.sources?.length ? multiQuotesRes.sources : ["vps", "ssi", "vndirect"];
       const valuationProviders = ["vndirect-finfo", "vietcap-iq", "orca-ratio-engine"];
       const allSourcesUsed = Array.from(new Set([...quoteProviders, ...valuationProviders]));
@@ -4504,6 +4627,22 @@ export async function queryScreenerStocks(params: ScreenerFilterParams): Promise
         x.horizonLongScore ?? 0,
       );
       if (maxH < params.minHorizonScore) continue;
+    }
+
+    // Unified Intra-Sector & Sector Institutional Money-Flow Filters
+    if (params.sectorFlowLeaderOnly && !x.isSectorFlowLeader) continue;
+    if (params.maxRankInSector != null && (x.rankInSector == null || x.rankInSector > params.maxRankInSector)) continue;
+    if (params.minSectorFlowScore != null && (x.sectorFlowScore == null || x.sectorFlowScore < params.minSectorFlowScore)) continue;
+    if (params.sectorFlowSignal && params.sectorFlowSignal !== "ALL") {
+      const sigTarget = params.sectorFlowSignal.toUpperCase();
+      if (sigTarget === "INFLOW_ANY") {
+        if (x.sectorFlowSignal !== "STRONG_INFLOW" && x.sectorFlowSignal !== "ACCUMULATION" && (x.sectorFlowScore ?? 0) < 58) continue;
+      } else if (x.sectorFlowSignal !== sigTarget) {
+        continue;
+      }
+    }
+    if (params.sectorInstitutionalRegime && params.sectorInstitutionalRegime !== "ALL") {
+      if (x.sectorInstitutionalRegime !== params.sectorInstitutionalRegime.toUpperCase()) continue;
     }
 
     filtered.push(x);

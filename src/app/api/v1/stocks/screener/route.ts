@@ -148,6 +148,15 @@ export async function GET(req: Request) {
           : undefined,
     investmentHorizon: url.searchParams.get("investmentHorizon") ?? undefined,
     minHorizonScore: num(url.searchParams.get("minHorizonScore"), 0, 99),
+    sectorFlowSignal: url.searchParams.get("sectorFlowSignal") ?? undefined,
+    sectorInstitutionalRegime: url.searchParams.get("sectorInstitutionalRegime") ?? undefined,
+    minSectorFlowScore: num(url.searchParams.get("minSectorFlowScore"), 0, 99),
+    maxRankInSector: num(url.searchParams.get("maxRankInSector"), 1, 50),
+    sectorFlowLeaderOnly:
+      url.searchParams.get("sectorFlowLeaderOnly") === "true" ||
+      url.searchParams.get("sectorFlowLeaderOnly") === "1"
+        ? true
+        : undefined,
     maSignal: url.searchParams.get("maSignal") ?? undefined,
     sort: (url.searchParams.get("sort") ?? "marketCap").slice(0, 40).replace(/[^a-zA-Z0-9_]/g, ""),
     order: (url.searchParams.get("order")

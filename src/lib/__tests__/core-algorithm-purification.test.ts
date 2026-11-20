@@ -465,6 +465,10 @@ describe("Core Algorithm & Money-Flow Purification Invariants (MF-01..TA-05)", (
     assert.equal(multiSector.sectors.length, 2);
     assert.equal(multiSector.horizonLeaders.SHORT_1_2W[0], "Chứng khoán");
     assert.equal(multiSector.horizonLeaders.LONG_6M_PLUS[0], "Công nghệ thông tin");
+    assert.ok(multiSector.stockRankMap.get("SSI")?.rankInSector === 1);
+    assert.ok(multiSector.stockRankMap.get("FPT")?.rankInSector === 1);
+    assert.ok(multiSector.sectors[0]?.institutionalRegime != null);
+    assert.ok(multiSector.sectors[0]?.weightedVolRatio20 != null);
   });
 
   it("Unified TA Kernel Consistency & 100-Stock Precomputed Pipeline Speedup", async () => {

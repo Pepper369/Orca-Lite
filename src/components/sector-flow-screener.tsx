@@ -242,8 +242,19 @@ export function SectorFlowScreener() {
                         {sec.rotationPhaseVi}
                       </span>
                     )}
+                    {sec.institutionalRegimeVi && (
+                      <span className="inline-block rounded bg-accent/15 border border-accent/30 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                        {sec.institutionalRegimeVi}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 font-mono text-[11px]">
+                    <Link
+                      href={`/screener?universe=sector-leaders&sector=${encodeURIComponent(sec.sector)}`}
+                      className="hidden lg:inline-block rounded border border-line bg-panel-2 px-2 py-0.5 font-sans text-[10px] font-semibold text-ink-2 hover:border-accent hover:text-accent"
+                    >
+                      Lọc mã dẫn sóng →
+                    </Link>
                     {activePicks.length > 0 && (
                       <span className="hidden sm:inline text-ink-3 font-sans">
                         Top:{" "}
@@ -370,10 +381,22 @@ export function SectorFlowScreener() {
                   return (
                     <tr key={sec.sector} className="hover:bg-panel-2/50 transition-colors">
                       <td className="py-2.5 px-3 font-sans">
-                        <div className="font-semibold text-ink">{sec.sector}</div>
-                        <div className="mt-0.5 text-[10px] text-ink-3">
-                          {sec.rotationPhaseVi || sec.bestHorizonVi}
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-ink">{sec.sector}</span>
+                          {sec.buyTriggerStocksCount != null && sec.buyTriggerStocksCount > 0 && (
+                            <span className="rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300">
+                              {sec.buyTriggerStocksCount} điểm mua
+                            </span>
+                          )}
                         </div>
+                        <div className="mt-0.5 text-[10px] text-ink-3">
+                          {sec.institutionalRegimeVi || sec.rotationPhaseVi || sec.bestHorizonVi}
+                        </div>
+                        {sec.weightedVolRatio20 != null && (
+                          <div className="mt-0.5 text-[9px] text-ink-3">
+                            Vol {sec.weightedVolRatio20}x • Cá mập {sec.smartMoneyBreadthPct ?? 0}% • Nền VCP {sec.vcpTightBreadthPct ?? 0}%
+                          </div>
+                        )}
                       </td>
 
                       {/* 1-2 Weeks */}

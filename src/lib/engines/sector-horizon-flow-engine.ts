@@ -28,6 +28,15 @@ export type HorizonFlowSignal =
   | "DISTRIBUTION"
   | "OUTFLOW";
 
+export type SectorInstitutionalRegime =
+  | "DUAL_INFLOW"
+  | "SECTOR_VOLUME_IGNITION"
+  | "DOMESTIC_SMART_MONEY_LEAD"
+  | "FOREIGN_NET_ACCUMULATION"
+  | "STEALTH_ACCUMULATION"
+  | "BROAD_DISTRIBUTION"
+  | "NEUTRAL_ROTATION";
+
 export interface HorizonStockPick {
   symbol: string;
   price: number;
@@ -123,6 +132,35 @@ export interface SectorHorizonFlowInputItem {
   bankFairPbGordon?: number | null;
   rnavUpsidePct?: number | null;
   isBrokenSupport?: boolean | null;
+  /** Optional precomputed horizon scores from unified snapshot pipeline to avoid duplicate evaluation */
+  precomputedHorizonScores?: {
+    short1_2w: number;
+    medium3w_2m: number;
+    medLong2_6m: number;
+    long6mPlus: number;
+    bestHorizon: InvestmentHorizon;
+    bestHorizonVi: string;
+    reasonsByHorizon?: Record<InvestmentHorizon, string>;
+  } | null;
+}
+
+export interface IntraSectorStockRank {
+  symbol: string;
+  sector: string;
+  sectorCode: string;
+  rankInSector: number;
+  isSectorFlowLeader: boolean;
+  sectorFlowScore: number;
+  sectorShortFlowScore: number;
+  sectorMediumFlowScore: number;
+  sectorMedLongFlowScore: number;
+  sectorLongFlowScore: number;
+  sectorFlowSignal: HorizonFlowSignal;
+  sectorFlowSignalVi: string;
+  sectorInstitutionalRegime: SectorInstitutionalRegime;
+  sectorInstitutionalRegimeVi: string;
+  sectorVolSurgeRatio: number;
+  sectorSmartMoneyBreadthPct: number;
 }
 
 export interface SectorHorizonFlowResult {
@@ -138,6 +176,22 @@ export interface SectorHorizonFlowResult {
   unchangedCount: number;
   totalStocksCount: number;
   breadthRatioPct: number;
+  /** Liquidity-weighted 20-day volume surge ratio across sector */
+  weightedVolRatio20: number;
+  /** Liquidity-weighted 50-day Up/Down volume accumulation ratio */
+  weightedUpDownVolRatio: number;
+  /** % of stocks in sector showing Smart Money accumulation / Pocket Pivot / Spring */
+  smartMoneyBreadthPct: number;
+  /** % of stocks in sector forming VCP / Tight Closes / VDU / Wyckoff LPS base */
+  vcpTightBreadthPct: number;
+  /** Number of stocks in sector currently at or near actionable buy trigger */
+  buyTriggerStocksCount: number;
+  /** Institutional money-flow regime classification */
+  institutionalRegime: SectorInstitutionalRegime;
+  institutionalRegimeVi: string;
+  /** Short-term vs Medium-Long term flow velocity delta (short1_2w - medLong2_6m) */
+  flowVelocityDelta: number;
+  flowVelocitySignalVi: string;
   quadrant: "Leading" | "Improving" | "Weakening" | "Lagging";
   quadrantVi: string;
   rsRatio: number;
@@ -460,8 +514,10 @@ export function evaluateMultiHorizonSectorFlow(
   sectors: SectorHorizonFlowResult[];
   totalMarketTurnoverBillion: number;
   horizonLeaders: Record<InvestmentHorizon, string[]>;
+  stockRankMap: Map<string, IntraSectorStockRank>;
 } {
   let totalMarketTurnoverBillion = 0;
+  const stockRankMap = new Map<string, IntraSectorStockRank>();
 
   interface BucketItem {
     raw: SectorHorizonFlowInputItem;
@@ -493,10 +549,29 @@ export function evaluateMultiHorizonSectorFlow(
       sectorBuckets.set(secName, bucket);
     }
 
+    // Reuse precomputed horizon scores if already calculated in snapshot pipeline (Zero Algorithmic Overlap)
+    const pre = raw.precomputedHorizonScores;
+    const scores: ReturnType<typeof evaluateStockHorizonScores> = pre
+      ? {
+          short1_2w: pre.short1_2w,
+          medium3w_2m: pre.medium3w_2m,
+          medLong2_6m: pre.medLong2_6m,
+          long6mPlus: pre.long6mPlus,
+          bestHorizon: pre.bestHorizon,
+          bestHorizonVi: pre.bestHorizonVi,
+          reasonsByHorizon: pre.reasonsByHorizon ?? {
+            SHORT_1_2W: `Xung lực ngắn hạn ${pre.short1_2w}đ`,
+            MEDIUM_3W_2M: `Cấu trúc trung hạn ${pre.medium3w_2m}đ`,
+            MED_LONG_2_6M: `Định giá & Stage 2 ${pre.medLong2_6m}đ`,
+            LONG_6M_PLUS: `Tích sản ROIC/ROE ${pre.long6mPlus}đ`,
+          },
+        }
+      : evaluateStockHorizonScores({ ...raw, sector: secName });
+
     bucket.list.push({
       raw,
       turnoverBillion: turnover,
-      scores: evaluateStockHorizonScores({ ...raw, sector: secName }),
+      scores,
     });
   }
 
@@ -525,6 +600,12 @@ export function evaluateMultiHorizonSectorFlow(
     let wLong = 0;
     let weightTotal = 0;
 
+    let wVolRatioSum = 0;
+    let wUpDownVolSum = 0;
+    let smartMoneyCount = 0;
+    let vcpTightCount = 0;
+    let buyTriggerCount = 0;
+
     let rsRatioSum = 0;
     let rsMomSum = 0;
     let rrgCount = 0;
@@ -542,6 +623,34 @@ export function evaluateMultiHorizonSectorFlow(
       if (chg > 0.1) gainers++;
       else if (chg < -0.1) losers++;
       else unchanged++;
+
+      const vr = entry.raw.volRatio20 ?? 1.0;
+      const udr = entry.raw.upDownVolRatio ?? 1.0;
+      wVolRatioSum += vr * w;
+      wUpDownVolSum += udr * w;
+
+      const hasSmartMoney =
+        (entry.raw.smartMoneyScore ?? 50) >= 62 ||
+        entry.raw.smartMoneySignal === "HEAVY_ACCUMULATION" ||
+        entry.raw.smartMoneySignal === "POCKET_PIVOT" ||
+        entry.raw.smartMoneySignal === "SPRING_ABSORPTION" ||
+        Boolean(entry.raw.isWyckoffSpring) ||
+        udr >= 1.22;
+      if (hasSmartMoney) smartMoneyCount++;
+
+      const hasVcpTight =
+        Boolean(entry.raw.isTightCloses) ||
+        Boolean(entry.raw.isVolumeDryUp) ||
+        Boolean(entry.raw.isWyckoffLps) ||
+        Boolean(entry.raw.isSqueezeOn) ||
+        Boolean(entry.raw.isSqueezeFiredBull);
+      if (hasVcpTight) vcpTightCount++;
+
+      const hasBuyTrigger =
+        Boolean(entry.raw.isBuyTriggerNow) ||
+        entry.raw.buyZoneStatus === "AT_BUY_POINT" ||
+        entry.raw.buyZoneStatus === "NEAR_BUY_POINT";
+      if (hasBuyTrigger) buyTriggerCount++;
 
       sumShort += entry.scores.short1_2w;
       sumMed += entry.scores.medium3w_2m;
@@ -566,20 +675,31 @@ export function evaluateMultiHorizonSectorFlow(
     const vwapChange = weightTotal > 0 ? weightedChgSum / weightTotal : avgChange;
     const sharePct = (secTurnover / denomTurnover) * 100;
     const breadthRatioPct = Math.round((gainers / n) * 100);
+    const weightedVolRatio20 = Number((weightTotal > 0 ? wVolRatioSum / weightTotal : 1.0).toFixed(2));
+    const weightedUpDownVolRatio = Number((weightTotal > 0 ? wUpDownVolSum / weightTotal : 1.0).toFixed(2));
+    const smartMoneyBreadthPct = Math.round((smartMoneyCount / n) * 100);
+    const vcpTightBreadthPct = Math.round((vcpTightCount / n) * 100);
 
-    // Combine 55% liquidity-weighted score + 45% equal-weighted breadth score + turnover share bonus
+    // Combine 55% liquidity-weighted score + 45% equal-weighted breadth score + turnover/surge bonus
     const shareBonus = Math.min(8, sharePct * 0.45);
     const breadthBonus = ((breadthRatioPct - 50) / 50) * 6;
+    const volIgnitionBonus =
+      weightedVolRatio20 >= 1.25 && vwapChange >= 0.5
+        ? Math.min(6, (weightedVolRatio20 - 1.0) * 8)
+        : 0;
+    const smartMoneyBonus = ((smartMoneyBreadthPct - 40) / 60) * 5;
 
     const short1_2w = clampScore(
       (weightTotal > 0 ? (wShort / weightTotal) * 0.55 + (sumShort / n) * 0.45 : sumShort / n) +
         shareBonus +
-        breadthBonus,
+        breadthBonus +
+        volIgnitionBonus,
     );
     const medium3w_2m = clampScore(
       (weightTotal > 0 ? (wMed / weightTotal) * 0.55 + (sumMed / n) * 0.45 : sumMed / n) +
         shareBonus * 0.6 +
-        breadthBonus * 0.5,
+        breadthBonus * 0.5 +
+        smartMoneyBonus,
     );
     const medLong2_6m = clampScore(
       weightTotal > 0 ? (wMedLong / weightTotal) * 0.55 + (sumMedLong / n) * 0.45 : sumMedLong / n,
@@ -591,6 +711,45 @@ export function evaluateMultiHorizonSectorFlow(
     const compositeFlowScore = clampScore(
       short1_2w * 0.28 + medium3w_2m * 0.28 + medLong2_6m * 0.24 + long6mPlus * 0.20,
     );
+
+    // Institutional Sector Money-Flow Regime Classification
+    let institutionalRegime: SectorInstitutionalRegime = "NEUTRAL_ROTATION";
+    let institutionalRegimeVi = "Phân hóa chọn lọc nội ngành";
+
+    if (secForeignNet >= 15 && smartMoneyBreadthPct >= 50 && compositeFlowScore >= 62) {
+      institutionalRegime = "DUAL_INFLOW";
+      institutionalRegimeVi = "Nội & Ngoại đồng thuận bơm tiền";
+    } else if (weightedVolRatio20 >= 1.22 && vwapChange >= 0.6 && breadthRatioPct >= 55) {
+      institutionalRegime = "SECTOR_VOLUME_IGNITION";
+      institutionalRegimeVi = `Nổ thanh khoản kích hoạt sóng ngành (${weightedVolRatio20}x)`;
+    } else if (smartMoneyBreadthPct >= 55 && weightedUpDownVolRatio >= 1.1) {
+      institutionalRegime = "DOMESTIC_SMART_MONEY_LEAD";
+      institutionalRegimeVi = `Cá mập & Tổ chức nội dẫn dắt (${smartMoneyBreadthPct}% mã)`;
+    } else if (secForeignNet >= 12 && compositeFlowScore >= 58) {
+      institutionalRegime = "FOREIGN_NET_ACCUMULATION";
+      institutionalRegimeVi = `Khối ngoại gom ròng nâng đỡ (+${secForeignNet.toFixed(1)} tỷ)`;
+    } else if (vcpTightBreadthPct >= 35 && weightedUpDownVolRatio >= 1.05 && compositeFlowScore >= 56) {
+      institutionalRegime = "STEALTH_ACCUMULATION";
+      institutionalRegimeVi = `Gom ngầm nền chặt VCP/VDU (${vcpTightBreadthPct}% mã)`;
+    } else if (
+      (breadthRatioPct <= 35 && (weightedVolRatio20 >= 1.12 || vwapChange <= -1.0)) ||
+      (secForeignNet <= -35 && compositeFlowScore < 52)
+    ) {
+      institutionalRegime = "BROAD_DISTRIBUTION";
+      institutionalRegimeVi = "Áp lực chốt lời / Rút dòng tiền ngắn hạn";
+    }
+
+    const flowVelocityDelta = short1_2w - medLong2_6m;
+    let flowVelocitySignalVi = "Cân bằng giữa ngắn & trung hạn";
+    if (short1_2w >= 66 && flowVelocityDelta >= 6) {
+      flowVelocitySignalVi = `Tăng tốc bơm tiền mới (+${flowVelocityDelta}đ Ngắn/Trung-Dài)`;
+    } else if (short1_2w >= 68 && medium3w_2m >= 66 && medLong2_6m >= 65) {
+      flowVelocitySignalVi = "Đồng thuận dòng tiền toàn chu kỳ (1T -> 6Th)";
+    } else if (flowVelocityDelta <= -8 && medLong2_6m >= 65) {
+      flowVelocitySignalVi = "Nghỉ nhịp ngắn hạn trên nền xu hướng tăng";
+    } else if (short1_2w < 50 && medium3w_2m < 52) {
+      flowVelocitySignalVi = "Xung lực dòng tiền suy yếu";
+    }
 
     // True RRG coordinates (from RRG engine when available, otherwise derived from relative breadth & momentum)
     const rsRatio =
@@ -691,6 +850,67 @@ export function evaluateMultiHorizonSectorFlow(
       topPicksByHorizon.SHORT_1_2W[0] ??
       null;
 
+    const sigComposite = classifyHorizonFlowSignal(compositeFlowScore);
+
+    // Rank all stocks within this sector by composite horizon strength + liquidity to populate stockRankMap
+    const rankedWithinSector = [...list].sort((a, b) => {
+      const compA =
+        a.scores.short1_2w * 0.30 +
+        a.scores.medium3w_2m * 0.30 +
+        a.scores.medLong2_6m * 0.22 +
+        a.scores.long6mPlus * 0.18;
+      const compB =
+        b.scores.short1_2w * 0.30 +
+        b.scores.medium3w_2m * 0.30 +
+        b.scores.medLong2_6m * 0.22 +
+        b.scores.long6mPlus * 0.18;
+      const diff = compB - compA;
+      if (Math.abs(diff) >= 2.5) return diff;
+      return b.turnoverBillion - a.turnoverBillion;
+    });
+
+    const isSectorInflowActive =
+      compositeFlowScore >= 60 ||
+      short1_2w >= 64 ||
+      medium3w_2m >= 64 ||
+      institutionalRegime === "DUAL_INFLOW" ||
+      institutionalRegime === "SECTOR_VOLUME_IGNITION" ||
+      institutionalRegime === "DOMESTIC_SMART_MONEY_LEAD" ||
+      institutionalRegime === "STEALTH_ACCUMULATION";
+
+    rankedWithinSector.forEach((b, idx) => {
+      const rank = idx + 1;
+      const stockComp =
+        b.scores.short1_2w * 0.30 +
+        b.scores.medium3w_2m * 0.30 +
+        b.scores.medLong2_6m * 0.22 +
+        b.scores.long6mPlus * 0.18;
+      const isLeader =
+        isSectorInflowActive &&
+        rank <= Math.min(4, Math.max(2, Math.ceil(n * 0.35))) &&
+        !b.raw.isBrokenSupport &&
+        stockComp >= 58;
+
+      stockRankMap.set(b.raw.symbol.toUpperCase(), {
+        symbol: b.raw.symbol.toUpperCase(),
+        sector,
+        sectorCode: code,
+        rankInSector: rank,
+        isSectorFlowLeader: isLeader,
+        sectorFlowScore: compositeFlowScore,
+        sectorShortFlowScore: short1_2w,
+        sectorMediumFlowScore: medium3w_2m,
+        sectorMedLongFlowScore: medLong2_6m,
+        sectorLongFlowScore: long6mPlus,
+        sectorFlowSignal: sigComposite.signal,
+        sectorFlowSignalVi: sigComposite.labelVi,
+        sectorInstitutionalRegime: institutionalRegime,
+        sectorInstitutionalRegimeVi: institutionalRegimeVi,
+        sectorVolSurgeRatio: weightedVolRatio20,
+        sectorSmartMoneyBreadthPct: smartMoneyBreadthPct,
+      });
+    });
+
     results.push({
       sectorCode: code,
       sector,
@@ -704,6 +924,15 @@ export function evaluateMultiHorizonSectorFlow(
       unchangedCount: unchanged,
       totalStocksCount: n,
       breadthRatioPct,
+      weightedVolRatio20,
+      weightedUpDownVolRatio,
+      smartMoneyBreadthPct,
+      vcpTightBreadthPct,
+      buyTriggerStocksCount: buyTriggerCount,
+      institutionalRegime,
+      institutionalRegimeVi,
+      flowVelocityDelta,
+      flowVelocitySignalVi,
       quadrant,
       quadrantVi,
       rsRatio,
@@ -729,9 +958,9 @@ export function evaluateMultiHorizonSectorFlow(
       bestHorizonVi: horizonLabelVi(bestHorizon),
       rotationPhaseVi,
       thesisByHorizonVi: {
-        SHORT_1_2W: `${sigShort.labelVi} (${short1_2w}đ) • Độ rộng ${breadthRatioPct}% mã xanh, tỷ trọng GTGD ${sharePct.toFixed(1)}%`,
-        MEDIUM_3W_2M: `${sigMed.labelVi} (${medium3w_2m}đ) • RRG ${quadrantVi}, RS-Momentum ${rsMomentum}`,
-        MED_LONG_2_6M: `${sigMedLong.labelVi} (${medLong2_6m}đ) • RS-Ratio ${rsRatio}, định giá & cấu trúc Stage 2`,
+        SHORT_1_2W: `${sigShort.labelVi} (${short1_2w}đ) • ${institutionalRegimeVi} • Vol ${weightedVolRatio20}x, độ rộng ${breadthRatioPct}%`,
+        MEDIUM_3W_2M: `${sigMed.labelVi} (${medium3w_2m}đ) • RRG ${quadrantVi} (Mom ${rsMomentum}) • Cá mập ${smartMoneyBreadthPct}% mã`,
+        MED_LONG_2_6M: `${sigMedLong.labelVi} (${medLong2_6m}đ) • RS-Ratio ${rsRatio} • Nền VCP/LPS ${vcpTightBreadthPct}% mã`,
         LONG_6M_PLUS: `${sigLong.labelVi} (${long6mPlus}đ) • Hội tụ ROIC/ROE, chất lượng tiền mặt CFO & sức bền BCTC`,
       },
       topStock: activeTopStock,
@@ -780,5 +1009,6 @@ export function evaluateMultiHorizonSectorFlow(
       MED_LONG_2_6M: topSectorsFor("MED_LONG_2_6M"),
       LONG_6M_PLUS: topSectorsFor("LONG_6M_PLUS"),
     },
+    stockRankMap,
   };
 }
