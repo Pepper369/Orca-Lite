@@ -8,7 +8,7 @@ import {
   type FaBacktestStrategy,
   type FaPriceBar,
 } from "./fa-backtest-harness";
-import { sectorOf } from "../vn/master";
+import { getSecurity, sectorOf } from "../vn/master";
 
 export type StrategyType =
   | "apex_buy_now"
@@ -145,6 +145,9 @@ export interface BacktestTrade {
   transactionCostPct?: number;
   t2Locked?: boolean;
   floorDelayedDays?: number;
+  exchangeLimitBandPct?: number;
+  participationRatioPct?: number;
+  liquidityParticipationCapped?: boolean;
   holdingDays: number;
   outcome: "WIN" | "LOSS";
   exitReason: "STOP_LOSS" | "TAKE_PROFIT" | "TIME_EXIT";
@@ -152,6 +155,25 @@ export interface BacktestTrade {
 
 /** Vietnam equity round-trip friction: 0.15% buy fee + 0.15% sell fee + 0.10% sell tax + 0.05% slippage = 0.45% */
 export const VN_EQUITY_ROUND_TRIP_COST_PCT = 0.45;
+/** Maximum institutional participation rate per session (10% of session volume) */
+export const VN_MAX_VOLUME_PARTICIPATION_RATE = 0.10;
+
+export function resolveVnExchangeLimitThreshold(symbol: string): {
+  exchange: "HOSE" | "HNX" | "UPCOM";
+  limitBandPct: number;
+  ceilingLockThreshold: number;
+  floorLockThreshold: number;
+} {
+  const sec = getSecurity(symbol);
+  const ex = sec?.exchange ?? "HOSE";
+  if (ex === "HNX") {
+    return { exchange: "HNX", limitBandPct: 10, ceilingLockThreshold: 0.097, floorLockThreshold: -0.096 };
+  }
+  if (ex === "UPCOM") {
+    return { exchange: "UPCOM", limitBandPct: 15, ceilingLockThreshold: 0.145, floorLockThreshold: -0.144 };
+  }
+  return { exchange: "HOSE", limitBandPct: 7, ceilingLockThreshold: 0.068, floorLockThreshold: -0.067 };
+}
 
 export interface EquityPoint {
   date: string;
@@ -773,13 +795,15 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
           const nextBar = bars[i + 1]!;
           const prevClose = bars[i]!.close;
           const nextOpen = nextBar.open > 0 ? nextBar.open : nextBar.close;
-          // Vietnam Microstructure Guard 1: Cannot buy at open if stock gaps directly to +7% ceiling with locked range
+          const exRules = resolveVnExchangeLimitThreshold(symbol);
+          // Vietnam Microstructure Guard 1: Exchange-aware Ceiling Lock (HOSE +7%, HNX +10%, UPCOM +15%)
           const isCeilingLockedAtOpen =
             prevClose > 0 &&
-            (nextOpen - prevClose) / prevClose >= 0.068 &&
+            (nextOpen - prevClose) / prevClose >= exRules.ceilingLockThreshold &&
             Math.abs(nextBar.high - nextBar.low) <= nextOpen * 0.001;
 
-          if (!isCeilingLockedAtOpen && nextOpen > 0) {
+          // Vietnam Microstructure Guard 1b: Session volume must be positive
+          if (!isCeilingLockedAtOpen && nextOpen > 0 && (nextBar.volume ?? 0) > 0) {
             inPosition = true;
             entryBarIdx = i + 1;
             entryPrice = nextOpen;
@@ -789,18 +813,19 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
       } else {
         // Evaluate active position under Vietnam T+2.5 Settlement & Floor-Lock Microstructure Rules
         const daysHeld = i - entryBarIdx;
+        const exRules = resolveVnExchangeLimitThreshold(symbol);
 
         // Vietnam Microstructure Guard 2: T+2.5 settlement lock (shares are not tradable on T+0 or T+1)
         if (daysHeld < 2 && i < bars.length - 1) {
           continue;
         }
 
-        // Vietnam Microstructure Guard 3: Floor-locked illiquidity (-6.7% drop with zero bid range) delays exit
+        // Vietnam Microstructure Guard 3: Exchange-aware Floor-locked illiquidity delays exit
         const prevBarClose = i > 0 ? bars[i - 1]!.close : entryPrice;
         const curBar = bars[i]!;
         const isFloorLocked =
           prevBarClose > 0 &&
-          (curBar.close - prevBarClose) / prevBarClose <= -0.067 &&
+          (curBar.close - prevBarClose) / prevBarClose <= exRules.floorLockThreshold &&
           Math.abs(curBar.high - curBar.low) <= curBar.close * 0.001;
         if (isFloorLocked && i < bars.length - 1) {
           continue;
@@ -832,8 +857,22 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         }
 
         if (shouldExit) {
+          const entryBar = bars[entryBarIdx]!;
+          const priceVnd = entryPrice < 500 ? entryPrice * 1000 : entryPrice;
+          const slotCapitalVnd = initialCapital / 5;
+          const desiredShares = priceVnd > 0 ? slotCapitalVnd / priceVnd : 0;
+          const sessionVol = Math.max(1, entryBar.volume || 1);
+          const rawParticipation = desiredShares / sessionVol;
+          const liquidityParticipationCapped = rawParticipation > VN_MAX_VOLUME_PARTICIPATION_RATE;
+          const participationRatioPct = Number(
+            (Math.min(VN_MAX_VOLUME_PARTICIPATION_RATE, rawParticipation) * 100).toFixed(2),
+          );
+          const impactPenaltyPct = liquidityParticipationCapped ? 0.15 : 0;
+
           const grossReturnPct = Number((((exitPrice - entryPrice) / entryPrice) * 100).toFixed(2));
-          const returnPct = Number((grossReturnPct - VN_EQUITY_ROUND_TRIP_COST_PCT).toFixed(2));
+          const returnPct = Number(
+            (grossReturnPct - VN_EQUITY_ROUND_TRIP_COST_PCT - impactPenaltyPct).toFixed(2),
+          );
           const entryDate = formatBarDate(bars[entryBarIdx].time);
           allTrades.push({
             id: `${symbol}-${entryDate}-${currentDate}`,
@@ -844,8 +883,11 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
             exitPrice: Number(exitPrice.toFixed(2)),
             returnPct,
             grossReturnPct,
-            transactionCostPct: VN_EQUITY_ROUND_TRIP_COST_PCT,
+            transactionCostPct: Number((VN_EQUITY_ROUND_TRIP_COST_PCT + impactPenaltyPct).toFixed(2)),
             t2Locked: true,
+            exchangeLimitBandPct: exRules.limitBandPct,
+            participationRatioPct,
+            liquidityParticipationCapped,
             holdingDays: daysHeld,
             outcome: returnPct >= 0 ? "WIN" : "LOSS",
             exitReason,

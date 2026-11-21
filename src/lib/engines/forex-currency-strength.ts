@@ -229,3 +229,212 @@ export function calculateCurrencyStrengthMatrix(
   };
 }
 
+export interface PairFactorDecomposition {
+  pair: string;
+  base: MajorCurrency;
+  quote: MajorCurrency;
+  observedReturnPct: number;
+  baseFactorPct: number;
+  quoteFactorPct: number;
+  usdFactorContributionPct: number;
+  idiosyncraticResidualPct: number;
+  usdVarianceSharePct: number;
+  driverType: "USD_MACRO_SHOCK" | "IDIOSYNCRATIC_PAIR_ALPHA" | "CROSS_FACTOR_DIVERGENCE";
+}
+
+export interface OrthogonalCurrencyFactorResult {
+  latentFactorsPct: Record<MajorCurrency, number>; // Zero-sum orthogonal currency factors: sum_c f_c = 0
+  usdShockDominancePct: number; // % of total G8 cross-section variance driven by USD factor
+  pairDecompositions: PairFactorDecomposition[];
+}
+
+/**
+ * Orthogonal Currency Factor Decomposition:
+ * Solves the zero-sum linear factor system r_{AB} = f_A - f_B + eps_{AB} subject to sum_{c in G8} f_c = 0
+ * via pseudoinverse / graph Laplacian least-squares, separating USD macro shocks from pair-specific alpha.
+ */
+export function decomposeOrthogonalCurrencyFactors(
+  pairs: PairPriceInput[],
+): OrthogonalCurrencyFactorResult {
+  const sumDiff: Record<MajorCurrency, number> = {
+    USD: 0,
+    EUR: 0,
+    GBP: 0,
+    JPY: 0,
+    AUD: 0,
+    CAD: 0,
+    CHF: 0,
+    NZD: 0,
+  };
+  const deg: Record<MajorCurrency, number> = {
+    USD: 0,
+    EUR: 0,
+    GBP: 0,
+    JPY: 0,
+    AUD: 0,
+    CAD: 0,
+    CHF: 0,
+    NZD: 0,
+  };
+  const adj: Record<MajorCurrency, Partial<Record<MajorCurrency, number>>> = {
+    USD: {},
+    EUR: {},
+    GBP: {},
+    JPY: {},
+    AUD: {},
+    CAD: {},
+    CHF: {},
+    NZD: {},
+  };
+
+  const validPairs: { pair: string; base: MajorCurrency; quote: MajorCurrency; r: number }[] = [];
+
+  for (const item of pairs) {
+    const clean = item.pair.toUpperCase().replace(/[^A-Z]/g, "");
+    if (clean.length < 6) continue;
+    const base = clean.slice(0, 3) as MajorCurrency;
+    const quote = clean.slice(3, 6) as MajorCurrency;
+    if (!(base in sumDiff) || !(quote in sumDiff) || base === quote) continue;
+    const r = Number.isFinite(item.changePercent) ? item.changePercent : 0;
+
+    sumDiff[base] += r;
+    sumDiff[quote] -= r;
+    deg[base] += 1;
+    deg[quote] += 1;
+    adj[base][quote] = (adj[base][quote] ?? 0) + 1;
+    adj[quote][base] = (adj[quote][base] ?? 0) + 1;
+    validPairs.push({ pair: clean.slice(0, 6), base, quote, r });
+  }
+
+  // Solve Laplacian system L * f = sumDiff with zero-mean projection (Jacobi relaxation converges in < 25 steps)
+  const f: Record<MajorCurrency, number> = {
+    USD: 0,
+    EUR: 0,
+    GBP: 0,
+    JPY: 0,
+    AUD: 0,
+    CAD: 0,
+    CHF: 0,
+    NZD: 0,
+  };
+
+  for (let iter = 0; iter < 30; iter++) {
+    const nextF = { ...f };
+    for (const c of MAJOR_CURRENCIES) {
+      const d = deg[c];
+      if (d <= 0) continue;
+      let neighborSum = 0;
+      for (const nb of MAJOR_CURRENCIES) {
+        if (nb !== c && adj[c][nb]) {
+          neighborSum += (adj[c][nb] ?? 0) * f[nb];
+        }
+      }
+      nextF[c] = (sumDiff[c] + neighborSum) / d;
+    }
+    // Enforce strict zero-sum orthogonality constraint: sum_{c in G8} f_c === 0
+    const meanF = MAJOR_CURRENCIES.reduce((s, c) => s + nextF[c], 0) / MAJOR_CURRENCIES.length;
+    for (const c of MAJOR_CURRENCIES) {
+      f[c] = nextF[c] - meanF;
+    }
+  }
+
+  const latentFactorsPct = {} as Record<MajorCurrency, number>;
+  let totalFactorSq = 0;
+  for (const c of MAJOR_CURRENCIES) {
+    latentFactorsPct[c] = Number(f[c].toFixed(4));
+    totalFactorSq += f[c] * f[c];
+  }
+
+  const usdFactorSq = f.USD * f.USD;
+  const usdShockDominancePct =
+    totalFactorSq > 1e-9
+      ? Number(Math.min(100, ((usdFactorSq * 2.5) / totalFactorSq) * 100).toFixed(1))
+      : 0;
+
+  const pairDecompositions: PairFactorDecomposition[] = validPairs.map(({ pair, base, quote, r }) => {
+    const fBase = f[base];
+    const fQuote = f[quote];
+    const fitted = fBase - fQuote;
+    const residual = r - fitted;
+    const usdContrib = base === "USD" ? fBase : quote === "USD" ? -fQuote : 0;
+    const nonUsdContrib = base === "USD" ? -fQuote : quote === "USD" ? fBase : fBase - fQuote;
+    const totalExplain = Math.abs(usdContrib) + Math.abs(nonUsdContrib) + Math.abs(residual) || 1;
+    const usdVarianceSharePct = Number(((Math.abs(usdContrib) / totalExplain) * 100).toFixed(1));
+
+    let driverType: PairFactorDecomposition["driverType"] = "CROSS_FACTOR_DIVERGENCE";
+    if (usdVarianceSharePct >= 52) {
+      driverType = "USD_MACRO_SHOCK";
+    } else if (Math.abs(residual) >= Math.abs(fitted) * 0.65 || Math.abs(nonUsdContrib) > Math.abs(usdContrib) * 1.2) {
+      driverType = "IDIOSYNCRATIC_PAIR_ALPHA";
+    }
+
+    return {
+      pair,
+      base,
+      quote,
+      observedReturnPct: Number(r.toFixed(4)),
+      baseFactorPct: Number(fBase.toFixed(4)),
+      quoteFactorPct: Number(fQuote.toFixed(4)),
+      usdFactorContributionPct: Number(usdContrib.toFixed(4)),
+      idiosyncraticResidualPct: Number(residual.toFixed(4)),
+      usdVarianceSharePct,
+      driverType,
+    };
+  });
+
+  return {
+    latentFactorsPct,
+    usdShockDominancePct,
+    pairDecompositions,
+  };
+}
+
+/**
+ * Filters candidate Forex trade signals to eliminate redundant USD-factor concentration
+ * (e.g. simultaneously entering Long EURUSD, GBPUSD, AUDUSD, XAUUSD on a single USD shock).
+ */
+export function filterRedundantUsdClusterSignals<
+  T extends { pair: string; direction: "BUY" | "SELL"; score: number },
+>(candidates: T[], maxSameUsdDirection = 2): { accepted: T[]; rejectedUsdDuplicates: T[] } {
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  const accepted: T[] = [];
+  const rejectedUsdDuplicates: T[] = [];
+  let longUsdCount = 0;
+  let shortUsdCount = 0;
+
+  for (const c of sorted) {
+    const clean = c.pair.toUpperCase().replace(/[^A-Z]/g, "");
+    const base = clean.slice(0, 3);
+    const quote = clean.slice(3, 6);
+    const isUsdPair = base === "USD" || quote === "USD";
+
+    if (!isUsdPair) {
+      accepted.push(c);
+      continue;
+    }
+
+    // Determine effective USD exposure direction (+1 = Long USD, -1 = Short USD)
+    const usdDir =
+      (base === "USD" && c.direction === "BUY") || (quote === "USD" && c.direction === "SELL")
+        ? 1
+        : -1;
+
+    if (usdDir === 1) {
+      if (longUsdCount >= maxSameUsdDirection) {
+        rejectedUsdDuplicates.push(c);
+        continue;
+      }
+      longUsdCount++;
+    } else {
+      if (shortUsdCount >= maxSameUsdDirection) {
+        rejectedUsdDuplicates.push(c);
+        continue;
+      }
+      shortUsdCount++;
+    }
+    accepted.push(c);
+  }
+
+  return { accepted, rejectedUsdDuplicates };
+}
+

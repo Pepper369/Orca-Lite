@@ -239,6 +239,128 @@ export interface RealBacktestSeries {
   benchCloses?: number[];
 }
 
+export type StrategyDslEntryMode =
+  | "MA_CROSS"
+  | "RSI_MEAN_REVERT"
+  | "BREAKOUT_HIGH"
+  | "MACD_MOMENTUM"
+  | "BOLLINGER_SQUEEZE"
+  | "VOLUME_SURGE";
+
+export interface CompiledStrategyRuleSet {
+  entryMode: StrategyDslEntryMode;
+  fastPeriod: number;
+  slowPeriod: number;
+  rsiEntryLow: number;
+  rsiExitHigh: number;
+  breakoutThresholdPct: number;
+  trailStopPct: number;
+  takeProfitPct: number;
+  useMarketFilter: boolean;
+  parsedRulesSummary: string[];
+}
+
+/**
+ * Parses a FireAnt Quant strategy's declarative DSL code & parameter map into an executable rule set,
+ * ensuring `strategy.code` directly governs signal entry/exit rules rather than being ignored.
+ */
+export function parseStructuredStrategyDsl(
+  strategy: Pick<FireAntStrategy, "id" | "category" | "code">,
+  activeParams: Record<string, any> = {},
+): CompiledStrategyRuleSet {
+  const codeLower = (strategy.code || "").toLowerCase();
+  const idCatLower = `${strategy.id}_${strategy.category}`.toLowerCase();
+
+  const fastPeriod = Math.max(
+    3,
+    Math.min(100, Number(activeParams.fast ?? activeParams.shortPeriod ?? activeParams.lookback ?? 10)),
+  );
+  const slowPeriod = Math.max(
+    fastPeriod + 5,
+    Math.min(250, Number(activeParams.slow ?? activeParams.longPeriod ?? activeParams.trendPeriod ?? 30)),
+  );
+  const rsiEntryLow = Math.max(
+    15,
+    Math.min(60, Number(activeParams.rsi ?? activeParams.oversold ?? activeParams.rsiLow ?? 35)),
+  );
+  const rsiExitHigh = Math.max(
+    60,
+    Math.min(92, Number(activeParams.overbought ?? activeParams.rsiHigh ?? 72)),
+  );
+  const trailStopPct = Math.max(
+    0.02,
+    Math.min(0.35, Number(activeParams.trail ?? activeParams.stopLoss ?? 0.08)),
+  );
+  const takeProfitPct = Math.max(
+    0.05,
+    Math.min(0.80, Number(activeParams.takeProfit ?? activeParams.target ?? 0.22)),
+  );
+  const breakoutThresholdPct = Math.max(
+    0.002,
+    Math.min(0.05, Number(activeParams.breakoutPct ?? 0.008)),
+  );
+  const useMarketFilter = activeParams.market !== false && !codeLower.includes("market: false");
+
+  let entryMode: StrategyDslEntryMode = "MA_CROSS";
+  const parsedRulesSummary: string[] = [];
+
+  if (
+    codeLower.includes("bollinger") ||
+    codeLower.includes("bbands") ||
+    codeLower.includes("squeeze") ||
+    idCatLower.includes("squeeze")
+  ) {
+    entryMode = "BOLLINGER_SQUEEZE";
+    parsedRulesSummary.push(`DSL: Bollinger/Volatility Squeeze Breakout (fast=${fastPeriod}, slow=${slowPeriod})`);
+  } else if (
+    strategy.category === "Đảo chiều" ||
+    codeLower.includes("oversold") ||
+    (codeLower.includes("rsi") && (codeLower.includes("<") || codeLower.includes("reversion"))) ||
+    idCatLower.includes("rsi") ||
+    idCatLower.includes("mean")
+  ) {
+    entryMode = "RSI_MEAN_REVERT";
+    parsedRulesSummary.push(`DSL: Mean-Reversion RSI <= ${rsiEntryLow} -> Exit RSI >= ${rsiExitHigh}`);
+  } else if (
+    codeLower.includes("highest") ||
+    codeLower.includes("donchian") ||
+    codeLower.includes("breakout") ||
+    idCatLower.includes("breakout")
+  ) {
+    entryMode = "BREAKOUT_HIGH";
+    parsedRulesSummary.push(`DSL: Price Channel Breakout +${(breakoutThresholdPct * 100).toFixed(1)}% above MA(${fastPeriod})`);
+  } else if (
+    codeLower.includes("macd") ||
+    idCatLower.includes("macd") ||
+    idCatLower.includes("momentum")
+  ) {
+    entryMode = "MACD_MOMENTUM";
+    parsedRulesSummary.push(`DSL: MACD/Momentum Impulse (fast=${fastPeriod} > slow=${slowPeriod}, RSI in [50, 78])`);
+  } else if (
+    codeLower.includes("volume") &&
+    (codeLower.includes("pocket") || codeLower.includes("smart") || idCatLower.includes("dòng tiền"))
+  ) {
+    entryMode = "VOLUME_SURGE";
+    parsedRulesSummary.push(`DSL: Institutional Volume Surge & Trend Filter (MA${fastPeriod} > MA${slowPeriod})`);
+  } else {
+    entryMode = "MA_CROSS";
+    parsedRulesSummary.push(`DSL: Trend Moving Average Crossover (MA${fastPeriod} > MA${slowPeriod})`);
+  }
+
+  return {
+    entryMode,
+    fastPeriod,
+    slowPeriod,
+    rsiEntryLow,
+    rsiExitHigh,
+    breakoutThresholdPct,
+    trailStopPct,
+    takeProfitPct,
+    useMarketFilter,
+    parsedRulesSummary,
+  };
+}
+
 // Run backtest calculation on strategy (O(N) rolling indicators; supports live historical OHLCV bars or deterministic fallback)
 export function executeBacktest(
   strategy: FireAntStrategy,
@@ -347,11 +469,12 @@ export function executeBacktest(
   }
   const marketRng = createSeededRng(baseSeed);
 
-  const fastPeriod = Math.max(3, Math.min(100, Number(activeParams.fast ?? activeParams.shortPeriod ?? 10)));
-  const slowPeriod = Math.max(fastPeriod + 5, Math.min(250, Number(activeParams.slow ?? activeParams.longPeriod ?? 30)));
-  const rsiThresh = Number(activeParams.rsi ?? activeParams.oversold ?? 35);
-  const trailStopPct = Number(activeParams.trail ?? activeParams.stopLoss ?? 0.08);
-  const useMarketFilter = activeParams.market !== false;
+  const compiledDsl = parseStructuredStrategyDsl(strategy, activeParams);
+  const fastPeriod = compiledDsl.fastPeriod;
+  const slowPeriod = compiledDsl.slowPeriod;
+  const rsiThresh = compiledDsl.rsiEntryLow;
+  const trailStopPct = compiledDsl.trailStopPct;
+  const useMarketFilter = compiledDsl.useMarketFilter;
 
   let stratEquity = startCapital;
   let benchEquity = startCapital;
@@ -429,14 +552,33 @@ export function executeBacktest(
 
       if (!inPosition) {
         let entrySignal = false;
-        if (strategy.category === "Đảo chiều" || stratIdLower.includes("rsi") || stratIdLower.includes("mean")) {
-          entrySignal = curRsi <= rsiThresh + 15 || (curPrice > fastMa && curRsi <= 55);
-        } else if (stratIdLower.includes("breakout") || stratIdLower.includes("donchian")) {
-          entrySignal = curPrice >= fastMa * 1.008 && fastMa >= slowMa && marketOk;
-        } else if (stratIdLower.includes("macd") || stratIdLower.includes("momentum")) {
-          entrySignal = fastMa > slowMa && curRsi >= 50 && curRsi <= 78 && marketOk;
-        } else {
-          entrySignal = fastMa > slowMa && marketOk;
+        switch (compiledDsl.entryMode) {
+          case "RSI_MEAN_REVERT":
+            entrySignal = curRsi <= rsiThresh + 15 || (curPrice > fastMa && curRsi <= 55);
+            break;
+          case "BREAKOUT_HIGH":
+            entrySignal =
+              curPrice >= fastMa * (1 + compiledDsl.breakoutThresholdPct) &&
+              fastMa >= slowMa &&
+              marketOk;
+            break;
+          case "BOLLINGER_SQUEEZE":
+            entrySignal =
+              Math.abs(fastMa - slowMa) / Math.max(1e-9, slowMa) <= 0.035 &&
+              curPrice > fastMa &&
+              curRsi >= 52 &&
+              marketOk;
+            break;
+          case "MACD_MOMENTUM":
+            entrySignal = fastMa > slowMa && curRsi >= 50 && curRsi <= 78 && marketOk;
+            break;
+          case "VOLUME_SURGE":
+            entrySignal = curPrice > fastMa && fastMa >= slowMa * 0.995 && curRsi >= 48 && marketOk;
+            break;
+          case "MA_CROSS":
+          default:
+            entrySignal = fastMa > slowMa && marketOk;
+            break;
         }
 
         if (entrySignal) {
@@ -450,12 +592,16 @@ export function executeBacktest(
         barsInPosition++;
         if (curPrice > positionPeakPrice) positionPeakPrice = curPrice;
         const ddFromPeak = (positionPeakPrice - curPrice) / positionPeakPrice;
+        const gainFromEntry = (curPrice - entryAssetPrice) / Math.max(1e-9, entryAssetPrice);
         const hitTrailStop = ddFromPeak >= Math.max(0.03, trailStopPct);
+        const hitTakeProfit = gainFromEntry >= compiledDsl.takeProfitPct;
         const hitSignalExit =
-          strategy.category === "Đảo chiều" ? curRsi >= 72 : fastMa < slowMa * 0.99;
+          compiledDsl.entryMode === "RSI_MEAN_REVERT"
+            ? curRsi >= compiledDsl.rsiExitHigh
+            : fastMa < slowMa * 0.99;
 
         // Vietnam T+2.5 settlement hold lock: cannot exit until at least 2 sessions held
-        if (barsInPosition >= 2 && (hitTrailStop || hitSignalExit)) {
+        if (barsInPosition >= 2 && (hitTrailStop || hitTakeProfit || hitSignalExit)) {
           const rawRetPct = ((curPrice - entryAssetPrice) / Math.max(1e-9, entryAssetPrice)) * 100;
           const netRetPct = Math.round((rawRetPct - 0.45) * 10) / 10;
           const sym = VN30_SYMBOLS[(entrySessionIdx + executedTrades.length) % VN30_SYMBOLS.length]!;

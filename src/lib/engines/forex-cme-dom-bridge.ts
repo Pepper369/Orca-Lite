@@ -107,6 +107,8 @@ export interface SyntheticDomResult {
   orderBookImbalanceFraction: number; // -1.0 to +1.0
   institutionalBias: "STRONG_BUY_WALL" | "BALANCED" | "STRONG_SELL_WALL";
   realVolumeWeight: number; // Quality weight [0.8 - 1.5]
+  provenance: "SYNTHETIC_GARMAN_KLASS_PROXY" | "CME_EXCHANGE_CALIBRATED";
+  canGateGradeAPlus: boolean;
   commentary: string;
 }
 
@@ -124,10 +126,16 @@ export function getCmeMappingForPair(pair: string): CmeFuturesMapping | null {
 export function reconstructSyntheticDom(
   pair: string,
   bars: OhlcvBar[],
-  currentSpreadPips: number | null = null
+  currentSpreadPips: number | null = null,
+  cmeRealOpenInterest?: number | null,
 ): SyntheticDomResult {
   const clean = pair.toUpperCase().replace("/", "").replace("-", "");
   const mapping = CME_FOREX_MAPPINGS[clean] ?? null;
+  const hasRealCmeFeed = cmeRealOpenInterest != null && Number.isFinite(cmeRealOpenInterest) && cmeRealOpenInterest > 0;
+  const provenance: SyntheticDomResult["provenance"] = hasRealCmeFeed
+    ? "CME_EXCHANGE_CALIBRATED"
+    : "SYNTHETIC_GARMAN_KLASS_PROXY";
+  const canGateGradeAPlus = hasRealCmeFeed;
 
   const pip = getAssetPipSize(clean, "FOREX");
 
@@ -148,6 +156,8 @@ export function reconstructSyntheticDom(
       orderBookImbalanceFraction: 0,
       institutionalBias: "BALANCED",
       realVolumeWeight: 1.0,
+      provenance,
+      canGateGradeAPlus: false,
       commentary: "Chưa đủ dữ liệu nến.",
     };
   }
@@ -268,6 +278,8 @@ export function reconstructSyntheticDom(
     orderBookImbalanceFraction,
     institutionalBias,
     realVolumeWeight,
+    provenance,
+    canGateGradeAPlus,
     commentary,
   };
 }

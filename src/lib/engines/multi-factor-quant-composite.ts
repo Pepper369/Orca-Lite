@@ -129,6 +129,11 @@ export interface MultiFactorCompositeResult {
     fundamental: FactorPillarDetail;
     valuation: FactorPillarDetail;
   };
+  orthogonalizedZ?: {
+    technical: number;
+    fundamental: number;
+    valuation: number;
+  };
   redFlags: string[];
   hardEliminated: boolean;
   eliminationReasonVi?: string;
@@ -621,5 +626,199 @@ export function calculateUniverseMultiFactor(
     resultMap.set(item.symbol, item);
   });
 
+  // Attach Gram-Schmidt orthogonalized cross-sectional Z-scores (Fund -> Val -> Tech)
+  // so collinear valuation/quality/momentum effects can be inspected without double-counting
+  if (scored.length >= 3) {
+    const fundVec = scored.map((s) => s.breakdown.fundamental.zScore);
+    const valVec = scored.map((s) => s.breakdown.valuation.zScore);
+    const techVec = scored.map((s) => s.breakdown.technical.zScore);
+    const [orthFund, orthVal, orthTech] = orthogonalizeFactorVectorsGramSchmidt([
+      fundVec,
+      valVec,
+      techVec,
+    ]);
+    scored.forEach((item, idx) => {
+      item.orthogonalizedZ = {
+        fundamental: Number((orthFund?.[idx] ?? item.breakdown.fundamental.zScore).toFixed(3)),
+        valuation: Number((orthVal?.[idx] ?? item.breakdown.valuation.zScore).toFixed(3)),
+        technical: Number((orthTech?.[idx] ?? item.breakdown.technical.zScore).toFixed(3)),
+      };
+    });
+  }
+
   return resultMap;
+}
+
+/**
+ * Gram-Schmidt Factor Orthogonalization across cross-sectional factor vectors.
+ * Removes collinearity between pillars (e.g. Fundamental Quality, Valuation, and Momentum)
+ * and standardizes each orthogonalized residual vector to zero mean and unit variance.
+ */
+export function orthogonalizeFactorVectorsGramSchmidt(vectors: number[][]): number[][] {
+  if (vectors.length === 0) return [];
+  const n = vectors[0]!.length;
+  if (n < 2) return vectors.map((v) => [...v]);
+
+  const centerAndNormalize = (vec: number[]): number[] => {
+    const mean = vec.reduce((a, b) => a + b, 0) / n;
+    const centered = vec.map((x) => x - mean);
+    const variance = centered.reduce((s, x) => s + x * x, 0) / Math.max(1, n - 1);
+    const std = Math.sqrt(Math.max(1e-9, variance));
+    return centered.map((x) => x / std);
+  };
+
+  const ortho: number[][] = [];
+  for (let k = 0; k < vectors.length; k++) {
+    let uk = centerAndNormalize(vectors[k]!);
+    for (let j = 0; j < ortho.length; j++) {
+      const uj = ortho[j]!;
+      let dotVU = 0;
+      let dotUU = 0;
+      for (let i = 0; i < n; i++) {
+        dotVU += uk[i]! * uj[i]!;
+        dotUU += uj[i]! * uj[i]!;
+      }
+      if (dotUU > 1e-9) {
+        const proj = dotVU / dotUU;
+        uk = uk.map((val, i) => val - proj * uj[i]!);
+      }
+    }
+    ortho.push(centerAndNormalize(uk).map((v) => Number(v.toFixed(4))));
+  }
+
+  return ortho;
+}
+
+function rankVector(values: number[]): number[] {
+  const indexed = values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const ranks = new Array<number>(values.length).fill(0);
+  let k = 0;
+  while (k < indexed.length) {
+    let end = k;
+    while (end + 1 < indexed.length && Math.abs(indexed[end + 1]!.v - indexed[k]!.v) <= 1e-12) {
+      end++;
+    }
+    const avgRank = (k + end) / 2 + 1;
+    for (let j = k; j <= end; j++) {
+      ranks[indexed[j]!.i] = avgRank;
+    }
+    k = end + 1;
+  }
+  return ranks;
+}
+
+/**
+ * Computes Spearman Rank Information Coefficient (RankIC) in [-1, 1]
+ * between cross-sectional factor scores at time t and realized forward returns at t + H.
+ */
+export function computeSpearmanRankIc(factorScores: number[], forwardReturns: number[]): number {
+  const n = Math.min(factorScores.length, forwardReturns.length);
+  if (n < 3) return 0;
+  const rX = rankVector(factorScores.slice(0, n));
+  const rY = rankVector(forwardReturns.slice(0, n));
+  const meanX = (n + 1) / 2;
+  const meanY = (n + 1) / 2;
+  let cov = 0;
+  let varX = 0;
+  let varY = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = rX[i]! - meanX;
+    const dy = rY[i]! - meanY;
+    cov += dx * dy;
+    varX += dx * dx;
+    varY += dy * dy;
+  }
+  const denom = Math.sqrt(varX * varY);
+  if (denom <= 1e-9) return 0;
+  return Number(Math.max(-1, Math.min(1, cov / denom)).toFixed(4));
+}
+
+export interface RollingRankIcSnapshot {
+  techScores: number[];
+  fundScores: number[];
+  valScores: number[];
+  forwardReturns: number[];
+}
+
+export interface DynamicRankIcWeightResult {
+  weights: MultiFactorWeights;
+  rankIcMean: { tech: number; fund: number; val: number };
+  icInformationRatio: { tech: number; fund: number; val: number };
+  sampleWindows: number;
+}
+
+/**
+ * Estimates Dynamic Factor Weights proportional to Rolling RankIC Information Ratio (IC-IR),
+ * shrunk toward the prevailing MarketRegime prior when sample windows are small.
+ */
+export function estimateRollingRankIcWeights(
+  snapshots: RollingRankIcSnapshot[],
+  fallbackRegime: MarketRegime = "BULL_EXPANSION",
+): DynamicRankIcWeightResult {
+  const prior = REGIME_WEIGHTS_MAP[fallbackRegime];
+  if (snapshots.length === 0) {
+    return {
+      weights: { ...prior },
+      rankIcMean: { tech: 0, fund: 0, val: 0 },
+      icInformationRatio: { tech: 0, fund: 0, val: 0 },
+      sampleWindows: 0,
+    };
+  }
+
+  const icTech: number[] = [];
+  const icFund: number[] = [];
+  const icVal: number[] = [];
+
+  for (const snap of snapshots) {
+    icTech.push(computeSpearmanRankIc(snap.techScores, snap.forwardReturns));
+    icFund.push(computeSpearmanRankIc(snap.fundScores, snap.forwardReturns));
+    icVal.push(computeSpearmanRankIc(snap.valScores, snap.forwardReturns));
+  }
+
+  const calcMeanAndIr = (arr: number[]): { mean: number; ir: number } => {
+    const m = arr.length;
+    if (m === 0) return { mean: 0, ir: 0 };
+    // Exponential recency decay weights
+    let wSum = 0;
+    let mean = 0;
+    for (let i = 0; i < m; i++) {
+      const w = Math.exp(-(m - 1 - i) / 6);
+      mean += w * arr[i]!;
+      wSum += w;
+    }
+    mean /= Math.max(1e-9, wSum);
+    if (m < 2) return { mean: Number(mean.toFixed(4)), ir: Number(Math.max(0, mean * 2).toFixed(4)) };
+    const variance = arr.reduce((s, x) => s + (x - mean) ** 2, 0) / (m - 1);
+    const std = Math.sqrt(Math.max(0.01, variance));
+    return {
+      mean: Number(mean.toFixed(4)),
+      ir: Number((mean / std).toFixed(4)),
+    };
+  };
+
+  const tStat = calcMeanAndIr(icTech);
+  const fStat = calcMeanAndIr(icFund);
+  const vStat = calcMeanAndIr(icVal);
+
+  const rawT = Math.max(0.08, tStat.ir > 0 ? tStat.ir : Math.max(0.08, prior.wTech * (1 + tStat.mean)));
+  const rawF = Math.max(0.08, fStat.ir > 0 ? fStat.ir : Math.max(0.08, prior.wFund * (1 + fStat.mean)));
+  const rawV = Math.max(0.08, vStat.ir > 0 ? vStat.ir : Math.max(0.08, prior.wVal * (1 + vStat.mean)));
+  const sumRaw = rawT + rawF + rawV;
+
+  const empWTech = rawT / sumRaw;
+  const empWFund = rawF / sumRaw;
+  const empWVal = rawV / sumRaw;
+
+  // Shrinkage toward regime prior based on number of observation windows
+  const confidence = Math.min(0.80, snapshots.length / (snapshots.length + 3));
+  const wTech = Number((confidence * empWTech + (1 - confidence) * prior.wTech).toFixed(3));
+  const wFund = Number((confidence * empWFund + (1 - confidence) * prior.wFund).toFixed(3));
+  const wVal = Number(Math.max(0.05, 1 - wTech - wFund).toFixed(3));
+
+  return {
+    weights: { wTech, wFund, wVal },
+    rankIcMean: { tech: tStat.mean, fund: fStat.mean, val: vStat.mean },
+    icInformationRatio: { tech: tStat.ir, fund: fStat.ir, val: vStat.ir },
+    sampleWindows: snapshots.length,
+  };
 }

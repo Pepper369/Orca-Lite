@@ -7,6 +7,275 @@ import {
   calibrateBasisOrnsteinUhlenbeck,
   type OUBasisCalibration,
 } from "./unified-cross-asset-quant";
+import { classifyDerivFlow } from "./derivatives-flow";
+
+export interface ScheduledVn30Dividend {
+  symbol: string;
+  weightInVn30: number; // e.g. 0.085 (8.5% weight in VN30 basket)
+  cashDividendVnd: number; // e.g. 1500 VND/share
+  stockPriceVnd: number; // e.g. 130000 VND/share
+  daysToExDate: number; // days from now until ex-dividend date
+}
+
+export interface DividendAdjustedBasisResult {
+  spotPrice: number;
+  repoRateAnnual: number;
+  daysToExpiry: number;
+  grossCarryPoints: number;
+  presentValueDividendPoints: number;
+  fairValuePrice: number;
+  netCarryAnnualizedPct: number;
+}
+
+export interface KalmanHedgeRatioResult {
+  alphaIntercept: number;
+  dynamicBetaHedgeRatio: number;
+  innovationSpreadPts: number;
+  innovationStdPts: number;
+  kalmanZScore: number;
+  hedgeSignal: "LONG_FUTURES_SHORT_BASKET" | "SHORT_FUTURES_LONG_BASKET" | "NEUTRAL_EQUILIBRIUM";
+}
+
+export interface BasisFlowRegimeResult {
+  regime:
+    | "DIRECTIONAL_HEDGING_DO_NOT_FADE"
+    | "ACTIONABLE_ARBITRAGE_MISPRICING"
+    | "ROLL_YIELD_CARRY_OPPORTUNITY"
+    | "BALANCED_BASIS";
+  canFadeBasis: boolean;
+  oiFlowSignal: string;
+  rationaleVi: string;
+}
+
+/**
+ * Computes Dividend-Adjusted Fair Futures Price for VN30F:
+ * F_fair = S * exp(r * T) - sum_{j in VN30, t_ex <= T} w_j * S * (Div_j / P_j) * exp(r * (T - t_ex))
+ */
+export function computeDividendAdjustedFairBasis(params: {
+  spotPrice: number;
+  repoRateAnnual: number;
+  daysToExpiry: number;
+  upcomingDividends?: ScheduledVn30Dividend[];
+  fallbackDividendYieldAnnual?: number;
+}): DividendAdjustedBasisResult {
+  const {
+    spotPrice,
+    repoRateAnnual,
+    daysToExpiry,
+    upcomingDividends,
+    fallbackDividendYieldAnnual = 0.015,
+  } = params;
+
+  const T = Math.max(1, daysToExpiry) / 365;
+  const r = Math.max(-0.02, Math.min(0.20, repoRateAnnual));
+  const grossForward = spotPrice * Math.exp(r * T);
+  const grossCarryPoints = Number((grossForward - spotPrice).toFixed(2));
+
+  let pvDividendPts = 0;
+  if (upcomingDividends && upcomingDividends.length > 0) {
+    for (const d of upcomingDividends) {
+      if (d.daysToExDate < 0 || d.daysToExDate > daysToExpiry) continue;
+      if (d.stockPriceVnd <= 0 || d.cashDividendVnd <= 0 || d.weightInVn30 <= 0) continue;
+      const divYieldStock = d.cashDividendVnd / d.stockPriceVnd;
+      const tauRemain = Math.max(0, daysToExpiry - d.daysToExDate) / 365;
+      // Forward value at expiry of the discrete dividend drop in index points
+      pvDividendPts += spotPrice * d.weightInVn30 * divYieldStock * Math.exp(r * tauRemain);
+    }
+  } else {
+    pvDividendPts = spotPrice * (1 - Math.exp(-Math.max(0, fallbackDividendYieldAnnual) * T));
+  }
+
+  const presentValueDividendPoints = Number(pvDividendPts.toFixed(2));
+  const fairValuePrice = Number((grossForward - presentValueDividendPoints).toFixed(1));
+  const netCarryAnnualizedPct =
+    spotPrice > 0 && T > 0
+      ? Number((((fairValuePrice - spotPrice) / spotPrice / T) * 100).toFixed(2))
+      : Number((r * 100).toFixed(2));
+
+  return {
+    spotPrice,
+    repoRateAnnual: r,
+    daysToExpiry,
+    grossCarryPoints,
+    presentValueDividendPoints,
+    fairValuePrice,
+    netCarryAnnualizedPct,
+  };
+}
+
+/**
+ * 2-State Causal Kalman Filter estimating Dynamic Hedge Ratio (alpha_t, beta_t)
+ * between VN30F Futures (F_t) and VN30 Spot/ETF Basket (S_t):
+ *   F_t = alpha_t + beta_t * S_t + eps_t
+ */
+export function estimateKalmanDynamicHedgeRatio(
+  futuresPrices: number[],
+  spotPrices: number[],
+  deltaProcessNoise = 1e-4,
+  obsNoiseVar = 1.25,
+): KalmanHedgeRatioResult {
+  const n = Math.min(futuresPrices.length, spotPrices.length);
+  if (n < 5) {
+    const fLast = futuresPrices[futuresPrices.length - 1] ?? 1250;
+    const sLast = spotPrices[spotPrices.length - 1] ?? 1250;
+    const diff = fLast - sLast;
+    return {
+      alphaIntercept: 0,
+      dynamicBetaHedgeRatio: 1.0,
+      innovationSpreadPts: Number(diff.toFixed(2)),
+      innovationStdPts: 2.0,
+      kalmanZScore: Number((diff / 2.0).toFixed(2)),
+      hedgeSignal: "NEUTRAL_EQUILIBRIUM",
+    };
+  }
+
+  // State x = [alpha, beta]^T initialized at [0, 1.0]
+  let alpha = 0;
+  let beta = 1.0;
+  const s0 = Math.max(1, spotPrices[0] ?? 1250);
+  // Covariance P (2x2), with beta variance scaled by 1 / S^2 for scale invariance
+  let p00 = 4.0;
+  let p01 = 0.0;
+  let p10 = 0.0;
+  let p11 = 0.05 / (s0 * s0);
+
+  const q00 = deltaProcessNoise * 50;
+  const R = Math.max(0.05, obsNoiseVar);
+
+  let lastInnovation = 0;
+  let lastInnovationStd = 1.5;
+
+  for (let t = 0; t < n; t++) {
+    const F = futuresPrices[t]!;
+    const S = spotPrices[t]!;
+    if (!Number.isFinite(F) || !Number.isFinite(S) || S <= 0) continue;
+
+    // 1. State Prediction: P_{t|t-1} = P_{t-1} + Q (scale beta process noise by 1 / S^2)
+    p00 += q00;
+    p11 += deltaProcessNoise / (S * S);
+
+    // 2. Measurement Innovation: e_t = F_t - (alpha + beta * S_t), H = [1, S]
+    const yHat = alpha + beta * S;
+    const e = F - yHat;
+
+    // Innovation variance Q_t = H * P * H^T + R
+    const hp0 = p00 + S * p10;
+    const hp1 = p01 + S * p11;
+    const Qt = Math.max(1e-6, hp0 + hp1 * S + R);
+
+    // 3. Kalman Gain K = P * H^T / Qt
+    const k0 = (p00 + p01 * S) / Qt;
+    const k1 = (p10 + p11 * S) / Qt;
+
+    // 4. Posterior State Update
+    alpha += k0 * e;
+    beta = Math.max(0.5, Math.min(1.5, beta + k1 * e));
+
+    // 5. Posterior Covariance Update P_t = (I - K * H) * P_{t|t-1}
+    const newP00 = (1 - k0) * p00 - k0 * S * p10;
+    const newP01 = (1 - k0) * p01 - k0 * S * p11;
+    const newP10 = -k1 * p00 + (1 - k1 * S) * p10;
+    const newP11 = -k1 * p01 + (1 - k1 * S) * p11;
+    p00 = Math.max(1e-8, newP00);
+    p01 = newP01;
+    p10 = newP10;
+    p11 = Math.max(1e-8, newP11);
+
+    lastInnovation = e;
+    lastInnovationStd = Math.sqrt(Qt);
+  }
+
+  const kalmanZScore = Number((lastInnovation / Math.max(0.25, lastInnovationStd)).toFixed(2));
+  let hedgeSignal: KalmanHedgeRatioResult["hedgeSignal"] = "NEUTRAL_EQUILIBRIUM";
+  if (kalmanZScore <= -1.85) {
+    hedgeSignal = "LONG_FUTURES_SHORT_BASKET";
+  } else if (kalmanZScore >= 1.85) {
+    hedgeSignal = "SHORT_FUTURES_LONG_BASKET";
+  }
+
+  return {
+    alphaIntercept: Number(alpha.toFixed(3)),
+    dynamicBetaHedgeRatio: Number(beta.toFixed(4)),
+    innovationSpreadPts: Number(lastInnovation.toFixed(2)),
+    innovationStdPts: Number(lastInnovationStd.toFixed(2)),
+    kalmanZScore,
+    hedgeSignal,
+  };
+}
+
+/**
+ * Separates institutional directional hedging flow (where basis divergence must NOT be faded)
+ * from transient arbitrage mispricing using Price x Open Interest flow and Roll Yield.
+ */
+export function evaluateBasisFlowRegime(params: {
+  mispricingPts: number;
+  kalmanZScore: number;
+  priceChangePts?: number | null;
+  oiChangeContracts?: number | null;
+  rollYieldAnnualizedPct?: number | null;
+}): BasisFlowRegimeResult {
+  const {
+    mispricingPts,
+    kalmanZScore,
+    priceChangePts = 0,
+    oiChangeContracts = 0,
+    rollYieldAnnualizedPct = null,
+  } = params;
+
+  const flow = classifyDerivFlow({
+    symbol: "VN30F1M",
+    priceChange: priceChangePts ?? 0,
+    oiChange: oiChangeContracts ?? 0,
+  });
+
+  // If basis is deeply negative (backwardation) AND Short Build-up is active (price down, OI surging),
+  // institutions are aggressively opening directional shorts — do NOT fade basis!
+  if (mispricingPts <= -4.5 && flow.kind === "short_build_up") {
+    return {
+      regime: "DIRECTIONAL_HEDGING_DO_NOT_FADE",
+      canFadeBasis: false,
+      oiFlowSignal: flow.kind,
+      rationaleVi:
+        "Cảnh báo: Basis âm sâu đi kèm Short Build-up (OI tăng + Giá giảm). Khối tổ chức đang mở mới vị thế Short xu hướng — KHÔNG bắt đáy Reverse Cash & Carry lúc này.",
+    };
+  }
+
+  // If basis is deeply positive (contango) AND Long Build-up is surging, momentum breakout is underway
+  if (mispricingPts >= 5.0 && flow.kind === "long_build_up" && kalmanZScore < 2.6) {
+    return {
+      regime: "DIRECTIONAL_HEDGING_DO_NOT_FADE",
+      canFadeBasis: false,
+      oiFlowSignal: flow.kind,
+      rationaleVi:
+        "Basis dương đi kèm Long Build-up (OI tăng + Giá bứt phá). Lực cầu xu hướng đang áp đảo — hạn chế Short chặn đầu.",
+    };
+  }
+
+  if (Math.abs(kalmanZScore) >= 1.85 || Math.abs(mispricingPts) >= 4.0) {
+    return {
+      regime: "ACTIONABLE_ARBITRAGE_MISPRICING",
+      canFadeBasis: true,
+      oiFlowSignal: flow.kind,
+      rationaleVi: `Độ lệch Kalman Z=${kalmanZScore} (Mispricing ${mispricingPts >= 0 ? "+" : ""}${mispricingPts} điểm) không có áp lực OI ngược pha — Thuận lợi giao dịch hội tụ Basis.`,
+    };
+  }
+
+  if (rollYieldAnnualizedPct != null && Math.abs(rollYieldAnnualizedPct) >= 6.0) {
+    return {
+      regime: "ROLL_YIELD_CARRY_OPPORTUNITY",
+      canFadeBasis: true,
+      oiFlowSignal: flow.kind,
+      rationaleVi: `Lợi suất Roll Yield kỳ hạn F1M-F2M đạt ${rollYieldAnnualizedPct.toFixed(1)}%/năm — Có thể khai thác Calendar Spread.`,
+    };
+  }
+
+  return {
+    regime: "BALANCED_BASIS",
+    canFadeBasis: false,
+    oiFlowSignal: flow.kind,
+    rationaleVi: "Basis và dòng tiền OI ở trạng thái cân bằng.",
+  };
+}
 
 export interface DerivativesArbitrageSignal {
   symbol: string;
@@ -31,6 +300,9 @@ export interface DerivativesArbitrageSignal {
     expectedGainPts: number;
   };
   ouCalibration?: OUBasisCalibration;
+  dividendAdjustedBasis?: DividendAdjustedBasisResult;
+  kalmanHedge?: KalmanHedgeRatioResult;
+  basisFlowRegime?: BasisFlowRegimeResult;
   daysToExpiry: number;
   expiryDateStr: string;
   updatedAt: string;
@@ -208,8 +480,15 @@ export async function getDerivativesArbitrageSignal(
 
   const basis = Number((fPrice - cashPrice).toFixed(1));
   const basisPct = Number(((basis / cashPrice) * 100).toFixed(2));
-  const timeYear = days / 365;
-  const fairValuePrice = Number((cashPrice * (1 + carryRate * timeYear)).toFixed(1));
+  const repoRate =
+    carryRateSource === "LIVE_ECONOMY_ADJUSTED" ? carryRate + 0.015 : 0.045;
+  const dividendAdjustedBasis = computeDividendAdjustedFairBasis({
+    spotPrice: cashPrice,
+    repoRateAnnual: repoRate,
+    daysToExpiry: days,
+    fallbackDividendYieldAnnual: 0.015,
+  });
+  const fairValuePrice = dividendAdjustedBasis.fairValuePrice;
   const mispricing = Number((fPrice - fairValuePrice).toFixed(1));
 
   let marketState: DerivativesArbitrageSignal["marketState"] = "FAIR_VALUE";
@@ -300,6 +579,31 @@ export async function getDerivativesArbitrageSignal(
     ouCalibration = calibrateBasisOrnsteinUhlenbeck(resolvedBasisSeries, resolvedDtMinutes);
   }
 
+  const alignedFut: number[] = [];
+  const alignedSpot: number[] = [];
+  if (futBars.length >= 5 && spotBars.length >= 5) {
+    const m = Math.min(futBars.length, spotBars.length);
+    for (let i = 0; i < m; i++) {
+      alignedFut.push(futBars[futBars.length - m + i]!.close);
+      alignedSpot.push(spotBars[spotBars.length - m + i]!.close);
+    }
+    alignedFut[alignedFut.length - 1] = fPrice;
+    alignedSpot[alignedSpot.length - 1] = cashPrice;
+  } else {
+    alignedFut.push(fPrice);
+    alignedSpot.push(cashPrice);
+  }
+
+  const kalmanHedge = estimateKalmanDynamicHedgeRatio(alignedFut, alignedSpot);
+  const priceChangePts =
+    alignedFut.length >= 2 ? alignedFut[alignedFut.length - 1]! - alignedFut[alignedFut.length - 2]! : 0;
+  const basisFlowRegime = evaluateBasisFlowRegime({
+    mispricingPts: mispricing,
+    kalmanZScore: kalmanHedge.kalmanZScore,
+    priceChangePts,
+    oiChangeContracts: 0,
+  });
+
   return {
     symbol: sym,
     underlyingSymbol: "VN30",
@@ -323,6 +627,9 @@ export async function getDerivativesArbitrageSignal(
       expectedGainPts,
     },
     ouCalibration,
+    dividendAdjustedBasis,
+    kalmanHedge,
+    basisFlowRegime,
     daysToExpiry: days,
     expiryDateStr: dateStr,
     updatedAt: new Date().toISOString(),

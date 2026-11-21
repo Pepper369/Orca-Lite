@@ -202,3 +202,205 @@ export function computeRrgTrail(
 
   return points;
 }
+
+export interface LeadLagPairEdge {
+  leaderSymbol: string;
+  followerSymbol: string;
+  optimalLagDays: 1 | 2;
+  leadLagCorrelation: number;
+  propagationSignal: "LEADER_PULLING_UP" | "LEADER_DRAGGING_DOWN" | "NEUTRAL";
+}
+
+export interface MstTreeEdge {
+  sourceSymbol: string;
+  targetSymbol: string;
+  contemporaneousCorr: number;
+  mantegnaDistance: number;
+}
+
+export interface SectorLeadLagMstResult {
+  sectorCode: string;
+  hubSymbol: string | null;
+  mstEdges: MstTreeEdge[];
+  leadLagEdges: LeadLagPairEdge[];
+  idiosyncraticReturnsBySymbol: Record<string, number[]>;
+}
+
+/**
+ * Computes market-residualized (idiosyncratic) returns, Lag-1 / Lag-2 Lead-Lag Cross-Correlation,
+ * and Kruskal's Minimum Spanning Tree (MST) over Mantegna metric distance d_ij = sqrt(2 * (1 - rho_ij)).
+ */
+export function computeSectorLeadLagAndMst(params: {
+  sectorCode: string;
+  symbolPrices: Record<string, number[]>;
+  benchmarkPrices?: number[];
+}): SectorLeadLagMstResult {
+  const { sectorCode, symbolPrices, benchmarkPrices } = params;
+  const symbols = Object.keys(symbolPrices).filter((s) => (symbolPrices[s]?.length ?? 0) >= 12);
+  if (symbols.length < 2) {
+    return {
+      sectorCode,
+      hubSymbol: symbols[0] ?? null,
+      mstEdges: [],
+      leadLagEdges: [],
+      idiosyncraticReturnsBySymbol: {},
+    };
+  }
+
+  const minLen = Math.min(
+    ...symbols.map((s) => symbolPrices[s]!.length),
+    benchmarkPrices && benchmarkPrices.length >= 12 ? benchmarkPrices.length : Infinity,
+  );
+  const retLen = minLen - 1;
+
+  // Compute benchmark log returns if provided
+  const benchRets: number[] = [];
+  if (benchmarkPrices && benchmarkPrices.length >= minLen) {
+    const bSlice = benchmarkPrices.slice(-minLen);
+    for (let t = 1; t < minLen; t++) {
+      const p0 = Math.max(1e-9, bSlice[t - 1]!);
+      const p1 = Math.max(1e-9, bSlice[t]!);
+      benchRets.push(Math.log(p1 / p0));
+    }
+  }
+
+  const meanB = benchRets.length > 0 ? mean(benchRets) : 0;
+  const varB =
+    benchRets.length > 1
+      ? benchRets.reduce((s, r) => s + (r - meanB) ** 2, 0) / (benchRets.length - 1)
+      : 0;
+
+  // Compute market-residualized (idiosyncratic) returns e_{i,t} = r_{i,t} - beta_i * r_{M,t}
+  const idioBySym: Record<string, number[]> = {};
+  for (const sym of symbols) {
+    const pSlice = symbolPrices[sym]!.slice(-minLen);
+    const rawRets: number[] = [];
+    for (let t = 1; t < minLen; t++) {
+      rawRets.push(Math.log(Math.max(1e-9, pSlice[t]!) / Math.max(1e-9, pSlice[t - 1]!)));
+    }
+    if (benchRets.length === retLen && varB > 1e-12) {
+      const meanR = mean(rawRets);
+      let cov = 0;
+      for (let t = 0; t < retLen; t++) {
+        cov += (rawRets[t]! - meanR) * (benchRets[t]! - meanB);
+      }
+      const beta = cov / ((retLen - 1) * varB);
+      idioBySym[sym] = rawRets.map((r, t) => Number((r - beta * benchRets[t]!).toFixed(6)));
+    } else {
+      idioBySym[sym] = rawRets.map((r) => Number(r.toFixed(6)));
+    }
+  }
+
+  const pearson = (a: number[], b: number[]): number => {
+    const m = Math.min(a.length, b.length);
+    if (m < 4) return 0;
+    const ma = mean(a.slice(0, m));
+    const mb = mean(b.slice(0, m));
+    let num = 0;
+    let da = 0;
+    let db = 0;
+    for (let i = 0; i < m; i++) {
+      const xa = a[i]! - ma;
+      const xb = b[i]! - mb;
+      num += xa * xb;
+      da += xa * xa;
+      db += xb * xb;
+    }
+    const den = Math.sqrt(da * db);
+    return den > 1e-12 ? Math.max(-1, Math.min(1, num / den)) : 0;
+  };
+
+  // 1. Build all pairwise Mantegna distances & run Kruskal's MST
+  const allPairs: MstTreeEdge[] = [];
+  for (let i = 0; i < symbols.length; i++) {
+    for (let j = i + 1; j < symbols.length; j++) {
+      const sA = symbols[i]!;
+      const sB = symbols[j]!;
+      const corr = pearson(idioBySym[sA]!, idioBySym[sB]!);
+      const dist = Math.sqrt(Math.max(0, 2 * (1 - corr)));
+      allPairs.push({
+        sourceSymbol: sA,
+        targetSymbol: sB,
+        contemporaneousCorr: Number(corr.toFixed(4)),
+        mantegnaDistance: Number(dist.toFixed(4)),
+      });
+    }
+  }
+  allPairs.sort((a, b) => a.mantegnaDistance - b.mantegnaDistance);
+
+  const parent = new Map<string, string>(symbols.map((s) => [s, s]));
+  const findRoot = (x: string): string => {
+    let curr = x;
+    while (parent.get(curr) !== curr) {
+      curr = parent.get(curr)!;
+    }
+    return curr;
+  };
+
+  const mstEdges: MstTreeEdge[] = [];
+  const degreeCount = new Map<string, number>(symbols.map((s) => [s, 0]));
+  for (const edge of allPairs) {
+    const rA = findRoot(edge.sourceSymbol);
+    const rB = findRoot(edge.targetSymbol);
+    if (rA !== rB) {
+      parent.set(rA, rB);
+      mstEdges.push(edge);
+      degreeCount.set(edge.sourceSymbol, (degreeCount.get(edge.sourceSymbol) ?? 0) + 1);
+      degreeCount.set(edge.targetSymbol, (degreeCount.get(edge.targetSymbol) ?? 0) + 1);
+      if (mstEdges.length === symbols.length - 1) break;
+    }
+  }
+
+  let hubSymbol: string | null = symbols[0] ?? null;
+  let maxDeg = -1;
+  for (const [sym, deg] of degreeCount.entries()) {
+    if (deg > maxDeg) {
+      maxDeg = deg;
+      hubSymbol = sym;
+    }
+  }
+
+  // 2. Evaluate Lag-1 and Lag-2 Lead-Lag Cross-Correlation between ordered pairs (leader -> follower)
+  const leadLagEdges: LeadLagPairEdge[] = [];
+  for (let i = 0; i < symbols.length; i++) {
+    for (let j = 0; j < symbols.length; j++) {
+      if (i === j) continue;
+      const leader = symbols[i]!;
+      const follower = symbols[j]!;
+      const rLead = idioBySym[leader]!;
+      const rFollow = idioBySym[follower]!;
+      if (rLead.length < 8) continue;
+
+      const corrLag1 = pearson(rLead.slice(0, rLead.length - 1), rFollow.slice(1));
+      const corrLag2 = pearson(rLead.slice(0, rLead.length - 2), rFollow.slice(2));
+      const bestLag: 1 | 2 = Math.abs(corrLag2) > Math.abs(corrLag1) ? 2 : 1;
+      const bestCorr = bestLag === 2 ? corrLag2 : corrLag1;
+
+      if (bestCorr >= 0.25) {
+        const recentLeaderImpulse = rLead[rLead.length - 1]! + (rLead[rLead.length - 2] ?? 0);
+        const propagationSignal: LeadLagPairEdge["propagationSignal"] =
+          recentLeaderImpulse > 0.005
+            ? "LEADER_PULLING_UP"
+            : recentLeaderImpulse < -0.005
+              ? "LEADER_DRAGGING_DOWN"
+              : "NEUTRAL";
+        leadLagEdges.push({
+          leaderSymbol: leader,
+          followerSymbol: follower,
+          optimalLagDays: bestLag,
+          leadLagCorrelation: Number(bestCorr.toFixed(4)),
+          propagationSignal,
+        });
+      }
+    }
+  }
+  leadLagEdges.sort((a, b) => b.leadLagCorrelation - a.leadLagCorrelation);
+
+  return {
+    sectorCode,
+    hubSymbol,
+    mstEdges,
+    leadLagEdges: leadLagEdges.slice(0, 12),
+    idiosyncraticReturnsBySymbol: idioBySym,
+  };
+}

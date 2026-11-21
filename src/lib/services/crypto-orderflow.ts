@@ -8,6 +8,16 @@ import {
   buildCryptoLiquidityContext,
   detectCryptoLiquidationClusters,
 } from "../engines/unified-cross-asset-quant";
+import {
+  computeMicropriceAndSpoofingSignal,
+  computeVolumeClockVpin,
+  evaluateDeltaNeutralFundingCarry,
+  evaluateFundingOiVelocityRegime,
+  type DeltaNeutralFundingCarryResult,
+  type FundingOiVelocityRegimeResult,
+  type MicropriceSpoofingResult,
+  type VolumeClockVpinResult,
+} from "../engines/crypto-derivatives-engine";
 import { atr as calcAtr } from "../technical";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import type { Meta } from "../types";
@@ -53,6 +63,10 @@ export interface CryptoOrderFlow {
   sellVolumeQuote: number;
   flowBias: "buy" | "sell" | "neutral";
   flowScore: number;
+  microprice?: MicropriceSpoofingResult;
+  vpin?: VolumeClockVpinResult;
+  fundingOiRegime?: FundingOiVelocityRegimeResult;
+  fundingCarryArb?: DeltaNeutralFundingCarryResult;
   signal: {
     direction: "BUY" | "SELL" | "NEUTRAL";
     confidencePct: number;
@@ -299,6 +313,25 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
     if (entry == null || !Number.isFinite(entry) || entry <= 0) entry = mid;
     const leveragePlans = buildLeveragePlans(direction, entry, stopLoss, takeProfit);
 
+    const aggressiveBuyShare = flowTotal > 0 ? buyVolumeQuote / flowTotal : 0.5;
+    const microprice = computeMicropriceAndSpoofingSignal({
+      orderBook: book,
+      aggressiveBuyShare,
+    });
+    const vpin = klines && klines.length >= 6 ? computeVolumeClockVpin(klines) : undefined;
+    const fundingRate8h = funding?.fundingRate ?? 0.0001;
+    const fundingOiRegime = evaluateFundingOiVelocityRegime({
+      fundingRate8h,
+      priceChange24hPct: ticker ? Number(ticker.priceChangePercent) || 0 : 0,
+      oiChange24hPct: 0,
+      vpin: vpin?.vpin,
+    });
+    const fundingCarryArb = evaluateDeltaNeutralFundingCarry({
+      spotPrice: ticker ? Number(ticker.lastPrice) || mid : mid,
+      perpMarkPrice: funding?.markPrice ?? mid,
+      fundingRate8h,
+    });
+
     const data: CryptoOrderFlow = {
       symbol,
       mid,
@@ -314,6 +347,10 @@ export async function getCryptoOrderFlow(symbolRaw: string): Promise<{ data: Cry
       sellVolumeQuote,
       flowBias,
       flowScore,
+      microprice,
+      vpin,
+      fundingOiRegime,
+      fundingCarryArb,
       signal: {
         direction,
         confidencePct,

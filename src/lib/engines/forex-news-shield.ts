@@ -200,3 +200,70 @@ export function calculateDynamicSlippageBuffer(
         : "Spread đang giãn nở, cần nới lỏng slippage buffer khi đặt lệnh.",
   };
 }
+
+export interface SpreadRecoveryHysteresisResult {
+  isLockout: boolean;
+  hysteresisLocked: boolean;
+  consecutiveNormalizedTicks: number;
+  requiredNormalizedTicks: number;
+  thresholdSpreadPips: number;
+  latestSpreadPips: number;
+  rationaleVi: string;
+}
+
+/**
+ * Post-News Spread-Recovery Hysteresis Gate:
+ * Even after the scheduled post-news timer expires, keeps execution locked out until
+ * `liveSpread <= maxMultiplier * rollingMedianSpread` holds continuously across K consecutive ticks.
+ */
+export function evaluateSpreadRecoveryHysteresis(params: {
+  recentSpreadTicksPips: number[];
+  rollingMedianSpreadPips: number;
+  maxMultiplier?: number; // default 1.5x median spread
+  requiredConsecutiveTicks?: number; // default K = 3 consecutive normalized ticks
+  timeBasedCircuitBreaker?: NewsCircuitBreakerResult | null;
+}): SpreadRecoveryHysteresisResult {
+  const {
+    recentSpreadTicksPips,
+    rollingMedianSpreadPips,
+    maxMultiplier = 1.5,
+    requiredConsecutiveTicks = 3,
+    timeBasedCircuitBreaker,
+  } = params;
+
+  const median = Math.max(0.2, rollingMedianSpreadPips);
+  const thresholdSpreadPips = Number((median * maxMultiplier).toFixed(2));
+  const latestSpreadPips =
+    recentSpreadTicksPips.length > 0
+      ? recentSpreadTicksPips[recentSpreadTicksPips.length - 1]!
+      : median;
+
+  let consecutiveNormalizedTicks = 0;
+  for (let i = recentSpreadTicksPips.length - 1; i >= 0; i--) {
+    if (recentSpreadTicksPips[i]! <= thresholdSpreadPips) {
+      consecutiveNormalizedTicks++;
+    } else {
+      break;
+    }
+  }
+
+  const hysteresisLocked = consecutiveNormalizedTicks < requiredConsecutiveTicks;
+  const timeLocked = Boolean(timeBasedCircuitBreaker?.isLockout);
+  const isLockout = timeLocked || hysteresisLocked;
+
+  const rationaleVi = timeLocked
+    ? timeBasedCircuitBreaker?.warningMessage ?? "Đang trong khung giờ khóa tin đỏ."
+    : hysteresisLocked
+      ? `Hysteresis Spread Lock: Spread hiện tại (${latestSpreadPips.toFixed(2)} pips) chỉ mới bình thường hóa ${consecutiveNormalizedTicks}/${requiredConsecutiveTicks} tick liên tiếp (Ngưỡng <= ${thresholdSpreadPips} pips). Tiếp tục chờ thanh khoản ổn định.`
+      : `Thanh khoản đã hồi phục hoàn toàn (${consecutiveNormalizedTicks}/${requiredConsecutiveTicks} tick liên tiếp <= ${thresholdSpreadPips} pips). Cho phép mở lệnh trở lại.`;
+
+  return {
+    isLockout,
+    hysteresisLocked,
+    consecutiveNormalizedTicks,
+    requiredNormalizedTicks: requiredConsecutiveTicks,
+    thresholdSpreadPips,
+    latestSpreadPips: Number(latestSpreadPips.toFixed(2)),
+    rationaleVi,
+  };
+}
