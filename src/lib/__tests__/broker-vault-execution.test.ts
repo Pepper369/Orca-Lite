@@ -688,3 +688,72 @@ test("Linked Trading Accounts Inventory: 1 API Key set = 1 account (dedupes dual
   assert.deepEqual(bn.environments, ["REAL", "DEMO"]);
   assert.equal(bn.connectionIds.length, 2);
 });
+
+test("Per-User Demo Persistence & Logout/Login Isolation: User Demo NAV & orders persist across sessions and never reset or leak", async () => {
+  const userA = `user-demo-persist-a-${Date.now()}`;
+  const userB = `user-demo-persist-b-${Date.now()}`;
+
+  // 1) User A logs in -> gets persistent per-user Demo accounts starting at $10,000
+  const accountsA1 = await listBrokerConnections(userA);
+  assert.equal(accountsA1.length, 2);
+  const binanceDemoA = accountsA1.find((a) => a.platform === "BINANCE_FUTURES");
+  assert.ok(binanceDemoA);
+  assert.ok(binanceDemoA.id.startsWith("paper-"));
+  assert.equal(binanceDemoA.balanceUsd, 10_000);
+
+  // 2) User A places a Demo trade and closes it at profit
+  const ordersA = await dispatchSignalWithVault({
+    signal: {
+      ...SAMPLE_CRYPTO_SIGNAL,
+      id: `sig_userA_${Date.now()}`,
+      entryPrice: 90_000,
+    },
+    currentMarketPrice: 90_000,
+    manualOverride: true,
+    userId: userA,
+    targetFollowerIds: [binanceDemoA.id],
+  });
+  assert.equal(ordersA[0]?.status, "FILLED_PAPER");
+
+  const closeRes = await closeTrackedBotPosition({
+    orderId: ordersA[0]!.orderId,
+    userId: userA,
+    overrideClosePrice: 92_000,
+  });
+  assert.equal(closeRes.ok, true);
+  assert.ok(closeRes.realizedPnlUsd > 0);
+
+  // 3) User A logs out (guest mode userId=null) -> guest sees $10,000 guest sandbox, NOT User A's account/orders
+  const guestSnap = await buildBotLiveTelemetrySnapshot(null);
+  assert.equal(guestSnap.accounts.some((a) => a.accountId === binanceDemoA.id), false);
+  assert.equal(guestSnap.openPositions.some((p) => p.accountId === binanceDemoA.id), false);
+
+  // 4) Another user B logs in -> isolated from User A and gets their own $10,000 Demo accounts
+  const snapB = await buildBotLiveTelemetrySnapshot(userB);
+  assert.equal(snapB.demoAccounts.length, 2);
+  assert.equal(snapB.demoNav.totalNavUsd, 20_000);
+  assert.equal(snapB.accounts.some((a) => a.accountId === binanceDemoA.id), false);
+
+  // 5) User A logs back in -> exact Demo NAV, wallet balance, and realized PnL are preserved (never reset to $10,000)
+  const snapA2 = await buildBotLiveTelemetrySnapshot(userA);
+  const restoredBinanceA = snapA2.accounts.find((a) => a.accountId === binanceDemoA.id);
+  assert.ok(restoredBinanceA);
+  assert.ok(
+    restoredBinanceA.walletBalanceUsd > 10_000,
+    `Expected User A Demo balance > $10,000 after relogin, got ${restoredBinanceA.walletBalanceUsd}`,
+  );
+  assert.ok(restoredBinanceA.realizedPnlUsd > 0);
+
+  // 6) Deleting a seeded Demo account must not auto-respawn on next listBrokerConnections
+  for (const acc of accountsA1) {
+    assert.equal(await deleteBrokerConnection(acc.id, userA), true);
+  }
+  const afterDeleteA = await listBrokerConnections(userA);
+  assert.equal(afterDeleteA.length, 0);
+
+  // Clean up User B test accounts
+  const accountsB = await listBrokerConnections(userB);
+  for (const acc of accountsB) {
+    await deleteBrokerConnection(acc.id, userB);
+  }
+});

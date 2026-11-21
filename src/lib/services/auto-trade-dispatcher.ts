@@ -429,7 +429,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const openSymbolsByAccount = new Map<string, Set<string>>();
   const openPositionsByAccount = new Map<string, FactorExposurePosition[]>();
   if (!manualOverride && !opts.overrideAccounts) {
-    const existingOrders = await listBotExecutionOrders(150);
+    const existingOrders = await listBotExecutionOrders(150, userId);
     for (const o of existingOrders) {
       if (
         (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
@@ -762,7 +762,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         idempotencyKey,
         message: `Hủy lệnh bảo vệ vốn: Trượt giá ${slippage.slippagePips} vượt ngưỡng cho phép`,
       };
-      await saveBotExecutionOrder(rejOrder);
+      await saveBotExecutionOrder(rejOrder, userId);
       results.push(rejOrder);
       continue;
     }
@@ -781,7 +781,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         slippage.slippagePips,
         idempotencyKey,
       );
-      await saveBotExecutionOrder(executed);
+      await saveBotExecutionOrder(executed, userId);
     } finally {
       INFLIGHT_IDEMPOTENCY_LOCKS.delete(idempotencyKey);
     }

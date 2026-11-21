@@ -337,7 +337,7 @@ export async function closeTrackedBotPosition(params: {
   accountName: string;
   message: string;
 }> {
-  const orders = await listBotExecutionOrders(150);
+  const orders = await listBotExecutionOrders(150, params.userId);
   const order = orders.find((o) => o.orderId === params.orderId);
   if (!order) {
     return {
@@ -348,6 +348,20 @@ export async function closeTrackedBotPosition(params: {
       accountName: "",
       message: "Không tìm thấy vị thế đang mở trong hệ thống",
     };
+  }
+
+  if (params.userId) {
+    const owned = await listBrokerConnections(params.userId);
+    if (!owned.some((a) => a.id === order.followerId)) {
+      return {
+        ok: false,
+        realizedPnlUsd: 0,
+        closePrice: 0,
+        symbol: order.symbol,
+        accountName: order.followerName,
+        message: "Không có quyền đóng vị thế thuộc tài khoản khác",
+      };
+    }
   }
 
   const acct = await getBrokerConnectionById(order.followerId);
@@ -767,7 +781,7 @@ export async function buildBotLiveTelemetrySnapshot(
   const now = Date.now();
   const [accounts, orders] = await Promise.all([
     listBrokerConnections(userId),
-    listBotExecutionOrders(150),
+    listBotExecutionOrders(150, userId),
   ]);
   await refreshOpenPositionLiveQuotes(orders);
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { auditLogs, botExecutionOrders, brokerConnections } from "@/db/schema";
 import type {
@@ -61,78 +61,90 @@ function getTodayUtcDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Tài khoản Paper mặc định khi hệ thống mới khởi tạo (không giả lập kết nối thật). */
-const DEFAULT_DEV_CONNECTIONS: StoredConnectionInternal[] = [
-  {
-    id: "paper-binance-sandbox",
-    userId: null,
-    name: "Binance Futures Paper Sandbox",
-    platform: "BINANCE_FUTURES",
-    accountNumberMasked: "PAPER-BN-01",
-    balanceUsd: 10000,
-    riskMultiplier: 1.0,
-    maxAllowedSlippagePips: 3.0,
-    leverageCap: 5,
-    isTestnet: true,
-    isActive: true,
-    autoExecuteEnabled: true,
-    killSwitched: false,
-    connectionStatus: "PAPER_SIMULATED",
-    maxDailyLossUsd: 500,
-    dailyRealizedPnlUsd: 0,
-    dailyPnlDate: getTodayUtcDate(),
-    maxOpenPositions: 3,
-    hasApiKey: false,
-    hasPassphrase: false,
-    hasEaToken: false,
-    lastVerifiedAt: null,
-    lastError: null,
-    totalCopiedTrades: 0,
-    winratePct: 0,
-    totalPnlUsd: 0,
-    createdAt: Date.now() - 86_400_000,
-    apiKeyEnc: null,
-    apiSecretEnc: null,
-    passphraseEnc: null,
-    eaTokenHash: null,
-  },
-  {
-    id: "paper-exness-mt5-demo",
-    userId: null,
-    name: "Exness MT5 Paper Demo",
-    platform: "MT5_EXNESS",
-    accountNumberMasked: "PAPER-EX-01",
-    balanceUsd: 10000,
-    riskMultiplier: 1.0,
-    maxAllowedSlippagePips: 1.5,
-    leverageCap: 5,
-    isTestnet: true,
-    isActive: true,
-    autoExecuteEnabled: true,
-    killSwitched: false,
-    connectionStatus: "PAPER_SIMULATED",
-    maxDailyLossUsd: 400,
-    dailyRealizedPnlUsd: 0,
-    dailyPnlDate: getTodayUtcDate(),
-    maxOpenPositions: 3,
-    hasApiKey: false,
-    hasPassphrase: false,
-    hasEaToken: false,
-    lastVerifiedAt: null,
-    lastError: null,
-    totalCopiedTrades: 0,
-    winratePct: 0,
-    totalPnlUsd: 0,
-    createdAt: Date.now() - 86_400_000,
-    apiKeyEnc: null,
-    apiSecretEnc: null,
-    passphraseEnc: null,
-    eaTokenHash: null,
-  },
-];
+/** Tạo cặp tài khoản Demo/Paper mặc định (guest `userId=null` hoặc gắn theo từng `userId`). */
+function createDefaultDemoConnections(userId: string | null): StoredConnectionInternal[] {
+  const now = Date.now();
+  const suffix = userId ? `-${userId}` : "";
+  return [
+    {
+      id: `paper-binance-sandbox${suffix}`,
+      userId,
+      name: "Binance Futures Paper Sandbox",
+      platform: "BINANCE_FUTURES",
+      accountNumberMasked: "PAPER-BN-01",
+      balanceUsd: 10000,
+      riskMultiplier: 1.0,
+      maxAllowedSlippagePips: 3.0,
+      leverageCap: 5,
+      isTestnet: true,
+      isActive: true,
+      autoExecuteEnabled: true,
+      killSwitched: false,
+      connectionStatus: "PAPER_SIMULATED",
+      maxDailyLossUsd: 500,
+      dailyRealizedPnlUsd: 0,
+      dailyPnlDate: getTodayUtcDate(),
+      maxOpenPositions: 3,
+      hasApiKey: false,
+      hasPassphrase: false,
+      hasEaToken: false,
+      lastVerifiedAt: null,
+      lastError: null,
+      totalCopiedTrades: 0,
+      winratePct: 0,
+      totalPnlUsd: 0,
+      createdAt: now - 86_400_000,
+      apiKeyEnc: null,
+      apiSecretEnc: null,
+      passphraseEnc: null,
+      eaTokenHash: null,
+    },
+    {
+      id: `paper-exness-mt5-demo${suffix}`,
+      userId,
+      name: "Exness MT5 Paper Demo",
+      platform: "MT5_EXNESS",
+      accountNumberMasked: "PAPER-EX-01",
+      balanceUsd: 10000,
+      riskMultiplier: 1.0,
+      maxAllowedSlippagePips: 1.5,
+      leverageCap: 5,
+      isTestnet: true,
+      isActive: true,
+      autoExecuteEnabled: true,
+      killSwitched: false,
+      connectionStatus: "PAPER_SIMULATED",
+      maxDailyLossUsd: 400,
+      dailyRealizedPnlUsd: 0,
+      dailyPnlDate: getTodayUtcDate(),
+      maxOpenPositions: 3,
+      hasApiKey: false,
+      hasPassphrase: false,
+      hasEaToken: false,
+      lastVerifiedAt: null,
+      lastError: null,
+      totalCopiedTrades: 0,
+      winratePct: 0,
+      totalPnlUsd: 0,
+      createdAt: now - 86_400_000,
+      apiKeyEnc: null,
+      apiSecretEnc: null,
+      passphraseEnc: null,
+      eaTokenHash: null,
+    },
+  ];
+}
 
-const DEV_CONNECTIONS_STORE: StoredConnectionInternal[] = DEFAULT_DEV_CONNECTIONS.map((c) => ({ ...c }));
+const DEV_CONNECTIONS_STORE: StoredConnectionInternal[] = createDefaultDemoConnections(null);
 const DEV_ORDERS_STORE: CopyExecutionOrder[] = [];
+const SEEDED_DEMO_USERS = new Set<string>();
+const INFLIGHT_SEED_PROMISES = new Map<string, Promise<void>>();
+
+function isForeignKeyUserError(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  const msg = err instanceof Error ? err.message : String(err);
+  return code === "23503" || /foreign key constraint|violates foreign key/i.test(msg);
+}
 
 // Circuit-breaker when Postgres broker_connections / bot_execution_orders tables are not migrated or unreachable
 let dbVaultCooldownUntil = 0;
@@ -140,6 +152,7 @@ function shouldUseVaultDb(): boolean {
   return databaseConfigured() && Date.now() >= dbVaultCooldownUntil;
 }
 function tripVaultDbCooldown(err: unknown): void {
+  if (isForeignKeyUserError(err)) return;
   const msg = err instanceof Error ? err.message : String(err);
   // Missing table (42P01) -> cool down 5 minutes; transient network -> cool down 30s
   const cooldownMs = /does not exist|42P01|relation/i.test(msg) ? 5 * 60_000 : 30_000;
@@ -232,29 +245,144 @@ export async function recordVaultAuditLog(
   }
 }
 
+function seedUserDemoInMemory(userId: string): void {
+  if (SEEDED_DEMO_USERS.has(userId)) return;
+  SEEDED_DEMO_USERS.add(userId);
+  if (DEV_CONNECTIONS_STORE.some((c) => c.userId === userId)) return;
+  const defaults = createDefaultDemoConnections(userId);
+  DEV_CONNECTIONS_STORE.push(...defaults);
+}
+
+async function ensureDefaultDemoConnectionsForUser(userId: string): Promise<void> {
+  if (!userId || SEEDED_DEMO_USERS.has(userId)) return;
+  const inflight = INFLIGHT_SEED_PROMISES.get(userId);
+  if (inflight) {
+    await inflight;
+    return;
+  }
+
+  const task = (async () => {
+    if (shouldUseVaultDb()) {
+      try {
+        const priorLogs = await db
+          .select({ id: auditLogs.id })
+          .from(auditLogs)
+          .where(
+            and(
+              eq(auditLogs.userId, userId),
+              inArray(auditLogs.action, ["PAPER_DEMO_SEEDED", "BROKER_CONNECTION_DELETED"]),
+            ),
+          )
+          .limit(1);
+
+        if (priorLogs.length > 0) {
+          SEEDED_DEMO_USERS.add(userId);
+          return;
+        }
+
+        const defaults = createDefaultDemoConnections(userId);
+        await db
+          .insert(brokerConnections)
+          .values(
+            defaults.map((d) => ({
+              id: d.id,
+              userId: d.userId,
+              name: d.name,
+              platform: d.platform,
+              accountNumberMasked: d.accountNumberMasked,
+              balanceUsd: String(d.balanceUsd),
+              riskMultiplier: String(d.riskMultiplier),
+              maxAllowedSlippagePips: String(d.maxAllowedSlippagePips),
+              leverageCap: d.leverageCap ?? 5,
+              isTestnet: d.isTestnet ?? true,
+              isActive: d.isActive,
+              autoExecuteEnabled: d.autoExecuteEnabled ?? true,
+              killSwitched: false,
+              connectionStatus: d.connectionStatus ?? "PAPER_SIMULATED",
+              maxDailyLossUsd: String(d.maxDailyLossUsd ?? 500),
+              dailyRealizedPnlUsd: "0",
+              dailyPnlDate: d.dailyPnlDate ?? getTodayUtcDate(),
+              maxOpenPositions: d.maxOpenPositions ?? 3,
+              apiKeyEnc: null,
+              apiSecretEnc: null,
+              passphraseEnc: null,
+              eaTokenHash: null,
+            })),
+          )
+          .onConflictDoNothing({ target: brokerConnections.id });
+
+        await recordVaultAuditLog(userId, "PAPER_DEMO_SEEDED", {
+          connectionIds: defaults.map((d) => d.id),
+        });
+        SEEDED_DEMO_USERS.add(userId);
+        return;
+      } catch (err) {
+        if (!isForeignKeyUserError(err)) {
+          tripVaultDbCooldown(err);
+        }
+        seedUserDemoInMemory(userId);
+        return;
+      }
+    }
+
+    seedUserDemoInMemory(userId);
+  })();
+
+  INFLIGHT_SEED_PROMISES.set(userId, task);
+  try {
+    await task;
+  } finally {
+    INFLIGHT_SEED_PROMISES.delete(userId);
+  }
+}
+
 export async function listBrokerConnections(userId?: string | null): Promise<FollowerAccount[]> {
+  // Explicit guest mode (userId === null): return only unowned guest sandbox accounts
+  if (userId === null) {
+    return DEV_CONNECTIONS_STORE.filter((c) => !c.userId).map(stripSecrets);
+  }
+
   if (shouldUseVaultDb()) {
     try {
-      const rows = userId
-        ? await db.select().from(brokerConnections).where(eq(brokerConnections.userId, userId)).orderBy(desc(brokerConnections.createdAt))
-        : await db.select().from(brokerConnections).orderBy(desc(brokerConnections.createdAt));
+      if (userId) {
+        let rows = await db
+          .select()
+          .from(brokerConnections)
+          .where(eq(brokerConnections.userId, userId))
+          .orderBy(desc(brokerConnections.createdAt));
 
+        if (rows.length === 0) {
+          await ensureDefaultDemoConnectionsForUser(userId);
+          rows = await db
+            .select()
+            .from(brokerConnections)
+            .where(eq(brokerConnections.userId, userId))
+            .orderBy(desc(brokerConnections.createdAt));
+        }
+
+        if (rows.length > 0) {
+          return rows.map((r) => stripSecrets(mapDbRowToInternal(r)));
+        }
+
+        return DEV_CONNECTIONS_STORE.filter((c) => c.userId === userId).map(stripSecrets);
+      }
+
+      const rows = await db.select().from(brokerConnections).orderBy(desc(brokerConnections.createdAt));
       if (rows.length > 0) {
         return rows.map((r) => stripSecrets(mapDbRowToInternal(r)));
       }
-      if (!userId) {
-        return DEV_CONNECTIONS_STORE.map(stripSecrets);
-      }
-      return [];
+      return DEV_CONNECTIONS_STORE.map(stripSecrets);
     } catch (err) {
       tripVaultDbCooldown(err);
-      return DEV_CONNECTIONS_STORE.map(stripSecrets);
     }
   }
 
-  return DEV_CONNECTIONS_STORE
-    .filter((c) => !userId || !c.userId || c.userId === userId)
-    .map(stripSecrets);
+  if (userId) {
+    seedUserDemoInMemory(userId);
+    return DEV_CONNECTIONS_STORE.filter((c) => c.userId === userId).map(stripSecrets);
+  }
+
+  return DEV_CONNECTIONS_STORE.map(stripSecrets);
 }
 
 export async function getBrokerConnectionById(id: string): Promise<FollowerAccount | null> {
@@ -431,7 +559,7 @@ export async function updateBrokerConnectionState(
     leverageCap: number;
   }>,
 ): Promise<FollowerAccount | null> {
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const dbPatch: Record<string, unknown> = { updatedAt: new Date() };
       if (patch.isActive !== undefined) dbPatch.isActive = patch.isActive;
@@ -456,8 +584,8 @@ export async function updateBrokerConnectionState(
         .where(eq(brokerConnections.id, id))
         .returning();
       if (updated) return stripSecrets(mapDbRowToInternal(updated));
-    } catch {
-      // Fallback below
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
 
@@ -503,7 +631,7 @@ export async function verifyEaBearerToken(bearerToken: string): Promise<Follower
   if (!clean) return null;
   const candidateHash = hashEaToken(clean);
 
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const [row] = await db
         .select()
@@ -513,8 +641,8 @@ export async function verifyEaBearerToken(bearerToken: string): Promise<Follower
       if (row && row.eaTokenHash && timingSafeTokenEqual(candidateHash, row.eaTokenHash)) {
         return stripSecrets(mapDbRowToInternal(row));
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
 
@@ -525,7 +653,7 @@ export async function verifyEaBearerToken(bearerToken: string): Promise<Follower
 }
 
 export async function hasExecutionOrderByIdempotency(idempotencyKey: string): Promise<boolean> {
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const [row] = await db
         .select({ id: botExecutionOrders.id, status: botExecutionOrders.status })
@@ -535,8 +663,8 @@ export async function hasExecutionOrderByIdempotency(idempotencyKey: string): Pr
       if (row) {
         return row.status === "FILLED" || row.status === "FILLED_PAPER" || row.status === "PENDING_EA";
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
   const existing = DEV_ORDERS_STORE.find((o) => o.idempotencyKey === idempotencyKey);
@@ -671,6 +799,11 @@ export async function listBotExecutionOrders(
   limit = 50,
   userId?: string | null,
 ): Promise<CopyExecutionOrder[]> {
+  if (userId === null) {
+    const guestIds = new Set(DEV_CONNECTIONS_STORE.filter((c) => !c.userId).map((c) => c.id));
+    return DEV_ORDERS_STORE.filter((o) => guestIds.has(o.followerId)).slice(0, limit);
+  }
+
   if (shouldUseVaultDb()) {
     try {
       const conns = await listBrokerConnections(userId);
@@ -746,10 +879,24 @@ export async function listBotExecutionOrders(
           };
         });
       }
-      if (userId) return [];
+      if (userId) {
+        const ramUserIds = new Set(
+          DEV_CONNECTIONS_STORE.filter((c) => c.userId === userId).map((c) => c.id),
+        );
+        if (ramUserIds.size > 0) {
+          return DEV_ORDERS_STORE.filter((o) => ramUserIds.has(o.followerId)).slice(0, limit);
+        }
+        return [];
+      }
     } catch (err) {
       tripVaultDbCooldown(err);
     }
+  }
+  if (userId) {
+    const userConnIds = new Set(
+      DEV_CONNECTIONS_STORE.filter((c) => c.userId === userId).map((c) => c.id),
+    );
+    return DEV_ORDERS_STORE.filter((o) => userConnIds.has(o.followerId)).slice(0, limit);
   }
   return DEV_ORDERS_STORE.slice(0, limit);
 }
@@ -781,6 +928,7 @@ export async function deleteBrokerConnection(id: string, userId?: string | null)
     deleted = true;
   }
   if (deleted) {
+    if (userId) SEEDED_DEMO_USERS.add(userId);
     await recordVaultAuditLog(userId, "BROKER_CONNECTION_DELETED", { connectionId: id });
   }
   return deleted;
@@ -821,7 +969,7 @@ export async function rotateBrokerCredentials(
       ? "AWAITING_EA"
       : undefined;
 
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const dbPatch: Record<string, unknown> = { updatedAt: new Date() };
       if (apiKeyEnc !== undefined) dbPatch.apiKeyEnc = apiKeyEnc;
@@ -845,8 +993,8 @@ export async function rotateBrokerCredentials(
         });
         return { connection: stripSecrets(mapDbRowToInternal(updated)), oneTimeEaToken };
       }
-    } catch {
-      // Fallback below
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
 
