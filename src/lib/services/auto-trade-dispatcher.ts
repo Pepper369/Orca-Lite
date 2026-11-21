@@ -436,7 +436,7 @@ export async function executePlatformOrder(
  * 5) Slippage Guard
  */
 export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promise<CopyExecutionOrder[]> {
-  const { signal, manualOverride = false, userId = null, targetFollowerIds, targetEnvironment = "ALL" } = opts;
+  const { signal, manualOverride = false, userId, targetFollowerIds, targetEnvironment = "ALL" } = opts;
   const marketPrice = opts.currentMarketPrice ?? signal.entryPrice;
   const executor = opts.orderExecutor ?? executePlatformOrder;
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
@@ -481,6 +481,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     const idempotencyKey = `${acct.id}_${signal.id}_${signal.symbol}_${signal.direction}`;
     const orderId = `ord_${randomUUID().slice(0, 12)}`;
     const now = Date.now();
+    const acctOwnerId = acct.userId ?? userId ?? null;
 
     // 1) Kill-Switch check
     if (acct.killSwitched) {
@@ -794,7 +795,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
           idempotencyKey,
           message: `Hủy lệnh do giãn Spread: ${spreadSafety.lockoutReason ?? `${signal.spreadPipsOrPct} pips`}`,
         };
-        await saveBotExecutionOrder(rejSpreadOrder, userId);
+        await saveBotExecutionOrder(rejSpreadOrder, acctOwnerId);
         results.push(rejSpreadOrder);
         continue;
       }
@@ -821,7 +822,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         idempotencyKey,
         message: `Hủy lệnh bảo vệ vốn: Trượt giá ${slippage.slippagePips} vượt ngưỡng cho phép`,
       };
-      await saveBotExecutionOrder(rejOrder, userId);
+      await saveBotExecutionOrder(rejOrder, acctOwnerId);
       results.push(rejOrder);
       continue;
     }
@@ -840,7 +841,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         slippage.slippagePips,
         idempotencyKey,
       );
-      await saveBotExecutionOrder(executed, userId);
+      await saveBotExecutionOrder(executed, acctOwnerId);
     } finally {
       INFLIGHT_IDEMPOTENCY_LOCKS.delete(idempotencyKey);
     }
@@ -884,7 +885,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       });
     }
 
-    await recordVaultAuditLog(userId, "BOT_ORDER_DISPATCH", {
+    await recordVaultAuditLog(acctOwnerId, "BOT_ORDER_DISPATCH", {
       orderId: executed.orderId,
       connectionId: acct.id,
       environment: acctEnv,

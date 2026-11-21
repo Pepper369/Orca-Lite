@@ -38,7 +38,7 @@ import {
   saveBotExecutionOrder,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
-import { getAutoTradeWorkerStatus } from "@/lib/services/auto-trade-worker";
+import { getAutoTradeWorkerStatus, getLiveQuantEngineFeed } from "@/lib/services/auto-trade-worker";
 
 export const BOT_TELEMETRY_CHANNEL = "bot:telemetry";
 const EXCHANGE_SYNC_TTL_MS = 4_500;
@@ -978,5 +978,6 @@ export async function buildBotLiveTelemetrySnapshot(
       ...w,
       nextTickAt: w.started && w.lastTickAt ? w.lastTickAt + w.pollIntervalMs : null,
     },
+    quantFeed: getLiveQuantEngineFeed(),
   };
 }

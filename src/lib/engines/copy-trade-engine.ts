@@ -21,6 +21,7 @@ export type ConnectionStatus =
 
 export interface FollowerAccount {
   id: string;
+  userId?: string | null;
   name: string;
   platform: BrokerPlatform;
   accountNumberMasked: string;

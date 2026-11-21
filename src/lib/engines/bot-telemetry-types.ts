@@ -268,6 +268,30 @@ export interface BotActivityEvent {
   platform?: BrokerPlatform;
 }
 
+export interface QuantEngineFeedItem {
+  id: string;
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+  direction: "BUY" | "SELL";
+  setupGrade: "A+" | "A" | "B" | "NO_TRADE";
+  winrateScore: number;
+  calibratedWinRatePct: number;
+  expectancyR: number;
+  entryMode: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  entryPrice: number;
+  stopLossPrice: number;
+  takeProfit1: number;
+  takeProfit2: number | null;
+  takeProfit3: number | null;
+  recommendedLeverage: number;
+  masterLotsOrQty: number;
+  ictSetup: string;
+  regimeState: string;
+  liquiditySweepDetected: boolean;
+  summaryVi: string;
+  updatedAt: number;
+}
+
 export interface BotWorkerTelemetry {
   started: boolean;
   isTickRunning: boolean;
@@ -277,6 +301,7 @@ export interface BotWorkerTelemetry {
   lastDispatchedCount: number;
   lastScannedSignalsCount: number;
   lastScanStatus: string;
+  quantFeed?: QuantEngineFeedItem[];
 }
 
 export interface BotLiveTelemetrySnapshot {
@@ -300,6 +325,7 @@ export interface BotLiveTelemetrySnapshot {
   openPositions: LiveOpenPosition[];
   recentEvents: BotActivityEvent[];
   worker: BotWorkerTelemetry;
+  quantFeed?: QuantEngineFeedItem[];
 }
 
 /* ------------------------- Pure SSOT Financial Math ------------------------- */

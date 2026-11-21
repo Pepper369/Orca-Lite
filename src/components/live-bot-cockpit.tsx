@@ -770,6 +770,95 @@ export function LiveBotCockpit({
         </div>
       </div>
 
+      {/* 2.5 Live Quant Engine -> Bot Continuous Signal Pipeline (ICT + SMC + 7-Gate Quant) */}
+      {snap.quantFeed && snap.quantFeed.length > 0 && (
+        <div className="rounded-xl border border-accent-primary/40 bg-surface-primary p-3.5 sm:p-4 shadow-sm space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-[13px] font-bold text-text-primary flex items-center gap-1.5">
+                <Cpu className="size-4 text-accent-primary" />
+                Luồng Phân Tích ICT + SMC + Quant Engine Đổ Trực Tiếp Vào Bot ({snap.quantFeed.length} Kèo Hội Tụ)
+              </h3>
+              <p className="text-[11px] text-text-muted">
+                Dữ liệu từ 7-Gate Precision Engine (Sweep/MSS · OTE/FVG/BPR · Online HMM Regime · Purged Meta-Labeling) tự động đẩy liên tục vào các tài khoản gắn API Key đang bật AUTO ON.
+              </p>
+            </div>
+            <Badge tone="up">
+              WINRATE GATE A+/A ACTIVE
+            </Badge>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-line/50">
+            <table className="w-full text-left text-[11.5px]">
+              <thead className="bg-surface-elevated/60 text-[10px] uppercase text-text-muted">
+                <tr>
+                  <th className="px-2.5 py-2">Cặp / Chiều</th>
+                  <th className="px-2.5 py-2">Hạng &amp; WinRate</th>
+                  <th className="px-2.5 py-2">Cấu Trúc ICT/SMC &amp; Regime</th>
+                  <th className="px-2.5 py-2 text-right">Chế Độ Entry</th>
+                  <th className="px-2.5 py-2 text-right">SL → TP1 / TP2 / TP3</th>
+                  <th className="px-2.5 py-2 text-right">Kỳ Vọng E[R]</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line/30 bg-surface-primary/40">
+                {snap.quantFeed.slice(0, 8).map((q) => (
+                  <tr key={q.id} className="hover:bg-surface-elevated/40">
+                    <td className="px-2.5 py-2">
+                      <div className="flex items-center gap-1.5 font-semibold">
+                        <span className="text-text-primary">{q.symbol}</span>
+                        <Badge tone={q.direction === "BUY" ? "up" : "down"}>{q.direction}</Badge>
+                        <span className="text-[10px] font-mono text-text-muted">{q.assetType}</span>
+                      </div>
+                    </td>
+                    <td className="px-2.5 py-2 font-mono">
+                      <div className="flex items-center gap-1.5">
+                        <Badge tone={q.setupGrade === "A+" ? "up" : "accent"}>
+                          Grade {q.setupGrade}
+                        </Badge>
+                        <span className="font-bold text-positive">
+                          WR ~{q.calibratedWinRatePct}%
+                        </span>
+                        <span className="text-[10px] text-text-muted">({q.winrateScore}đ)</span>
+                      </div>
+                    </td>
+                    <td className="px-2.5 py-2">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="font-medium text-text-primary">{q.ictSetup}</span>
+                        {q.liquiditySweepDetected && (
+                          <Badge tone="warn" className="text-[9.5px]">SWEEP+MSS</Badge>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-text-muted truncate max-w-[260px]" title={q.summaryVi}>
+                        {q.regimeState} · {q.summaryVi}
+                      </div>
+                    </td>
+                    <td className="px-2.5 py-2 text-right font-mono">
+                      <div className="font-bold text-text-primary">{q.entryPrice}</div>
+                      <div className="text-[10px] text-accent-primary">{q.entryMode}</div>
+                    </td>
+                    <td className="px-2.5 py-2 text-right font-mono text-[10.5px]">
+                      <div className="text-negative">SL: {q.stopLossPrice}</div>
+                      <div className="text-positive">
+                        TP1: {q.takeProfit1}
+                        {q.takeProfit2 ? ` · TP2: ${q.takeProfit2}` : ""}
+                      </div>
+                    </td>
+                    <td className="px-2.5 py-2 text-right font-mono">
+                      <span className="font-extrabold text-positive">
+                        +{q.expectancyR}R
+                      </span>
+                      <div className="text-[10px] text-text-muted">
+                        {q.assetType === "CRYPTO" ? `${q.recommendedLeverage}x` : `${q.masterLotsOrQty} lot`}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* 3. Live Open Positions Table & Real-Time Activity Feed */}
       {(variant === "full" || openPositions.length > 0) && (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-12">

@@ -2,6 +2,10 @@ import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import { getMasterTraderPerformance } from "@/lib/engines/copy-trade-engine";
 import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
+import {
+  getLiveQuantEngineFeed,
+  initAutoTradeWorker,
+} from "@/lib/services/auto-trade-worker";
 import { listBotExecutionOrders } from "@/lib/services/broker-vault-store";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
@@ -12,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
+    initAutoTradeWorker();
     const session = await getSessionUser(req);
     if (!session && process.env.NODE_ENV === "production") {
       return fail("UNAUTHENTICATED", "Đăng nhập để xem nhật ký lệnh Copy Trade", 401);
@@ -45,11 +50,12 @@ export async function GET(req: Request) {
     if (fxRes.status === "fulfilled") {
       for (const s of fxRes.value.data.signals) {
         if (
-          s.status === "ACTIVE" &&
+          (s.status === "ACTIVE" || s.status === "AWAITING_BREAKOUT") &&
           (s.direction === "BUY" || s.direction === "SELL") &&
           s.entryPrice &&
           s.stopLossPrice &&
-          s.tp1
+          s.tp1 &&
+          !s.newsLockout
         ) {
           copyableSignals.push({
             id: `fx_${s.pair}_${s.direction}`,
@@ -77,7 +83,7 @@ export async function GET(req: Request) {
     if (crRes.status === "fulfilled") {
       for (const s of crRes.value.data.signals) {
         if (
-          s.status === "ACTIVE" &&
+          (s.status === "ACTIVE" || s.status === "AWAITING_BREAKOUT") &&
           (s.direction === "BUY" || s.direction === "SELL") &&
           s.entryPrice &&
           s.stopLossPrice &&
@@ -109,6 +115,33 @@ export async function GET(req: Request) {
           });
         }
       }
+    }
+
+    // Merge live 7-Gate Quant Engine setups from Auto-Trade Worker feed
+    const seenSymbols = new Set(copyableSignals.map((x) => x.symbol.toUpperCase()));
+    for (const q of getLiveQuantEngineFeed()) {
+      if (seenSymbols.has(q.symbol.toUpperCase())) continue;
+      seenSymbols.add(q.symbol.toUpperCase());
+      copyableSignals.push({
+        id: q.id,
+        symbol: q.symbol,
+        assetType: q.assetType,
+        direction: q.direction,
+        entryPrice: q.entryPrice,
+        stopLossPrice: q.stopLossPrice,
+        tp1: q.takeProfit1,
+        tp2: q.takeProfit2,
+        tp3: q.takeProfit3,
+        winrateScore: q.winrateScore,
+        setupGrade: q.setupGrade,
+        expectancyR: q.expectancyR,
+        recommendedLeverage: q.recommendedLeverage,
+        status: "ACTIVE",
+        recommendedLotsOrMargin:
+          q.assetType === "FOREX" ? `${q.masterLotsOrQty} Lots` : `${q.masterLotsOrQty} (${q.recommendedLeverage}x)`,
+        masterLotsOrQty: q.masterLotsOrQty,
+        updatedAt: q.updatedAt,
+      });
     }
 
     copyableSignals.sort((a, b) => b.winrateScore - a.winrateScore);

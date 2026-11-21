@@ -164,6 +164,7 @@ function stripSecrets(row: StoredConnectionInternal): FollowerAccount {
   const dailyPnl = row.dailyPnlDate === today ? row.dailyRealizedPnlUsd ?? 0 : 0;
   return {
     id: row.id,
+    userId: row.userId ?? null,
     name: row.name,
     platform: row.platform,
     accountNumberMasked: row.accountNumberMasked,
@@ -476,7 +477,7 @@ export async function createBrokerConnection(
     leverageCap: Math.max(1, Math.min(20, Math.round(input.leverageCap ?? 5))),
     isTestnet: input.isTestnet ?? true,
     isActive: true,
-    autoExecuteEnabled: Boolean(input.autoExecuteEnabled ?? false),
+    autoExecuteEnabled: Boolean(input.autoExecuteEnabled ?? true),
     killSwitched: false,
     connectionStatus: initialStatus,
     maxDailyLossUsd: Math.max(10, input.maxDailyLossUsd ?? 500),

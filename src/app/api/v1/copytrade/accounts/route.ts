@@ -30,7 +30,11 @@ import {
   rotateBrokerCredentials,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
-import { getAutoTradeWorkerStatus } from "@/lib/services/auto-trade-worker";
+import {
+  getAutoTradeWorkerStatus,
+  initAutoTradeWorker,
+  triggerImmediateAutoTradeScan,
+} from "@/lib/services/auto-trade-worker";
 import { notifyBotTelemetryChanged } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
 import { safeInternalErrorMessage, sanitizeIdentityName, sanitizePlainText } from "@/app/api/_security";
@@ -40,6 +44,7 @@ export const dynamic = "force-dynamic";
 const ALLOWED_PLATFORMS: BrokerPlatform[] = ALL_ALLOWED_PLATFORMS;
 
 export async function GET(req: Request) {
+  initAutoTradeWorker();
   const session = await getSessionUser(req);
   if (!session && process.env.NODE_ENV === "production") {
     return fail("UNAUTHENTICATED", "Đăng nhập để xem kết nối Broker Vault", 401);
@@ -192,7 +197,7 @@ export async function POST(req: Request) {
             : 2.0,
           leverageCap: Number.isFinite(Number(body.leverageCap)) ? Number(body.leverageCap) : 5,
           isTestnet: t.isTestnet,
-          autoExecuteEnabled: Boolean(body.autoExecuteEnabled),
+          autoExecuteEnabled: body.autoExecuteEnabled !== false,
           maxDailyLossUsd: Number.isFinite(Number(body.maxDailyLossUsd)) ? Number(body.maxDailyLossUsd) : 500,
           maxOpenPositions: Number.isFinite(Number(body.maxOpenPositions)) ? Number(body.maxOpenPositions) : 3,
           apiKey: body.apiKey,
@@ -217,6 +222,8 @@ export async function POST(req: Request) {
         createdAccounts.push(updated ?? connection);
       }
 
+      initAutoTradeWorker();
+      triggerImmediateAutoTradeScan();
       notifyBotTelemetryChanged("account_created");
       return ok({
         account: createdAccounts[0],
@@ -237,7 +244,7 @@ export async function POST(req: Request) {
       maxAllowedSlippagePips: Number.isFinite(Number(body.maxAllowedSlippagePips)) ? Number(body.maxAllowedSlippagePips) : 2.0,
       leverageCap: Number.isFinite(Number(body.leverageCap)) ? Number(body.leverageCap) : 5,
       isTestnet: body.isTestnet !== false,
-      autoExecuteEnabled: Boolean(body.autoExecuteEnabled),
+      autoExecuteEnabled: body.autoExecuteEnabled !== false,
       maxDailyLossUsd: Number.isFinite(Number(body.maxDailyLossUsd)) ? Number(body.maxDailyLossUsd) : 500,
       maxOpenPositions: Number.isFinite(Number(body.maxOpenPositions)) ? Number(body.maxOpenPositions) : 3,
       apiKey: trimmedKey || undefined,
@@ -281,6 +288,8 @@ export async function POST(req: Request) {
         })
       : null;
 
+    initAutoTradeWorker();
+    triggerImmediateAutoTradeScan();
     notifyBotTelemetryChanged("account_created");
     return ok({
       account: finalAccount,
@@ -373,6 +382,10 @@ export async function PATCH(req: Request) {
     });
 
     if (!updated) return fail("NOT_FOUND", "Không thể cập nhật tài khoản", 404);
+    if (updated.autoExecuteEnabled && updated.isActive && !updated.killSwitched) {
+      initAutoTradeWorker();
+      triggerImmediateAutoTradeScan();
+    }
     notifyBotTelemetryChanged("account_updated");
     return ok({ account: updated });
   } catch (err) {

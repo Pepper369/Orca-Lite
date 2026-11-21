@@ -22,6 +22,7 @@ import {
   createBrokerConnection,
   deleteBrokerConnection,
   getBrokerConnectionSecrets,
+  listBotExecutionOrders,
   listBrokerConnections,
   rotateBrokerCredentials,
   triggerGlobalKillSwitch,
@@ -755,5 +756,83 @@ test("Per-User Demo Persistence & Logout/Login Isolation: User Demo NAV & orders
   const accountsB = await listBrokerConnections(userB);
   for (const acc of accountsB) {
     await deleteBrokerConnection(acc.id, userB);
+  }
+});
+
+test("Direct Quant Engine -> API-Key Bot Bridge: Background Worker dispatches A+/A setups directly to user API-Key accounts", async () => {
+  const userId = `usr_quant_api_${Date.now()}`;
+  const { connection: apiConn } = await createBrokerConnection({
+    userId,
+    name: "Binance API Live Bot",
+    platform: "BINANCE_FUTURES",
+    balanceUsd: 5_000,
+    riskMultiplier: 1.0,
+    isTestnet: true,
+    apiKey: "bn_quant_live_key_99887766",
+    apiSecret: "bn_quant_live_sec_11223344",
+  });
+
+  // Verify autoExecuteEnabled defaults to true and userId is preserved on FollowerAccount
+  assert.equal(apiConn.autoExecuteEnabled, true);
+  assert.equal(apiConn.userId, userId);
+
+  const quantSignal: DispatchableSignalInput = {
+    ...SAMPLE_CRYPTO_SIGNAL,
+    id: `sig_quant_bridge_${Date.now()}`,
+    setupGrade: "A+",
+    winrateScore: 91,
+    entryMode: "LIMIT_PULLBACK",
+    expectancyR: 1.42,
+    tp1ClosePct: 50,
+    tp2ClosePct: 30,
+    tp3ClosePct: 20,
+  };
+
+  // Simulate background worker tick calling dispatchSignalWithVault WITHOUT userId (scans all active accounts)
+  const dispatched = await dispatchSignalWithVault({
+    signal: quantSignal,
+    currentMarketPrice: quantSignal.entryPrice,
+    manualOverride: false,
+    targetFollowerIds: [apiConn.id],
+    orderExecutor: async (acct, sig, qty, _lev, mktPx, slip, idemKey) => ({
+      orderId: `ord_quant_${Date.now()}`,
+      followerId: acct.id,
+      followerName: acct.name,
+      platform: acct.platform,
+      symbol: sig.symbol,
+      direction: sig.direction,
+      copiedLotsOrQty: qty,
+      initialLotsOrQty: qty,
+      entryPrice: sig.entryPrice,
+      executionPrice: mktPx,
+      slippagePips: slip,
+      status: "FILLED",
+      stopLossPrice: sig.stopLossPrice,
+      takeProfit1: sig.takeProfit1,
+      takeProfit2: sig.takeProfit2 ?? null,
+      takeProfit3: sig.takeProfit3 ?? null,
+      entryMode: sig.entryMode,
+      tp1ClosePct: sig.tp1ClosePct,
+      tp2ClosePct: sig.tp2ClosePct,
+      tp3ClosePct: sig.tp3ClosePct,
+      timestamp: Date.now(),
+      signalId: sig.id,
+      idempotencyKey: idemKey,
+      exchangeOrderId: "BN_QUANT_ORDER_001",
+      message: "Khớp tự động từ 7-Gate Quant Engine qua API Key",
+    }),
+  });
+
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0]?.status, "FILLED");
+  assert.equal(dispatched[0]?.entryMode, "LIMIT_PULLBACK");
+
+  // User must immediately see this worker-dispatched order in their user-scoped order log
+  const userOrders = await listBotExecutionOrders(20, userId);
+  assert.ok(userOrders.some((o) => o.orderId === dispatched[0]!.orderId));
+
+  const allUserConns = await listBrokerConnections(userId);
+  for (const c of allUserConns) {
+    await deleteBrokerConnection(c.id, userId);
   }
 });
