@@ -5,6 +5,7 @@ import { validateBars, logQualityEvent } from "../quality";
 import { analyzeForexScalp, type ForexScalpSignal } from "../engines/forex-scalp";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
+import { mergeBarsWithBiquoteLiveTick } from "../realtime/biquote-poll";
 import { getForexMarkets } from "./forex";
 import type { Meta, OhlcvBar } from "../types";
 import type { ChartCandle } from "../chart-const";
@@ -133,10 +134,13 @@ export async function buildForexScalpSignal(
         if (q5.status !== "VALID") void logQualityEvent("yahoo-fx", `fx-scalp:${pair}:m5`, q5);
         if (q15.status !== "VALID") void logQualityEvent("yahoo-fx", `fx-scalp:${pair}:m15`, q15);
 
+        const liveBarsM5 = mergeBarsWithBiquoteLiveTick(q5.cleaned, pair, 300);
+        const liveBarsM15 = mergeBarsWithBiquoteLiveTick(q15.cleaned, pair, 900);
+
         const signal = analyzeForexScalp({
           pair,
-          barsM15: q15.cleaned,
-          barsM5: q5.cleaned,
+          barsM15: liveBarsM15,
+          barsM5: liveBarsM5,
           barsM1: m1 && m1.length >= 25 ? validateBars(m1).cleaned : null,
           barsH1,
           calendarEvents,

@@ -465,6 +465,81 @@ export function getLiveTrainedMetaModel(
 
 export function clearLiveTrainedMetaModels(): void {
   LIVE_TRAINED_META_MODELS.clear();
+  LIVE_META_OUTCOME_STATS.FOREX = { count: 0, wins: 0, cumulativeR: 0, biasDelta: 0 };
+  LIVE_META_OUTCOME_STATS.CRYPTO = { count: 0, wins: 0, cumulativeR: 0, biasDelta: 0 };
+}
+
+export interface LiveMetaOutcomeTelemetry {
+  count: number;
+  wins: number;
+  empiricalWinRatePct: number | null;
+  avgRealizedR: number;
+  biasDelta: number;
+}
+
+const LIVE_META_OUTCOME_STATS: Record<
+  "FOREX" | "CRYPTO",
+  { count: number; wins: number; cumulativeR: number; biasDelta: number }
+> = {
+  FOREX: { count: 0, wins: 0, cumulativeR: 0, biasDelta: 0 },
+  CRYPTO: { count: 0, wins: 0, cumulativeR: 0, biasDelta: 0 },
+};
+
+/**
+ * Closed-Loop Online Bayesian / L2-Anchored SGD Feedback Updater:
+ * Incrementally adapts the live Meta-Labeling posterior bias from realized trade outcomes (TP1/TP2/Close)
+ * without overfitting single trades (bounded bias shift in [-0.35, +0.35]).
+ */
+export function recordLiveMetaLabelOutcome(params: {
+  assetType: "FOREX" | "CRYPTO";
+  winrateScore?: number;
+  realizedR?: number;
+  isWin: boolean;
+}): LiveMetaOutcomeTelemetry {
+  const assetType = params.assetType === "FOREX" ? "FOREX" : "CRYPTO";
+  const bucket = LIVE_META_OUTCOME_STATS[assetType];
+  const y = params.isWin ? 1 : 0;
+  const r = Number.isFinite(params.realizedR) ? Math.max(-3, Math.min(6, params.realizedR!)) : y ? 1.0 : -1.0;
+
+  bucket.count += 1;
+  if (y === 1) bucket.wins += 1;
+  bucket.cumulativeR = Number((bucket.cumulativeR + r).toFixed(4));
+
+  const active = getLiveTrainedMetaModel(assetType);
+  const priorProb =
+    Number.isFinite(params.winrateScore) && (params.winrateScore ?? 0) > 0
+      ? Math.max(0.35, Math.min(0.92, params.winrateScore! / 100))
+      : 0.72;
+  const lr = 0.035;
+  const l2 = 0.08;
+  const err = y - priorProb;
+  bucket.biasDelta = Number(
+    Math.max(-0.35, Math.min(0.35, bucket.biasDelta + lr * (err - l2 * bucket.biasDelta))).toFixed(4),
+  );
+
+  if (active) {
+    const baseBias = Number.isFinite(active.bias) ? active.bias : DEFAULT_META_BIAS;
+    const updatedBias = Number(
+      Math.max(-2.5, Math.min(2.5, baseBias + lr * (err - l2 * (baseBias - DEFAULT_META_BIAS)))).toFixed(4),
+    );
+    LIVE_TRAINED_META_MODELS.set(assetType, {
+      ...active,
+      bias: updatedBias,
+    });
+  }
+
+  return getLiveMetaOutcomeTelemetry(assetType);
+}
+
+export function getLiveMetaOutcomeTelemetry(assetType: "FOREX" | "CRYPTO"): LiveMetaOutcomeTelemetry {
+  const b = LIVE_META_OUTCOME_STATS[assetType === "FOREX" ? "FOREX" : "CRYPTO"];
+  return {
+    count: b.count,
+    wins: b.wins,
+    empiricalWinRatePct: b.count > 0 ? Number(((b.wins / b.count) * 100).toFixed(1)) : null,
+    avgRealizedR: b.count > 0 ? Number((b.cumulativeR / b.count).toFixed(3)) : 0,
+    biasDelta: b.biasDelta,
+  };
 }
 
 /**

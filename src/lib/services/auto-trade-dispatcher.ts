@@ -25,6 +25,7 @@ import {
   isMt5BrokerPlatform,
 } from "@/lib/engines/broker-registry";
 import {
+  getEmpiricalFrictionTelemetry,
   placePlatformExchangeOrder,
   recordExecutionSlippageTelemetry,
 } from "@/lib/engines/exchange-execution-client";
@@ -227,15 +228,24 @@ function computeOrderSize(
   const safeMasterCapital =
     Number.isFinite(signal.masterCapitalUsd) && signal.masterCapitalUsd > 0 ? signal.masterCapitalUsd : 10_000;
 
-  // Phase 3: Continuous Drawdown De-leveraging Governor
+  // Phase 3: Continuous Drawdown De-leveraging Governor (with High-Water-Mark peakBalanceUsd & Empirical Slippage Guard)
+  const realizedNetPnl = Number.isFinite(acct.totalPnlUsd) ? acct.totalPnlUsd : 0;
+  const estimatedPeakBalanceUsd = Math.max(
+    safeBalanceUsd,
+    safeBalanceUsd - Math.min(0, realizedNetPnl),
+  );
   const ddGovernor = evaluateContinuousDrawdownGovernor({
     currentBalanceUsd: safeBalanceUsd,
+    peakBalanceUsd: estimatedPeakBalanceUsd,
     dailyRealizedPnlUsd: Number.isFinite(acct.dailyRealizedPnlUsd) ? acct.dailyRealizedPnlUsd! : 0,
     maxDailyLossUsd:
       Number.isFinite(acct.maxDailyLossUsd) && (acct.maxDailyLossUsd ?? 0) > 0 ? acct.maxDailyLossUsd! : 500,
   });
+  const empFriction = getEmpiricalFrictionTelemetry(signal.symbol);
+  const slippagePenaltyScale =
+    empFriction.sampleCount >= 3 && empFriction.empiricalFrictionR >= 0.16 ? 0.85 : 1.0;
   const govScale = Number.isFinite(ddGovernor.recommendedSizeScale) ? ddGovernor.recommendedSizeScale : 1.0;
-  const combinedScale = Math.max(0.2, Math.min(1.25, govScale * safeFactorMult));
+  const combinedScale = Math.max(0.2, Math.min(1.25, govScale * safeFactorMult * slippagePenaltyScale));
 
   if (signal.assetType === "CRYPTO") {
     const riskPct = Math.max(0.20, Math.min(3.0, 1.0 * safeRiskMultiplier * combinedScale));
@@ -302,6 +312,12 @@ export async function executePlatformOrder(
   const adjustedTp2 = shiftTp(signal.takeProfit2);
   const adjustedTp3 = shiftTp(signal.takeProfit3);
 
+  const empFriction = getEmpiricalFrictionTelemetry(signal.symbol);
+  const resolvedEntryMode: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT" =
+    empFriction.sampleCount >= 3 && empFriction.empiricalFrictionR >= 0.16 && signal.entryMode !== "WAIT"
+      ? "LIMIT_PULLBACK"
+      : (signal.entryMode ?? "MARKET_CONFIRMED");
+
   const baseOrder: Omit<CopyExecutionOrder, "status" | "message"> = {
     orderId,
     followerId: acct.id,
@@ -324,7 +340,7 @@ export async function executePlatformOrder(
     signalId: signal.id,
     idempotencyKey,
     isTestnet: acct.isTestnet ?? true,
-    entryMode: signal.entryMode ?? "MARKET_CONFIRMED",
+    entryMode: resolvedEntryMode,
     tp1ClosePct: signal.tp1ClosePct,
     tp2ClosePct: signal.tp2ClosePct,
     tp3ClosePct: signal.tp3ClosePct,

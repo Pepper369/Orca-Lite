@@ -59,6 +59,8 @@ export interface PrecisionSetupInput {
   secondsRemaining?: number;
   sharedCtx?: SharedBarContext | null;
   trainedMetaModel?: TrainedMetaLabelModel | null;
+  /** Realized execution Implementation Shortfall override from live fills (in R units) */
+  empiricalFrictionROverride?: number | null;
 }
 
 export interface PrecisionTradeSetup {
@@ -1036,9 +1038,19 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const tp2Raw = isBuy ? rawEntry + target2Dist : rawEntry - target2Dist;
   const tp3Raw = isBuy ? rawEntry + tp3Dist : rawEntry - tp3Dist;
 
-  const frictionR = Number((totalFrictionPrice / Math.max(1e-12, stopDist)).toFixed(3));
+  const rawFrictionR = totalFrictionPrice / Math.max(1e-12, stopDist);
+  const empFriction =
+    input.empiricalFrictionROverride != null &&
+    Number.isFinite(input.empiricalFrictionROverride) &&
+    input.empiricalFrictionROverride > 0
+      ? Math.min(0.35, input.empiricalFrictionROverride)
+      : 0;
+  const frictionR = Number(Math.max(rawFrictionR, empFriction).toFixed(3));
+  const effectiveFrictionPrice = Math.max(totalFrictionPrice, frictionR * stopDist);
   const grossRiskReward = prelimGrossRr;
-  const netRiskReward = Number(Math.max(0, (target2Dist - totalFrictionPrice) / Math.max(1e-12, stopDist)).toFixed(2));
+  const netRiskReward = Number(
+    Math.max(0, (target2Dist - effectiveFrictionPrice) / Math.max(1e-12, stopDist)).toFixed(2),
+  );
 
   if (frictionR > 0.22) {
     vetoReasons.push(`Chi phí spread/phí quá lớn (${(frictionR * 100).toFixed(0)}% rủi ro 1R)`);

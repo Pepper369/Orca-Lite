@@ -6,6 +6,7 @@ import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
+import { getEmpiricalFrictionTelemetry } from "../engines/exchange-execution-client";
 import { calculateUnifiedTradeRiskPlan } from "../engines/unified-cross-asset-quant";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import { getForexDetail, getForexMarkets } from "./forex";
@@ -46,6 +47,12 @@ export interface ForexQuantSignalItem {
   setupGrade?: SetupGrade;
   expectancyR?: number;
   entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  entryZone?: [number, number] | null;
+  tp1ClosePct?: number;
+  tp2ClosePct?: number;
+  tp3ClosePct?: number;
+  trailingAtrMult?: number;
+  dominantScenario?: string;
   vetoReasons?: string[];
   netRiskReward?: number | null;
   recommendedSizeMultiplier?: number;
@@ -211,6 +218,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
         // 2. Harmonized Precision Evaluation (use intraday directly when available; compute daily only as fallback)
         const intradayPrecision = sig.precision ?? null;
+        const empFrictionFx = getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride;
         const effectivePrecision =
           intradayPrecision ??
           (detailSeries.length >= 30
@@ -231,6 +239,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
                 spreadPipsOrPct: sig.filter.spreadPips,
                 isNewsOrCascadeLockout: newsLockout || Boolean(spreadLockoutReason),
                 lockoutReason: newsWarning ?? spreadLockoutReason,
+                empiricalFrictionROverride: empFrictionFx,
               })
             : null);
 
@@ -360,6 +369,12 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           setupGrade,
           expectancyR: effectivePrecision?.expectancyR ?? 0,
           entryMode: action === "WAIT" ? "WAIT" : effectivePrecision?.entryMode ?? "MARKET_CONFIRMED",
+          entryZone: action === "WAIT" ? null : (effectivePrecision?.entryZone ?? null),
+          tp1ClosePct: effectivePrecision?.breakevenPlan.tp1ClosePct,
+          tp2ClosePct: effectivePrecision?.breakevenPlan.tp2ClosePct,
+          tp3ClosePct: effectivePrecision?.breakevenPlan.tp3ClosePct,
+          trailingAtrMult: effectivePrecision?.breakevenPlan.trailingAtrMult,
+          dominantScenario: effectivePrecision?.scenario?.dominantScenario,
           vetoReasons,
           netRiskReward: effectivePrecision?.netRiskReward ?? null,
           recommendedSizeMultiplier: sizeMult,

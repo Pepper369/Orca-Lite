@@ -7,6 +7,7 @@ import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engi
 import { evaluateNewsCircuitBreaker } from "@/lib/engines/forex-news-shield";
 import { generateDeepFlowSignal } from "@/lib/engines/forex-order-flow-pro";
 import { calibrateAndRegisterLiveMetaModels } from "@/lib/engines/fx-crypto-backtest-harness";
+import { getEmpiricalFrictionTelemetry } from "@/lib/engines/exchange-execution-client";
 import {
   evaluatePrecisionTradeSetup,
   type SetupGrade,
@@ -236,6 +237,7 @@ async function scanLivePrecisionSetups(params: {
             externalMagnets,
             isNewsOrCascadeLockout: shield.isLockout,
             lockoutReason: shield.warningMessage,
+            empiricalFrictionROverride: getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride,
           });
 
           if (
@@ -430,6 +432,7 @@ async function scanLivePrecisionSetups(params: {
             spreadPipsOrPct: liveSpreadPips,
             isNewsOrCascadeLockout: cb.isLockout || !(flow.spreadSafety?.isSafe ?? true),
             lockoutReason: cb.warningMessage ?? flow.spreadSafety?.lockoutReason ?? null,
+            empiricalFrictionROverride: getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride,
           });
 
           if (
@@ -644,7 +647,12 @@ export async function runAutoTradeTick(): Promise<{
               winrateScore: wrScore,
               setupGrade: grade,
               entryMode: s.entryMode,
+              entryZone: s.entryZone ?? null,
               expectancyR: s.expectancyR,
+              tp1ClosePct: s.tp1ClosePct,
+              tp2ClosePct: s.tp2ClosePct,
+              tp3ClosePct: s.tp3ClosePct,
+              trailingAtrMult: s.trailingAtrMult,
               spreadPipsOrPct: spreadPips,
               timestamp: s.updatedAt,
             },
@@ -743,7 +751,12 @@ export async function runAutoTradeTick(): Promise<{
               setupGrade: grade,
               recommendedLeverage: s.recommendedLeverage,
               entryMode: s.entryMode,
+              entryZone: s.entryZone ?? null,
               expectancyR: s.expectancyR,
+              tp1ClosePct: s.tp1ClosePct,
+              tp2ClosePct: s.tp2ClosePct,
+              tp3ClosePct: s.tp3ClosePct,
+              trailingAtrMult: s.trailingAtrMult,
               timestamp: s.updatedAt,
             },
             marketPrice,

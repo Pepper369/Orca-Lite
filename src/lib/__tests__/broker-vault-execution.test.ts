@@ -50,6 +50,7 @@ import {
   getLivePriceReference,
   updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
+import { getLiveMetaOutcomeTelemetry } from "@/lib/engines/meta-labeling-calibration";
 import type { FollowerAccount } from "@/lib/engines/copy-trade-engine";
 
 test("Credential Vault: AES-256-GCM encrypt/decrypt round-trip, random IV & tamper rejection", () => {
@@ -920,6 +921,10 @@ test("Winrate Bottleneck Shields: TP Drift Preservation, Pre-TP1 Profit Shield, 
   const snapAfterTp1 = await buildBotLiveTelemetrySnapshot(userId);
   const acctSnap = snapAfterTp1.accounts.find((a) => a.accountId === demoConn.id)!;
   assert.equal(acctSnap.winratePct, 100, "TP1_BE profit-banked trade must count as a 100% win in live winratePct");
+
+  // 4) Closed-Loop Online Meta-Labeling Outcome Feedback must record the TP1 win
+  const metaTelemetry = getLiveMetaOutcomeTelemetry("CRYPTO");
+  assert.ok(metaTelemetry.count >= 1 && metaTelemetry.wins >= 1, "Live Meta-Labeling feedback must record TP1 win");
 
   // Clean up
   await closeTrackedBotPosition({ orderId: liveOrd!.orderId, userId, overrideClosePrice: 3065 });

@@ -14,7 +14,9 @@ import {
   detectCryptoLiquidationClusters,
 } from "../engines/unified-cross-asset-quant";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
+import { getEmpiricalFrictionTelemetry } from "../engines/exchange-execution-client";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
+import { binanceWs } from "../realtime/binance-ws";
 import type { Meta } from "../types";
 
 export interface CryptoQuantSignalItem {
@@ -46,6 +48,12 @@ export interface CryptoQuantSignalItem {
   setupGrade?: SetupGrade;
   expectancyR?: number;
   entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  entryZone?: [number, number] | null;
+  tp1ClosePct?: number;
+  tp2ClosePct?: number;
+  tp3ClosePct?: number;
+  trailingAtrMult?: number;
+  dominantScenario?: string;
   vetoReasons?: string[];
   netRiskReward?: number | null;
   recommendedSizeMultiplier?: number;
@@ -117,25 +125,48 @@ async function scanSingleCryptoPair(
       binance.getOpenInterest(pair).catch(() => ({ openInterest: 0, time: Date.now() })),
     ]);
 
-    const execBars = klines5m.length >= 60 ? klines5m : klines15m;
-    const htfBars = klines15m.length >= 40 ? klines15m : execBars;
-    if (!execBars || execBars.length < 30 || !ticker) {
+    const rawExecBars = klines5m.length >= 60 ? klines5m : klines15m;
+    const htfBars = klines15m.length >= 40 ? klines15m : rawExecBars;
+    if (!rawExecBars || rawExecBars.length < 30 || !ticker) {
       return null;
     }
 
-    const lastPrice = Number(ticker.lastPrice) || execBars[execBars.length - 1]!.close;
+    const wsPrice =
+      binanceWs.getMark(pair, 20_000)?.markPrice ?? binanceWs.getTicker(pair, 20_000)?.price;
+    const lastPrice =
+      wsPrice && wsPrice > 0
+        ? wsPrice
+        : Number(ticker.lastPrice) || rawExecBars[rawExecBars.length - 1]!.close;
+    const execBars = rawExecBars.map((b, idx) =>
+      idx === rawExecBars.length - 1 && lastPrice > 0
+        ? {
+            ...b,
+            close: lastPrice,
+            high: Math.max(b.high, lastPrice),
+            low: Math.min(b.low, lastPrice),
+          }
+        : b,
+    );
     const quoteVol = Number((ticker as { quoteVolume?: string }).quoteVolume ?? 0) || null;
 
-    // L2 DOM, True Spread, 1H Macro Bars, Liquidation Clusters & Funding Rate Analysis
+    // L2 DOM + Real-Time WS AggTrade Micro-Flow Blend, True Spread, 1H Macro Bars & Funding Rate Analysis
     const dom = evaluateTrueLevel2Dom(book, 5);
-    const domImbalance = dom.imbalanceRatio;
+    const wsMicro = binanceWs.getMicroFlow(pair);
+    const domImbalance =
+      wsMicro != null
+        ? Math.round(dom.imbalanceRatio * 0.65 + wsMicro.tickImbalancePct * 0.35)
+        : dom.imbalanceRatio;
     const bestBid = book.bids[0]?.price ?? 0;
     const bestAsk = book.asks[0]?.price ?? 0;
     const liveSpreadPct =
       bestBid > 0 && bestAsk >= bestBid
         ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2)
         : null;
-    const fundingAnalysis = analyzeFundingRate(funding.fundingRate);
+    const effectiveFundingRate =
+      wsMicro && Number.isFinite(wsMicro.fundingRate) && wsMicro.fundingRate !== 0
+        ? wsMicro.fundingRate
+        : funding.fundingRate;
+    const fundingAnalysis = analyzeFundingRate(effectiveFundingRate);
     const bars1h = resampleOhlcvBars(htfBars, 4);
     const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
     const prelimAtrExec = calcAtr(execBars, 14) ?? lastPrice * 0.015;
@@ -143,7 +174,7 @@ async function scanSingleCryptoPair(
       openInterestUsd > 0
         ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, prelimAtrExec, {
           symbol: pair,
-          fundingRate: funding.fundingRate,
+          fundingRate: effectiveFundingRate,
           priceChange24hPct: Number(ticker.priceChangePercent) || null,
           orderBookImbalance: domImbalance,
         })
@@ -159,7 +190,7 @@ async function scanSingleCryptoPair(
 
     const shield = evaluateCryptoShield({
       symbol: pair,
-      fundingRate: funding.fundingRate,
+      fundingRate: effectiveFundingRate,
       recentPriceChangePct5m: recent5mPct,
       calendarEvents,
     });
@@ -173,7 +204,7 @@ async function scanSingleCryptoPair(
           barsM5: execBars,
           barsH1: bars1h.length >= 12 ? bars1h : null,
           quoteVolume24h: quoteVol,
-          fundingRate: funding.fundingRate,
+          fundingRate: effectiveFundingRate,
           spreadPct: liveSpreadPct,
           orderBookImbalance: domImbalance,
           liquidationClusterAligned,
@@ -183,6 +214,7 @@ async function scanSingleCryptoPair(
         })
         : null;
 
+    const empFrictionCr = getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride;
     const precision =
       scalp?.precision ??
       evaluatePrecisionTradeSetup({
@@ -193,11 +225,12 @@ async function scanSingleCryptoPair(
         barsMacro: bars1h.length >= 12 ? bars1h : null,
         spreadPipsOrPct: liveSpreadPct,
         orderBookImbalance: domImbalance,
-        fundingRate: funding.fundingRate,
+        fundingRate: effectiveFundingRate,
         liquidationClusterAligned,
         externalMagnets,
         isNewsOrCascadeLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
+        empiricalFrictionROverride: empFrictionCr,
       });
 
     const primarySetup = scalp?.primarySetup ?? null;
@@ -339,6 +372,12 @@ async function scanSingleCryptoPair(
       setupGrade,
       expectancyR: precision.expectancyR,
       entryMode: action === "WAIT" ? "WAIT" : precision.entryMode,
+      entryZone: action === "WAIT" ? null : precision.entryZone,
+      tp1ClosePct: precision.breakevenPlan.tp1ClosePct,
+      tp2ClosePct: precision.breakevenPlan.tp2ClosePct,
+      tp3ClosePct: precision.breakevenPlan.tp3ClosePct,
+      trailingAtrMult: precision.breakevenPlan.trailingAtrMult,
+      dominantScenario: precision.scenario?.dominantScenario,
       vetoReasons,
       netRiskReward: precision.netRiskReward,
       recommendedSizeMultiplier: sizeMult,

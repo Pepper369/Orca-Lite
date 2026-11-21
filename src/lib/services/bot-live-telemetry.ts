@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { eventBus } from "@/lib/events";
 import { getAssetPipSize, roundPrice } from "@/lib/engines/asset-precision";
+import { recordLiveMetaLabelOutcome } from "@/lib/engines/meta-labeling-calibration";
 import * as binance from "@/lib/providers/binance";
 import { getBiquotePublicQuotes } from "@/lib/providers/forex";
 import { binanceWs, ensureBinanceWsStarted } from "@/lib/realtime/binance-ws";
@@ -452,6 +453,11 @@ export async function closeTrackedBotPosition(params: {
     dailyPnlDate: new Date().toISOString().slice(0, 10),
     ...(wrStats.winratePct != null ? { winratePct: wrStats.winratePct } : {}),
   });
+  recordLiveMetaLabelOutcome({
+    assetType,
+    isWin: totalRealizedTradePnl > 0,
+    realizedR: totalRealizedTradePnl > 0 ? 1.25 : -1.0,
+  });
 
   const chunkSign = chunkRealizedPnlUsd >= 0 ? "+" : "";
   recordBotActivity({
@@ -545,6 +551,13 @@ async function advancePartialTakeProfitStage(params: {
     dailyPnlDate: new Date().toISOString().slice(0, 10),
     ...(wrStats.winratePct != null ? { winratePct: wrStats.winratePct } : {}),
   });
+  if (nextStage === "TP1_BE" && partialPnlUsd > 0) {
+    recordLiveMetaLabelOutcome({
+      assetType,
+      isWin: true,
+      realizedR: 1.0,
+    });
+  }
 
   recordBotActivity({
     level: "ok",
