@@ -811,6 +811,18 @@ export function LiveBotCockpit({
                     openPositions.map((pos) => {
                       const isRealPos =
                         (pos.environment ?? (pos.accountTier === "LIVE_REAL" ? "REAL" : "DEMO")) === "REAL";
+                      const isBuy = pos.direction === "BUY";
+                      const isBeLocked =
+                        pos.stopLossPrice != null &&
+                        ((isBuy && pos.stopLossPrice >= pos.entryPrice) ||
+                          (!isBuy && pos.stopLossPrice <= pos.entryPrice));
+                      let progressPct = 50;
+                      if (pos.stopLossPrice != null && pos.takeProfit1 != null && pos.takeProfit1 !== pos.stopLossPrice) {
+                        const rawPct = isBuy
+                          ? ((pos.markPrice - pos.stopLossPrice) / (pos.takeProfit1 - pos.stopLossPrice)) * 100
+                          : ((pos.stopLossPrice - pos.markPrice) / (pos.stopLossPrice - pos.takeProfit1)) * 100;
+                        progressPct = Math.max(4, Math.min(98, Math.round(rawPct)));
+                      }
                       return (
                         <tr
                           key={pos.positionId}
@@ -819,11 +831,16 @@ export function LiveBotCockpit({
                           }`}
                         >
                           <td className="px-2.5 py-2">
-                            <div className="flex items-center gap-1.5 font-semibold">
+                            <div className="flex flex-wrap items-center gap-1.5 font-semibold">
                               <span className="text-text-primary">{pos.symbol}</span>
                               <Badge tone={pos.direction === "BUY" ? "up" : "down"}>
                                 {pos.direction}
                               </Badge>
+                              {isBeLocked && (
+                                <Badge tone="up" className="text-[9px]">
+                                  TRAILING LOCK
+                                </Badge>
+                              )}
                             </div>
                             <div className="text-[10px] font-mono text-text-muted">
                               {pos.qtyOrLots} {pos.assetType === "FOREX" ? "lots" : ""} · {pos.leverage}x
@@ -842,8 +859,20 @@ export function LiveBotCockpit({
                             <div className="font-bold text-text-primary">{pos.markPrice}</div>
                           </td>
                           <td className="px-2.5 py-2 text-right font-mono text-[10.5px]">
-                            <div className="text-negative">{pos.stopLossPrice ?? "—"}</div>
-                            <div className="text-positive">{pos.takeProfit1 ?? "—"}</div>
+                            <div className={isBeLocked ? "text-positive font-semibold" : "text-negative"}>
+                              SL: {pos.stopLossPrice ?? "—"}
+                            </div>
+                            <div className="text-positive">TP: {pos.takeProfit1 ?? "—"}</div>
+                            {pos.stopLossPrice != null && pos.takeProfit1 != null && (
+                              <div className="mt-1 ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-panel-3" title={`Tiến độ SL → TP1: ${progressPct}%`}>
+                                <div
+                                  className={`h-full transition-all ${
+                                    pos.unrealizedPnlUsd >= 0 ? "bg-positive" : "bg-warn"
+                                  }`}
+                                  style={{ width: `${progressPct}%` }}
+                                />
+                              </div>
+                            )}
                           </td>
                           <td
                             className={`px-2.5 py-2 text-right font-mono font-bold ${pnlTextClass(pos.unrealizedPnlUsd)}`}

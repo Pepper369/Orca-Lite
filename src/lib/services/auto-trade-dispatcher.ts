@@ -17,6 +17,7 @@ import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import {
   getBrokerConnectionSecrets,
   hasExecutionOrderByIdempotency,
+  listBotExecutionOrders,
   listBrokerConnections,
   recordVaultAuditLog,
   saveBotExecutionOrder,
@@ -63,7 +64,12 @@ export interface VaultDispatchOptions {
 const INFLIGHT_IDEMPOTENCY_LOCKS = new Set<string>();
 
 function isCryptoSupportedPlatform(platform: FollowerAccount["platform"]): boolean {
-  return Boolean(platform);
+  return (
+    platform === "BINANCE_FUTURES" ||
+    platform === "OKX_FUTURES" ||
+    platform === "BYBIT_FUTURES" ||
+    platform === "TELEGRAM_1CLICK"
+  );
 }
 
 function isForexSupportedPlatform(platform: FollowerAccount["platform"]): boolean {
@@ -282,6 +288,24 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
   const results: CopyExecutionOrder[] = [];
 
+  // Track currently open positions per account for autonomous portfolio concentration & duplicate-pair guard
+  const openCountByAccount = new Map<string, number>();
+  const openSymbolsByAccount = new Map<string, Set<string>>();
+  if (!manualOverride && !opts.overrideAccounts) {
+    const existingOrders = await listBotExecutionOrders(150);
+    for (const o of existingOrders) {
+      if (
+        (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
+        !o.message.startsWith("[ĐÃ ĐÓNG]")
+      ) {
+        openCountByAccount.set(o.followerId, (openCountByAccount.get(o.followerId) ?? 0) + 1);
+        const set = openSymbolsByAccount.get(o.followerId) ?? new Set<string>();
+        set.add(o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+        openSymbolsByAccount.set(o.followerId, set);
+      }
+    }
+  }
+
   for (const acct of accounts) {
     if (!acct.isActive) continue;
     if (targetFollowerIds?.length && !targetFollowerIds.includes(acct.id)) continue;
@@ -343,12 +367,29 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       continue;
     }
 
+    // 2b) Portfolio Concentration & Active Symbol Guard (autonomous mode)
+    if (!manualOverride && !opts.overrideAccounts) {
+      const cleanSym = signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const activeSyms = openSymbolsByAccount.get(acct.id);
+      if (activeSyms?.has(cleanSym)) {
+        continue;
+      }
+      const maxOpen = Math.max(1, acct.maxOpenPositions ?? 5);
+      const currentOpen = openCountByAccount.get(acct.id) ?? 0;
+      if (currentOpen >= maxOpen) {
+        continue;
+      }
+    }
+
     // 3) Asset-Class compatibility check
     const assetOk =
       signal.assetType === "CRYPTO"
         ? isCryptoSupportedPlatform(acct.platform)
         : isForexSupportedPlatform(acct.platform);
     if (!assetOk) {
+      if (!manualOverride && !opts.overrideAccounts) {
+        continue;
+      }
       results.push({
         orderId,
         followerId: acct.id,
@@ -489,6 +530,13 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       await saveBotExecutionOrder(executed);
     } finally {
       INFLIGHT_IDEMPOTENCY_LOCKS.delete(idempotencyKey);
+    }
+
+    if (executed.status === "FILLED" || executed.status === "FILLED_PAPER" || executed.status === "PENDING_EA") {
+      openCountByAccount.set(acct.id, (openCountByAccount.get(acct.id) ?? 0) + 1);
+      const set = openSymbolsByAccount.get(acct.id) ?? new Set<string>();
+      set.add(signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+      openSymbolsByAccount.set(acct.id, set);
     }
 
     if (executed.status === "FILLED" || executed.status === "FILLED_PAPER") {

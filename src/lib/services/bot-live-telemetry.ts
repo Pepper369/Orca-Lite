@@ -1,8 +1,12 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { eventBus } from "@/lib/events";
+import { getAssetPipSize, roundPrice } from "@/lib/engines/asset-precision";
+import * as binance from "@/lib/providers/binance";
+import { getBiquotePublicQuotes } from "@/lib/providers/forex";
 import { binanceWs, ensureBinanceWsStarted } from "@/lib/realtime/binance-ws";
 import {
+  ensureBiquoteCoreWatch,
   ensureBiquotePollStarted,
   getBiquoteLiveTick,
   watchBiquoteSymbol,
@@ -49,6 +53,8 @@ const g = globalThis as typeof globalThis & {
   __orcaBotActivityRing?: BotActivityEvent[];
   __orcaExchangeTelemetryCache?: Map<string, CachedExchangeTelemetry>;
   __orcaClosedOrderIds?: Set<string>;
+  __orcaLivePriceRefMap?: Map<string, { price: number; ts: number }>;
+  __orcaLastQuoteRefreshAt?: number;
 };
 
 const ACTIVITY_RING = g.__orcaBotActivityRing ?? (g.__orcaBotActivityRing = []);
@@ -56,6 +62,23 @@ const EXCHANGE_CACHE =
   g.__orcaExchangeTelemetryCache ?? (g.__orcaExchangeTelemetryCache = new Map());
 const CLOSED_ORDER_IDS =
   g.__orcaClosedOrderIds ?? (g.__orcaClosedOrderIds = new Set());
+const LIVE_PRICE_REF_MAP =
+  g.__orcaLivePriceRefMap ?? (g.__orcaLivePriceRefMap = new Map());
+
+export function updateLivePriceReference(symbol: string, price: number): void {
+  if (!Number.isFinite(price) || price <= 0) return;
+  const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!clean) return;
+  LIVE_PRICE_REF_MAP.set(clean, { price, ts: Date.now() });
+}
+
+export function getLivePriceReference(symbol: string, maxAgeMs = 120_000): number | null {
+  const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const entry = LIVE_PRICE_REF_MAP.get(clean);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > maxAgeMs) return null;
+  return entry.price;
+}
 
 export function recordBotActivity(input: Omit<BotActivityEvent, "id" | "ts">): BotActivityEvent {
   const evt: BotActivityEvent = {
@@ -98,9 +121,19 @@ function resolveLiveMarkPrice(symbol: string, assetType: "CRYPTO" | "FOREX", fal
   if (assetType === "CRYPTO") {
     if (!IS_TEST_RUNNER) ensureBinanceWsStarted();
     const mark = binanceWs.getMark(clean, 30_000);
-    if (mark && mark.markPrice > 0) return { price: mark.markPrice, isLiveFeed: true };
+    if (mark && mark.markPrice > 0) {
+      updateLivePriceReference(clean, mark.markPrice);
+      return { price: mark.markPrice, isLiveFeed: true };
+    }
     const tick = binanceWs.getTicker(clean, 30_000);
-    if (tick && tick.price > 0) return { price: tick.price, isLiveFeed: true };
+    if (tick && tick.price > 0) {
+      updateLivePriceReference(clean, tick.price);
+      return { price: tick.price, isLiveFeed: true };
+    }
+    const cachedRef = getLivePriceReference(clean, 90_000);
+    if (cachedRef && cachedRef > 0) {
+      return { price: cachedRef, isLiveFeed: true };
+    }
     return { price: fallbackPrice, isLiveFeed: false };
   }
 
@@ -110,9 +143,71 @@ function resolveLiveMarkPrice(symbol: string, assetType: "CRYPTO" | "FOREX", fal
   }
   const fxTick = getBiquoteLiveTick(clean);
   if (fxTick && fxTick.price > 0) {
+    updateLivePriceReference(clean, fxTick.price);
     return { price: fxTick.price, isLiveFeed: true };
   }
+  const cachedFxRef = getLivePriceReference(clean, 90_000);
+  if (cachedFxRef && cachedFxRef > 0) {
+    return { price: cachedFxRef, isLiveFeed: true };
+  }
   return { price: fallbackPrice, isLiveFeed: false };
+}
+
+async function refreshOpenPositionLiveQuotes(orders: CopyExecutionOrder[]): Promise<void> {
+  if (IS_TEST_RUNNER) return;
+  const now = Date.now();
+  if (g.__orcaLastQuoteRefreshAt && now - g.__orcaLastQuoteRefreshAt < 2_500) {
+    return;
+  }
+  g.__orcaLastQuoteRefreshAt = now;
+
+  const openOrders = orders.filter(
+    (o) =>
+      (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
+      !CLOSED_ORDER_IDS.has(o.orderId) &&
+      !o.message.startsWith("[ĐÃ ĐÓNG]"),
+  );
+  if (openOrders.length === 0) return;
+
+  const cryptoSyms = new Set<string>();
+  const fxSyms = new Set<string>();
+  for (const o of openOrders) {
+    const clean = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const fresh = LIVE_PRICE_REF_MAP.get(clean);
+    if (fresh && now - fresh.ts < 2_500) continue;
+    if (isCryptoOrderSymbol(clean, o.platform)) {
+      const wsMark = binanceWs.getMark(clean, 5_000) ?? binanceWs.getTicker(clean, 5_000);
+      if (wsMark) {
+        updateLivePriceReference(clean, "markPrice" in wsMark ? wsMark.markPrice : wsMark.price);
+      } else {
+        cryptoSyms.add(clean);
+      }
+    } else {
+      const fxLive = getBiquoteLiveTick(clean, 5_000);
+      if (fxLive && fxLive.price > 0) {
+        updateLivePriceReference(clean, fxLive.price);
+      } else {
+        fxSyms.add(clean);
+      }
+    }
+  }
+
+  await Promise.allSettled([
+    ...[...cryptoSyms].slice(0, 6).map(async (sym) => {
+      const t = await binance.getSpotTicker(sym).catch(() => null);
+      const p = Number(t?.lastPrice ?? 0);
+      if (p > 0) updateLivePriceReference(sym, p);
+    }),
+    fxSyms.size > 0
+      ? getBiquotePublicQuotes([...fxSyms])
+          .then(({ ticks }) => {
+            for (const [sym, t] of Object.entries(ticks)) {
+              if (t.mid > 0) updateLivePriceReference(sym, t.mid);
+            }
+          })
+          .catch(() => null)
+      : Promise.resolve(null),
+  ]);
 }
 
 async function fetchAccountExchangeTelemetryCached(
@@ -183,8 +278,10 @@ function buildLocalOpenPositions(
     const assetType: "CRYPTO" | "FOREX" = isCryptoOrderSymbol(o.symbol, acct.platform)
       ? "CRYPTO"
       : "FOREX";
-    const entry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
-    const { price: markPrice } = resolveLiveMarkPrice(o.symbol, assetType, entry);
+    const rawEntry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
+    const entry = roundPrice(rawEntry, o.symbol);
+    const { price: rawMarkPrice } = resolveLiveMarkPrice(o.symbol, assetType, entry);
+    const markPrice = roundPrice(rawMarkPrice, o.symbol);
     const leverage = assetType === "CRYPTO" ? Math.max(1, acct.leverageCap ?? 5) : 100;
     const unrealizedPnlUsd = calculateMarkToMarketPnlUsd({
       symbol: o.symbol,
@@ -234,6 +331,8 @@ function buildLocalOpenPositions(
 export async function closeTrackedBotPosition(params: {
   orderId: string;
   userId?: string | null;
+  reasonTag?: string;
+  overrideClosePrice?: number;
 }): Promise<{
   ok: boolean;
   realizedPnlUsd: number;
@@ -271,7 +370,11 @@ export async function closeTrackedBotPosition(params: {
     ? "CRYPTO"
     : "FOREX";
   const entry = order.executionPrice > 0 ? order.executionPrice : order.entryPrice;
-  const { price: closePrice } = resolveLiveMarkPrice(order.symbol, assetType, entry);
+  const resolvedPrice =
+    params.overrideClosePrice && params.overrideClosePrice > 0
+      ? params.overrideClosePrice
+      : resolveLiveMarkPrice(order.symbol, assetType, entry).price;
+  const closePrice = roundPrice(resolvedPrice, order.symbol);
   const realizedPnlUsd = calculateMarkToMarketPnlUsd({
     symbol: order.symbol,
     assetType,
@@ -283,10 +386,11 @@ export async function closeTrackedBotPosition(params: {
 
   CLOSED_ORDER_IDS.add(order.orderId);
   const pnlSign = realizedPnlUsd >= 0 ? "+" : "";
+  const tag = params.reasonTag ? ` [${params.reasonTag}]` : "";
   await saveBotExecutionOrder({
     ...order,
     status: "CANCELLED",
-    message: `[ĐÃ ĐÓNG] Chốt tại ${closePrice} · PnL ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
+    message: `[ĐÃ ĐÓNG]${tag} Chốt tại ${closePrice} · PnL ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
   });
 
   const nextTotalPnl = Number((acct.totalPnlUsd + realizedPnlUsd).toFixed(2));
@@ -305,7 +409,7 @@ export async function closeTrackedBotPosition(params: {
     symbol: order.symbol,
     accountName: acct.name,
     platform: acct.platform,
-    message: `Đóng vị thế ${order.direction} ${order.symbol} @ ${closePrice} (${pnlSign}$${realizedPnlUsd.toFixed(2)})`,
+    message: `Đóng vị thế${tag} ${order.direction} ${order.symbol} @ ${closePrice} (${pnlSign}$${realizedPnlUsd.toFixed(2)})`,
   });
 
   return {
@@ -314,18 +418,139 @@ export async function closeTrackedBotPosition(params: {
     closePrice,
     symbol: order.symbol,
     accountName: acct.name,
-    message: `Đã chốt ${order.symbol} tại ${closePrice} · Lãi/Lỗ thực hiện: ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
+    message: `Đã chốt${tag} ${order.symbol} tại ${closePrice} · Lãi/Lỗ thực hiện: ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
   };
+}
+
+/**
+ * Quản trị vị thế tự động theo thời gian thực (Auto TP1 · Auto SL · Breakeven Lock · Dynamic Trailing Stop · Signal Reversal).
+ */
+export async function evaluateRealtimePositionExits(options?: {
+  reversals?: Map<string, "BUY" | "SELL">;
+}): Promise<{ closedCount: number; trailedCount: number }> {
+  if (IS_TEST_RUNNER) return { closedCount: 0, trailedCount: 0 };
+  const orders = await listBotExecutionOrders(150);
+  await refreshOpenPositionLiveQuotes(orders);
+
+  const openOrders = orders.filter(
+    (o) =>
+      (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
+      !CLOSED_ORDER_IDS.has(o.orderId) &&
+      !o.message.startsWith("[ĐÃ ĐÓNG]"),
+  );
+
+  let closedCount = 0;
+  let trailedCount = 0;
+
+  for (const o of openOrders) {
+    const assetType: "CRYPTO" | "FOREX" = isCryptoOrderSymbol(o.symbol, o.platform)
+      ? "CRYPTO"
+      : "FOREX";
+    const entry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
+    if (!Number.isFinite(entry) || entry <= 0) continue;
+
+    const { price: markPrice, isLiveFeed } = resolveLiveMarkPrice(o.symbol, assetType, entry);
+    if (!isLiveFeed || !Number.isFinite(markPrice) || markPrice <= 0) continue;
+
+    const isBuy = o.direction === "BUY";
+    const tp1 = o.takeProfit1;
+    const sl = o.stopLossPrice;
+
+    // 1) Auto Take-Profit (TP1)
+    if (tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1))) {
+      const res = await closeTrackedBotPosition({
+        orderId: o.orderId,
+        reasonTag: "AUTO TP1",
+        overrideClosePrice: markPrice,
+      });
+      if (res.ok) closedCount++;
+      continue;
+    }
+
+    // 2) Auto Stop-Loss / Trailing Stop Hit
+    if (sl > 0 && ((isBuy && markPrice <= sl) || (!isBuy && markPrice >= sl))) {
+      const isProfitSl = (isBuy && sl >= entry) || (!isBuy && sl <= entry);
+      const res = await closeTrackedBotPosition({
+        orderId: o.orderId,
+        reasonTag: isProfitSl ? "TRAILING PROFIT LOCK" : "AUTO SL GUARD",
+        overrideClosePrice: markPrice,
+      });
+      if (res.ok) closedCount++;
+      continue;
+    }
+
+    // 3) Opposite High-Conviction Quant Signal Reversal Exit
+    const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const reversalDir = options?.reversals?.get(cleanSym);
+    if (reversalDir && reversalDir !== o.direction && Date.now() - o.timestamp >= 30_000) {
+      const res = await closeTrackedBotPosition({
+        orderId: o.orderId,
+        reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
+        overrideClosePrice: markPrice,
+      });
+      if (res.ok) closedCount++;
+      continue;
+    }
+
+    // 4) Dynamic Breakeven & Trailing Stop Ratchet
+    if (tp1 > 0 && sl > 0) {
+      const targetDist = Math.abs(tp1 - entry);
+      const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
+      const pip = getAssetPipSize(o.symbol);
+      if (targetDist > pip * 3 && favorableMove >= targetDist * 0.45) {
+        const lockDist =
+          favorableMove >= targetDist * 0.7
+            ? favorableMove * 0.52
+            : targetDist * 0.08;
+        const candidateSl = roundPrice(
+          isBuy ? entry + lockDist : entry - lockDist,
+          o.symbol,
+        );
+        const improved = isBuy
+          ? candidateSl > sl + pip * 2
+          : candidateSl < sl - pip * 2;
+        if (improved) {
+          await saveBotExecutionOrder({
+            ...o,
+            stopLossPrice: candidateSl,
+          });
+          trailedCount++;
+          recordBotActivity({
+            level: "info",
+            category: "GUARDRAIL",
+            symbol: o.symbol,
+            accountName: o.followerName,
+            platform: o.platform,
+            message: `[TRAILING SL] Dịch Stop-Loss ${o.direction} ${o.symbol} lên ${candidateSl} (khóa lãi an toàn @ Mark ${markPrice})`,
+          });
+        }
+      }
+    }
+  }
+
+  return { closedCount, trailedCount };
 }
 
 export async function buildBotLiveTelemetrySnapshot(
   userId?: string | null,
 ): Promise<BotLiveTelemetrySnapshot> {
+  if (!IS_TEST_RUNNER) {
+    ensureBinanceWsStarted();
+    ensureBiquoteCoreWatch();
+    const wStatus = getAutoTradeWorkerStatus();
+    if (!wStatus.started || (wStatus.lastTickAt === null && !wStatus.isTickRunning)) {
+      import("@/lib/services/auto-trade-worker")
+        .then((m) => m.initAutoTradeWorker())
+        .catch(() => null);
+    }
+    await evaluateRealtimePositionExits().catch(() => null);
+  }
   const now = Date.now();
   const [accounts, orders] = await Promise.all([
     listBrokerConnections(userId),
     listBotExecutionOrders(150),
   ]);
+  await refreshOpenPositionLiveQuotes(orders);
 
   const ordersByAccount = new Map<string, CopyExecutionOrder[]>();
   for (const o of orders) {

@@ -40,6 +40,8 @@ import {
 import {
   buildBotLiveTelemetrySnapshot,
   closeTrackedBotPosition,
+  getLivePriceReference,
+  updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
 import type { FollowerAccount } from "@/lib/engines/copy-trade-engine";
 
@@ -599,4 +601,8 @@ test("Real vs Demo NAV Separation: Per-account NAV isolation, pool shares & targ
     orderExecutor: stubExec,
   });
   assert.deepEqual(touchedIds, [realAcct.id], "targetEnvironment=REAL phải chỉ định riêng tài khoản REAL");
+
+  // 4) Live Price Reference Feed updates Mark-to-Market PnL & NAV in real time
+  updateLivePriceReference("BTCUSDT", 92500);
+  assert.equal(getLivePriceReference("BTCUSDT"), 92500);
 });
