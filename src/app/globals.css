@@ -64,8 +64,12 @@
 
 html {
   height: 100%;
-  overflow-x: clip;
   color-scheme: dark;
+}
+@supports (overflow-x: clip) {
+  html {
+    overflow-x: clip;
+  }
 }
 html[data-theme="light"] {
   color-scheme: light;
@@ -76,7 +80,6 @@ body {
   font-family: var(--font-sans);
   background: var(--color-canvas);
   color: var(--color-text-primary);
-  -webkit-font-smoothing: antialiased;
 }
 * {
   box-sizing: border-box;
@@ -216,6 +219,7 @@ html[data-reduced-motion="true"] .ticker-track {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
 }
 select.input {
+  -webkit-appearance: none;
   appearance: none;
   cursor: pointer;
   padding-right: 1.75rem;
@@ -244,9 +248,10 @@ textarea,
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+@supports (scrollbar-width: none) {
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
 }
 
 /* Phase 5: Zero-Overflow Media & Text Foundations */
@@ -272,10 +277,9 @@ code {
 
 .break-word-safe {
   overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
-/* Phase 5: Standard Responsive Table Scrolling with iOS inertial scroll */
+/* Phase 5: Standard Responsive Table Scrolling */
 .table-scroll-wrap,
 .table-scroll,
 .table-responsive {
@@ -283,9 +287,20 @@ code {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
+}
+@supports (overscroll-behavior-x: contain) {
+  .table-scroll-wrap,
+  .table-scroll,
+  .table-responsive {
+    overscroll-behavior-x: contain;
+  }
+}
+@supports (scrollbar-width: thin) {
+  .table-scroll-wrap,
+  .table-scroll,
+  .table-responsive {
+    scrollbar-width: thin;
+  }
 }
 
 /* Base stock table styles */

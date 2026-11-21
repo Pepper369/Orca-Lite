@@ -12,27 +12,27 @@
 html {
   scroll-behavior: auto;
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
 
 .orca-sidebar {
   contain: layout style;
   transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
 .orca-sidebar-nav {
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-border-default) 70%, transparent) transparent;
+}
+@supports (overscroll-behavior: contain) {
+  .orca-sidebar-nav {
+    overscroll-behavior: contain;
+  }
+}
+@supports (scrollbar-width: thin) {
+  .orca-sidebar-nav {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-border-default) 70%, transparent) transparent;
+  }
 }
 .orca-sidebar-nav::-webkit-scrollbar { width: 5px; }
 .orca-sidebar-nav::-webkit-scrollbar-thumb {
@@ -46,8 +46,13 @@ html {
   overflow: hidden;
   contain: layout style;
   transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
-  transition: width 300ms var(--ease-out-smooth);
+  transition: width 300ms var(--ease-out-smooth),
+              background-color 180ms ease,
+              border-color 180ms ease,
+              color 180ms ease,
+              box-shadow 180ms ease;
 }
 .orca-aside.is-collapsing {
   will-change: width;
@@ -65,7 +70,7 @@ html {
 }
 .orca-sidebar-brand-text,
 .orca-sidebar-section-title,
-.orca-aside .orca-nav-item-label {
+.orca-nav-item-label {
   transition: opacity 160ms var(--ease-out-soft);
 }
 .orca-aside.is-collapsed .orca-sidebar-brand-text,
@@ -83,14 +88,30 @@ html {
 }
 
 .orca-main-scroll {
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
   transform: translateZ(0);
   isolation: isolate;
   touch-action: pan-y;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-border-default) 55%, transparent) transparent;
+}
+@supports (overscroll-behavior-y: contain) {
+  .orca-main-scroll {
+    overscroll-behavior-y: contain;
+  }
+}
+@supports (scrollbar-gutter: stable) {
+  .orca-main-scroll,
+  .agent-messages {
+    scrollbar-gutter: stable;
+  }
+}
+@supports (scrollbar-width: thin) {
+  .orca-main-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-border-default) 55%, transparent) transparent;
+  }
+  .agent-messages {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-accent-primary, #3b82f6) 65%, var(--color-border-default, #243556)) rgba(15, 24, 48, 0.35);
+  }
 }
 .orca-main-scroll::-webkit-scrollbar { width: 8px; }
 .orca-main-scroll::-webkit-scrollbar-thumb {
@@ -100,12 +121,6 @@ html {
 .orca-main-scroll::-webkit-scrollbar-track { background: transparent; }
 
 /* ——— Agent AI Chat Scrollbar — Always visible, tactile and easy to drag ——— */
-.agent-messages {
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-accent-primary, #3b82f6) 65%, var(--color-border-default, #243556)) rgba(15, 24, 48, 0.35);
-}
-
 .agent-messages::-webkit-scrollbar {
   width: 9px;
 }
@@ -135,21 +150,6 @@ html {
 .agent-messages::-webkit-scrollbar-thumb:active {
   background: var(--color-accent-2, #60a5fa);
   cursor: grabbing;
-}
-
-/* ——— Page route enter — soft, no blank flash ——— */
-@keyframes orca-page-in {
-  from {
-    opacity: 0.92;
-    transform: translateY(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.orca-page-enter {
-  animation: orca-page-in 180ms var(--ease-out-soft) both;
 }
 
 /* ——— Top route progress (masks RSC latency) ——— */
@@ -243,23 +243,16 @@ html {
   animation: orca-fade-up var(--dur-med) var(--ease-spring) both;
 }
 
-.panel, .orca-panel {
-  transition: border-color var(--dur-fast) var(--ease-out-soft),
-              box-shadow var(--dur-fast) var(--ease-out-soft);
-}
-
 .orca-nav-item {
   transition: background-color var(--dur-fast) var(--ease-out-soft),
               color var(--dur-fast) var(--ease-out-soft);
-}
-.orca-nav-item-label {
-  transition: opacity 160ms var(--ease-out-soft);
 }
 
 .orca-drawer {
   transition: transform var(--dur-side) var(--ease-out-smooth);
   will-change: transform;
   transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
 .orca-drawer-backdrop {
@@ -378,6 +371,7 @@ html {
   position: absolute;
   inset: 0;
   background: color-mix(in srgb, var(--color-canvas) 55%, transparent);
+  -webkit-backdrop-filter: blur(1px);
   backdrop-filter: blur(1px);
   border-radius: inherit;
   pointer-events: none;
@@ -433,34 +427,6 @@ html {
 .orca-loading-dots > span:nth-child(3) { animation-delay: 0.36s; }
 
 /* ——— Page & tab transitions ——— */
-@view-transition {
-  navigation: auto;
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 140ms;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-::view-transition-old(root) {
-  animation-name: orca-view-out;
-}
-
-::view-transition-new(root) {
-  animation-name: orca-view-in;
-}
-
-@keyframes orca-view-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-@keyframes orca-view-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 @keyframes orca-page-in {
   from {
     opacity: 0;
@@ -502,7 +468,6 @@ html[data-theme] {
 }
 
 body,
-.orca-aside,
 header,
 .panel,
 .orca-panel,
@@ -605,6 +570,12 @@ button:not(:disabled):active,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .agent-msg-enter,
   .agent-ambient-active,
   .agent-caret,
