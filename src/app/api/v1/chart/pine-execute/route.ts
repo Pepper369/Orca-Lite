@@ -3,8 +3,13 @@ import { getChartHistory } from "@/lib/services/chart";
 import { executePineScript } from "@/lib/engines/pine-runner";
 import { rateLimit } from "@/lib/rate-limit";
 import type { OhlcvBar } from "@/lib/types";
+import { isValidTradingSymbol, safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
+
+const ALLOWED_TIMEFRAMES = new Set(["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"]);
+const MAX_PINE_SCRIPT_CHARS = 16_000;
+const MAX_PINE_SCRIPT_LINES = 200;
 
 /**
  * POST /api/v1/chart/pine-execute
@@ -14,13 +19,28 @@ export async function POST(req: NextRequest) {
   const limited = await rateLimit(req, { name: "pine_execute", binding: "RL_AI", limit: 20, windowSec: 60 });
   if (limited) return limited;
   try {
-    const body = await req.json();
-    const symbol = (body.symbol || "SSI").trim().toUpperCase();
-    const timeframe = body.timeframe || "1d";
-    const script = String(body.script || "");
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ ok: false, error: "Invalid JSON payload" }, { status: 400 });
+    }
+    const symbol = typeof body.symbol === "string" && body.symbol.trim() ? body.symbol.trim().toUpperCase() : "SSI";
+    if (!isValidTradingSymbol(symbol)) {
+      return NextResponse.json({ ok: false, error: "Invalid symbol" }, { status: 400 });
+    }
+    const timeframe = typeof body.timeframe === "string" ? body.timeframe.trim() : "1d";
+    if (!ALLOWED_TIMEFRAMES.has(timeframe)) {
+      return NextResponse.json({ ok: false, error: "Invalid timeframe" }, { status: 400 });
+    }
+    const script = typeof body.script === "string" ? body.script : "";
 
     if (!script.trim()) {
       return NextResponse.json({ ok: false, error: "Empty Pine Script" }, { status: 400 });
+    }
+    if (script.length > MAX_PINE_SCRIPT_CHARS || script.split("\n").length > MAX_PINE_SCRIPT_LINES) {
+      return NextResponse.json(
+        { ok: false, error: "Pine Script exceeds maximum allowed length (16,000 chars / 200 lines)" },
+        { status: 400 },
+      );
     }
 
     const history = await getChartHistory({
@@ -51,7 +71,7 @@ export async function POST(req: NextRequest) {
       data: result,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Error executing Pine Script";
+    const msg = safeInternalErrorMessage(err, "Error executing Pine Script");
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

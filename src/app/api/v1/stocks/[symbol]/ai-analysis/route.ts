@@ -1,6 +1,8 @@
 import { ok, badRequest, unavailable, fail } from "@/lib/envelope";
 import { analyzeFinancialHealthAi } from "@/lib/services/financial-ai";
 import { llmConfigured } from "@/lib/ai/gateway";
+import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,10 +13,13 @@ export const maxDuration = 60;
  * AI phân tích sức khỏe TC + xu hướng từ snapshot BCTC.
  * Fallback deterministic nếu chưa có OPENROUTER_API_KEY.
  */
-export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ symbol: string }> }) {
+  const limited = await rateLimit(req, { name: "stock_ai_analysis", binding: "RL_AI", limit: 25, windowSec: 60 });
+  if (limited) return limited;
+
   const { symbol } = await ctx.params;
   const sym = symbol?.trim().toUpperCase();
-  if (!sym || sym.length > 12) return badRequest("Mã không hợp lệ");
+  if (!sym || !/^[A-Z0-9]{1,12}$/.test(sym)) return badRequest("Mã không hợp lệ");
 
   try {
     const r = await analyzeFinancialHealthAi(sym);
@@ -35,7 +40,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ symbol: string
       },
     );
   } catch (e) {
-    return fail("FINANCIAL_AI_FAILED", e instanceof Error ? e.message : "unknown", 502);
+    return fail("FINANCIAL_AI_FAILED", safeInternalErrorMessage(e, "Financial AI analysis failed"), 502);
   }
 }
 

@@ -22,6 +22,7 @@ import {
 import { getAutoTradeWorkerStatus } from "@/lib/services/auto-trade-worker";
 import { notifyBotTelemetryChanged } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage, sanitizeIdentityName, sanitizePlainText } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,11 @@ const ALLOWED_PLATFORMS: BrokerPlatform[] = [
 
 export async function GET(req: Request) {
   const session = await getSessionUser(req);
-  const accounts = await listBrokerConnections(session?.id ?? null);
+  if (!session && process.env.NODE_ENV === "production") {
+    return fail("UNAUTHENTICATED", "Đăng nhập để xem kết nối Broker Vault", 401);
+  }
+  const rawAccounts = await listBrokerConnections(session?.id ?? null);
+  const accounts = session ? rawAccounts : rawAccounts.filter((a) => a.id.startsWith("paper-"));
   const realAccounts = accounts.filter((a) => classifyAccountEnvironment(a).environment === "REAL");
   const demoAccounts = accounts.filter((a) => classifyAccountEnvironment(a).environment === "DEMO");
 
@@ -79,6 +84,9 @@ export async function POST(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để tạo kết nối Broker Vault", 401);
+    }
     const body = (await req.json()) as {
       name?: string;
       platform?: BrokerPlatform;
@@ -96,13 +104,15 @@ export async function POST(req: Request) {
       passphrase?: string;
     };
 
-    if (!body.name?.trim() || !body.platform) {
-      return badRequest("Vui lòng nhập tên kết nối và chọn sàn giao dịch");
+    const nameCheck = sanitizeIdentityName(body.name, 80);
+    if (!nameCheck.ok || !body.platform) {
+      return badRequest((!nameCheck.ok ? nameCheck.reason : undefined) ?? "Vui lòng nhập tên kết nối và chọn sàn giao dịch");
     }
     if (!ALLOWED_PLATFORMS.includes(body.platform)) {
       return badRequest("Nền tảng giao dịch không được hỗ trợ");
     }
 
+    const cleanAccountNumber = body.accountNumber ? sanitizePlainText(body.accountNumber, 64) : undefined;
     const hasApiCreds = Boolean(body.apiKey?.trim() && body.apiSecret?.trim());
     if (body.platform === "OKX_FUTURES" && hasApiCreds && !body.passphrase?.trim()) {
       return badRequest("OKX v5 API yêu cầu bắt buộc phải có Passphrase");
@@ -110,17 +120,17 @@ export async function POST(req: Request) {
 
     const { connection, oneTimeEaToken } = await createBrokerConnection({
       userId: session?.id ?? null,
-      name: body.name,
+      name: nameCheck.value ?? "",
       platform: body.platform,
-      accountNumber: body.accountNumber,
-      balanceUsd: Number(body.balanceUsd) > 0 ? Number(body.balanceUsd) : 1000,
-      riskMultiplier: Number(body.riskMultiplier) || 1.0,
-      maxAllowedSlippagePips: Number(body.maxAllowedSlippagePips) || 2.0,
-      leverageCap: Number(body.leverageCap) || 5,
+      accountNumber: cleanAccountNumber,
+      balanceUsd: Number.isFinite(Number(body.balanceUsd)) && Number(body.balanceUsd) > 0 ? Number(body.balanceUsd) : 1000,
+      riskMultiplier: Number.isFinite(Number(body.riskMultiplier)) ? Number(body.riskMultiplier) : 1.0,
+      maxAllowedSlippagePips: Number.isFinite(Number(body.maxAllowedSlippagePips)) ? Number(body.maxAllowedSlippagePips) : 2.0,
+      leverageCap: Number.isFinite(Number(body.leverageCap)) ? Number(body.leverageCap) : 5,
       isTestnet: body.isTestnet !== false,
       autoExecuteEnabled: Boolean(body.autoExecuteEnabled),
-      maxDailyLossUsd: Number(body.maxDailyLossUsd) || 500,
-      maxOpenPositions: Number(body.maxOpenPositions) || 3,
+      maxDailyLossUsd: Number.isFinite(Number(body.maxDailyLossUsd)) ? Number(body.maxDailyLossUsd) : 500,
+      maxOpenPositions: Number.isFinite(Number(body.maxOpenPositions)) ? Number(body.maxOpenPositions) : 3,
       apiKey: body.apiKey,
       apiSecret: body.apiSecret,
       passphrase: body.passphrase,
@@ -186,7 +196,7 @@ export async function POST(req: Request) {
   } catch (err) {
     return fail(
       "BAD_REQUEST",
-      err instanceof Error ? err.message : "Không thể khởi tạo kết nối Broker Vault",
+      safeInternalErrorMessage(err, "Không thể khởi tạo kết nối Broker Vault"),
       400,
     );
   }
@@ -203,6 +213,9 @@ export async function PATCH(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để chỉnh sửa kết nối Broker Vault", 401);
+    }
     const body = (await req.json()) as {
       id?: string;
       isActive?: boolean;
@@ -216,10 +229,15 @@ export async function PATCH(req: Request) {
     const existing = await getBrokerConnectionById(body.id);
     if (!existing) return fail("NOT_FOUND", "Không tìm thấy tài khoản Follower", 404);
 
-    // Nếu tài khoản có chủ sở hữu rõ ràng và khác user hiện tại -> chặn
-    const all = await listBrokerConnections(session?.id ?? null);
-    if (session?.id && !all.some((a) => a.id === body.id)) {
-      return fail("FORBIDDEN", "Không có quyền chỉnh sửa kết nối của tài khoản khác", 403);
+    if (!session) {
+      if (!body.id.startsWith("paper-")) {
+        return fail("UNAUTHENTICATED", "Đăng nhập để chỉnh sửa kết nối Broker Vault", 401);
+      }
+    } else {
+      const all = await listBrokerConnections(session.id);
+      if (!all.some((a) => a.id === body.id)) {
+        return fail("FORBIDDEN", "Không có quyền chỉnh sửa kết nối của tài khoản khác", 403);
+      }
     }
 
     const isLegacyToggle =
@@ -277,6 +295,9 @@ export async function PUT(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session) {
+      return fail("UNAUTHENTICATED", "Đăng nhập để xoay vòng khóa kết nối Broker Vault", 401);
+    }
     const body = (await req.json()) as {
       id?: string;
       apiKey?: string;
@@ -290,8 +311,8 @@ export async function PUT(req: Request) {
     const existing = await getBrokerConnectionById(body.id);
     if (!existing) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
 
-    const all = await listBrokerConnections(session?.id ?? null);
-    if (session?.id && !all.some((a) => a.id === body.id)) {
+    const all = await listBrokerConnections(session.id);
+    if (!all.some((a) => a.id === body.id)) {
       return fail("FORBIDDEN", "Không có quyền chỉnh sửa kết nối của tài khoản khác", 403);
     }
 
@@ -371,6 +392,9 @@ export async function DELETE(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để xóa kết nối Broker Vault", 401);
+    }
     const url = new URL(req.url);
     let id = url.searchParams.get("id");
     if (!id) {
@@ -383,9 +407,15 @@ export async function DELETE(req: Request) {
     }
     if (!id) return badRequest("Thiếu id tài khoản cần xóa");
 
-    const all = await listBrokerConnections(session?.id ?? null);
-    if (session?.id && !all.some((a) => a.id === id)) {
-      return fail("FORBIDDEN", "Không có quyền xóa kết nối của tài khoản khác", 403);
+    if (!session) {
+      if (!id.startsWith("paper-")) {
+        return fail("UNAUTHENTICATED", "Đăng nhập để xóa kết nối Broker Vault", 401);
+      }
+    } else {
+      const all = await listBrokerConnections(session.id);
+      if (!all.some((a) => a.id === id)) {
+        return fail("FORBIDDEN", "Không có quyền xóa kết nối của tài khoản khác", 403);
+      }
     }
 
     const removed = await deleteBrokerConnection(id, session?.id ?? null);

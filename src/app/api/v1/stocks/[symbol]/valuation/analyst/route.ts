@@ -10,6 +10,8 @@ import { collectPeerMetrics } from "@/lib/engines/valuation-peers";
 import { sectorOf } from "@/lib/vn/master";
 import { priceQuoteToVnd } from "@/lib/providers/vndirect-company";
 import { llmConfigured } from "@/lib/ai/gateway";
+import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,6 +36,10 @@ export async function GET(
     const url = new URL(req.url);
     const useLlm = url.searchParams.get("llm") === "1";
     const wantPeers = url.searchParams.get("peers") === "1";
+    if (useLlm) {
+      const limited = await rateLimit(req, { name: "valuation_analyst_llm", binding: "RL_AI", limit: 20, windowSec: 60 });
+      if (limited) return limited;
+    }
 
     const pack = await getVnStockDetail(symbol);
     if (!pack) {
@@ -146,7 +152,7 @@ export async function GET(
     console.error("[valuation/analyst]", e);
     return fail(
       "VALUATION_ANALYST_ERROR",
-      e instanceof Error ? e.message : "analyst failed",
+      safeInternalErrorMessage(e, "analyst failed"),
       500,
     );
   }

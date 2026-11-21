@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { fail, badRequest, ok } from "@/lib/envelope";
 import { createSessionCookie, hashPassword, isValidEmail } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizeIdentityName } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,7 +16,12 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => null)) as { email?: string; password?: string; name?: string } | null;
     const email = body?.email?.trim().toLowerCase();
     const password = body?.password ?? "";
-    const name = body?.name?.trim().slice(0, 80) || null;
+    let name: string | null = null;
+    if (body?.name !== undefined && body.name !== null && String(body.name).trim() !== "") {
+      const check = sanitizeIdentityName(body.name, 80);
+      if (!check.ok) return badRequest(check.reason ?? "Tên không hợp lệ");
+      name = check.value ?? null;
+    }
     if (!email || !isValidEmail(email)) return badRequest("Email không hợp lệ");
     if (password.length < 8) return badRequest("Mật khẩu tối thiểu 8 ký tự");
     if (password.length > 128) return badRequest("Mật khẩu không được vượt quá 128 ký tự");

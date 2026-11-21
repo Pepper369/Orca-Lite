@@ -4,6 +4,7 @@ import { fail, ok, badRequest } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { eq, asc } from "drizzle-orm";
+import { isValidTradingSymbol } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,6 +15,8 @@ export interface WatchItemPayload {
   addedAt?: number;
 }
 
+const VALID_WATCHLIST_TYPES = new Set(["stock", "crypto", "forex", "commodity"]);
+
 /**
  * Lấy danh sách watchlist của người dùng đã đăng nhập từ database.
  */
@@ -21,7 +24,7 @@ export async function GET(req: Request) {
   const limited = await rateLimit(req, { name: "watchlist_get", binding: "RL_AUTH", limit: 60, windowSec: 60 });
   if (limited) return limited;
 
-  const session = await getSessionUser();
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ watchlist", 401);
   if (!databaseConfigured()) {
     return ok({ items: [] }, { source: "orca-watchlist-mock" });
@@ -67,7 +70,7 @@ export async function PUT(req: Request) {
   const limited = await rateLimit(req, { name: "watchlist_put", binding: "RL_AUTH", limit: 30, windowSec: 60 });
   if (limited) return limited;
 
-  const session = await getSessionUser();
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Đăng nhập để đồng bộ watchlist", 401);
   if (!databaseConfigured()) {
     return ok({ saved: true, count: 0 }, { source: "orca-watchlist-mock" });
@@ -78,10 +81,17 @@ export async function PUT(req: Request) {
     return badRequest("Danh sách items không hợp lệ");
   }
 
-  // Tối đa 200 items trong watchlist cá nhân
+  // Tối đa 200 items trong watchlist cá nhân, validate assetType & symbol
   const cleanItems = body.items
     .slice(0, 200)
-    .filter((i) => i && typeof i.symbol === "string" && typeof i.assetType === "string");
+    .filter(
+      (i) =>
+        i &&
+        typeof i.symbol === "string" &&
+        typeof i.assetType === "string" &&
+        VALID_WATCHLIST_TYPES.has(i.assetType) &&
+        isValidTradingSymbol(i.symbol),
+    );
 
   try {
     let [userWatchlist] = await db

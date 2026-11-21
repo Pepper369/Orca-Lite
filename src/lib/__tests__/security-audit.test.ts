@@ -122,3 +122,167 @@ test("Security Audit: Rate Limiter enforces limit and returns 429 with Retry-Aft
   assert.equal(r3.status, 429);
   assert.ok(Number(r3.headers.get("Retry-After")) >= 1);
 });
+
+test("Security Audit: Hono Security Headers, CSP & index.html Inline Script Hash", async () => {
+  const { computeInlineScriptHashes, getSecurityHeaders } = await import("../../../server/security");
+  const hashes = computeInlineScriptHashes();
+  assert.ok(hashes.length >= 1, "index.html inline boot script hash must be computed");
+
+  const prodHtmlHeaders = getSecurityHeaders({ pathname: "/", isProd: true, inlineScriptHashes: hashes });
+  assert.equal(prodHtmlHeaders["X-Frame-Options"], "DENY");
+  assert.equal(prodHtmlHeaders["X-Content-Type-Options"], "nosniff");
+  assert.equal(prodHtmlHeaders["Referrer-Policy"], "strict-origin-when-cross-origin");
+  assert.ok(prodHtmlHeaders["Permissions-Policy"].includes("camera=()"));
+  assert.ok(prodHtmlHeaders["Strict-Transport-Security"].includes("max-age="));
+
+  const csp = prodHtmlHeaders["Content-Security-Policy"];
+  assert.ok(csp.includes("object-src 'none'"));
+  assert.ok(csp.includes("base-uri 'self'"));
+  assert.ok(csp.includes("frame-ancestors 'none'"));
+  assert.ok(csp.includes("https://s.tradingview.com"));
+  assert.ok(csp.includes("wss:"));
+  assert.ok(csp.includes(hashes[0]!));
+  const scriptSrcMatch = csp.match(/script-src\s+([^;]+)/);
+  assert.ok(scriptSrcMatch && !scriptSrcMatch[1]!.includes("'unsafe-inline'"), "Prod script-src must not allow unsafe-inline");
+
+  const apiHeaders = getSecurityHeaders({ pathname: "/api/v1/auth/me", isProd: true, inlineScriptHashes: hashes });
+  assert.ok(apiHeaders["Content-Security-Policy"].includes("default-src 'none'"));
+});
+
+test("Security Audit: CORS Origin Hardening & CSRF Verification", async () => {
+  const { resolveCorsOrigin, verifyCsrfRequest, sanitizePathSegments } = await import("../../../server/security");
+
+  assert.equal(resolveCorsOrigin(undefined, "localhost:3000", { allowedOrigins: [], isProd: true }), null);
+  assert.equal(resolveCorsOrigin("null", "localhost:3000", { allowedOrigins: [], isProd: true }), null);
+  assert.equal(
+    resolveCorsOrigin("https://evil.com", "orca.local", { allowedOrigins: ["https://orca.local"], isProd: true }),
+    null,
+  );
+  assert.equal(
+    resolveCorsOrigin("http://localhost:80.evil.com", "orca.local", { allowedOrigins: [], isProd: true }),
+    null,
+  );
+  assert.equal(
+    resolveCorsOrigin("https://orca.local", "orca.local", { allowedOrigins: ["https://orca.local"], isProd: true }),
+    "https://orca.local",
+  );
+
+  // CSRF checks
+  const crossOriginPost = new Request("https://orca.local/api/v1/settings", {
+    method: "PUT",
+    headers: { host: "orca.local", origin: "https://evil.com" },
+  });
+  assert.equal(verifyCsrfRequest(crossOriginPost).ok, false);
+
+  const nullOriginPost = new Request("https://orca.local/api/v1/auth/profile", {
+    method: "PATCH",
+    headers: { host: "orca.local", origin: "null" },
+  });
+  assert.equal(verifyCsrfRequest(nullOriginPost).ok, false);
+
+  const crossSiteFetch = new Request("https://orca.local/api/v1/copytrade/kill-switch", {
+    method: "POST",
+    headers: { host: "orca.local", "sec-fetch-site": "cross-site" },
+  });
+  assert.equal(verifyCsrfRequest(crossSiteFetch).ok, false);
+
+  const sameOriginPost = new Request("https://orca.local/api/v1/settings", {
+    method: "PUT",
+    headers: { host: "orca.local", origin: "https://orca.local" },
+  });
+  assert.equal(verifyCsrfRequest(sameOriginPost).ok, true);
+
+  const firebaseExempt = new Request("https://orca.local/api/v1/auth/firebase", {
+    method: "POST",
+    headers: { host: "orca.local", origin: "https://accounts.google.com" },
+  });
+  assert.equal(verifyCsrfRequest(firebaseExempt).ok, true);
+
+  const eaExempt = new Request("https://orca.local/api/v1/copytrade/ea-ack", {
+    method: "POST",
+    headers: { host: "orca.local", origin: "https://external-ea.local" },
+  });
+  assert.equal(verifyCsrfRequest(eaExempt).ok, true);
+
+  // Encoded traversal rejection
+  assert.equal(sanitizePathSegments("/api/v1/stocks/%2e%2e/secrets"), null);
+  assert.equal(sanitizePathSegments("/api/v1/stocks/foo%5cbar"), null);
+  assert.deepEqual(sanitizePathSegments("/api/v1/stocks/HPG"), ["v1", "stocks", "HPG"]);
+});
+
+test("Security Audit: API Input Sanitization, Avatar URL & Prototype Pollution Defense", async () => {
+  const {
+    sanitizeAvatarUrl,
+    sanitizeIdentityName,
+    escapeHtmlStrict,
+    hasPrototypePollutionKey,
+    stripPrototypePollution,
+    sanitizeHttpHeaderValue,
+  } = await import("../../app/api/_security");
+
+  const badAvatars = [
+    "javascript:alert(1)",
+    "JaVaScRiPt:alert(1)",
+    "java\tscript:alert(1)",
+    "javascript&#58;alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "data:image/svg+xml,<svg onload=alert(1)>",
+    "http://insecure.example.com/a.png",
+  ];
+  for (const url of badAvatars) {
+    assert.equal(sanitizeAvatarUrl(url).ok, false, `Avatar URL must be rejected: ${url}`);
+  }
+  assert.equal(sanitizeAvatarUrl("data:image/jpeg;base64,/9j/4AAQSkZJRg==").ok, true);
+  assert.equal(sanitizeAvatarUrl("https://cdn.example.com/avatar.png").ok, true);
+  assert.equal(sanitizeAvatarUrl(null).ok, true);
+
+  assert.equal(sanitizeIdentityName("<script>alert(1)</script>").ok, false);
+  assert.equal(sanitizeIdentityName("User <img src=x onerror=alert(1)>").ok, false);
+  assert.equal(sanitizeIdentityName("Nguyen Van A").ok, true);
+
+  assert.equal(
+    escapeHtmlStrict(`<b onclick='x'>"test"&</b>`),
+    "&lt;b onclick=&#39;x&#39;&gt;&quot;test&quot;&amp;&lt;/b&gt;",
+  );
+
+  const polluted = JSON.parse('{"__proto__":{"isAdmin":true},"profile":{"displayName":"Ok","constructor":{"x":1}}}');
+  assert.equal(hasPrototypePollutionKey(polluted), true);
+  const cleaned = stripPrototypePollution(polluted) as Record<string, unknown>;
+  assert.equal(Object.prototype.hasOwnProperty.call(cleaned, "__proto__"), false);
+  assert.equal((({} as Record<string, unknown>)).isAdmin, undefined);
+
+  assert.equal(sanitizeHttpHeaderValue("secret\r\nX-Evil: 1"), "secretX-Evil: 1");
+});
+
+test("Security Audit: Hono App End-to-End Security Headers, CSRF & Non-Reflected 404", async () => {
+  process.env.ORCA_SKIP_SERVER_BOOT = "true";
+  const { default: app } = await import("../../../server/index");
+
+  const healthRes = await app.request("http://localhost:3000/api/health", {
+    headers: { host: "localhost:3000", origin: "https://evil.example.com" },
+  });
+  assert.equal(healthRes.status, 200);
+  assert.equal(healthRes.headers.get("X-Frame-Options"), "DENY");
+  assert.equal(healthRes.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(healthRes.headers.get("Access-Control-Allow-Origin"), null);
+
+  const csrfBlocked = await app.request("http://localhost:3000/api/v1/settings", {
+    method: "PUT",
+    headers: { host: "localhost:3000", origin: "https://evil.example.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ settings: {} }),
+  });
+  assert.equal(csrfBlocked.status, 403);
+
+  const xss404 = await app.request("http://localhost:3000/api/v1/<script>alert(1)</script>", {
+    headers: { host: "localhost:3000" },
+  });
+  assert.equal(xss404.status, 404);
+  const xssBody = await xss404.text();
+  assert.equal(xssBody.includes("<script>"), false);
+
+  const traversalRes = await app.request("http://localhost:3000/api/v1/stocks/foo%5cbar", {
+    headers: { host: "localhost:3000" },
+  });
+  assert.equal(traversalRes.status, 403);
+});

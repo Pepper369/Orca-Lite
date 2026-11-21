@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   const limited = await rateLimit(req, { name: "password_change", binding: "RL_AUTH", limit: 5, windowSec: 60 });
   if (limited) return limited;
 
-  const session = await getSessionUser();
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
 
   const body = (await req.json().catch(() => null)) as { current?: string; next?: string } | null;

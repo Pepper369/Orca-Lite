@@ -6,12 +6,16 @@ import { listBotExecutionOrders } from "@/lib/services/broker-vault-store";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
 import { rateLimit } from "@/lib/rate-limit";
+import { isValidTradingSymbol, safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để xem nhật ký lệnh Copy Trade", 401);
+    }
     const [fxRes, crRes, logs] = await Promise.allSettled([
       getForexSignalsHubData(),
       getCryptoSignalsHubData(),
@@ -134,6 +138,9 @@ export async function POST(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để đẩy lệnh Copy Trade", 401);
+    }
     const body = (await req.json()) as {
       signal?: DispatchableSignalInput;
       currentMarketPrice?: number;
@@ -142,8 +149,14 @@ export async function POST(req: Request) {
       targetEnvironment?: "REAL" | "DEMO" | "ALL";
     };
 
-    if (!body.signal || !body.signal.symbol || !body.signal.entryPrice || !body.signal.stopLossPrice || !body.signal.takeProfit1) {
-      return badRequest("Dữ liệu tín hiệu Master thiếu entryPrice, stopLossPrice hoặc takeProfit1");
+    if (
+      !body.signal ||
+      !isValidTradingSymbol(body.signal.symbol) ||
+      !Number.isFinite(Number(body.signal.entryPrice)) ||
+      !Number.isFinite(Number(body.signal.stopLossPrice)) ||
+      !Number.isFinite(Number(body.signal.takeProfit1))
+    ) {
+      return badRequest("Dữ liệu tín hiệu Master thiếu symbol hợp lệ, entryPrice, stopLossPrice hoặc takeProfit1");
     }
 
     const targetEnvironment =
@@ -170,6 +183,6 @@ export async function POST(req: Request) {
       rejectedCount: orders.filter((o) => o.status !== "FILLED" && o.status !== "FILLED_PAPER" && o.status !== "PENDING_EA").length,
     });
   } catch (err) {
-    return fail("DISPATCH_ERROR", err instanceof Error ? err.message : "Lỗi đẩy lệnh Copy Trade", 500);
+    return fail("DISPATCH_ERROR", safeInternalErrorMessage(err, "Lỗi đẩy lệnh Copy Trade"), 500);
   }
 }

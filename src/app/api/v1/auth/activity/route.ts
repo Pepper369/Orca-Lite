@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** Security: recent account activity (audit trail). */
-export async function GET() {
-  const session = await getSessionUser();
+export async function GET(req: Request) {
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const rows = await db
     .select({ id: auditLogs.id, action: auditLogs.action, meta: auditLogs.meta, createdAt: auditLogs.createdAt })

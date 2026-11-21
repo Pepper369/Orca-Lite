@@ -7,6 +7,8 @@ import {
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
 import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
+import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage, sanitizePlainText } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,9 @@ function extractEaToken(req: Request): string | null {
  * Callback xác nhận khớp lệnh hoặc đóng lệnh từ OrcaCopyTradeSlave.mq5 (XM / Exness MT5).
  */
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "copytrade_ea_ack", binding: "RL_AUTH", limit: 60, windowSec: 60 });
+  if (limited) return limited;
+
   const token = extractEaToken(req);
   if (!token) {
     return NextResponse.json({ ok: false, error: "Unauthorized MT5 EA token" }, { status: 401 });
@@ -45,9 +50,10 @@ export async function POST(req: Request) {
       message?: string;
     };
 
-    if (!body.ticketId) {
-      return NextResponse.json({ ok: false, error: "Missing ticketId" }, { status: 400 });
+    if (!body.ticketId || typeof body.ticketId !== "string" || body.ticketId.length > 64) {
+      return NextResponse.json({ ok: false, error: "Invalid ticketId" }, { status: 400 });
     }
+    const cleanMessage = body.message ? sanitizePlainText(body.message, 240) : "";
 
     const orders = await listBotExecutionOrders(100);
     const existing = orders.find((o) => o.orderId === body.ticketId && o.followerId === conn.id);
@@ -66,7 +72,7 @@ export async function POST(req: Request) {
       copiedLotsOrQty: Number(body.lots) > 0 ? Number(body.lots) : existing.copiedLotsOrQty,
       exchangeOrderId: mt5Id,
       message:
-        body.message ||
+        cleanMessage ||
         (isRejected
           ? `${conn.platform} từ chối vào lệnh MT5`
           : `${conn.platform} MT5 đã khớp ticket #${mt5Id ?? "N/A"}`),
@@ -75,7 +81,7 @@ export async function POST(req: Request) {
     const patch: Parameters<typeof updateBrokerConnectionState>[1] = {
       connectionStatus: "CONNECTED_VERIFIED",
       lastVerifiedAt: Date.now(),
-      lastError: isRejected ? body.message || "MT5 OrderSend failed" : null,
+      lastError: isRejected ? cleanMessage || "MT5 OrderSend failed" : null,
     };
 
     if (!isRejected && existing.status === "PENDING_EA") {
@@ -112,7 +118,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, status: nextStatus, mt5Ticket: mt5Id });
   } catch (err) {
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : "Failed to acknowledge EA order" },
+      { ok: false, error: safeInternalErrorMessage(err, "Failed to acknowledge EA order") },
       { status: 500 },
     );
   }

@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { triggerGlobalKillSwitch } from "@/lib/services/broker-vault-store";
 import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage, sanitizePlainText } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +18,18 @@ export async function POST(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để kích hoạt Kill-Switch", 401);
+    }
     const body = (await req.json().catch(() => ({}))) as {
       engage?: boolean;
       reason?: string;
     };
     const engage = body.engage !== false;
+    const cleanReason = body.reason ? sanitizePlainText(body.reason, 160) : "";
     const accounts = await triggerGlobalKillSwitch({
       engage,
-      reason: body.reason || (engage ? "Kích hoạt Kill-Switch khẩn cấp từ Dashboard" : undefined),
+      reason: cleanReason || (engage ? "Kích hoạt Kill-Switch khẩn cấp từ Dashboard" : undefined),
       userId: session?.id ?? null,
     });
 
@@ -45,6 +50,6 @@ export async function POST(req: Request) {
         : `Đã mở khóa an toàn ${accounts.length} kết nối.`,
     });
   } catch (err) {
-    return fail("KILL_SWITCH_ERROR", err instanceof Error ? err.message : "Lỗi Kill-Switch", 500);
+    return fail("KILL_SWITCH_ERROR", safeInternalErrorMessage(err, "Lỗi Kill-Switch"), 500);
   }
 }

@@ -9,6 +9,8 @@ import {
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
+import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +28,9 @@ function extractEaToken(req: Request): string | null {
  * Xác thực qua Bearer Token SHA-256 hash theo từng tài khoản.
  */
 export async function GET(req: Request) {
+  const limited = await rateLimit(req, { name: "copytrade_ea_poll", binding: "RL_AUTH", limit: 120, windowSec: 60 });
+  if (limited) return limited;
+
   const token = extractEaToken(req);
   if (!token) {
     return NextResponse.json(
@@ -182,7 +187,7 @@ export async function GET(req: Request) {
     );
   } catch (err) {
     return NextResponse.json(
-      { ok: false, hasSignal: false, error: err instanceof Error ? err.message : "EA poll failed" },
+      { ok: false, hasSignal: false, error: safeInternalErrorMessage(err, "EA poll failed") },
       { status: 500 },
     );
   }

@@ -1,6 +1,7 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
+import { hasPrototypePollutionKey, stripPrototypePollution } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,13 +13,17 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object") {
+    if (!body || typeof body !== "object" || hasPrototypePollutionKey(body)) {
       return badRequest("Body JSON không hợp lệ");
     }
 
-    const facts = body.facts;
-    if (!facts || typeof facts !== "object") {
+    const rawFacts = body.facts;
+    if (!rawFacts || typeof rawFacts !== "object" || Array.isArray(rawFacts)) {
       return badRequest("Thiếu thông tin facts");
+    }
+    const facts = stripPrototypePollution(rawFacts as Record<string, unknown>);
+    if (JSON.stringify(facts).length > 32_000) {
+      return badRequest("Dữ liệu facts quá lớn");
     }
 
     if (llmConfigured()) {

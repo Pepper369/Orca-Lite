@@ -16,6 +16,9 @@ export async function POST(req: Request) {
 
   try {
     const session = await getSessionUser(req);
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để đóng vị thế bot", 401);
+    }
     const body = (await req.json()) as { action?: string; orderId?: string };
     if (body.action !== "close" || !body.orderId?.trim()) {
       return badRequest("Cần cung cấp action='close' và orderId vị thế cần chốt");

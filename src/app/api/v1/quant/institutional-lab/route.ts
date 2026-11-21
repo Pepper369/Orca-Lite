@@ -8,6 +8,8 @@ import {
   calculateTripleBarrierLevels,
 } from "@/lib/engines/advanced-quant-math";
 import { MiQuantEngine } from "@/lib/engines/miquant-quant-engine";
+import { rateLimit } from "@/lib/rate-limit";
+import { isValidTradingSymbol } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -69,16 +71,28 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = await rateLimit(req, { name: "institutional_lab_post", binding: "RL_AI", limit: 30, windowSec: 60 });
+  if (limited) return limited;
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ success: false, error: "Invalid JSON payload" }, { status: 400 });
+    }
     const type = body.type; // "hrp" | "almgren_chriss" | "dsr" | "ou" | "var_cvar"
 
     if (type === "hrp") {
-      const symbols: string[] = body.symbols || ["FPT", "VNM", "SSI", "HPG"];
+      const rawSymbols = Array.isArray(body.symbols) ? body.symbols : ["FPT", "VNM", "SSI", "HPG"];
+      const symbols: string[] = rawSymbols
+        .filter((s): s is string => isValidTradingSymbol(s))
+        .map((s) => s.trim().toUpperCase())
+        .slice(0, 30);
+      if (symbols.length === 0) {
+        return NextResponse.json({ success: false, error: "Invalid symbols" }, { status: 400 });
+      }
       const n = symbols.length;
-      let cov: number[][] = body.covMatrix;
+      let cov: number[][] | undefined = Array.isArray(body.covMatrix) ? (body.covMatrix as number[][]) : undefined;
 
-      if (!cov || cov.length !== n) {
+      if (!cov || cov.length !== n || cov.some((row) => !Array.isArray(row) || row.length !== n)) {
         cov = [];
         const vols = symbols.map((_, i) => (2.0 + (i % 3) * 0.8) / 100);
         for (let i = 0; i < n; i++) {
@@ -118,13 +132,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (type === "ou") {
-      const series: number[] = body.series || [100, 102, 101, 98, 97, 99, 101, 103, 100, 99];
+      const series: number[] = Array.isArray(body.series)
+        ? body.series.filter((v): v is number => typeof v === "number" && Number.isFinite(v)).slice(0, 1000)
+        : [100, 102, 101, 98, 97, 99, 101, 103, 100, 99];
       const result = estimateOrnsteinUhlenbeck(series, Number(body.dt || 1.0));
       return NextResponse.json({ success: true, data: result });
     }
 
     if (type === "var_cvar") {
-      const returns: number[] = body.returns || [-0.02, 0.01, -0.015, 0.02, -0.01, 0.005, -0.025, 0.015];
+      const returns: number[] = Array.isArray(body.returns)
+        ? body.returns.filter((v): v is number => typeof v === "number" && Number.isFinite(v)).slice(0, 2000)
+        : [-0.02, 0.01, -0.015, 0.02, -0.01, 0.005, -0.025, 0.015];
       const result = calculateVaRAndCVaR(returns);
       return NextResponse.json({ success: true, data: result });
     }

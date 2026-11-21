@@ -1,6 +1,8 @@
 import { ok, badRequest, fail } from "@/lib/envelope";
 import { generateDailyReport, listReports, type DailyReportType } from "@/lib/services/report-engine";
 import { ensureSchedulerStarted } from "@/lib/realtime/scheduler";
+import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,6 +26,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "reports_post", binding: "RL_AI", limit: 10, windowSec: 60 });
+  if (limited) return limited;
   ensureSchedulerStarted();
   const body = (await req.json().catch(() => null)) as { type?: DailyReportType } | null;
   const type = body?.type;
@@ -32,6 +36,6 @@ export async function POST(req: Request) {
     const { report, meta } = await generateDailyReport(type);
     return ok(report, meta);
   } catch (e) {
-    return fail("REPORT_FAILED", e instanceof Error ? e.message : "unknown", 502);
+    return fail("REPORT_FAILED", safeInternalErrorMessage(e, "Report generation failed"), 502);
   }
 }

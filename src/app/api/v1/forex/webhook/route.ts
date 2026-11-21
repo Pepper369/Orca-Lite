@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as { targetUrl?: string; pair?: string; type?: "telegram" | "mt5" };
-    const pair = (body.pair ?? "EURUSD").toUpperCase().replace("/", "");
+    const pair = (typeof body.pair === "string" ? body.pair : "EURUSD").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12) || "EURUSD";
 
     const hub = await getForexSignalsHub();
     const signal = hub?.data?.signals.find((s) => s.pair === pair) ?? hub?.data?.signals[0];
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     // If targetUrl provided, require auth in production before dispatching
     if (body.targetUrl) {
       if (process.env.NODE_ENV === "production") {
-        const session = await getSessionUser();
+        const session = await getSessionUser(req);
         if (!session && cronUnauthorized(req) !== null) {
           return fail("UNAUTHENTICATED", "Đăng nhập hoặc cung cấp CRON_SECRET để gửi webhook", 401);
         }

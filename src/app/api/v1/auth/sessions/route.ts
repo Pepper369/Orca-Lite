@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** List active sessions (Security settings). */
-export async function GET() {
-  const session = await getSessionUser();
+export async function GET(req: Request) {
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const rows = await db
     .select({ id: sessions.id, createdAt: sessions.createdAt, userAgent: sessions.userAgent, ip: sessions.ip, expiresAt: sessions.expiresAt })
@@ -31,7 +31,7 @@ export async function DELETE(req: Request) {
   const limited = await rateLimit(req, { name: "session_revoke", binding: "RL_AUTH", limit: 20, windowSec: 60 });
   if (limited) return limited;
 
-  const session = await getSessionUser();
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const body = (await req.json().catch(() => null)) as { id?: string } | null;
   if (!body?.id) return badRequest("Thiếu session id");

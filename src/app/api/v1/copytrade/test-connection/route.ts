@@ -9,10 +9,12 @@ import {
 import {
   getBrokerConnectionById,
   getBrokerConnectionSecrets,
+  listBrokerConnections,
   recordVaultAuditLog,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
 import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +39,19 @@ export async function POST(req: Request) {
     };
 
     if (body.connectionId) {
+      if (!session && (process.env.NODE_ENV === "production" || !body.connectionId.startsWith("paper-"))) {
+        return fail("UNAUTHENTICATED", "Đăng nhập để kiểm tra kết nối Broker Vault", 401);
+      }
+
       const acct = await getBrokerConnectionById(body.connectionId);
       if (!acct) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
+
+      if (session) {
+        const owned = await listBrokerConnections(session.id);
+        if (!owned.some((a) => a.id === body.connectionId)) {
+          return fail("FORBIDDEN", "Không có quyền truy cập kết nối của tài khoản khác", 403);
+        }
+      }
 
       const isMt5 = acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA";
       const supportsDirectTest =
@@ -60,6 +73,10 @@ export async function POST(req: Request) {
           },
           account: acct,
         });
+      }
+
+      if (!session) {
+        return fail("UNAUTHENTICATED", "Đăng nhập để kiểm tra kết nối có khóa API", 401);
       }
 
       const secrets = await getBrokerConnectionSecrets(acct.id);
@@ -99,6 +116,10 @@ export async function POST(req: Request) {
       return ok({ verification, account: updated });
     }
 
+    if (!session && process.env.NODE_ENV === "production") {
+      return fail("UNAUTHENTICATED", "Đăng nhập để kiểm tra kết nối Broker", 401);
+    }
+
     if (!body.platform || !body.apiKey?.trim() || !body.apiSecret?.trim()) {
       return badRequest("Cần cung cấp platform, API Key và API Secret để kiểm tra kết nối");
     }
@@ -129,6 +150,6 @@ export async function POST(req: Request) {
 
     return ok({ verification });
   } catch (err) {
-    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Lỗi kiểm tra API kết nối", 400);
+    return fail("BAD_REQUEST", safeInternalErrorMessage(err, "Lỗi kiểm tra API kết nối"), 400);
   }
 }

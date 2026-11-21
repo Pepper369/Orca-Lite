@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { auditLogs } from "@/db/schema";
 import { ok, fail } from "@/lib/envelope";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizePlainText } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,7 +26,8 @@ export async function POST(req: Request) {
       return fail("UNAUTHORIZED", "Token Firebase không hợp lệ", 401);
     }
 
-    const user = await getOrCreateUser(decoded.uid, decoded.email, decoded.name ?? null);
+    const safeName = decoded.name ? sanitizePlainText(decoded.name, 80) || null : null;
+    const user = await getOrCreateUser(decoded.uid, decoded.email, safeName);
     if (!user) {
       return fail("USER_SYNC_FAILED", "Không thể đồng bộ người dùng với cơ sở dữ liệu", 500);
     }

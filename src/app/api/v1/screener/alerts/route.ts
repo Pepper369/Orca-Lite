@@ -3,6 +3,7 @@ import { getHot } from "@/lib/hot-snapshot";
 import { getSessionUser } from "@/lib/auth";
 import { cronUnauthorized } from "@/lib/cron-auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizeHttpHeaderValue, sanitizePlainText } from "@/app/api/_security";
 import {
   runScreenerAlertMonitor,
   ALERT_MONITORED_PRESETS,
@@ -31,25 +32,31 @@ export async function POST(req: Request) {
   if (limited) return limited;
 
   if (process.env.NODE_ENV === "production") {
-    const session = await getSessionUser();
+    const session = await getSessionUser(req);
     if (!session && cronUnauthorized(req) !== null) {
       return fail("UNAUTHENTICATED", "Đăng nhập hoặc cung cấp CRON_SECRET để kích hoạt cảnh báo", 401);
     }
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const { forceDispatch, webhookUrl, provider, secret } = body;
+    const body = (await req.json().catch(() => ({}))) as {
+      forceDispatch?: unknown;
+      webhookUrl?: unknown;
+      provider?: unknown;
+      secret?: unknown;
+    };
+    const cleanUrl = typeof body.webhookUrl === "string" ? body.webhookUrl.replace(/[\r\n\0]/g, "").trim() : undefined;
+    const cleanSecret = sanitizeHttpHeaderValue(body.secret, 256) ?? undefined;
 
     const result = await runScreenerAlertMonitor({
-      forceDispatch: Boolean(forceDispatch),
-      webhookUrl: typeof webhookUrl === "string" ? webhookUrl.trim() : undefined,
-      provider: provider === "telegram" ? "telegram" : "discord",
-      secret: typeof secret === "string" ? secret.trim() : undefined,
+      forceDispatch: Boolean(body.forceDispatch),
+      webhookUrl: cleanUrl,
+      provider: body.provider === "telegram" ? "telegram" : "discord",
+      secret: cleanSecret,
     });
 
     return ok(result);
   } catch (error) {
-    return badRequest(error instanceof Error ? error.message : "Lỗi thực thi alert monitor screener");
+    return badRequest(sanitizePlainText(error instanceof Error ? error.message : "Lỗi thực thi alert monitor screener", 200) || "Lỗi thực thi alert monitor screener");
   }
 }

@@ -5,6 +5,12 @@ import { getGlobalDiscordWebhook, postGlobalDiscord } from "@/lib/services/disco
 import { rateLimit } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/auth";
 import { isDiscordUrl, isSafeWebhookUrl, looksLikeTelegramToken } from "@/lib/webhook-security";
+import {
+  escapeHtmlStrict,
+  safeInternalErrorMessage,
+  sanitizeHttpHeaderValue,
+  sanitizePlainText,
+} from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -59,7 +65,7 @@ function slackPayload(b: Body) {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">");
+  return escapeHtmlStrict(s);
 }
 
 function telegramText(b: Body): string {
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest) {
   const limited = await rateLimit(req, { name: "alert_webhook", binding: "RL_AUTH", limit: 20, windowSec: 60 });
   if (limited) return limited;
 
-  const session = await getSessionUser();
+  const session = await getSessionUser(req);
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET?.trim();
   const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
@@ -104,9 +110,17 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const b = (await req.json()) as Body;
+    const raw = (await req.json()) as Body;
+    const b: Body = {
+      ...raw,
+      title: raw.title ? sanitizePlainText(raw.title, 200) : undefined,
+      body: raw.body ? sanitizePlainText(raw.body, 1500, true) : undefined,
+      symbol: raw.symbol ? sanitizePlainText(raw.symbol, 30) : undefined,
+      direction: raw.direction ? sanitizePlainText(raw.direction, 30) : undefined,
+      reason: raw.reason ? sanitizePlainText(raw.reason, 200) : undefined,
+    };
     const globalUrl = getGlobalDiscordWebhook();
-    let url = typeof b.url === "string" ? b.url.trim() : "";
+    let url = typeof b.url === "string" ? b.url.replace(/[\r\n\0]/g, "").trim() : "";
     if (!url && globalUrl) {
       url = globalUrl;
       b.provider = "discord";
@@ -186,7 +200,8 @@ export async function POST(req: NextRequest) {
       "Content-Type": "application/json",
       "User-Agent": "Orca-Multi-Finance/1.0",
     };
-    if (b.secret) headers["X-Orca-Secret"] = b.secret;
+    const safeSecret = sanitizeHttpHeaderValue(b.secret, 256);
+    if (safeSecret) headers["X-Orca-Secret"] = safeSecret;
 
     const upstream = await fetch(url, {
       method: "POST",
@@ -227,6 +242,6 @@ export async function POST(req: NextRequest) {
       globalConfigured: Boolean(getGlobalDiscordWebhook()),
     });
   } catch (e) {
-    return fail("WEBHOOK_FAILED", e instanceof Error ? e.message : "unknown", 502);
+    return fail("WEBHOOK_FAILED", safeInternalErrorMessage(e, "Webhook dispatch failed"), 502);
   }
 }

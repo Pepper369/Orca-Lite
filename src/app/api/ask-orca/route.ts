@@ -1,6 +1,7 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import { rateLimit } from "@/lib/rate-limit";
+import { hasPrototypePollutionKey, stripPrototypePollution } from "@/app/api/_security";
 import { getVnStockDetail, classifyMarketRegime } from "@/lib/services/stocks";
 import { getQuantInsightForQuery } from "@/lib/services/quant-knowledge-base";
 import { getVnIndices } from "@/lib/services/stocks-board";
@@ -467,7 +468,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object") {
+    if (!body || typeof body !== "object" || hasPrototypePollutionKey(body)) {
       return badRequest("Body JSON không hợp lệ");
     }
 
@@ -475,8 +476,17 @@ export async function POST(req: Request) {
     if (!question) {
       return badRequest("Thiếu câu hỏi");
     }
+    if (question.length > 2000) {
+      return badRequest("Câu hỏi quá dài (tối đa 2000 ký tự)");
+    }
 
-    const facts = (body.snapshotFacts as SnapshotFacts) || {};
+    const rawFacts = body.snapshotFacts && typeof body.snapshotFacts === "object"
+      ? stripPrototypePollution(body.snapshotFacts as SnapshotFacts)
+      : {};
+    if (JSON.stringify(rawFacts).length > 32_000) {
+      return badRequest("Dữ liệu snapshotFacts quá lớn");
+    }
+    const facts = rawFacts;
     const history = Array.isArray(body.conversationHistory)
       ? body.conversationHistory.filter(
           (m: unknown) =>

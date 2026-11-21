@@ -15,18 +15,38 @@ import {
   isLlamaServerHealthy,
   cleanupAiRuntime,
 } from "./ai-runtime";
+import {
+  computeInlineScriptHashes,
+  getSecurityHeaders,
+  resolveCorsOrigin,
+  sanitizePathSegments,
+  verifyCsrfRequest,
+} from "./security";
 
 dotenv.config();
 
 const app = new Hono();
+const isProd = process.env.NODE_ENV === "production";
+const inlineScriptHashes = computeInlineScriptHashes();
 
 // Global Middleware
 app.use("*", logger());
 app.use("*", async (c, next) => {
+  await next();
+  const secHeaders = getSecurityHeaders({
+    pathname: c.req.path,
+    isProd,
+    inlineScriptHashes,
+  });
+  for (const [key, value] of Object.entries(secHeaders)) {
+    c.header(key, value);
+  }
+});
+app.use("*", async (c, next) => {
   // Never compress SSE streaming endpoints or agent endpoints
   const accept = c.req.header("accept") || "";
-  const path = c.req.path;
-  if (path.startsWith("/api/v1/agent") || accept.includes("text/event-stream")) {
+  const reqPath = c.req.path;
+  if (reqPath.startsWith("/api/v1/agent") || accept.includes("text/event-stream")) {
     return next();
   }
   return compress()(c, next);
@@ -39,31 +59,64 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
 app.use(
   "*",
   cors({
-    origin: (origin) => {
-      if (!origin) return "*";
-      if (allowedOrigins.length > 0) {
-        return allowedOrigins.includes(origin) ? origin : allowedOrigins[0]!;
-      }
-      if (process.env.NODE_ENV !== "production") return origin;
-      return origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:")
-        ? origin
-        : "";
-    },
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "Accept"],
+    origin: (origin, c) =>
+      resolveCorsOrigin(origin, c.req.header("host"), {
+        allowedOrigins,
+        isProd,
+        siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL,
+      }),
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization", "Accept", "X-Orca-EA-Token"],
     maxAge: 86400,
   }),
 );
+
+// Path traversal & CSRF Origin/Referer/Sec-Fetch-Site verification on /api/* routes
+app.use("/api/*", async (c, next) => {
+  const url = new URL(c.req.url);
+  if (!sanitizePathSegments(url.pathname)) {
+    return c.json({ success: false, error: { code: "FORBIDDEN", message: "Invalid path segments" } }, 403);
+  }
+  const csrf = verifyCsrfRequest(c.req.raw, {
+    allowedOrigins,
+    siteUrl: process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL,
+  });
+  if (!csrf.ok) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: csrf.code || "CROSS_ORIGIN_FORBIDDEN",
+          message: csrf.message || "Cross-Origin request forbidden",
+        },
+      },
+      csrf.status ?? 403,
+    );
+  }
+  return next();
+});
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 app.get("/api/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 
-// Simple per-IP limiter for local LLM proxy
+// Bounded per-IP limiter for local LLM proxy
 const llmHits = new Map<string, { count: number; resetAt: number }>();
+const MAX_LLM_HITS_KEYS = 5_000;
 app.use("/v1/*", async (c, next) => {
-  const ip = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const ip =
+    c.req.header("cf-connecting-ip")?.trim() ||
+    c.req.header("true-client-ip")?.trim() ||
+    c.req.header("x-real-ip")?.trim() ||
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "local";
   const now = Date.now();
+  if (llmHits.size > MAX_LLM_HITS_KEYS) {
+    for (const [k, v] of llmHits) {
+      if (v.resetAt <= now) llmHits.delete(k);
+    }
+    if (llmHits.size > MAX_LLM_HITS_KEYS) llmHits.clear();
+  }
   const cur = llmHits.get(ip);
   if (!cur || cur.resetAt <= now) {
     llmHits.set(ip, { count: 1, resetAt: now + 60_000 });
@@ -304,11 +357,10 @@ function findRoute(currentDir: string, segments: string[], paramNames: string[])
 // Universal API Router for all /api/* routes
 app.all("/api/*", async (c) => {
   const url = new URL(c.req.url);
-  const pathname = url.pathname.replace(/^\/api\//, "");
-  const segments = pathname.split("/").filter(Boolean);
+  const segments = sanitizePathSegments(url.pathname);
 
-  // Security guard: Reject path traversal attempts immediately
-  if (segments.some((s) => s === ".." || s === "." || s.includes("..") || s.includes("\\") || s.includes("\0"))) {
+  // Security guard: Reject path traversal attempts (including percent-encoded) immediately
+  if (!segments) {
     return c.json({ success: false, error: { code: "FORBIDDEN", message: "Invalid path segments" } }, 403);
   }
 
@@ -349,16 +401,18 @@ app.all("/api/*", async (c) => {
         return handler(c.req.raw, { params: Promise.resolve(params) });
       }
     }
-  } catch (err: any) {
-    console.error(`[Hono API] Error handling /api/${pathname}:`, err);
-    return c.json({ success: false, error: { code: "INTERNAL_ERROR", message: err?.message || "Route execution error" } }, 500);
+  } catch (err: unknown) {
+    console.error(`[Hono API] Error handling /api/${segments.join("/")}:`, err);
+    return c.json(
+      { success: false, error: { code: "INTERNAL_ERROR", message: "Internal route execution error" } },
+      500,
+    );
   }
 
-  return c.json({ success: false, error: { code: "NOT_FOUND", message: `Endpoint /api/${pathname} not found on Hono engine` } }, 404);
+  return c.json({ success: false, error: { code: "NOT_FOUND", message: "API endpoint not found on Hono engine" } }, 404);
 });
 
 const port = Number(process.env.PORT || 3000);
-const isProd = process.env.NODE_ENV === "production";
 const hasDist = fs.existsSync(path.resolve(process.cwd(), "dist", "index.html"));
 
 async function startUnifiedServer() {
@@ -418,6 +472,15 @@ async function startUnifiedServer() {
       ) {
         return honoListener(req, res);
       }
+      const reqPath = url.split("?")[0] || "/";
+      const secHeaders = getSecurityHeaders({
+        pathname: reqPath,
+        isProd: false,
+        inlineScriptHashes,
+      });
+      for (const [key, value] of Object.entries(secHeaders)) {
+        res.setHeader(key, value);
+      }
       vite.middlewares(req, res);
     });
 
@@ -453,10 +516,12 @@ async function startUnifiedServer() {
   }
 }
 
-// Start server
-startUnifiedServer().catch((err) => {
-  console.error("Failed to start unified ORCA server:", err);
-  process.exit(1);
-});
+// Start server unless explicitly skipped (e.g., unit tests importing `app`)
+if (process.env.ORCA_SKIP_SERVER_BOOT !== "true") {
+  startUnifiedServer().catch((err) => {
+    console.error("Failed to start unified ORCA server:", err);
+    process.exit(1);
+  });
+}
 
 export default app;

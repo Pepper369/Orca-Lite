@@ -7,8 +7,8 @@ import { getSessionUser } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
-  const session = await getSessionUser();
+export async function GET(req: Request) {
+  const session = await getSessionUser(req);
   if (!session) return fail("UNAUTHENTICATED", "Chưa đăng nhập", 401);
   const [user] = await db.select({ id: users.id, email: users.email, name: users.name }).from(users).where(eq(users.id, session.id)).limit(1);
   if (!user) return fail("UNAUTHENTICATED", "Phiên không hợp lệ", 401);

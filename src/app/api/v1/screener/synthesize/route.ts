@@ -1,6 +1,8 @@
 import { ok, badRequest } from "@/lib/envelope";
 import { llmChat, llmConfigured } from "@/lib/ai/gateway";
 import type { ScreenerStockItem } from "@/lib/services/screener-snapshot-service";
+import { rateLimit } from "@/lib/rate-limit";
+import { sanitizePlainText } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -114,15 +116,41 @@ ${tradePlanRows.join("\n")}
 }
 
 export async function POST(req: Request) {
+  const limited = await rateLimit(req, { name: "screener_synthesize", binding: "RL_AI", limit: 15, windowSec: 60 });
+  if (limited) return limited;
+
   try {
     const body = (await req.json()) as SynthesizePayload;
-    const { preset, totalMatched, stocks = [], question } = body;
+    const preset = body.preset ? sanitizePlainText(body.preset, 80) : undefined;
+    const question = body.question ? sanitizePlainText(body.question, 600) : undefined;
+    const { totalMatched, stocks = [] } = body;
 
     if (!Array.isArray(stocks) || stocks.length === 0) {
       return badRequest("Danh sách cổ phiếu phân tích không được để trống.");
     }
 
-    const targetStocks = stocks.slice(0, 10);
+    const VALID_ZONES = new Set([
+      "AT_BUY_POINT",
+      "NEAR_BUY_POINT",
+      "WAIT_PULLBACK",
+      "EXTENDED",
+      "BELOW_SUPPORT",
+      "NO_SETUP",
+    ]);
+    const targetStocks: Partial<ScreenerStockItem>[] = stocks.slice(0, 10).map((s) => ({
+      ...s,
+      symbol: sanitizePlainText(s.symbol ?? "CP", 20).toUpperCase(),
+      sector: sanitizePlainText(s.sector ?? "Khác", 60),
+      buyZoneStatus:
+        s.buyZoneStatus && VALID_ZONES.has(s.buyZoneStatus) ? s.buyZoneStatus : "NO_SETUP",
+      vsaSignal: s.vsaSignal
+        ? (sanitizePlainText(s.vsaSignal, 80) as ScreenerStockItem["vsaSignal"])
+        : s.vsaSignal,
+      smartMoneySignal: s.smartMoneySignal
+        ? (sanitizePlainText(s.smartMoneySignal, 80) as ScreenerStockItem["smartMoneySignal"])
+        : s.smartMoneySignal,
+      setupGrade: s.setupGrade ? (sanitizePlainText(s.setupGrade, 20) as ScreenerStockItem["setupGrade"]) : s.setupGrade,
+    }));
     const stockSummaries = targetStocks.map((s, idx) => {
       return `${idx + 1}. [${s.symbol}] - Ngành: ${s.sector || "N/A"}, Giá: ${s.price?.toLocaleString("vi-VN") || "0"} đ (${(s.changePercent ?? 0) >= 0 ? "+" : ""}${s.changePercent?.toFixed(2) ?? "0"}%), Vol: ${s.volume?.toLocaleString("vi-VN") || "N/A"}, RS: ${s.rsRating ?? "N/A"}/99, Điểm Master: ${s.compositeScore ?? s.qualityScore ?? "N/A"}, Buy Point: ${s.buyPoint?.toLocaleString("vi-VN") || "N/A"} (Lệch: ${s.buyPointDiffPct != null ? (s.buyPointDiffPct >= 0 ? "+" : "") + s.buyPointDiffPct.toFixed(1) + "%" : "0%"}), Vùng: ${s.buyZoneStatus || "N/A"}, Smart Money / VSA: ${s.vsaSignal || s.smartMoneySignal || "N/A"}, Setup Grade: ${s.setupGrade || "N/A"}`;
     });
