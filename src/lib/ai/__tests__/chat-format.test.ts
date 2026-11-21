@@ -114,3 +114,41 @@ test("empty / whitespace input yields no blocks", () => {
 test("CRLF answers are normalised", () => {
   assert.deepEqual(kinds("Một\r\nHai"), ["para", "para"]);
 });
+
+/* ------------------------------ XSS & URL security --------------------------- */
+
+test("markdown links allow only validated http(s) URLs and neutralize bypass payloads", () => {
+  const safe = parseInline("Xem [Báo cáo HPG](https://dstock.vndirect.com.vn/tin-tuc-ma/HPG?tab=1)");
+  assert.deepEqual(safe, [
+    { text: "Xem " },
+    { text: "Báo cáo HPG", href: "https://dstock.vndirect.com.vn/tin-tuc-ma/HPG?tab=1" },
+  ]);
+
+  const balanced = parseInline("[Wiki](https://en.wikipedia.org/wiki/Foo_(bar))");
+  assert.deepEqual(balanced, [{ text: "Wiki", href: "https://en.wikipedia.org/wiki/Foo_(bar)" }]);
+
+  const dangerousCases = [
+    "[click](javascript:alert(1))",
+    "[click](JaVaScRiPt:alert(1))",
+    "[click](  javascript&#58;alert(1))",
+    "[click](javascript&colon;alert(1))",
+    "[click](java\tscript:alert(1))",
+    "[click](&#x6a;avascript:alert(1))",
+    "[click](data:text/html,<script>alert(1)</script>)",
+    "[click](vbscript:msgbox(1))",
+    "[click](//evil.example/phish)",
+    "[click](https://user:pass@evil.example/a)",
+  ];
+  for (const payload of dangerousCases) {
+    const runs = parseInline(payload);
+    assert.ok(runs.every((r) => r.href == null), `href must be stripped for ${payload}`);
+    assert.deepEqual(runs, [{ text: "click" }]);
+  }
+});
+
+test("markdown image syntax and nested brackets never produce href or image elements", () => {
+  assert.deepEqual(parseInline("![alt](https://evil.example/a.svg)"), [{ text: "alt" }]);
+  assert.deepEqual(parseInline("![x](javascript:alert(1))"), [{ text: "x" }]);
+  const nested = parseInline("[outer [inner](https://safe.example)](javascript:alert(1))");
+  assert.ok(nested.every((r) => r.href !== "javascript:alert(1)"));
+});

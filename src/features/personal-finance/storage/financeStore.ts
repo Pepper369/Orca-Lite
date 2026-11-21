@@ -20,6 +20,7 @@ import { calculateNetworth } from '../engines/networthEngine.ts';
 import { calculateHealthScore } from '../engines/healthScoreEngine.ts';
 import { generateQuantitativeAdvice } from '../engines/adviceEngine.ts';
 import { DEFAULT_ASSUMPTIONS } from '../engines/projectionEngine.ts';
+import { escapeCsvCell, safeJsonParse, sanitizeText } from '../../../lib/ai/sanitize.ts';
 
 const STORAGE_KEY_PROFILE = 'orca_fin_profile_v1';
 const STORAGE_KEY_SNAPSHOTS = 'orca_fin_snapshots_v1';
@@ -324,11 +325,72 @@ export function createZeroSnapshot(period = '2026-10'): MonthlySnapshot {
   });
 }
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function finiteNumber(v: unknown, fallback: number, min = -Infinity, max = Infinity): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+export function sanitizeStoredProfile(raw: unknown): FinanceProfile {
+  if (!isPlainRecord(raw)) return INITIAL_EMPTY_PROFILE;
+  const marital = raw.maritalStatus === 'married' || raw.maritalStatus === 'has_children' ? raw.maritalStatus : 'single';
+  const employment =
+    raw.employmentType === 'freelance' || raw.employmentType === 'business_owner' || raw.employmentType === 'other'
+      ? raw.employmentType
+      : 'salaried';
+  const risk =
+    raw.riskTolerance === 'conservative' || raw.riskTolerance === 'growth' || raw.riskTolerance === 'aggressive'
+      ? raw.riskTolerance
+      : 'moderate';
+
+  return {
+    birthYear: Math.round(finiteNumber(raw.birthYear, INITIAL_EMPTY_PROFILE.birthYear, 1920, 2020)),
+    maritalStatus: marital,
+    dependentsCount: Math.round(finiteNumber(raw.dependentsCount, 0, 0, 20)),
+    employmentType: employment,
+    riskTolerance: risk,
+    consentStorage: typeof raw.consentStorage === 'boolean' ? raw.consentStorage : INITIAL_EMPTY_PROFILE.consentStorage,
+    consentAI: typeof raw.consentAI === 'boolean' ? raw.consentAI : INITIAL_EMPTY_PROFILE.consentAI,
+    consentOpenBanking: typeof raw.consentOpenBanking === 'boolean' ? raw.consentOpenBanking : INITIAL_EMPTY_PROFILE.consentOpenBanking,
+    updatedAt: sanitizeText(raw.updatedAt, 32) || INITIAL_EMPTY_PROFILE.updatedAt,
+  };
+}
+
+export function sanitizeStoredAssumptions(raw: unknown): AssumptionSet {
+  if (!isPlainRecord(raw)) return DEFAULT_ASSUMPTIONS;
+  return {
+    inflationRate: finiteNumber(raw.inflationRate, DEFAULT_ASSUMPTIONS.inflationRate, 0, 50),
+    salaryGrowthRate: finiteNumber(raw.salaryGrowthRate, DEFAULT_ASSUMPTIONS.salaryGrowthRate, -50, 100),
+    returnsConservative: finiteNumber(raw.returnsConservative, DEFAULT_ASSUMPTIONS.returnsConservative, -50, 100),
+    returnsBase: finiteNumber(raw.returnsBase, DEFAULT_ASSUMPTIONS.returnsBase, -50, 100),
+    returnsAggressive: finiteNumber(raw.returnsAggressive, DEFAULT_ASSUMPTIONS.returnsAggressive, -50, 100),
+    retirementAge: Math.round(finiteNumber(raw.retirementAge, DEFAULT_ASSUMPTIONS.retirementAge, 40, 85)),
+    lifeExpectancy: Math.round(finiteNumber(raw.lifeExpectancy, DEFAULT_ASSUMPTIONS.lifeExpectancy, 60, 110)),
+    sourceNotes: sanitizeText(raw.sourceNotes, 300) || DEFAULT_ASSUMPTIONS.sourceNotes,
+    updatedAt: sanitizeText(raw.updatedAt, 32) || DEFAULT_ASSUMPTIONS.updatedAt,
+  };
+}
+
+function isValidSnapshotShape(v: unknown): v is MonthlySnapshot {
+  if (!isPlainRecord(v)) return false;
+  if (typeof v.period !== 'string' || !/^\d{4}-\d{2}$/.test(v.period)) return false;
+  if (!isPlainRecord(v.income) || !isPlainRecord(v.metrics) || !isPlainRecord(v.metrics.healthScore)) return false;
+  if (!Array.isArray(v.expenses) || !Array.isArray(v.assets) || !Array.isArray(v.debts) || !Array.isArray(v.goals)) {
+    return false;
+  }
+  return true;
+}
+
 export function loadProfileFromStorage(): FinanceProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PROFILE);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = safeJsonParse(raw);
+      if (parsed) return sanitizeStoredProfile(parsed);
     }
   } catch {
     // fallback
@@ -348,12 +410,47 @@ export function loadSnapshotsFromStorage(): MonthlySnapshot[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_SNAPSHOTS);
     if (raw) {
-      const parsed = JSON.parse(raw);
+      const parsed = safeJsonParse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter(isValidSnapshotShape).map((s) => ({
+          ...s,
+          profile: sanitizeStoredProfile(s.profile),
+          expenses: s.expenses.filter(isPlainRecord).map((e) => ({
+            ...e,
+            id: sanitizeText(e.id, 64) || 'exp',
+            name: sanitizeText(e.name, 120),
+            amount: finiteNumber(e.amount, 0, 0),
+          })) as ExpenseItem[],
+          assets: s.assets.filter(isPlainRecord).map((a) => ({
+            ...a,
+            id: sanitizeText(a.id, 64) || 'ast',
+            name: sanitizeText(a.name, 120),
+            balance: finiteNumber(a.balance, 0, 0),
+            updatedAt: sanitizeText(a.updatedAt, 32),
+            sourceNote: a.sourceNote ? sanitizeText(a.sourceNote, 200) : undefined,
+          })) as AssetItem[],
+          debts: s.debts.filter(isPlainRecord).map((d) => ({
+            ...d,
+            id: sanitizeText(d.id, 64) || 'debt',
+            name: sanitizeText(d.name, 120),
+            balance: finiteNumber(d.balance, 0, 0),
+            interestRate: finiteNumber(d.interestRate, 0, 0, 200),
+            minMonthlyPayment: finiteNumber(d.minMonthlyPayment, 0, 0),
+            remainingMonths: Math.round(finiteNumber(d.remainingMonths, 0, 0, 600)),
+          })) as DebtItem[],
+          goals: s.goals.filter(isPlainRecord).map((g) => ({
+            ...g,
+            id: sanitizeText(g.id, 64) || 'goal',
+            name: sanitizeText(g.name, 120),
+            targetAmount: finiteNumber(g.targetAmount, 0, 0),
+            accumulatedAmount: finiteNumber(g.accumulatedAmount, 0, 0),
+            deadline: sanitizeText(g.deadline, 16),
+          })) as FinancialGoal[],
+        }));
         // Nếu toàn bộ là dữ liệu mẫu demo thì tự động chuyển sang số liệu 0 sạch
-        const hasUserCustomData = parsed.some((s: MonthlySnapshot) => s.isDemo === false);
+        const hasUserCustomData = valid.some((s) => s.isDemo === false);
         if (hasUserCustomData) {
-          return parsed;
+          return valid;
         }
       }
     }
@@ -387,7 +484,8 @@ export function loadAssumptionsFromStorage(): AssumptionSet {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_ASSUMPTIONS);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = safeJsonParse(raw);
+      if (parsed) return sanitizeStoredAssumptions(parsed);
     }
   } catch {
     // fallback
@@ -466,5 +564,5 @@ export function exportDataAsCsv(snapshots: MonthlySnapshot[]): string {
     s.metrics.emergencyFundMonths,
   ]);
 
-  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  return [headers.map(escapeCsvCell).join(','), ...rows.map((r) => r.map(escapeCsvCell).join(','))].join('\n');
 }

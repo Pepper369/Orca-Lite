@@ -86,3 +86,28 @@ test("system notices render as muted text without a copy control", () => {
   assert.match(html, /Đã dừng câu trả lời\./);
   assert.ok(!html.includes("Sao chép"), "no copy button on system notices");
 });
+
+test("XSS markdown links and images in agent output never render unsafe href or img", () => {
+  const html = render({
+    id: "xss1",
+    role: "agent",
+    text: [
+      "Thử [c1](javascript:alert(1))",
+      "Thử [c2](  javascript&#58;alert(1))",
+      "Thử [c3](java\tscript:alert(1))",
+      "Thử [c4](data:text/html,<script>alert(1)</script>)",
+      "Thử [c5](vbscript:msgbox(1))",
+      "Thử [c6](//evil.example/x)",
+      "Thử ![svg](https://evil.example/x.svg)",
+      "Hợp lệ [VNDirect](https://dstock.vndirect.com.vn/tin-tuc-ma/HPG)",
+    ].join("\n"),
+    ts: 1,
+  });
+
+  assert.ok(!html.includes("javascript:"), "must never emit javascript: URI");
+  assert.ok(!html.includes("vbscript:"), "must never emit vbscript: URI");
+  assert.ok(!html.includes("data:text/html"), "must never emit data: URI");
+  assert.ok(!html.includes("<img"), "must never render markdown <img>");
+  assert.ok(!html.includes("//evil.example"), "must never emit protocol-relative href");
+  assert.match(html, /<a href="https:\/\/dstock\.vndirect\.com\.vn\/tin-tuc-ma\/HPG" target="_blank" rel="noopener noreferrer nofollow"/);
+});

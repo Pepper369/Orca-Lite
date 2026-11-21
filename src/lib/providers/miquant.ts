@@ -1,4 +1,5 @@
 import "server-only";
+import { sanitizeExternalUrl, sanitizeImageUrl, sanitizeText } from "../ai/sanitize";
 
 const MIQUANT_BASE_URL = "https://backend.miquant.vn";
 
@@ -242,6 +243,34 @@ export interface MiQuantAssetComposition {
   quarter?: number;
 }
 
+function sanitizeEvidenceSummary<T extends { description: string; sites: MiQuantCatalystItem["sites"] }>(
+  summary: T[] | undefined,
+): T[] {
+  if (!Array.isArray(summary)) return [];
+  return summary.map((item) => ({
+    ...item,
+    description: sanitizeText(item.description, 1000),
+    sites: Array.isArray(item.sites)
+      ? item.sites.map((site) => ({
+          domain: sanitizeText(site.domain, 120),
+          favicon: sanitizeImageUrl(site.favicon) ?? undefined,
+          articles: Array.isArray(site.articles)
+            ? site.articles
+                .map((art) => {
+                  const safeUrl = sanitizeExternalUrl(art?.url);
+                  if (!safeUrl) return null;
+                  return {
+                    url: safeUrl,
+                    title: sanitizeText(art?.title, 300) || safeUrl,
+                  };
+                })
+                .filter((a): a is { url: string; title: string } => a !== null)
+            : [],
+        }))
+      : [],
+  }));
+}
+
 export const MiQuantProvider = {
   /** Top breakout stocks from MiQuant */
   async getBreakoutStocks(): Promise<MiQuantBreakoutStock[]> {
@@ -370,7 +399,11 @@ export const MiQuantProvider = {
       `${MIQUANT_BASE_URL}/api/v1/stock/catalyst?symbol=${encodeURIComponent(symbol.toUpperCase())}`,
       600
     );
-    return res?.data ?? null;
+    if (!res?.data) return null;
+    return {
+      ...res.data,
+      summary: sanitizeEvidenceSummary(res.data.summary),
+    };
   },
 
   /** Stock risks and warnings */
@@ -379,7 +412,11 @@ export const MiQuantProvider = {
       `${MIQUANT_BASE_URL}/api/v1/stock/risk?symbol=${encodeURIComponent(symbol.toUpperCase())}`,
       600
     );
-    return res?.data ?? null;
+    if (!res?.data) return null;
+    return {
+      ...res.data,
+      summary: sanitizeEvidenceSummary(res.data.summary),
+    };
   },
 
   /** Key metrics */

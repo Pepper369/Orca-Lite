@@ -2,6 +2,7 @@ import "server-only";
 import { httpJson, httpText } from "../http";
 import { ProviderError } from "./binance";
 import { resolveCommodityImpact, type CommodityStockImpact } from "../commodities-impact";
+import { safeJsonParse } from "../ai/sanitize";
 
 /**
  * Commodity data — VietnamBiz DATA portal ONLY.
@@ -163,7 +164,7 @@ function extractNextDataJson(html: string): string | null {
 }
 
 function extractBuildId(html: string): string | null {
-  const m = html.match(/"buildId"\s*:\s*"([^"]+)"/);
+  const m = html.match(/"buildId"\s*:\s*"([a-zA-Z0-9_-]{1,128})"/);
   return m?.[1] ?? null;
 }
 
@@ -296,11 +297,8 @@ async function fetchViaHtml(): Promise<{ groups: Record<string, VnbItem[]>; down
   const jsonStr = extractNextDataJson(res.text);
   if (!jsonStr) return null;
   let pageData: unknown;
-  try {
-    pageData = JSON.parse(jsonStr);
-  } catch {
-    return null;
-  }
+  pageData = safeJsonParse(jsonStr);
+  if (!pageData) return null;
   const groups = groupsFromUnknown(pageData);
   if (!groups) return null;
   return { groups, downloadMs, buildId };

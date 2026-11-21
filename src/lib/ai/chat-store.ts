@@ -10,6 +10,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { safeJsonParse } from "./sanitize";
 
 export interface ChatTurnMeta {
   mode?: "deterministic" | "llm";
@@ -69,16 +70,25 @@ function notify() {
 }
 
 function isTurn(v: unknown): v is ChatTurn {
-  if (typeof v !== "object" || v === null) return false;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   const t = v as Partial<ChatTurn>;
-  return (t.role === "user" || t.role === "agent") && typeof t.text === "string" && t.text.length > 0;
+  return (
+    (t.role === "user" || t.role === "agent") &&
+    typeof t.text === "string" &&
+    t.text.length > 0 &&
+    typeof t.id === "string" &&
+    t.id.length > 0 &&
+    typeof t.ts === "number" &&
+    Number.isFinite(t.ts)
+  );
 }
 
 function readStored(): ChatSnapshot | null {
   try {
     const raw = window.sessionStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { messages?: unknown; input?: unknown };
+    const parsed = safeJsonParse<{ messages?: unknown; input?: unknown }>(raw);
+    if (!parsed || typeof parsed !== "object") return null;
     const messages = Array.isArray(parsed.messages) ? parsed.messages.filter(isTurn).slice(-MAX_STORED) : [];
     const input = typeof parsed.input === "string" ? parsed.input.slice(0, 800) : "";
     if (messages.length === 0 && !input) return null;

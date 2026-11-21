@@ -6,6 +6,7 @@ import { calculateJarsDistribution } from '../engines/jarsEngine';
 import { calculateYnabMetrics } from '../engines/ynabEngine';
 import { calculateFireAndPyramid } from '../engines/firePyramidEngine';
 import { analyzeSubscriptionsAndRunway, SubscriptionItem } from '../engines/subscriptionsEngine';
+import { safeJsonParse, sanitizeText } from '../../../lib/ai/sanitize';
 import {
   SlidersHorizontal,
   RotateCcw,
@@ -62,21 +63,56 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
   // Custom Subscriptions list - Mặc định rỗng [] để người dùng tự thêm
   const [customSubs, setCustomSubs] = useState<SubscriptionItem[]>([]);
 
-  // Load custom settings from LocalStorage
+  // Load custom settings from LocalStorage (with prototype-pollution & schema guards)
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.customIncome != null) setCustomIncome(parsed.customIncome);
-        if (parsed.customExpenses != null) setCustomExpenses(parsed.customExpenses);
-        if (parsed.customCash != null) setCustomCash(parsed.customCash);
-        if (parsed.customInvested != null) setCustomInvested(parsed.customInvested);
-        if (parsed.customAge != null) setCustomAge(parsed.customAge);
-        if (parsed.customCagr != null) setCustomCagr(parsed.customCagr);
-        if (parsed.jarsRatios != null) setJarsRatios(parsed.jarsRatios);
-        if (parsed.customSubs != null && Array.isArray(parsed.customSubs)) setCustomSubs(parsed.customSubs);
-        if (parsed.useCustomAmounts != null) setUseCustomAmounts(parsed.useCustomAmounts);
+        const parsed = safeJsonParse<Record<string, unknown>>(saved);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+        const fin = (v: unknown): number | null => {
+          const n = typeof v === 'number' ? v : Number(v);
+          return Number.isFinite(n) && n >= 0 ? n : null;
+        };
+        const inc = fin(parsed.customIncome);
+        if (inc !== null) setCustomIncome(inc);
+        const exp = fin(parsed.customExpenses);
+        if (exp !== null) setCustomExpenses(exp);
+        const cash = fin(parsed.customCash);
+        if (cash !== null) setCustomCash(cash);
+        const inv = fin(parsed.customInvested);
+        if (inv !== null) setCustomInvested(inv);
+        const age = fin(parsed.customAge);
+        if (age !== null) setCustomAge(Math.min(100, Math.max(18, Math.round(age))));
+        const cagr = fin(parsed.customCagr);
+        if (cagr !== null) setCustomCagr(Math.min(50, Math.max(0, cagr)));
+        if (parsed.jarsRatios && typeof parsed.jarsRatios === 'object' && !Array.isArray(parsed.jarsRatios)) {
+          const allowedKeys = ['NEC', 'FFA', 'LTSS', 'EDU', 'PLAY', 'GIVE'] as const;
+          const nextRatios: Record<string, number> = { ...jarsRatios };
+          for (const k of allowedKeys) {
+            const val = fin((parsed.jarsRatios as Record<string, unknown>)[k]);
+            if (val !== null && val <= 100) nextRatios[k] = val;
+          }
+          setJarsRatios(nextRatios);
+        }
+        if (Array.isArray(parsed.customSubs)) {
+          const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
+          const safeSubs: SubscriptionItem[] = parsed.customSubs
+            .filter((s): s is Record<string, unknown> => Boolean(s && typeof s === 'object' && !Array.isArray(s)))
+            .slice(0, 50)
+            .map((s, idx) => ({
+              id: sanitizeText(s.id, 64) || `sub-${idx}`,
+              name: sanitizeText(s.name, 80) || 'Thuê bao',
+              category: s.category === 'living' || s.category === 'wellness' || s.category === 'productivity' || s.category === 'other' ? s.category : 'digital',
+              monthlyAmount: fin(s.monthlyAmount) ?? 0,
+              billingCycle: s.billingCycle === 'yearly' ? 'yearly' : 'monthly',
+              autoRenew: typeof s.autoRenew === 'boolean' ? s.autoRenew : true,
+              isEssential: typeof s.isEssential === 'boolean' ? s.isEssential : false,
+              color: typeof s.color === 'string' && HEX_COLOR_RE.test(s.color) ? s.color : '#38bdf8',
+            }));
+          setCustomSubs(safeSubs);
+        }
+        if (typeof parsed.useCustomAmounts === 'boolean') setUseCustomAmounts(parsed.useCustomAmounts);
       }
     } catch {
       /* ignore storage load error */
@@ -201,15 +237,16 @@ export const GlobalFinanceView: React.FC<GlobalFinanceViewProps> = ({
   };
 
   const handleAddSubscription = () => {
-    const name = prompt('Nhập tên khoản chi định kỳ / Thuê bao:');
-    if (!name?.trim()) return;
+    const rawName = prompt('Nhập tên khoản chi định kỳ / Thuê bao:');
+    const cleanName = sanitizeText(rawName, 80);
+    if (!cleanName) return;
     const amountStr = prompt('Nhập số tiền hàng tháng (VND):', '100000');
     const amount = Number(amountStr?.replace(/\D/g, '')) || 100_000;
     const isEssential = confirm('Khoản chi này có phải là bắt buộc thiết yếu không? (OK = Có, Cancel = Tùy chọn)');
 
     const newSub: SubscriptionItem = {
       id: `sub-${Date.now()}`,
-      name: name.trim(),
+      name: cleanName,
       category: 'digital',
       monthlyAmount: amount,
       billingCycle: 'monthly',

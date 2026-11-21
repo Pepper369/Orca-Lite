@@ -3,6 +3,8 @@
  * Scrapes or feeds ideas and sentiments for a given ticker from TradingView.
  */
 
+import { decodeHtmlEntitiesSafe, sanitizeExternalUrl, sanitizeImageUrl, sanitizeText } from "../ai/sanitize";
+
 export interface TradingViewIdea {
   id: string;
   title: string;
@@ -17,8 +19,12 @@ export interface TradingViewIdea {
   url: string;
 }
 
+const IMAGE_EXT_RE = /\.(?:png|jpg|jpeg|webp)$/i;
+
 export async function fetchTradingViewIdeas(symbol: string): Promise<TradingViewIdea[]> {
-  const cleanSym = symbol.trim().toUpperCase();
+  const cleanSym = symbol.trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "");
+  if (!cleanSym) return [];
+  const fallbackUrl = `https://www.tradingview.com/symbols/${encodeURIComponent(cleanSym)}/ideas/`;
 
   try {
     // Query TradingView community ideas RSS / feed
@@ -39,7 +45,7 @@ export async function fetchTradingViewIdeas(symbol: string): Promise<TradingView
 
     // Parse RSS items
     const items: TradingViewIdea[] = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
     let match: RegExpExecArray | null;
 
     let index = 0;
@@ -47,33 +53,48 @@ export async function fetchTradingViewIdeas(symbol: string): Promise<TradingView
       index++;
       const itemContent = match[1]!;
 
-      const titleMatch = itemContent.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || itemContent.match(/<title>(.*?)<\/title>/);
-      const linkMatch = itemContent.match(/<link>(.*?)<\/link>/);
-      const authorMatch = itemContent.match(/<dc:creator><!\[CDATA\[(.*?)\]\]><\/dc:creator>/) || itemContent.match(/<author>(.*?)<\/author>/);
-      const pubDateMatch = itemContent.match(/<pubDate>(.*?)<\/pubDate>/);
-      const descMatch = itemContent.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || itemContent.match(/<description>(.*?)<\/description>/);
+      const titleMatch = itemContent.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+      const linkMatch = itemContent.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i);
+      const authorMatch =
+        itemContent.match(/<dc:creator\b[^>]*>([\s\S]*?)<\/dc:creator>/i) ||
+        itemContent.match(/<author\b[^>]*>([\s\S]*?)<\/author>/i);
+      const pubDateMatch = itemContent.match(/<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i);
+      const descMatch = itemContent.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i);
 
-      const title = titleMatch?.[1]?.trim() || `Phân tích kỹ thuật ${cleanSym}`;
-      const link = linkMatch?.[1]?.trim() || `https://www.tradingview.com/symbols/${cleanSym}/ideas/`;
-      const author = authorMatch?.[1]?.trim() || "Trader";
-      const pubDate = pubDateMatch?.[1] ? new Date(pubDateMatch[1]).toISOString() : new Date().toISOString();
+      const title = sanitizeText(titleMatch?.[1], 240) || `Phân tích kỹ thuật ${cleanSym}`;
+      const rawLink = decodeHtmlEntitiesSafe((linkMatch?.[1] ?? "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"), 2, false);
+      const link = sanitizeExternalUrl(rawLink) ?? fallbackUrl;
+      const author = sanitizeText(authorMatch?.[1], 80) || "Trader";
+      const parsedDateMs = pubDateMatch?.[1] ? Date.parse(sanitizeText(pubDateMatch[1], 64)) : NaN;
+      const pubDate = Number.isFinite(parsedDateMs) ? new Date(parsedDateMs).toISOString() : new Date().toISOString();
       const rawDesc = descMatch?.[1] || "";
+      const cleanDesc = sanitizeText(rawDesc, 220);
 
       // Detect sentiment from title & description keywords
       let sentiment: "BULLISH" | "BEARISH" | "NEUTRAL" = "NEUTRAL";
-      const combined = `${title} ${rawDesc}`.toLowerCase();
+      const combined = `${title} ${cleanDesc}`.toLowerCase();
       if (combined.includes("long") || combined.includes("bullish") || combined.includes("buy") || combined.includes("tăng") || combined.includes("mua")) {
         sentiment = "BULLISH";
       } else if (combined.includes("short") || combined.includes("bearish") || combined.includes("sell") || combined.includes("giảm") || combined.includes("bán")) {
         sentiment = "BEARISH";
       }
 
-      // Extract image URL if present in description
-      const imgMatch = rawDesc.match(/src=["'](https:\/\/[^"']+\.(?:png|jpg|jpeg))["']/i);
-      const previewImageUrl = imgMatch?.[1];
-
-      // Strip HTML tags for clean description
-      const cleanDesc = rawDesc.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220);
+      // Extract & strictly validate image URL if present in description (https + raster extension only)
+      let previewImageUrl: string | undefined;
+      for (const imgMatch of rawDesc.matchAll(/\bsrc\s*=\s*["']([^"']+)["']/gi)) {
+        const rawSrc = imgMatch[1];
+        if (!rawSrc) continue;
+        const candidate = sanitizeImageUrl(decodeHtmlEntitiesSafe(rawSrc, 2, false), { requireHttps: true });
+        if (!candidate) continue;
+        try {
+          if (IMAGE_EXT_RE.test(new URL(candidate).pathname)) {
+            previewImageUrl = candidate;
+            break;
+          }
+        } catch {
+          // try next image candidate
+        }
+      }
 
       items.push({
         id: `tv_idea_${cleanSym}_${index}`,
@@ -103,7 +124,7 @@ export async function fetchTradingViewIdeas(symbol: string): Promise<TradingView
       sentiment: "BULLISH",
       timestamp: new Date().toISOString(),
       description: `Mã ${cleanSym} đang hình thành nền giá nén chặt sau pha rũ bỏ. Dòng tiền thông minh bắt đầu tham gia tại vùng hỗ trợ then chốt.`,
-      url: `https://www.tradingview.com/symbols/${cleanSym}/ideas/`,
+      url: fallbackUrl,
     },
     {
       id: `tv_idea_${cleanSym}_def2`,
@@ -113,7 +134,7 @@ export async function fetchTradingViewIdeas(symbol: string): Promise<TradingView
       sentiment: "NEUTRAL",
       timestamp: new Date(Date.now() - 86400000).toISOString(),
       description: `Cần theo dõi chặt chẽ phản ứng giá quanh đường MA 50 ngày. Động lượng RSI đang trung tính trước thềm báo cáo kết quả kinh doanh.`,
-      url: `https://www.tradingview.com/symbols/${cleanSym}/ideas/`,
+      url: fallbackUrl,
     },
   ];
 }

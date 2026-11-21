@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "crypto";
 import { vndirectJson } from "../financial/vndirect-http";
 import type { NewsArticle } from "../types";
+import { sanitizeExternalUrl, sanitizeText } from "../ai/sanitize";
 
 const VND_NEWS = "vndirect-news";
 
@@ -29,7 +30,7 @@ export function mapVndNewsRow(sym: string, row: Row): NewsArticle | null {
   const title = str(row.newsTitle) ?? str(row.title) ?? str(row.headline);
   if (!title) return null;
   const rawUrl = str(row.newsSourceLink) ?? str(row.newsUrl) ?? str(row.url) ?? str(row.link);
-  const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : dstockNewsUrl(sym);
+  const url = sanitizeExternalUrl(rawUrl) ?? dstockNewsUrl(sym);
   const id = str(row.newsId) ?? str(row.id) ?? createHash("sha1").update(`${sym}|${title}`).digest("hex").slice(0, 16);
   return {
     id: `vnd-${id}`,
@@ -60,12 +61,7 @@ export interface AnalyticReport {
 }
 
 function cleanHtmlText(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return sanitizeText(html);
 }
 
 export function mapVndAnalyticReport(sym: string, row: Row): AnalyticReport | null {
@@ -73,24 +69,24 @@ export function mapVndAnalyticReport(sym: string, row: Row): AnalyticReport | nu
   if (!title) return null;
   const content = str(row.newsContent) ?? "";
   const rawUrl = str(row.newsSourceLink) ?? str(row.newsUrl) ?? str(row.url) ?? str(row.link);
-  const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : dstockNewsUrl(sym);
+  const url = sanitizeExternalUrl(rawUrl) ?? dstockNewsUrl(sym);
   const id = str(row.newsId) ?? str(row.id) ?? createHash("sha1").update(`${sym}|${title}`).digest("hex").slice(0, 16);
 
-  // Extract PDF attachment if present
+  // Extract PDF attachment if present (strict http/https + .pdf pathname)
   let pdfUrl: string | null = null;
   const rawAttachments = row.attachments;
   if (Array.isArray(rawAttachments) && rawAttachments.length) {
     for (const att of rawAttachments) {
-      const u = str(att?.url) ?? str(att?.sourceUrl);
-      if (u && /\.pdf$/i.test(u)) {
-        pdfUrl = u;
+      const safeU = sanitizeExternalUrl(str(att?.url) ?? str(att?.sourceUrl));
+      if (safeU && /\.pdf(?:$|[?#])/i.test(safeU)) {
+        pdfUrl = safeU;
         break;
       }
     }
   }
   if (!pdfUrl && content) {
-    const m = content.match(/https?:\/\/[^\s"'><\)]+\.pdf/i);
-    if (m) pdfUrl = m[0];
+    const m = content.match(/https?:\/\/[^\s"'><\)]+\.pdf(?:\?[^\s"'><\)]*)?/i);
+    if (m) pdfUrl = sanitizeExternalUrl(m[0]);
   }
 
   // Extract Target Price
@@ -250,20 +246,22 @@ export async function getVndSignedDisclosures(symbol: string, size = 25): Promis
     if (Array.isArray(row.attachments)) {
       for (const att of row.attachments) {
         if (!att || typeof att !== "object") continue;
-        const u = str((att as any).url) ?? str((att as any).sourceUrl);
-        const name = str((att as any).name) ?? "Tài liệu đính kèm";
-        if (u) {
+        const attObj = att as Record<string, unknown>;
+        const safeUrl = sanitizeExternalUrl(str(attObj.url) ?? str(attObj.sourceUrl));
+        const safeSourceUrl = sanitizeExternalUrl(str(attObj.sourceUrl));
+        const name = str(attObj.name) ?? "Tài liệu đính kèm";
+        if (safeUrl) {
           attachments.push({
             name,
-            url: u,
-            sourceUrl: str((att as any).sourceUrl),
+            url: safeUrl,
+            sourceUrl: safeSourceUrl,
           });
         }
       }
     }
 
     const rawUrl = str(row.newsSourceLink) ?? str(row.newsUrl) ?? str(row.url) ?? str(row.link);
-    const newsUrl = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : dstockNewsUrl(sym);
+    const newsUrl = sanitizeExternalUrl(rawUrl) ?? dstockNewsUrl(sym);
 
     out.push({
       id: `vnd-disc-${id}`,

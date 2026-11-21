@@ -13,6 +13,7 @@ import { memo, useMemo, useState } from "react";
 import { Bot, Check, Copy } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { blockText, parseChatBlocks, type ChatBlock, type ChatInline } from "@/lib/ai/chat-format";
+import { sanitizeExternalUrl } from "@/lib/ai/sanitize";
 import type { ChatTurn, ChatTurnMeta } from "@/lib/ai/chat-store";
 
 export type { ChatTurn, ChatTurnMeta };
@@ -36,20 +37,41 @@ export function clockLabel(ts: number): string {
 function Inline({ parts }: { parts: ChatInline[] }) {
   return (
     <>
-      {parts.map((p, i) =>
-        p.bold ? (
-          <strong key={i} className="font-semibold text-ink">
-            {p.text}
-          </strong>
-        ) : p.code ? (
-          <code key={i} className="rounded bg-panel-3/70 px-1 py-px text-[12px] text-accent-2">
-            {p.text}
-          </code>
-        ) : (
-          // plain runs stay bare strings — no wrapper node per text run
-          p.text
-        ),
-      )}
+      {parts.map((p, i) => {
+        if (p.href) {
+          const safeHref = sanitizeExternalUrl(p.href);
+          if (safeHref) {
+            return (
+              <a
+                key={i}
+                href={safeHref}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="underline decoration-accent/60 hover:text-accent"
+              >
+                {p.text}
+              </a>
+            );
+          }
+          return p.text;
+        }
+        if (p.bold) {
+          return (
+            <strong key={i} className="font-semibold text-ink">
+              {p.text}
+            </strong>
+          );
+        }
+        if (p.code) {
+          return (
+            <code key={i} className="rounded bg-panel-3/70 px-1 py-px text-[12px] text-accent-2">
+              {p.text}
+            </code>
+          );
+        }
+        // plain runs stay bare strings — no wrapper node per text run
+        return p.text;
+      })}
     </>
   );
 }

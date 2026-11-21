@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { httpText } from "../http";
 import type { NewsArticle } from "../types";
 import { ProviderError } from "./binance";
+import { decodeHtmlEntitiesSafe, sanitizeExternalUrl, sanitizeText } from "../ai/sanitize";
 
 /**
  * News aggregation engine — real RSS ingestion with timestamp validation,
@@ -133,19 +134,8 @@ const SECTOR_KW: [RegExp, string][] = [
 
 /* ------------------------------ XML helpers ------------------------------ */
 
-const _AMP = "&";
 const decodeXml = (s: string) =>
-  s
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(new RegExp(_AMP + "amp;", "g"), _AMP)
-    .replace(new RegExp(_AMP + "lt;", "g"), "<")
-    .replace(new RegExp(_AMP + "gt;", "g"), ">")
-    .replace(new RegExp(_AMP + "quot;", "g"), '"')
-    .replace(new RegExp(_AMP + "#39;|" + _AMP + "apos;", "g"), "'")
-    .replace(new RegExp(_AMP + "#(\\d+);", "g"), (_, c) => String.fromCharCode(Number(c)))
-    .replace(new RegExp(_AMP + "#x([0-9a-fA-F]+);", "g"), (_, h) => String.fromCharCode(parseInt(h, 16)));
-
-const stripTags = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  decodeHtmlEntitiesSafe(s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1"), 2, false);
 
 function extractTag(block: string, tag: string): string {
   const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i");
@@ -157,16 +147,23 @@ function extractCdataOrText(block: string, tag: string): string {
   const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i");
   const m = block.match(re);
   if (!m) return "";
-  return stripTags(decodeXml(m[1]));
+  return sanitizeText(m[1]);
 }
 
 function extractLink(block: string): string {
-  const plain = extractTag(block, "link");
-  if (/^https?:\/\//i.test(plain)) return plain.trim();
-  const href = block.match(/<link[^>]+href=["']([^"']+)["']/i);
-  if (href?.[1]) return href[1];
-  const guid = extractTag(block, "guid");
-  if (/^https?:\/\//i.test(guid)) return guid.trim();
+  const plain = sanitizeExternalUrl(extractTag(block, "link"));
+  if (plain) return plain;
+
+  // Match all <link ... href="..."> attributes (Atom feeds) and require strict http(s) URL
+  const linkTags = block.matchAll(/<link\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi);
+  for (const m of linkTags) {
+    const rawHref = m[1] ?? m[2] ?? m[3] ?? "";
+    const safeHref = sanitizeExternalUrl(decodeXml(rawHref));
+    if (safeHref) return safeHref;
+  }
+
+  const guid = sanitizeExternalUrl(extractTag(block, "guid"));
+  if (guid) return guid;
   return "";
 }
 
@@ -215,24 +212,8 @@ function makeId(url: string, title: string): string {
 
 /* ------------------------------ per-feed fetch ------------------------------ */
 
-export async function fetchFeed(feed: FeedDef): Promise<NewsArticle[]> {
-  const res = await httpText(feed.url, {
-    provider: `news:${feed.name}`,
-    timeoutMs: FEED_TIMEOUT_MS,
-    retries: FEED_RETRIES,
-    backoffBaseMs: 400,
-    headers: {
-      Accept: "application/rss+xml, application/xml, text/xml, application/atom+xml, */*",
-    },
-  });
-  if (!res.ok || !res.text) {
-    throw new ProviderError(`news feed ${feed.name}: ${res.error ?? "unreachable"}`, NEWS_PROVIDER);
-  }
-  const items = extractItems(res.text);
-  if (!items.length) {
-    throw new ProviderError(`news feed ${feed.name}: empty parse`, NEWS_PROVIDER);
-  }
-
+export function parseFeedXml(feed: FeedDef, xml: string): NewsArticle[] {
+  const items = extractItems(xml);
   const out: NewsArticle[] = [];
   for (const block of items.slice(0, 25)) {
     const title = extractCdataOrText(block, "title");
@@ -259,6 +240,26 @@ export async function fetchFeed(feed: FeedDef): Promise<NewsArticle[]> {
       relatedSymbols: symbols,
       relatedSector: sector,
     });
+  }
+  return out;
+}
+
+export async function fetchFeed(feed: FeedDef): Promise<NewsArticle[]> {
+  const res = await httpText(feed.url, {
+    provider: `news:${feed.name}`,
+    timeoutMs: FEED_TIMEOUT_MS,
+    retries: FEED_RETRIES,
+    backoffBaseMs: 400,
+    headers: {
+      Accept: "application/rss+xml, application/xml, text/xml, application/atom+xml, */*",
+    },
+  });
+  if (!res.ok || !res.text) {
+    throw new ProviderError(`news feed ${feed.name}: ${res.error ?? "unreachable"}`, NEWS_PROVIDER);
+  }
+  const out = parseFeedXml(feed, res.text);
+  if (!out.length && !extractItems(res.text).length) {
+    throw new ProviderError(`news feed ${feed.name}: empty parse`, NEWS_PROVIDER);
   }
   return out;
 }

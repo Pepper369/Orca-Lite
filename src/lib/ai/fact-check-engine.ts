@@ -14,6 +14,7 @@ import { runFundamentalValuation } from "../services/fundamental-valuation";
 import { fetchVndirectFinancials } from "../financial/vndirect-fs";
 import { getVndSignedDisclosures } from "../providers/vndirect-news";
 import { getSecurity } from "../vn/master";
+import { sanitizeExternalUrl } from "./sanitize";
 
 export type ClaimCategory = "REVENUE_PROFIT" | "DEBT_LEVERAGE" | "CASHFLOW" | "VALUATION" | "PROJECT_LANDBANK" | "DIVIDEND";
 
@@ -229,7 +230,7 @@ export async function verifyFinancialClaims(input: {
     disclosuresFound: disclosures.slice(0, 3).map((f) => ({
       title: f.title,
       date: f.date,
-      url: f.newsUrl,
+      url: sanitizeExternalUrl(f.newsUrl),
     })),
   };
 }

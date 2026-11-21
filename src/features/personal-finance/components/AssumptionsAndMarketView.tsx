@@ -13,6 +13,7 @@ import {
   Check,
 } from 'lucide-react';
 import { DEFAULT_ASSUMPTIONS } from '../engines/projectionEngine.ts';
+import { sanitizeExternalUrl } from '../../../lib/ai/sanitize.ts';
 
 interface AssumptionsAndMarketViewProps {
   assumptions: AssumptionSet;
@@ -81,16 +82,19 @@ export const AssumptionsAndMarketView: React.FC<AssumptionsAndMarketViewProps> =
                   <td className="py-2.5 px-3 text-slate-300">
                     <div className="flex items-center gap-1">
                       <span>{item.sourceName}</span>
-                      {item.sourceUrl && (
-                        <a
-                          href={item.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-slate-500 hover:text-amber-400"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
+                      {(() => {
+                        const safeSourceUrl = sanitizeExternalUrl(item.sourceUrl);
+                        return safeSourceUrl ? (
+                          <a
+                            href={safeSourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-slate-500 hover:text-amber-400"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : null;
+                      })()}
                     </div>
                   </td>
                   <td className="py-2.5 px-3 text-slate-400">{item.updatedAt}</td>

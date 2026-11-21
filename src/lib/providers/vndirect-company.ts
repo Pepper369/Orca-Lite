@@ -1,6 +1,7 @@
 import "server-only";
 import { vndirectJson } from "../financial/vndirect-http";
 import { vnPriceQuoteToVnd } from "../financial/vn-units";
+import { sanitizeExternalUrl, sanitizeImageUrl } from "../ai/sanitize";
 
 const VND = "vndirect-company";
 
@@ -96,10 +97,18 @@ function mapProfileRow(sym: string, row: Record<string, unknown>): VndCompanyPro
     return Number.isFinite(x) ? x : null;
   };
   const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const rawWebsite = s(row.website);
+  const safeWebsite = rawWebsite
+    ? sanitizeExternalUrl(
+        /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(rawWebsite) || rawWebsite.startsWith("//")
+          ? rawWebsite
+          : `https://${rawWebsite}`,
+      )
+    : null;
   return {
     code: String(row.code ?? sym),
     floor: s(row.floor),
-    logo: s(row.logo),
+    logo: sanitizeImageUrl(row.logo),
     vnName: s(row.vnName),
     enName: s(row.enName),
     foundDate: s(row.foundDate),
@@ -109,7 +118,7 @@ function mapProfileRow(sym: string, row: Record<string, unknown>): VndCompanyPro
     enAddress: s(row.enAddress),
     phone: s(row.phone),
     fax: s(row.fax),
-    website: s(row.website),
+    website: safeWebsite,
     email: s(row.email),
     employees: n(row.employees),
     branches: n(row.branches),

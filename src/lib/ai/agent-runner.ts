@@ -9,6 +9,7 @@
 
 import "server-only";
 import { llmChat, llmChatStream } from "./gateway";
+import { safeJsonParse } from "./sanitize";
 import { ORCA_FA_TOOLS, executeOrcaTool } from "./tools/fa-tools";
 
 export interface AgenticStep {
@@ -159,7 +160,7 @@ QUY TẮC BẮT BUỘC:
 
     try {
       const cleaned = res.text.replace(/^```json/i, "").replace(/```$/, "").trim();
-      parsed = JSON.parse(cleaned);
+      parsed = safeJsonParse(cleaned);
     } catch {
       if (res.text.trim().length >= 100) {
         opts?.onToken?.(res.text.trim());

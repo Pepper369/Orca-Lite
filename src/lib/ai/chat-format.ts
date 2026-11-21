@@ -3,18 +3,21 @@
  *
  * Agent answers arrive as plain text: the deterministic engine emits
  * `heading\n` + one fact per line, while the LLM persona emits real Markdown
- * (headings, bullets, wrapped paragraphs, **bold**, `code`). The chat frame
- * renders both from the same block model, so this lives outside React and is
- * unit-tested in isolation (src/lib/ai/__tests__/chat-format.test.ts).
+ * (headings, bullets, wrapped paragraphs, **bold**, `code`, and validated [label](url) links).
+ * The chat frame renders both from the same block model, so this lives outside
+ * React and is unit-tested in isolation (src/lib/ai/__tests__/chat-format.test.ts).
  *
- * Deliberately no HTML parsing and no dangerouslySetInnerHTML: the parser can
- * only ever produce text nodes, so answer text can never inject markup.
+ * Deliberately no HTML parsing, no raw <img> rendering, and no dangerouslySetInnerHTML:
+ * all text nodes are plain React text, and links are strictly validated to http(s) URLs.
  */
+
+import { sanitizeExternalUrl } from "./sanitize";
 
 export interface ChatInline {
   text: string;
   bold?: boolean;
   code?: boolean;
+  href?: string;
 }
 
 export type ChatBlock =
@@ -32,8 +35,86 @@ const QUOTE_RE = /^>\s?/;
 const CONTINUATION_RE = /^[\p{Ll}]/u;
 const INLINE_RE = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
 
-/** Split `**bold**`, `__bold__` and `` `code` `` runs out of a single line. */
-export function parseInline(text: string): ChatInline[] {
+interface ParsedLinkMatch {
+  start: number;
+  end: number;
+  isImage: boolean;
+  label: string;
+  rawUrl: string;
+}
+
+/**
+ * Scan for balanced markdown link/image `[label](target)` or `![alt](target)`.
+ * Handles nested parentheses in targets like `javascript:alert(1)` or Wikipedia URLs,
+ * and rejects nested `[` inside labels to prevent bracket-smuggling bypasses.
+ */
+function findNextMarkdownLink(text: string, from: number): ParsedLinkMatch | null {
+  let idx = from;
+  while (idx < text.length) {
+    const openBracket = text.indexOf("[", idx);
+    if (openBracket < 0) return null;
+
+    const isImage = openBracket > 0 && text[openBracket - 1] === "!";
+    const start = isImage ? openBracket - 1 : openBracket;
+
+    // Find matching ']' without nested '['
+    let closeBracket = -1;
+    for (let i = openBracket + 1; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "[") break;
+      if (ch === "]") {
+        closeBracket = i;
+        break;
+      }
+    }
+    if (closeBracket < 0) {
+      idx = openBracket + 1;
+      continue;
+    }
+
+    if (text[closeBracket + 1] !== "(") {
+      idx = closeBracket + 1;
+      continue;
+    }
+
+    // Scan balanced parentheses for URL target
+    let depth = 1;
+    let i = closeBracket + 2;
+    while (i < text.length && depth > 0) {
+      const ch = text[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (depth === 0) break;
+      i++;
+    }
+
+    if (depth !== 0) {
+      idx = openBracket + 1;
+      continue;
+    }
+
+    const label = text.slice(openBracket + 1, closeBracket);
+    const rawTarget = text.slice(closeBracket + 2, i).trim();
+    // Strip optional markdown title `"..."` or `'...'` after URL
+    const titleSplit = rawTarget.match(/^(\S+)(?:\s+["'][^"']*["'])?$/);
+    const rawUrl = titleSplit ? titleSplit[1]! : rawTarget;
+
+    return {
+      start,
+      end: i + 1,
+      isImage,
+      label,
+      rawUrl,
+    };
+  }
+  return null;
+}
+
+function parseInlineStyles(text: string): ChatInline[] {
   const out: ChatInline[] = [];
   let last = 0;
   let m: RegExpExecArray | null;
@@ -46,6 +127,39 @@ export function parseInline(text: string): ChatInline[] {
     last = m.index + token.length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });
+  return out.filter((s) => s.text.length > 0);
+}
+
+/**
+ * Split `**bold**`, `__bold__`, `` `code` ``, and safe `[label](https://...)` runs out of a single line.
+ * Dangerous or non-http(s) markdown links and all `![alt](url)` image markdown are neutralized to plain text.
+ */
+export function parseInline(text: string): ChatInline[] {
+  const out: ChatInline[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const link = findNextMarkdownLink(text, cursor);
+    if (!link) {
+      out.push(...parseInlineStyles(text.slice(cursor)));
+      break;
+    }
+    if (link.start > cursor) {
+      out.push(...parseInlineStyles(text.slice(cursor, link.start)));
+    }
+    if (link.isImage) {
+      // Never render markdown images from untrusted AI/user text; keep alt text only if non-empty
+      if (link.label.trim()) out.push({ text: link.label.trim() });
+    } else {
+      const safeHref = sanitizeExternalUrl(link.rawUrl);
+      if (safeHref && link.label.trim()) {
+        out.push({ text: link.label, href: safeHref });
+      } else if (link.label.trim()) {
+        // Neutralize unsafe link targets (javascript:, vbscript:, data:, //, entity-encoded) to inert plain text
+        out.push({ text: link.label });
+      }
+    }
+    cursor = link.end;
+  }
   return out.filter((s) => s.text.length > 0);
 }
 

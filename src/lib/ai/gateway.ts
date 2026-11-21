@@ -2,6 +2,7 @@ import "server-only";
 import { env } from "../env";
 import { httpJson } from "../http";
 import { isLocalGgufModelId, resolveLocalGgufConfig } from "./local-gguf";
+import { safeJsonParse } from "./sanitize";
 
 /**
  * LLM GATEWAY — OpenRouter-first + fast cascade (production) + optional Local GGUF runtime.
@@ -562,7 +563,7 @@ export async function llmChatStream(
         const jsonStr = trimmed.slice(5).trim();
         if (jsonStr === "[DONE]") break;
         try {
-          const parsed = JSON.parse(jsonStr);
+          const parsed = safeJsonParse<{ choices?: { delta?: { content?: string } }[] }>(jsonStr);
           const delta = parsed?.choices?.[0]?.delta?.content ?? "";
           if (delta) {
             accumulatedText += delta;
