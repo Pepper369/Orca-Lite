@@ -1,8 +1,24 @@
 import type { OhlcvBar } from "../types";
 import { atr, ema, rsi } from "../technical";
 import { getAssetPipSize } from "./asset-precision";
-import { calculateDeflatedSharpeRatio } from "./advanced-quant-math";
+import {
+  applySymmetricCusumFilter,
+  calculateDeflatedSharpeRatio,
+  filterOnlineRegimeHmm,
+  forecastHarRealizedVolatility,
+} from "./advanced-quant-math";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "./fx-crypto-precision-engine";
+import {
+  applyIsotonicCalibration,
+  calculateCombinatorialPurgedPbo,
+  computeBrierScore,
+  predictMetaLabelProbability,
+  trainPurgedMetaLabelClassifier,
+  type MetaLabelFeatureVector,
+  type MetaLabelTrainingSample,
+  type PboEvaluationResult,
+  type TrainedMetaLabelModel,
+} from "./meta-labeling-calibration";
 
 export type BenchmarkRegime =
   | "CLEAN_UPTREND_PULLBACK"
@@ -551,5 +567,394 @@ export function runWalkForwardComparison(params: {
     upgradedAllGrades,
     winRateLiftPp,
     trapReductionPct,
+  };
+}
+
+export interface PurgedMetaLabelWalkForwardReport {
+  calibrationSamplesCount: number;
+  holdoutSamplesCount: number;
+  model: TrainedMetaLabelModel;
+  oosBrierBefore: number;
+  oosBrierAfter: number;
+  brierImprovementPct: number;
+  metaFilteredMetrics: BacktestMetrics;
+  pbo: PboEvaluationResult;
+}
+
+export interface HistoricalAssetSeriesInput {
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+  spreadPipsOrPct: number;
+  bars: OhlcvBar[];
+}
+
+export interface RealHistoricalWalkForwardReport {
+  totalBarsEvaluated: number;
+  calibrationMetrics: BacktestMetrics;
+  holdoutMetrics: BacktestMetrics;
+  oosBrierBefore: number;
+  oosBrierAfter: number;
+  pbo: PboEvaluationResult;
+}
+
+function collectWalkForwardMetaSamples(params: {
+  seeds: number[];
+  assets: BenchmarkAssetSpec[];
+  regimes: BenchmarkRegime[];
+}): {
+  samples: MetaLabelTrainingSample[];
+  records: {
+    netR: number;
+    tp1Hit: boolean;
+    isTrap: boolean;
+    grade: SetupGrade;
+    rawProb: number;
+    features: MetaLabelFeatureVector;
+  }[];
+  totalEvaluations: number;
+} {
+  const { seeds, assets, regimes } = params;
+  const samples: MetaLabelTrainingSample[] = [];
+  const records: {
+    netR: number;
+    tp1Hit: boolean;
+    isTrap: boolean;
+    grade: SetupGrade;
+    rawProb: number;
+    features: MetaLabelFeatureVector;
+  }[] = [];
+  let totalEvaluations = 0;
+  let globalIdxOffset = 0;
+
+  for (const seed of seeds) {
+    for (let aIdx = 0; aIdx < assets.length; aIdx++) {
+      const asset = assets[aIdx]!;
+      for (let rIdx = 0; rIdx < regimes.length; rIdx++) {
+        const regime = regimes[rIdx]!;
+        const { bars, isTrapBar } = generateRegimeBars(asset, regime, seed + aIdx * 31 + rIdx * 97);
+        const pip = getAssetPipSize(asset.symbol, asset.assetType, asset.basePrice);
+        let nextAllowedPrecision = 50;
+
+        for (let t = 50; t <= bars.length - 26; t += 2) {
+          totalEvaluations++;
+          if (t < nextAllowedPrecision) continue;
+          const barsCausal = bars.slice(0, t + 1);
+          const futureBars = bars.slice(t + 1);
+          const curPrice = bars[t]!.close;
+          const frictionPrice =
+            asset.assetType === "FOREX"
+              ? (asset.spreadPipsOrPct + 0.35) * pip
+              : curPrice * (asset.spreadPipsOrPct + 0.0006);
+
+          const prec = evaluatePrecisionTradeSetup({
+            symbol: asset.symbol,
+            assetType: asset.assetType,
+            barsExecution: barsCausal,
+            spreadPipsOrPct: asset.spreadPipsOrPct,
+          });
+
+          if (
+            prec.grade !== "NO_TRADE" &&
+            prec.direction !== "NEUTRAL" &&
+            prec.entry != null &&
+            prec.stopLoss != null &&
+            prec.tp1 != null &&
+            prec.tp2 != null &&
+            prec.tp3 != null
+          ) {
+            const out = simulateTradeOutcome({
+              barsFuture: futureBars,
+              direction: prec.direction,
+              entryMode: prec.entryMode === "LIMIT_PULLBACK" ? "LIMIT_PULLBACK" : "MARKET_CONFIRMED",
+              intendedEntry: prec.entry,
+              stopLoss: prec.stopLoss,
+              tp1: prec.tp1,
+              tp2: prec.tp2,
+              tp3: prec.tp3,
+              frictionPrice,
+              useBreakevenScaling: true,
+            });
+
+            if (out.filled) {
+              const isBuy = prec.direction === "BUY";
+              const hmm = filterOnlineRegimeHmm(barsCausal);
+              const cusum = applySymmetricCusumFilter(barsCausal);
+              const har = forecastHarRealizedVolatility(barsCausal, asset.assetType === "CRYPTO" ? 365 : 252);
+              const cusumAligned =
+                (isBuy && cusum.latestBreak === "BULL_BREAK") || (!isBuy && cusum.latestBreak === "BEAR_BREAK")
+                  ? 1
+                  : (isBuy && cusum.latestBreak === "BEAR_BREAK") || (!isBuy && cusum.latestBreak === "BULL_BREAK")
+                    ? -1
+                    : 0;
+
+              const features: MetaLabelFeatureVector = {
+                primaryScoreNorm: prec.precisionScore / 100,
+                hmmTrendProb: hmm.probabilities.trendExpansion,
+                hmmCrisisProb: hmm.probabilities.crisisHighVol,
+                cusumAligned,
+                efficiencyRatio: prec.regime.efficiencyRatio,
+                harVolExpansionRatio: har.expansionRatio,
+                orderFlowAligned: prec.liquiditySweepDetected ? 0.55 : 0.25,
+                liquiditySweepConfirmed: prec.liquiditySweepDetected ? 1 : 0,
+                frictionR: prec.frictionR,
+              };
+
+              const rawLinearProb = Math.min(0.84, Math.max(0.38, 0.30 + (prec.precisionScore / 100) * 0.56));
+              const outcomeWin: 0 | 1 = out.netR > 0 ? 1 : 0;
+
+              samples.push({
+                startIdx: globalIdxOffset + t,
+                endIdx: globalIdxOffset + t + Math.max(1, out.barsHeld),
+                outcome: outcomeWin,
+                netR: out.netR,
+                features,
+              });
+
+              records.push({
+                netR: out.netR,
+                tp1Hit: out.tp1Hit,
+                isTrap: Boolean(isTrapBar[t]),
+                grade: prec.grade,
+                rawProb: rawLinearProb,
+                features,
+              });
+
+              nextAllowedPrecision = t + Math.max(4, out.barsHeld);
+            }
+          }
+        }
+        globalIdxOffset += bars.length + 10;
+      }
+    }
+  }
+
+  return { samples, records, totalEvaluations };
+}
+
+/**
+ * Runs Purged & Embargoed K-Fold Meta-Labeling + Isotonic Calibration Walk-Forward
+ * and evaluates Out-of-Sample Brier Score reduction + Combinatorial Purged PBO.
+ */
+export function runPurgedMetaLabelWalkForward(params?: {
+  calibrationSeeds?: number[];
+  holdoutSeeds?: number[];
+  assets?: BenchmarkAssetSpec[];
+  regimes?: BenchmarkRegime[];
+}): PurgedMetaLabelWalkForwardReport {
+  const calibrationSeeds = params?.calibrationSeeds ?? [101, 202, 303];
+  const holdoutSeeds = params?.holdoutSeeds ?? [404, 505, 606];
+  const assets = params?.assets ?? BENCHMARK_ASSETS;
+  const regimes = params?.regimes ?? BENCHMARK_REGIMES;
+
+  const cal = collectWalkForwardMetaSamples({ seeds: calibrationSeeds, assets, regimes });
+  const hold = collectWalkForwardMetaSamples({ seeds: holdoutSeeds, assets, regimes });
+
+  const model = trainPurgedMetaLabelClassifier(cal.samples, 4);
+
+  const oosRawProbs = hold.records.map((r) => r.rawProb);
+  const oosOutcomes = hold.records.map((r) => (r.netR > 0 ? (1 as const) : (0 as const)));
+  const oosCalibratedProbs = hold.records.map((r) => {
+    const iso = applyIsotonicCalibration(r.rawProb, model.calibration);
+    const meta = predictMetaLabelProbability(r.features, model).calibratedProbability;
+    return Number((0.6 * iso + 0.4 * meta).toFixed(4));
+  });
+
+  const oosBrierBefore = computeBrierScore(oosRawProbs, oosOutcomes);
+  const oosBrierAfter = computeBrierScore(oosCalibratedProbs, oosOutcomes);
+  const brierImprovementPct =
+    oosBrierBefore > 0
+      ? Number((((oosBrierBefore - oosBrierAfter) / oosBrierBefore) * 100).toFixed(2))
+      : 0;
+
+  const metaAccepted = hold.records.filter(
+    (r, idx) => (r.grade === "A+" || r.grade === "A") && oosCalibratedProbs[idx]! >= 0.55,
+  );
+  const metaFilteredMetrics = summarizeTrades(metaAccepted, hold.totalEvaluations, 6);
+
+  // Build M = 6 trial fold-performance series across meta-probability thresholds for CPCV PBO
+  const thresholds = [0.50, 0.54, 0.58, 0.62, 0.66, 0.70];
+  const allSamples = [...cal.records, ...hold.records];
+  const allCalProbs = allSamples.map((r) => applyIsotonicCalibration(r.rawProb, model.calibration));
+  const foldCount = 6;
+  const foldSize = Math.max(1, Math.floor(allSamples.length / foldCount));
+  const trialMatrix = thresholds.map((th) => {
+    const foldPerf: number[] = [];
+    for (let f = 0; f < foldCount; f++) {
+      const s = f * foldSize;
+      const e = f === foldCount - 1 ? allSamples.length : (f + 1) * foldSize;
+      let sumR = 0;
+      for (let idx = s; idx < e; idx++) {
+        if (allCalProbs[idx]! >= th) sumR += allSamples[idx]!.netR;
+      }
+      foldPerf.push(sumR);
+    }
+    return foldPerf;
+  });
+  const pbo = calculateCombinatorialPurgedPbo(trialMatrix);
+
+  return {
+    calibrationSamplesCount: cal.samples.length,
+    holdoutSamplesCount: hold.samples.length,
+    model,
+    oosBrierBefore,
+    oosBrierAfter,
+    brierImprovementPct,
+    metaFilteredMetrics,
+    pbo,
+  };
+}
+
+/**
+ * Replays real historical OHLCV bar series causally with an embossed 60/40 Purged Walk-Forward split.
+ */
+export function runRealHistoricalWalkForwardBacktest(
+  seriesList: HistoricalAssetSeriesInput[],
+): RealHistoricalWalkForwardReport {
+  const calSamples: MetaLabelTrainingSample[] = [];
+  const calRecords: { netR: number; tp1Hit: boolean; isTrap: boolean }[] = [];
+  const holdRecords: {
+    netR: number;
+    tp1Hit: boolean;
+    isTrap: boolean;
+    rawProb: number;
+    features: MetaLabelFeatureVector;
+  }[] = [];
+  let totalBarsEvaluated = 0;
+  let globalOffset = 0;
+
+  for (const item of seriesList) {
+    const { symbol, assetType, spreadPipsOrPct, bars } = item;
+    if (bars.length < 85) continue;
+    const pip = getAssetPipSize(symbol, assetType, bars[bars.length - 1]!.close);
+    const splitBar = Math.floor(bars.length * 0.6);
+    const embargoBars = 5;
+    let nextAllowed = 45;
+
+    for (let t = 45; t <= bars.length - 20; t += 2) {
+      totalBarsEvaluated++;
+      if (t < nextAllowed) continue;
+      if (t > splitBar && t < splitBar + embargoBars) continue; // Embargo zone between Calibration and Holdout
+
+      const barsCausal = bars.slice(0, t + 1);
+      const futureBars = bars.slice(t + 1);
+      const curPrice = bars[t]!.close;
+      const frictionPrice =
+        assetType === "FOREX" ? (spreadPipsOrPct + 0.35) * pip : curPrice * (spreadPipsOrPct + 0.0006);
+
+      const prec = evaluatePrecisionTradeSetup({
+        symbol,
+        assetType,
+        barsExecution: barsCausal,
+        spreadPipsOrPct,
+      });
+
+      if (
+        (prec.grade === "A+" || prec.grade === "A" || prec.grade === "B") &&
+        prec.direction !== "NEUTRAL" &&
+        prec.entry != null &&
+        prec.stopLoss != null &&
+        prec.tp1 != null &&
+        prec.tp2 != null &&
+        prec.tp3 != null
+      ) {
+        const out = simulateTradeOutcome({
+          barsFuture: futureBars,
+          direction: prec.direction,
+          entryMode: prec.entryMode === "LIMIT_PULLBACK" ? "LIMIT_PULLBACK" : "MARKET_CONFIRMED",
+          intendedEntry: prec.entry,
+          stopLoss: prec.stopLoss,
+          tp1: prec.tp1,
+          tp2: prec.tp2,
+          tp3: prec.tp3,
+          frictionPrice,
+          useBreakevenScaling: true,
+        });
+
+        if (out.filled) {
+          const hmm = filterOnlineRegimeHmm(barsCausal);
+          const cusum = applySymmetricCusumFilter(barsCausal);
+          const har = forecastHarRealizedVolatility(barsCausal, assetType === "CRYPTO" ? 365 : 252);
+          const isBuy = prec.direction === "BUY";
+          const cusumAligned =
+            (isBuy && cusum.latestBreak === "BULL_BREAK") || (!isBuy && cusum.latestBreak === "BEAR_BREAK")
+              ? 1
+              : -1;
+          const features: MetaLabelFeatureVector = {
+            primaryScoreNorm: prec.precisionScore / 100,
+            hmmTrendProb: hmm.probabilities.trendExpansion,
+            hmmCrisisProb: hmm.probabilities.crisisHighVol,
+            cusumAligned,
+            efficiencyRatio: prec.regime.efficiencyRatio,
+            harVolExpansionRatio: har.expansionRatio,
+            orderFlowAligned: prec.liquiditySweepDetected ? 0.5 : 0.2,
+            liquiditySweepConfirmed: prec.liquiditySweepDetected ? 1 : 0,
+            frictionR: prec.frictionR,
+          };
+          const rawProb = Math.min(0.84, Math.max(0.38, 0.30 + (prec.precisionScore / 100) * 0.56));
+
+          if (t <= splitBar) {
+            calSamples.push({
+              startIdx: globalOffset + t,
+              endIdx: globalOffset + t + Math.max(1, out.barsHeld),
+              outcome: out.netR > 0 ? 1 : 0,
+              netR: out.netR,
+              features,
+            });
+            calRecords.push({ netR: out.netR, tp1Hit: out.tp1Hit, isTrap: false });
+          } else {
+            holdRecords.push({
+              netR: out.netR,
+              tp1Hit: out.tp1Hit,
+              isTrap: false,
+              rawProb,
+              features,
+            });
+          }
+          nextAllowed = t + Math.max(3, out.barsHeld);
+        }
+      }
+    }
+    globalOffset += bars.length + 20;
+  }
+
+  const model = trainPurgedMetaLabelClassifier(calSamples, 3);
+  const oosOutcomes = holdRecords.map((r) => (r.netR > 0 ? (1 as const) : (0 as const)));
+  const oosRawProbs = holdRecords.map((r) => r.rawProb);
+  const oosCalProbs = holdRecords.map((r) => applyIsotonicCalibration(r.rawProb, model.calibration));
+  const oosBrierBefore = computeBrierScore(oosRawProbs, oosOutcomes);
+  const oosBrierAfter = computeBrierScore(oosCalProbs, oosOutcomes);
+
+  const calibrationMetrics = summarizeTrades(calRecords, Math.floor(totalBarsEvaluated * 0.6), 4);
+  const holdoutMetrics = summarizeTrades(holdRecords, Math.ceil(totalBarsEvaluated * 0.4), 4);
+
+  const thresholds = [0.48, 0.53, 0.58, 0.63];
+  const combined = [
+    ...calSamples.map((s) => ({ netR: s.netR, prob: s.features.primaryScoreNorm })),
+    ...holdRecords.map((r) => ({ netR: r.netR, prob: r.rawProb })),
+  ];
+  const foldCount = 4;
+  const foldSize = Math.max(1, Math.floor(combined.length / foldCount));
+  const trialMatrix = thresholds.map((th) => {
+    const foldPerf: number[] = [];
+    for (let f = 0; f < foldCount; f++) {
+      const s = f * foldSize;
+      const e = f === foldCount - 1 ? combined.length : (f + 1) * foldSize;
+      let sumR = 0;
+      for (let idx = s; idx < e; idx++) {
+        if (combined[idx]!.prob >= th) sumR += combined[idx]!.netR;
+      }
+      foldPerf.push(sumR);
+    }
+    return foldPerf;
+  });
+  const pbo = calculateCombinatorialPurgedPbo(trialMatrix);
+
+  return {
+    totalBarsEvaluated,
+    calibrationMetrics,
+    holdoutMetrics,
+    oosBrierBefore,
+    oosBrierAfter,
+    pbo,
   };
 }

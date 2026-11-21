@@ -1,14 +1,25 @@
 import "server-only";
+import { getAssetPipSize, resampleOhlcvBars, roundPrice } from "@/lib/engines/asset-precision";
+import { analyzeFundingRate, evaluateTrueLevel2Dom } from "@/lib/engines/crypto-derivatives-engine";
+import { evaluateCryptoShield } from "@/lib/engines/crypto-news-shield";
+import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engines/forex-currency-strength";
+import { evaluateNewsCircuitBreaker } from "@/lib/engines/forex-news-shield";
+import { generateDeepFlowSignal } from "@/lib/engines/forex-order-flow-pro";
+import { calculateForexPositionSize } from "@/lib/engines/forex-position-sizer";
 import {
-  computeEfficiencyRatio,
-  estimateClvOrderFlowImbalance,
-  getAssetPipSize,
-  roundPrice,
-} from "@/lib/engines/asset-precision";
-import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
-import { buildSharedBarContext } from "@/lib/engines/unified-ta-kernel";
+  evaluatePrecisionTradeSetup,
+  type SetupGrade,
+} from "@/lib/engines/fx-crypto-precision-engine";
+import {
+  buildCryptoLiquidityContext,
+  calculateCrossAssetKelly,
+  computeGarmanKlassLeverageCap,
+  detectCryptoLiquidationClusters,
+} from "@/lib/engines/unified-cross-asset-quant";
 import { eventBus } from "@/lib/events";
 import * as binance from "@/lib/providers/binance";
+import { getGlobalMacroShieldEvents } from "@/lib/providers/economic-calendar";
+import { getBiquotePublicOhlc } from "@/lib/providers/forex";
 import { binanceWs, ensureBinanceWsStarted } from "@/lib/realtime/binance-ws";
 import {
   ensureBiquoteCoreWatch,
@@ -26,9 +37,9 @@ import {
 } from "@/lib/services/bot-live-telemetry";
 import { listBrokerConnections } from "@/lib/services/broker-vault-store";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
-import { getForexDetail } from "@/lib/services/forex";
+import { getForexDetail, getForexMarkets } from "@/lib/services/forex";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
-import type { OhlcvBar } from "@/lib/types";
+import { atr as calcAtr } from "@/lib/technical";
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -105,121 +116,11 @@ function isEligibleGrade(grade?: string | null, winrateScore?: number): boolean 
 }
 
 /**
- * Đánh giá nhân quả (Causal Micro-Momentum + CLV Order Flow + ATR Structure) trên chuỗi OHLCV thực
- * kết hợp giá tick WebSocket/Biquote trực tiếp khi khung lớn đang đứng chờ.
+ * SSOT Real-Time Precision Scanner (Single Source of Truth):
+ * Dùng trực tiếp 7-Gate `evaluatePrecisionTradeSetup` cho các cặp còn lại ngoài Hub,
+ * loại bỏ hoàn toàn mô hình momentum riêng lẻ gây sai lệch với Signal Hub và Backtest.
  */
-function evaluateCausalMicroMomentumBarSeries(params: {
-  symbol: string;
-  assetType: "CRYPTO" | "FOREX";
-  bars: OhlcvBar[];
-  livePrice: number;
-}): {
-  direction: "BUY" | "SELL";
-  grade: SetupGrade;
-  winrateScore: number;
-  entryPrice: number;
-  stopLossPrice: number;
-  takeProfit1: number;
-  takeProfit2: number;
-  recommendedLeverage: number;
-} | null {
-  const { symbol, assetType, bars, livePrice } = params;
-  if (!bars || bars.length < 28 || !Number.isFinite(livePrice) || livePrice <= 0) {
-    return null;
-  }
-
-  const ctx = buildSharedBarContext(bars);
-  const n = bars.length;
-  const closes = ctx.closes;
-  const e9 = ctx.ema9[n - 1] ?? livePrice;
-  const e21 = ctx.ema21[n - 1] ?? livePrice;
-  const e9Prev = ctx.ema9[n - 2] ?? e9;
-  const e21Prev = ctx.ema21[n - 2] ?? e21;
-  const rsi14 = ctx.rsi14 ?? 50;
-  const macdHist = ctx.macdFull.histogram;
-  const histNow = macdHist[n - 1] ?? 0;
-  const histPrev = macdHist[n - 2] ?? 0;
-  const pip = getAssetPipSize(symbol);
-  const atr14 = Math.max(pip * 6, ctx.atr14 || livePrice * (assetType === "CRYPTO" ? 0.0045 : 0.0018));
-  const clvOfi = estimateClvOrderFlowImbalance(bars, 10);
-  const er10 = computeEfficiencyRatio(closes.slice(-12), 10);
-
-  const lastBar = bars[n - 1]!;
-  const prevBar = bars[n - 2]!;
-  const barImpulse = (livePrice - lastBar.open) / Math.max(1e-9, atr14);
-
-  // Veto extreme overextension / flash spike
-  if (Math.abs(livePrice - e21) > atr14 * 2.6) return null;
-
-  let bullPts = 0;
-  let bearPts = 0;
-
-  // 1) EMA9 vs EMA21 structure & slope
-  if (e9 > e21) bullPts += 20;
-  else if (e9 < e21) bearPts += 20;
-
-  if (e9 > e9Prev && e21 >= e21Prev) bullPts += 10;
-  else if (e9 < e9Prev && e21 <= e21Prev) bearPts += 10;
-
-  // 2) Live Price vs EMA9/EMA21 value zone
-  if (livePrice >= e9 && livePrice >= e21) bullPts += 12;
-  else if (livePrice <= e9 && livePrice <= e21) bearPts += 12;
-
-  // 3) MACD Histogram momentum & acceleration
-  if (histNow > 0) bullPts += 12;
-  else if (histNow < 0) bearPts += 12;
-  if (histNow > histPrev) bullPts += 8;
-  else if (histNow < histPrev) bearPts += 8;
-
-  // 4) Causal Order Flow Imbalance (CLV)
-  if (clvOfi >= 10) bullPts += 14;
-  else if (clvOfi <= -10) bearPts += 14;
-
-  // 5) Live Candle Impulse & Micro Structure Break
-  if (barImpulse >= 0.15 || livePrice > prevBar.high) bullPts += 12;
-  else if (barImpulse <= -0.15 || livePrice < prevBar.low) bearPts += 12;
-
-  // 6) RSI regime sweet spot (avoid chasing >76 or <24)
-  if (rsi14 >= 51 && rsi14 <= 72) bullPts += 10;
-  else if (rsi14 <= 49 && rsi14 >= 28) bearPts += 10;
-  else if (rsi14 > 76) bearPts += 14;
-  else if (rsi14 < 24) bullPts += 14;
-
-  const diff = Math.abs(bullPts - bearPts);
-  if (diff < 14) return null;
-
-  const direction: "BUY" | "SELL" = bullPts > bearPts ? "BUY" : "SELL";
-  const isBuy = direction === "BUY";
-  const rawScore = Math.min(94, Math.round(64 + diff * 0.45 + er10 * 14));
-  if (rawScore < 75) return null;
-
-  const grade: SetupGrade = rawScore >= 85 ? "A+" : "A";
-  const slDist = Math.max(pip * 8, atr14 * 1.15);
-  const tp1Dist = slDist * 1.55;
-  const tp2Dist = slDist * 2.35;
-
-  const entryPrice = roundPrice(livePrice, symbol);
-  const stopLossPrice = roundPrice(isBuy ? livePrice - slDist : livePrice + slDist, symbol);
-  const takeProfit1 = roundPrice(isBuy ? livePrice + tp1Dist : livePrice - tp1Dist, symbol);
-  const takeProfit2 = roundPrice(isBuy ? livePrice + tp2Dist : livePrice - tp2Dist, symbol);
-
-  if (stopLossPrice <= 0 || takeProfit1 <= 0 || stopLossPrice === entryPrice) {
-    return null;
-  }
-
-  return {
-    direction,
-    grade,
-    winrateScore: rawScore,
-    entryPrice,
-    stopLossPrice,
-    takeProfit1,
-    takeProfit2,
-    recommendedLeverage: assetType === "CRYPTO" ? (symbol === "BTCUSDT" || symbol === "ETHUSDT" ? 5 : 4) : 1,
-  };
-}
-
-async function scanLiveMicroMomentumSetups(params: {
+async function scanLivePrecisionSetups(params: {
   existingCryptoSymbols: Set<string>;
   existingForexSymbols: Set<string>;
   needCryptoCount: number;
@@ -227,6 +128,7 @@ async function scanLiveMicroMomentumSetups(params: {
 }): Promise<Array<{ signal: DispatchableSignalInput; marketPrice: number }>> {
   const out: Array<{ signal: DispatchableSignalInput; marketPrice: number }> = [];
   const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
+  const calendarEvents = await withTimeout(getGlobalMacroShieldEvents().catch(() => []), 2_000, []);
 
   if (params.needCryptoCount > 0) {
     const candidates = CORE_REALTIME_CRYPTO_PAIRS.filter(
@@ -236,45 +138,123 @@ async function scanLiveMicroMomentumSetups(params: {
     const scanned = await Promise.all(
       candidates.map(async (pair) => {
         try {
-          const [bars5m, spot] = await Promise.all([
-            binance.getKlines(pair, "5m", 64).catch(() => []),
+          const [bars5m, bars15m, spot, funding, book, oi] = await Promise.all([
+            binance.getKlines(pair, "5m", 120).catch(() => []),
+            binance.getKlines(pair, "15m", 96).catch(() => []),
             binance.getSpotTicker(pair).catch(() => null),
+            binance.getFundingRate(pair).catch(() => null),
+            binance.getOrderBook(pair, 10).catch(() => ({ lastUpdateId: 0, bids: [], asks: [] })),
+            binance.getOpenInterest(pair).catch(() => ({ openInterest: 0, time: Date.now() })),
           ]);
+          const execBars = bars5m.length >= 60 ? bars5m : bars15m;
+          const htfBars = bars15m.length >= 40 ? bars15m : execBars;
           const wsMark = binanceWs.getMark(pair, 20_000)?.markPrice ?? binanceWs.getTicker(pair, 20_000)?.price;
           const livePrice =
             wsMark && wsMark > 0
               ? wsMark
-              : Number(spot?.lastPrice ?? 0) || (bars5m.length > 0 ? bars5m[bars5m.length - 1]!.close : 0);
-          if (livePrice <= 0 || bars5m.length < 28) return null;
+              : Number(spot?.lastPrice ?? 0) || (execBars.length > 0 ? execBars[execBars.length - 1]!.close : 0);
+          if (livePrice <= 0 || execBars.length < 30) return null;
           updateLivePriceReference(pair, livePrice);
 
-          const setup = evaluateCausalMicroMomentumBarSeries({
+          const dom = evaluateTrueLevel2Dom(book, 5);
+          const bestBid = book.bids[0]?.price ?? 0;
+          const bestAsk = book.asks[0]?.price ?? 0;
+          const liveSpreadPct =
+            bestBid > 0 && bestAsk >= bestBid ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2) : null;
+          const bars1h = resampleOhlcvBars(htfBars, 4);
+          const fundingRate = funding?.fundingRate ?? null;
+          const oiUsd = oi.openInterest > 0 ? oi.openInterest * livePrice : 0;
+          const prelimAtr = calcAtr(execBars, 14) ?? livePrice * 0.012;
+          const liqClusters =
+            oiUsd > 0
+              ? detectCryptoLiquidationClusters(livePrice, oiUsd, prelimAtr, {
+                  symbol: pair,
+                  fundingRate,
+                  priceChange24hPct: Number(spot?.priceChangePercent) || null,
+                  orderBookImbalance: dom.imbalanceRatio,
+                })
+              : null;
+          const { liquidationClusterAligned, externalMagnets } = buildCryptoLiquidityContext(liqClusters);
+          const nExec = execBars.length;
+          const recent5mPct =
+            nExec >= 2 && execBars[nExec - 2]!.close > 0
+              ? ((livePrice - execBars[nExec - 2]!.close) / execBars[nExec - 2]!.close) * 100
+              : 0;
+          const shield = evaluateCryptoShield({
+            symbol: pair,
+            fundingRate: fundingRate ?? 0,
+            recentPriceChangePct5m: recent5mPct,
+            calendarEvents,
+          });
+
+          const precision = evaluatePrecisionTradeSetup({
             symbol: pair,
             assetType: "CRYPTO",
-            bars: bars5m,
-            livePrice,
+            barsExecution: execBars,
+            barsHtf: htfBars !== execBars ? htfBars : null,
+            barsMacro: bars1h.length >= 12 ? bars1h : null,
+            spreadPipsOrPct: liveSpreadPct,
+            orderBookImbalance: dom.imbalanceRatio,
+            fundingRate,
+            liquidationClusterAligned,
+            externalMagnets,
+            isNewsOrCascadeLockout: shield.isLockout,
+            lockoutReason: shield.warningMessage,
           });
-          if (!setup) return null;
 
-          const baseQty = Number(Math.max(0.001, (220 * setup.recommendedLeverage) / setup.entryPrice).toFixed(4));
+          if (
+            precision.direction === "NEUTRAL" ||
+            !isEligibleGrade(precision.grade, precision.precisionScore) ||
+            precision.stopLoss == null ||
+            precision.tp1 == null ||
+            precision.vetoReasons.length > 0
+          ) {
+            return null;
+          }
+
+          const levGov = computeGarmanKlassLeverageCap(
+            bars1h.length >= 5 ? bars1h : execBars.slice(-24),
+            true,
+          );
+          const pairLevCap = pair === "BTCUSDT" || pair === "ETHUSDT" ? 15 : 8;
+          const gradeFactor = precision.grade === "A+" ? 1.0 : 0.8;
+          const recommendedLeverage = Math.max(
+            1,
+            Math.min(pairLevCap, Math.round(levGov.maxRecommendedLeverage * gradeFactor)),
+          );
+          const kelly = calculateCrossAssetKelly({
+            winRate: precision.calibratedWinRatePct / 100,
+            payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
+            isCrypto: true,
+            maxCapitalPerTrade: 0.02,
+          });
+          const effectiveRiskPct =
+            kelly.recommendedAllocation > 0
+              ? Math.min(1.5, Math.max(0.25, kelly.recommendedAllocation * 100)) * precision.recommendedSizeMultiplier
+              : 1.0 * precision.recommendedSizeMultiplier;
+          const riskUsd = 100 * effectiveRiskPct;
+          const stopDistPct = Math.max(0.002, Math.abs(livePrice - precision.stopLoss) / livePrice);
+          const baseQty = Math.max(0.001, riskUsd / (livePrice * stopDistPct));
+
           return {
             signal: {
-              id: `rt_cr_${pair}_${setup.direction}_${bucket5m}`,
+              id: `rt_cr_${pair}_${precision.direction}_${bucket5m}`,
               symbol: pair,
               assetType: "CRYPTO" as const,
-              direction: setup.direction,
-              entryPrice: setup.entryPrice,
-              stopLossPrice: setup.stopLossPrice,
-              takeProfit1: setup.takeProfit1,
-              takeProfit2: setup.takeProfit2,
-              masterLotsOrQty: baseQty,
+              direction: precision.direction,
+              entryPrice: roundPrice(livePrice, pair, "CRYPTO"),
+              stopLossPrice: roundPrice(precision.stopLoss, pair, "CRYPTO"),
+              takeProfit1: roundPrice(precision.tp1, pair, "CRYPTO"),
+              takeProfit2: precision.tp2 != null ? roundPrice(precision.tp2, pair, "CRYPTO") : undefined,
+              takeProfit3: precision.tp3 != null ? roundPrice(precision.tp3, pair, "CRYPTO") : undefined,
+              masterLotsOrQty: Number(baseQty.toFixed(4)),
               masterCapitalUsd: 10_000,
-              winrateScore: setup.winrateScore,
-              setupGrade: setup.grade,
-              recommendedLeverage: setup.recommendedLeverage,
+              winrateScore: precision.precisionScore,
+              setupGrade: precision.grade,
+              recommendedLeverage,
               timestamp: Date.now(),
             },
-            marketPrice: setup.entryPrice,
+            marketPrice: roundPrice(livePrice, pair, "CRYPTO"),
           };
         } catch {
           return null;
@@ -294,45 +274,126 @@ async function scanLiveMicroMomentumSetups(params: {
       (p) => !params.existingForexSymbols.has(p),
     ).slice(0, params.needForexCount + 2);
 
+    const marketsRes = await withTimeout(getForexMarkets().catch(() => null), 2_000, null);
+    const fxRows = marketsRes?.data?.rows ?? [];
+    const csmScoreMap = new Map<string, number>();
+    if (fxRows.length >= 4) {
+      const csmInputs: PairPriceInput[] = fxRows
+        .filter((r) => r.price > 0)
+        .map((r) => ({ pair: r.pair, price: r.price, changePercent: r.changePercent ?? 0 }));
+      if (csmInputs.length >= 4) {
+        const csm = calculateCurrencyStrengthMatrix(csmInputs);
+        for (const s of csm.scores) csmScoreMap.set(s.currency, s.score);
+      }
+    }
+    const findFx = (target: string) => fxRows.find((r) => r.pair === target && r.price > 0)?.price ?? null;
+    const crossRates = {
+      usdJpy: findFx("USDJPY"),
+      gbpUsd: findFx("GBPUSD"),
+      usdChf: findFx("USDCHF"),
+      usdCad: findFx("USDCAD"),
+      audUsd: findFx("AUDUSD"),
+      nzdUsd: findFx("NZDUSD"),
+    };
+
     const scannedFx = await Promise.all(
       fxCandidates.map(async (pair) => {
         try {
-          const detail = await getForexDetail(pair).catch(() => null);
-          const series = detail?.detail?.series ?? [];
+          const [intraday15m, detail] = await Promise.all([
+            withTimeout(getBiquotePublicOhlc(pair, "15m", 120).catch(() => []), 2_500, []),
+            getForexDetail(pair).catch(() => null),
+          ]);
+          const dailySeries = detail?.detail?.series ?? [];
+          const execBars = intraday15m.length >= 30 ? intraday15m : dailySeries;
           const bqTick = getBiquoteLiveTick(pair, 45_000);
           const livePrice =
             bqTick && bqTick.price > 0
               ? bqTick.price
-              : detail?.detail?.price || (series.length > 0 ? series[series.length - 1]!.close : 0);
-          if (livePrice <= 0 || series.length < 28) return null;
+              : detail?.detail?.current?.price || (execBars.length > 0 ? execBars[execBars.length - 1]!.close : 0);
+          if (livePrice <= 0 || execBars.length < 30) return null;
           updateLivePriceReference(pair, livePrice);
 
-          const setup = evaluateCausalMicroMomentumBarSeries({
+          const pipSizeFx = getAssetPipSize(pair, "FOREX", livePrice);
+          const liveSpreadPips =
+            bqTick && bqTick.ask > bqTick.bid && pipSizeFx > 0
+              ? Number(((bqTick.ask - bqTick.bid) / pipSizeFx).toFixed(2))
+              : null;
+          const cb = evaluateNewsCircuitBreaker(pair, Date.now(), calendarEvents);
+          const flow = generateDeepFlowSignal(
+            pair,
+            execBars,
+            liveSpreadPips != null ? { currentSpreadPips: liveSpreadPips } : undefined,
+          );
+          const baseCurr = pair.slice(0, 3);
+          const quoteCurr = pair.slice(3, 6);
+          const baseScore = csmScoreMap.get(baseCurr);
+          const quoteScore = csmScoreMap.get(quoteCurr);
+          const csmSpread =
+            baseScore != null && quoteScore != null
+              ? Number((baseScore - quoteScore).toFixed(1))
+              : baseCurr === "XAU" && quoteScore != null
+                ? Number((5.0 - quoteScore).toFixed(1))
+                : null;
+
+          const htfBars =
+            intraday15m.length >= 30 && dailySeries.length >= 30
+              ? dailySeries
+              : resampleOhlcvBars(execBars, 4);
+
+          const precision = evaluatePrecisionTradeSetup({
             symbol: pair,
             assetType: "FOREX",
-            bars: series,
-            livePrice,
+            barsExecution: execBars,
+            barsHtf: htfBars.length >= 20 ? htfBars : null,
+            flowIntensityIndex: flow.flowIntensityIndex,
+            absorptionType: flow.absorption.type,
+            volumeDeltaDivergence: flow.cvdDivergence,
+            csmBaseMinusQuote: csmSpread,
+            spreadPipsOrPct: liveSpreadPips,
+            isNewsOrCascadeLockout: cb.isLockout || !(flow.spreadSafety?.isSafe ?? true),
+            lockoutReason: cb.warningMessage ?? flow.spreadSafety?.lockoutReason ?? null,
           });
-          if (!setup) return null;
+
+          if (
+            precision.direction === "NEUTRAL" ||
+            !isEligibleGrade(precision.grade, precision.precisionScore) ||
+            precision.stopLoss == null ||
+            precision.tp1 == null ||
+            precision.vetoReasons.length > 0
+          ) {
+            return null;
+          }
+
+          const entryPrice = roundPrice(livePrice, pair, "FOREX");
+          const stopLossPrice = roundPrice(precision.stopLoss, pair, "FOREX");
+          const sizer = calculateForexPositionSize({
+            accountBalance: 10_000,
+            riskPercent: 1.0 * precision.recommendedSizeMultiplier,
+            pair,
+            entryPrice,
+            stopLossPrice,
+            crossRates,
+          });
 
           return {
             signal: {
-              id: `rt_fx_${pair}_${setup.direction}_${bucket5m}`,
+              id: `rt_fx_${pair}_${precision.direction}_${bucket5m}`,
               symbol: pair,
               assetType: "FOREX" as const,
-              direction: setup.direction,
-              entryPrice: setup.entryPrice,
-              stopLossPrice: setup.stopLossPrice,
-              takeProfit1: setup.takeProfit1,
-              takeProfit2: setup.takeProfit2,
-              masterLotsOrQty: pair === "XAUUSD" ? 0.1 : 0.2,
+              direction: precision.direction,
+              entryPrice,
+              stopLossPrice,
+              takeProfit1: roundPrice(precision.tp1, pair, "FOREX"),
+              takeProfit2: precision.tp2 != null ? roundPrice(precision.tp2, pair, "FOREX") : undefined,
+              takeProfit3: precision.tp3 != null ? roundPrice(precision.tp3, pair, "FOREX") : undefined,
+              masterLotsOrQty: Math.max(0.01, sizer.standardLots),
               masterCapitalUsd: 10_000,
-              winrateScore: setup.winrateScore,
-              setupGrade: setup.grade,
+              winrateScore: precision.precisionScore,
+              setupGrade: precision.grade,
               recommendedLeverage: 1,
               timestamp: Date.now(),
             },
-            marketPrice: setup.entryPrice,
+            marketPrice: entryPrice,
           };
         } catch {
           return null;
@@ -515,17 +576,17 @@ export async function runAutoTradeTick(): Promise<{
       };
     }
 
-    // 2) Augment with Causal Real-Time Micro-Momentum & Order-Flow Setups so the engine trades continuously
+    // 2) Augment with SSOT 7-Gate Precision setups on remaining core pairs
     const needCrypto = Math.max(0, 3 - seenCrypto.size);
     const needForex = Math.max(0, 3 - seenForex.size);
     if (needCrypto > 0 || needForex > 0) {
-      const microSetups = await scanLiveMicroMomentumSetups({
+      const precisionSetups = await scanLivePrecisionSetups({
         existingCryptoSymbols: seenCrypto,
         existingForexSymbols: seenForex,
         needCryptoCount: needCrypto,
         needForexCount: needForex,
       });
-      signalsToDispatch.push(...microSetups);
+      signalsToDispatch.push(...precisionSetups);
     }
 
     let dispatched = 0;

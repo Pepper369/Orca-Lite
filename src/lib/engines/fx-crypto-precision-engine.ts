@@ -12,7 +12,15 @@ import {
   type ExternalLiquidityMagnet,
   type ForwardLiquidityForecast,
 } from "./ict-smc-liquidity-engine";
+import {
+  applySymmetricCusumFilter,
+  computeYangZhangVolatility,
+  filterOnlineRegimeHmm,
+  forecastHarRealizedVolatility,
+  type HmmRegimeState,
+} from "./advanced-quant-math";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
+import { predictMetaLabelProbability } from "./meta-labeling-calibration";
 import { calculateRequiredSpeedPace } from "./quant-reversal-pace";
 import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
 
@@ -67,7 +75,17 @@ export interface PrecisionTradeSetup {
     adx14: number;
     efficiencyRatio: number;
     atrRatio: number;
+    hmmState?: HmmRegimeState;
+    hmmProbabilities?: {
+      trendExpansion: number;
+      meanRevertLowVol: number;
+      crisisHighVol: number;
+    };
+    cusumBreak?: "BULL_BREAK" | "BEAR_BREAK" | "NONE";
+    yangZhangVolPct?: number;
+    harForecastVolPct?: number;
   };
+  metaLabelProbability?: number;
   gatesPassed: string[];
   gatesFailed: string[];
   vetoReasons: string[];
@@ -395,6 +413,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if (execBias === "BEARISH" && (htfBias !== "BULLISH" || adxVal >= 20)) {
     regimeState = "TRENDING_DOWN";
   }
+
+  // Causal Online 3-State HMM, Symmetric CUSUM Filter, Yang-Zhang & HAR-RV Volatility
+  const annualFactor = assetType === "CRYPTO" ? 365 : 252;
+  const hmmRegime = filterOnlineRegimeHmm(barsExecution);
+  const cusumFilter = applySymmetricCusumFilter(barsExecution);
+  const yzVol = computeYangZhangVolatility(barsExecution, 20, annualFactor);
+  const harVol = forecastHarRealizedVolatility(barsExecution, annualFactor);
 
   // ------------------------------------------------------------------
   // 2. ICT/SMC STRUCTURE, ORDER FLOW & MOMENTUM SIGNALS
@@ -952,8 +977,28 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   precisionScore = Math.max(25, Math.min(95, Math.round(precisionScore)));
 
+  // Secondary Meta-Labeling & Isotonic Probability Calibration (López de Prado)
+  const cusumAligned =
+    (isBuy && cusumFilter.latestBreak === "BULL_BREAK") || (!isBuy && cusumFilter.latestBreak === "BEAR_BREAK")
+      ? 1
+      : (isBuy && cusumFilter.latestBreak === "BEAR_BREAK") || (!isBuy && cusumFilter.latestBreak === "BULL_BREAK")
+        ? -1
+        : 0;
+  const metaPred = predictMetaLabelProbability({
+    primaryScoreNorm: precisionScore / 100,
+    hmmTrendProb: hmmRegime.probabilities.trendExpansion,
+    hmmCrisisProb: hmmRegime.probabilities.crisisHighVol,
+    cusumAligned,
+    efficiencyRatio: erVal,
+    harVolExpansionRatio: harVol.expansionRatio,
+    orderFlowAligned: Math.max(-1, Math.min(1, (isBuy ? realImbalance : -realImbalance) / 100)),
+    liquiditySweepConfirmed: hasSweep && hasMss ? 1 : 0,
+    frictionR,
+  });
+
   // Calibrated outcome probabilities & net Expectancy E[R] under 50% TP1 BE (0.95R) / 30% TP2 / 20% TP3 scaling
-  const pTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));
+  const linearPTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));
+  const pTp1 = Math.min(0.86, Math.max(0.38, 0.65 * linearPTp1 + 0.35 * metaPred.calibratedProbability));
   const pTp2 = Math.max(0.24, pTp1 * 0.72);
   const pTp3 = Math.max(0.12, pTp1 * 0.44);
   const calibratedWinRatePct = Math.round(pTp1 * 100);
@@ -968,6 +1013,18 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     else if (precisionScore >= 65 && expectancyR >= 0.16) grade = "A";
     else if (precisionScore >= 54 && expectancyR >= 0.05) grade = "B";
   }
+
+  const enrichedRegime: PrecisionTradeSetup["regime"] = {
+    state: regimeState,
+    adx14: Number(adxVal.toFixed(1)),
+    efficiencyRatio: Number(erVal.toFixed(2)),
+    atrRatio: Number(atrRatio.toFixed(2)),
+    hmmState: hmmRegime.dominantState,
+    hmmProbabilities: hmmRegime.probabilities,
+    cusumBreak: cusumFilter.latestBreak,
+    yangZhangVolPct: Number((yzVol.annualizedVol * 100).toFixed(2)),
+    harForecastVolPct: harVol.forecastAnnualVolPct,
+  };
 
   if (grade === "NO_TRADE") {
     if (vetoReasons.length === 0) {
@@ -991,12 +1048,8 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       grossRiskReward,
       netRiskReward,
       frictionR,
-      regime: {
-        state: regimeState,
-        adx14: Number(adxVal.toFixed(1)),
-        efficiencyRatio: Number(erVal.toFixed(2)),
-        atrRatio: Number(atrRatio.toFixed(2)),
-      },
+      regime: enrichedRegime,
+      metaLabelProbability: metaPred.calibratedProbability,
       gatesPassed,
       gatesFailed,
       vetoReasons,
@@ -1032,12 +1085,8 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     grossRiskReward,
     netRiskReward,
     frictionR,
-    regime: {
-      state: regimeState,
-      adx14: Number(adxVal.toFixed(1)),
-      efficiencyRatio: Number(erVal.toFixed(2)),
-      atrRatio: Number(atrRatio.toFixed(2)),
-    },
+    regime: enrichedRegime,
+    metaLabelProbability: metaPred.calibratedProbability,
     gatesPassed,
     gatesFailed,
     vetoReasons,

@@ -8,6 +8,20 @@
  * - Margin requirements and leverage check
  */
 
+export interface CrossRateOverrides {
+  usdJpy?: number | null;
+  gbpUsd?: number | null;
+  usdChf?: number | null;
+  usdCad?: number | null;
+  audUsd?: number | null;
+  nzdUsd?: number | null;
+}
+
+export type PipValueSource =
+  | "DIRECT_USD"
+  | "LIVE_CROSS_RATE"
+  | "BOOTSTRAP_FALLBACK";
+
 export interface PositionSizerInput {
   accountBalance: number; // e.g. 10000 (USD)
   riskPercent?: number; // e.g. 1.0 (1%)
@@ -19,6 +33,7 @@ export interface PositionSizerInput {
   takeProfit2?: number | null;
   takeProfit3?: number | null;
   leverage?: number; // e.g. 100 (1:100)
+  crossRates?: CrossRateOverrides;
 }
 
 export interface PositionSizerResult {
@@ -31,6 +46,7 @@ export interface PositionSizerResult {
   stopLossPips: number;
   pipSize: number;
   pipValuePerStandardLot: number;
+  pipValueSource?: PipValueSource;
   standardLots: number;
   miniLots: number;
   microLots: number;
@@ -65,53 +81,98 @@ export function getForexPipSize(pair: string): number {
   return 0.0001;
 }
 
-/**
- * Calculates the pip value in USD for 1.0 Standard Lot (100,000 units).
- * For XAUUSD, 1 standard lot = 100 oz, $0.10 move = $10.00.
- */
-export function calculatePipValueUsd(pair: string, currentPrice: number): number {
+export function resolvePipValueUsd(
+  pair: string,
+  currentPrice: number,
+  crossRates?: CrossRateOverrides,
+): { pipValueUsd: number; source: PipValueSource } {
   const p = pair.toUpperCase().replace("/", "").replace("-", "");
   const pip = getForexPipSize(p);
   const cur = currentPrice > 0 ? currentPrice : 1.0;
 
-  // Gold / Metals
+  // Gold / Metals / Energy (USD-settled contracts)
   if (p.startsWith("XAU") || p === "GOLD") {
-    // 1 standard lot = 100 oz. 1 pip = 0.10 USD/oz -> 100 * 0.10 = $10.00 per pip
-    return 10.0;
+    return { pipValueUsd: 10.0, source: "DIRECT_USD" };
   }
   if (p.startsWith("XAG") || p === "SILVER") {
-    // 1 standard lot = 5000 oz. 1 pip = 0.01 USD -> 5000 * 0.01 = $50.00 per pip
-    return 50.0;
+    return { pipValueUsd: 50.0, source: "DIRECT_USD" };
   }
   if (p.startsWith("OIL") || p === "USOIL" || p === "UKOIL") {
-    // 1 standard lot = 1000 barrels. 0.01 = $10.00
-    return 10.0;
+    return { pipValueUsd: 10.0, source: "DIRECT_USD" };
   }
 
   // Quote is USD (EURUSD, GBPUSD, AUDUSD, NZDUSD)
   if (p.endsWith("USD")) {
-    return 100_000 * pip; // $10.00
+    return { pipValueUsd: 100_000 * pip, source: "DIRECT_USD" };
   }
 
   // Base is USD (USDJPY, USDCAD, USDCHF)
   if (p.startsWith("USD")) {
-    return (100_000 * pip) / cur;
+    return { pipValueUsd: (100_000 * pip) / cur, source: "DIRECT_USD" };
   }
 
-  // Cross rates where quote is JPY (EURJPY, GBPJPY, AUDJPY)
+  // Cross pairs: use caller-supplied live USD cross rate before any static bootstrap fallback
   if (p.endsWith("JPY")) {
-    // Pip value in JPY is 1,000 JPY. Converted to USD via USDJPY ~ 155 approx if cur unknown
-    // E.g. 100,000 * 0.01 = 1,000 JPY. Divide by estimated USD/JPY rate or ~155
-    return 1000 / 155.0; // ~$6.45
+    const usdJpy = crossRates?.usdJpy;
+    if (usdJpy != null && Number.isFinite(usdJpy) && usdJpy > 0) {
+      return { pipValueUsd: 1000 / usdJpy, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: 1000 / 155.0, source: "BOOTSTRAP_FALLBACK" };
   }
 
-  // Cross pairs (e.g. EURGBP)
   if (p.endsWith("GBP")) {
-    return 100_000 * pip * 1.28; // GBPUSD ~ 1.28
+    const gbpUsd = crossRates?.gbpUsd;
+    if (gbpUsd != null && Number.isFinite(gbpUsd) && gbpUsd > 0) {
+      return { pipValueUsd: 100_000 * pip * gbpUsd, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: 100_000 * pip * 1.28, source: "BOOTSTRAP_FALLBACK" };
   }
 
-  // Default fallback for standard FX
-  return 10.0;
+  if (p.endsWith("CHF")) {
+    const usdChf = crossRates?.usdChf;
+    if (usdChf != null && Number.isFinite(usdChf) && usdChf > 0) {
+      return { pipValueUsd: (100_000 * pip) / usdChf, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: (100_000 * pip) / 0.885, source: "BOOTSTRAP_FALLBACK" };
+  }
+
+  if (p.endsWith("CAD")) {
+    const usdCad = crossRates?.usdCad;
+    if (usdCad != null && Number.isFinite(usdCad) && usdCad > 0) {
+      return { pipValueUsd: (100_000 * pip) / usdCad, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: (100_000 * pip) / 1.385, source: "BOOTSTRAP_FALLBACK" };
+  }
+
+  if (p.endsWith("AUD")) {
+    const audUsd = crossRates?.audUsd;
+    if (audUsd != null && Number.isFinite(audUsd) && audUsd > 0) {
+      return { pipValueUsd: 100_000 * pip * audUsd, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: 100_000 * pip * 0.658, source: "BOOTSTRAP_FALLBACK" };
+  }
+
+  if (p.endsWith("NZD")) {
+    const nzdUsd = crossRates?.nzdUsd;
+    if (nzdUsd != null && Number.isFinite(nzdUsd) && nzdUsd > 0) {
+      return { pipValueUsd: 100_000 * pip * nzdUsd, source: "LIVE_CROSS_RATE" };
+    }
+    return { pipValueUsd: 100_000 * pip * 0.592, source: "BOOTSTRAP_FALLBACK" };
+  }
+
+  return { pipValueUsd: 10.0, source: "BOOTSTRAP_FALLBACK" };
+}
+
+/**
+ * Calculates the pip value in USD for 1.0 Standard Lot (100,000 units).
+ * For XAUUSD, 1 standard lot = 100 oz, $0.10 move = $10.00.
+ */
+export function calculatePipValueUsd(
+  pair: string,
+  currentPrice: number,
+  crossRates?: CrossRateOverrides,
+): number {
+  return resolvePipValueUsd(pair, currentPrice, crossRates).pipValueUsd;
 }
 
 /**
@@ -128,11 +189,16 @@ export function calculateForexPositionSize(input: PositionSizerInput): PositionS
     takeProfit2,
     takeProfit3,
     leverage = 100,
+    crossRates,
   } = input;
 
   const cleanPair = pair.toUpperCase().replace("/", "").replace("-", "");
   const pipSize = getForexPipSize(cleanPair);
-  const pipValuePerLot = calculatePipValueUsd(cleanPair, entryPrice);
+  const { pipValueUsd: pipValuePerLot, source: pipValueSource } = resolvePipValueUsd(
+    cleanPair,
+    entryPrice,
+    crossRates,
+  );
 
   // Determine risk amount in USD
   const riskPercent = input.riskPercent ?? (input.riskAmountUsd ? (input.riskAmountUsd / accountBalance) * 100 : 1.0);
@@ -208,6 +274,7 @@ export function calculateForexPositionSize(input: PositionSizerInput): PositionS
     stopLossPips,
     pipSize,
     pipValuePerStandardLot: Math.round(pipValuePerLot * 100) / 100,
+    pipValueSource,
     standardLots,
     miniLots,
     microLots,

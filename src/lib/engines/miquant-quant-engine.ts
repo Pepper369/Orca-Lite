@@ -12,7 +12,9 @@ import {
   calculateHRP,
   calculateTripleBarrierLevels,
   calculateDeflatedSharpeRatio,
+  computeEmpiricalShrinkageCovariance,
 } from "./advanced-quant-math";
+import { getVnOhlcv } from "@/lib/services/stocks-board";
 
 export type AllocationMode =
   | "EQUAL_WEIGHT"
@@ -146,10 +148,63 @@ export interface RebalancePlan {
   bot_id: string;
   bot_name: string;
   allocation_mode?: AllocationMode;
+  covariance_source?: "EMPIRICAL_LEDOIT_WOLF" | "VOLATILITY_DIAGONAL_FALLBACK";
   input_capital: number;
   total_allocated: number;
   cash_remaining: number;
   orders: OrderRebalanceItem[];
+}
+
+const COV_SERIES_CACHE = new Map<string, { ts: number; returns: number[] }>();
+const COV_CACHE_TTL_MS = 15 * 60_000;
+
+/**
+ * Fetches real daily log-returns for candidate symbols (fast cached) and computes
+ * Ledoit-Wolf shrinkage covariance for HRP, falling back strictly to diagonal empirical variance
+ * rather than fabricating a constant 0.35 cross-correlation matrix.
+ */
+export async function resolveEmpiricalCovarianceForSymbols(
+  symbols: string[],
+  fallbackDailyVols: number[],
+): Promise<{
+  covMatrix: number[][];
+  source: "EMPIRICAL_LEDOIT_WOLF" | "VOLATILITY_DIAGONAL_FALLBACK";
+}> {
+  const now = Date.now();
+  const returnSeries = await Promise.all(
+    symbols.map(async (sym) => {
+      const clean = sym.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const cached = COV_SERIES_CACHE.get(clean);
+      if (cached && now - cached.ts < COV_CACHE_TTL_MS) {
+        return cached.returns;
+      }
+      try {
+        const pack = await Promise.race([
+          getVnOhlcv(clean, 90).catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_600)),
+        ]);
+        const bars = pack?.bars ?? [];
+        const rets: number[] = [];
+        for (let i = 1; i < bars.length; i++) {
+          const prev = bars[i - 1]!.close;
+          const cur = bars[i]!.close;
+          if (prev > 0 && cur > 0) rets.push(Math.log(cur / prev));
+        }
+        if (rets.length >= 12) {
+          COV_SERIES_CACHE.set(clean, { ts: now, returns: rets });
+        }
+        return rets;
+      } catch {
+        return [];
+      }
+    }),
+  );
+
+  const covRes = computeEmpiricalShrinkageCovariance(returnSeries, fallbackDailyVols, 0.25);
+  return {
+    covMatrix: covRes.covMatrix,
+    source: covRes.isEmpirical ? "EMPIRICAL_LEDOIT_WOLF" : "VOLATILITY_DIAGONAL_FALLBACK",
+  };
 }
 
 export interface QuantStrategyStock {
@@ -628,7 +683,15 @@ export const MiQuantEngine = {
     const lowVolCandidates: BotScannedCandidate[] = composite_ranked
       .map((c) => {
         const price = c.close < 1000 ? c.close * 1000 : c.close;
-        const qAttr = computeQuantAttributes(c.symbol, price);
+        const qAttr = computeQuantAttributes(c.symbol, price, {
+          pctChange: c.pct_change,
+          volumeRatio: c.volume_ratio,
+          upsidePct: c.details?.upside_pct,
+          foreignNetValue: c.details?.foreign_netvalue,
+          fScore: c.details?.f_score,
+          beta: c.details?.beta,
+          atrPct: c.details?.atr_pct,
+        });
         const lowBetaScore = Math.min(
           99,
           Math.round(65 + qAttr.f_score * 3.5 + Math.max(0, (1.1 - qAttr.beta) * 20))
@@ -665,7 +728,15 @@ export const MiQuantEngine = {
     const meanReversionCandidates: BotScannedCandidate[] = composite_ranked
       .map((c) => {
         const price = c.close < 1000 ? c.close * 1000 : c.close;
-        const qAttr = computeQuantAttributes(c.symbol, price);
+        const qAttr = computeQuantAttributes(c.symbol, price, {
+          pctChange: c.pct_change,
+          volumeRatio: c.volume_ratio,
+          upsidePct: c.details?.upside_pct,
+          foreignNetValue: c.details?.foreign_netvalue,
+          fScore: c.details?.f_score,
+          beta: c.details?.beta,
+          atrPct: c.details?.atr_pct,
+        });
         // Prioritize stocks that are oversold or consolidating with high upside / quality
         const dipBonus = c.pct_change <= 0 ? Math.abs(c.pct_change) * 2.5 : 0;
         const swingScore = Math.min(
@@ -883,22 +954,14 @@ export const MiQuantEngine = {
 
     // Determine target weights based on allocation mode
     let targetWeights: number[] = [];
+    let covarianceSource: RebalancePlan["covariance_source"] | undefined;
 
     if (allocationMode === "HIERARCHICAL_RISK_PARITY") {
-      // Hierarchical Risk Parity (HRP) - Marcos López de Prado (2016)
+      // Hierarchical Risk Parity (HRP) with empirical Ledoit-Wolf shrinkage covariance
       const symbols = holdings.map((h) => h.symbol);
       const vols = holdings.map((h) => Math.max(0.01, (h.metrics?.atr_pct || 2.5) / 100));
-      const covMatrix: number[][] = [];
-      for (let i = 0; i < n; i++) {
-        covMatrix[i] = [];
-        for (let j = 0; j < n; j++) {
-          if (i === j) {
-            covMatrix[i][j] = vols[i] * vols[i];
-          } else {
-            covMatrix[i][j] = 0.35 * vols[i] * vols[j];
-          }
-        }
-      }
+      const { covMatrix, source } = await resolveEmpiricalCovarianceForSymbols(symbols, vols);
+      covarianceSource = source;
       const hrp = calculateHRP(symbols, covMatrix);
       targetWeights = symbols.map((s) => hrp.weights[s] || 1 / n);
     } else if (allocationMode === "INVERSE_VOLATILITY") {
@@ -954,6 +1017,7 @@ export const MiQuantEngine = {
       bot_id: bot.id,
       bot_name: bot.name,
       allocation_mode: allocationMode,
+      ...(covarianceSource ? { covariance_source: covarianceSource } : {}),
       input_capital: capital,
       total_allocated: totalAllocated,
       cash_remaining: cashRemaining,

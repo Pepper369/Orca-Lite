@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { auditLogs, botExecutionOrders, brokerConnections } from "@/db/schema";
 import type {
@@ -76,7 +76,7 @@ const DEFAULT_DEV_CONNECTIONS: StoredConnectionInternal[] = [
     maxDailyLossUsd: 500,
     dailyRealizedPnlUsd: 0,
     dailyPnlDate: getTodayUtcDate(),
-    maxOpenPositions: 5,
+    maxOpenPositions: 3,
     hasApiKey: false,
     hasPassphrase: false,
     hasEaToken: false,
@@ -109,7 +109,7 @@ const DEFAULT_DEV_CONNECTIONS: StoredConnectionInternal[] = [
     maxDailyLossUsd: 400,
     dailyRealizedPnlUsd: 0,
     dailyPnlDate: getTodayUtcDate(),
-    maxOpenPositions: 5,
+    maxOpenPositions: 3,
     hasApiKey: false,
     hasPassphrase: false,
     hasEaToken: false,
@@ -534,6 +534,26 @@ export async function hasExecutionOrderByIdempotency(idempotencyKey: string): Pr
   );
 }
 
+// Lazy idempotent Postgres extension table for 3-stage TP / partial exit state without breaking un-migrated bot_execution_orders
+let stageTablePromise: Promise<boolean> | null = null;
+async function ensureBotPositionStagesTable(): Promise<boolean> {
+  if (!shouldUseVaultDb()) return false;
+  if (!stageTablePromise) {
+    stageTablePromise = db
+      .execute(sql`CREATE TABLE IF NOT EXISTS orca_bot_position_stages (
+        order_id text PRIMARY KEY,
+        initial_qty_or_lots numeric,
+        take_profit_2 numeric,
+        take_profit_3 numeric,
+        position_stage text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`)
+      .then(() => true)
+      .catch(() => false);
+  }
+  return stageTablePromise;
+}
+
 export async function saveBotExecutionOrder(
   order: CopyExecutionOrder,
   userId?: string | null,
@@ -573,12 +593,17 @@ export async function saveBotExecutionOrder(
           tpOrderId: order.tpOrderId ?? null,
           message: order.message,
           isTestnet: order.isTestnet ?? true,
+          realizedPnlUsd: order.realizedPnlUsd != null ? String(order.realizedPnlUsd) : null,
         })
         .onConflictDoUpdate({
           target: botExecutionOrders.id,
           set: {
             status: order.status,
+            qtyOrLots: String(order.copiedLotsOrQty),
             executionPrice: String(order.executionPrice),
+            stopLossPrice: String(order.stopLossPrice),
+            takeProfit1: String(order.takeProfit1),
+            realizedPnlUsd: order.realizedPnlUsd != null ? String(order.realizedPnlUsd) : null,
             exchangeOrderId: order.exchangeOrderId ?? null,
             slOrderId: order.slOrderId ?? null,
             tpOrderId: order.tpOrderId ?? null,
@@ -586,6 +611,34 @@ export async function saveBotExecutionOrder(
             updatedAt: new Date(),
           },
         });
+
+      const hasStageTable = await ensureBotPositionStagesTable();
+      if (
+        hasStageTable &&
+        (order.initialLotsOrQty != null ||
+          order.takeProfit2 != null ||
+          order.takeProfit3 != null ||
+          order.positionStage != null)
+      ) {
+        await db
+          .execute(sql`INSERT INTO orca_bot_position_stages (order_id, initial_qty_or_lots, take_profit_2, take_profit_3, position_stage, updated_at)
+            VALUES (
+              ${order.orderId},
+              ${order.initialLotsOrQty ?? order.copiedLotsOrQty},
+              ${order.takeProfit2 ?? null},
+              ${order.takeProfit3 ?? null},
+              ${order.positionStage ?? "INITIAL"},
+              now()
+            )
+            ON CONFLICT (order_id) DO UPDATE SET
+              initial_qty_or_lots = COALESCE(EXCLUDED.initial_qty_or_lots, orca_bot_position_stages.initial_qty_or_lots),
+              take_profit_2 = COALESCE(EXCLUDED.take_profit_2, orca_bot_position_stages.take_profit_2),
+              take_profit_3 = COALESCE(EXCLUDED.take_profit_3, orca_bot_position_stages.take_profit_3),
+              position_stage = COALESCE(EXCLUDED.position_stage, orca_bot_position_stages.position_stage),
+              updated_at = now()`)
+          .catch(() => null);
+      }
+
       return order;
     } catch (err) {
       tripVaultDbCooldown(err);
@@ -623,29 +676,63 @@ export async function listBotExecutionOrders(
             .orderBy(desc(botExecutionOrders.createdAt))
             .limit(limit);
       if (rows.length > 0) {
-        return rows.map((r) => ({
-          orderId: r.id,
-          followerId: r.connectionId,
-          followerName: nameById.get(r.connectionId) ?? r.connectionId,
-          platform: r.platform as BrokerPlatform,
-          symbol: r.symbol,
-          direction: r.direction as "BUY" | "SELL",
-          copiedLotsOrQty: Number(r.qtyOrLots),
-          entryPrice: Number(r.entryPrice),
-          executionPrice: Number(r.executionPrice),
-          slippagePips: Number(r.slippagePips),
-          status: r.status as CopyOrderStatus,
-          stopLossPrice: Number(r.stopLossPrice),
-          takeProfit1: Number(r.takeProfit1),
-          timestamp: r.createdAt.getTime(),
-          message: r.message,
-          signalId: r.signalId,
-          idempotencyKey: r.idempotencyKey,
-          exchangeOrderId: r.exchangeOrderId,
-          slOrderId: r.slOrderId,
-          tpOrderId: r.tpOrderId,
-          isTestnet: r.isTestnet,
-        }));
+        const stageMap = new Map<
+          string,
+          { initialQty?: number; tp2?: number | null; tp3?: number | null; stage?: CopyExecutionOrder["positionStage"] }
+        >();
+        const hasStageTable = await ensureBotPositionStagesTable();
+        if (hasStageTable) {
+          const ids = rows.map((r) => r.id);
+          const stageRes = await db
+            .execute(sql`SELECT order_id, initial_qty_or_lots, take_profit_2, take_profit_3, position_stage
+              FROM orca_bot_position_stages
+              WHERE order_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`)
+            .catch(() => null);
+          const stageRows =
+            (stageRes as unknown as { rows?: Array<Record<string, unknown>> } | null)?.rows ?? [];
+          for (const sr of stageRows) {
+            const oid = String(sr.order_id ?? "");
+            if (!oid) continue;
+            stageMap.set(oid, {
+              initialQty: sr.initial_qty_or_lots != null ? Number(sr.initial_qty_or_lots) : undefined,
+              tp2: sr.take_profit_2 != null ? Number(sr.take_profit_2) : null,
+              tp3: sr.take_profit_3 != null ? Number(sr.take_profit_3) : null,
+              stage: (sr.position_stage as CopyExecutionOrder["positionStage"]) ?? undefined,
+            });
+          }
+        }
+
+        return rows.map((r) => {
+          const st = stageMap.get(r.id);
+          return {
+            orderId: r.id,
+            followerId: r.connectionId,
+            followerName: nameById.get(r.connectionId) ?? r.connectionId,
+            platform: r.platform as BrokerPlatform,
+            symbol: r.symbol,
+            direction: r.direction as "BUY" | "SELL",
+            copiedLotsOrQty: Number(r.qtyOrLots),
+            initialLotsOrQty: st?.initialQty ?? Number(r.qtyOrLots),
+            entryPrice: Number(r.entryPrice),
+            executionPrice: Number(r.executionPrice),
+            slippagePips: Number(r.slippagePips),
+            status: r.status as CopyOrderStatus,
+            stopLossPrice: Number(r.stopLossPrice),
+            takeProfit1: Number(r.takeProfit1),
+            takeProfit2: st?.tp2 ?? null,
+            takeProfit3: st?.tp3 ?? null,
+            positionStage: st?.stage,
+            realizedPnlUsd: r.realizedPnlUsd != null ? Number(r.realizedPnlUsd) : undefined,
+            timestamp: r.createdAt.getTime(),
+            message: r.message,
+            signalId: r.signalId,
+            idempotencyKey: r.idempotencyKey,
+            exchangeOrderId: r.exchangeOrderId,
+            slOrderId: r.slOrderId,
+            tpOrderId: r.tpOrderId,
+            isTestnet: r.isTestnet,
+          };
+        });
       }
       if (userId) return [];
     } catch (err) {

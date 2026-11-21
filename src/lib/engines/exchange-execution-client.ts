@@ -27,6 +27,8 @@ export interface ExchangeOrderRequest {
   entryPrice: number;
   stopLossPrice: number;
   takeProfit1: number;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
   leverage: number;
   idempotencyKey: string;
 }
@@ -37,10 +39,71 @@ export interface ExchangeOrderResult {
   exchangeOrderId: string | null;
   slOrderId: string | null;
   tpOrderId: string | null;
+  tp2OrderId?: string | null;
+  tp3OrderId?: string | null;
+  tpAllocationPlan?: string;
   executedQty: number;
   executedPrice: number;
   message: string;
   slWarning?: string;
+}
+
+export interface TpAllocationChunk {
+  tier: "TP1" | "TP2" | "TP3";
+  price: number;
+  qty: number;
+  closePosition: boolean;
+}
+
+/**
+ * Splits executed quantity into institutional 50% (TP1) / 30% (TP2) / 20% (TP3) scale-out chunks,
+ * gracefully collapsing to 2 tiers or 1 full-close trigger when total qty is too small for exchange minQty/minNotional.
+ */
+export function computeMultiTierTpChunks(params: {
+  totalQty: number;
+  stepSize: number | string;
+  minQty: number;
+  minNotional: number;
+  tickSize: number | string;
+  tp1: number;
+  tp2?: number | null;
+  tp3?: number | null;
+}): TpAllocationChunk[] {
+  const { totalQty, stepSize, minQty, minNotional, tickSize } = params;
+  const p1 = roundTickSize(params.tp1, tickSize);
+  const p2 = params.tp2 && params.tp2 > 0 ? roundTickSize(params.tp2, tickSize) : 0;
+  const p3 = params.tp3 && params.tp3 > 0 ? roundTickSize(params.tp3, tickSize) : 0;
+
+  if (p1 <= 0 || totalQty <= 0) return [];
+
+  const isViable = (qty: number, px: number) =>
+    qty >= minQty && (minNotional <= 0 || qty * px >= minNotional);
+
+  if (p2 > 0 && p2 !== p1 && p3 > 0 && p3 !== p2) {
+    const q1 = roundStepSize(totalQty * 0.5, stepSize);
+    const q2 = roundStepSize(totalQty * 0.3, stepSize);
+    const q3 = roundStepSize(Math.max(0, totalQty - q1 - q2), stepSize);
+    if (isViable(q1, p1) && isViable(q2, p2) && isViable(q3, p3)) {
+      return [
+        { tier: "TP1", price: p1, qty: q1, closePosition: false },
+        { tier: "TP2", price: p2, qty: q2, closePosition: false },
+        { tier: "TP3", price: p3, qty: q3, closePosition: false },
+      ];
+    }
+  }
+
+  if (p2 > 0 && p2 !== p1) {
+    const q1 = roundStepSize(totalQty * 0.5, stepSize);
+    const q2 = roundStepSize(Math.max(0, totalQty - q1), stepSize);
+    if (isViable(q1, p1) && isViable(q2, p2)) {
+      return [
+        { tier: "TP1", price: p1, qty: q1, closePosition: false },
+        { tier: "TP2", price: p2, qty: q2, closePosition: false },
+      ];
+    }
+  }
+
+  return [{ tier: "TP1", price: p1, qty: totalQty, closePosition: true }];
 }
 
 interface CacheEntry<T> {
@@ -339,14 +402,23 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
 
     const exitSide = req.direction === "BUY" ? "SELL" : "BUY";
     const slPrice = roundTickSize(req.stopLossPrice, filters.tickSize);
-    const tpPrice = roundTickSize(req.takeProfit1, filters.tickSize);
+    const tpChunks = computeMultiTierTpChunks({
+      totalQty: execQty,
+      stepSize: filters.stepSize,
+      minQty: filters.minQty,
+      minNotional: filters.minNotional,
+      tickSize: filters.tickSize,
+      tp1: req.takeProfit1,
+      tp2: req.takeProfit2,
+      tp3: req.takeProfit3,
+    });
 
-    const placeTrigger = async (type: "STOP_MARKET" | "TAKE_PROFIT_MARKET", stopPrice: number) => {
-      if (stopPrice <= 0) return { id: null, err: "Giá trigger không hợp lệ" };
+    const placeBinanceSl = async (stopPrice: number) => {
+      if (stopPrice <= 0) return { id: null, err: "Giá SL không hợp lệ" };
       const p = new URLSearchParams({
         symbol,
         side: exitSide,
-        type,
+        type: "STOP_MARKET",
         stopPrice: String(stopPrice),
         closePosition: "true",
         workingType: "MARK_PRICE",
@@ -369,11 +441,47 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
       return { id: String(j.orderId ?? ""), err: undefined };
     };
 
-    const [slRes, tpRes] = await Promise.all([
-      placeTrigger("STOP_MARKET", slPrice),
-      placeTrigger("TAKE_PROFIT_MARKET", tpPrice),
+    const placeBinanceTpChunk = async (chunk: TpAllocationChunk) => {
+      const p = new URLSearchParams({
+        symbol,
+        side: exitSide,
+        type: "TAKE_PROFIT_MARKET",
+        stopPrice: String(chunk.price),
+        workingType: "MARK_PRICE",
+        timestamp: String(Date.now()),
+        recvWindow: "5000",
+      });
+      if (chunk.closePosition) {
+        p.set("closePosition", "true");
+      } else {
+        p.set("quantity", String(chunk.qty));
+        p.set("reduceOnly", "true");
+      }
+      const q = p.toString();
+      const r = await fetch(
+        `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, req.credentials.apiSecret)}`,
+        {
+          method: "POST",
+          headers: { "X-MBX-APIKEY": req.credentials.apiKey },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      );
+      const j = (await r.json()) as Record<string, unknown>;
+      if (!r.ok || typeof j.code === "number") {
+        return { tier: chunk.tier, id: null, err: String(j.msg ?? r.status) };
+      }
+      return { tier: chunk.tier, id: String(j.orderId ?? ""), err: undefined };
+    };
+
+    const [slRes, ...tpResults] = await Promise.all([
+      placeBinanceSl(slPrice),
+      ...tpChunks.map((chunk) => placeBinanceTpChunk(chunk)),
     ]);
 
+    const tp1Res = tpResults.find((t) => t.tier === "TP1");
+    const tp2Res = tpResults.find((t) => t.tier === "TP2");
+    const tp3Res = tpResults.find((t) => t.tier === "TP3");
+    const tpPlanStr = tpChunks.map((c) => `${c.tier}:${c.qty}@${c.price}`).join(" | ");
     const slWarning = slRes.err ? `Cảnh báo: Đã vào lệnh chính nhưng đặt SL thất bại (${slRes.err})` : undefined;
 
     return {
@@ -381,10 +489,13 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
       status: "FILLED",
       exchangeOrderId,
       slOrderId: slRes.id,
-      tpOrderId: tpRes.id,
+      tpOrderId: tp1Res?.id ?? null,
+      tp2OrderId: tp2Res?.id ?? null,
+      tp3OrderId: tp3Res?.id ?? null,
+      tpAllocationPlan: tpPlanStr,
       executedQty: execQty,
       executedPrice: execPrice,
-      message: `Binance ${req.credentials.isTestnet ? "Testnet" : "Live"} khớp #${exchangeOrderId} (${execQty} ${symbol})`,
+      message: `Binance ${req.credentials.isTestnet ? "Testnet" : "Live"} khớp #${exchangeOrderId} (${execQty} ${symbol}${tpChunks.length > 1 ? ` · ${tpChunks.length} mốc TP` : ""})`,
       slWarning,
     };
   } catch (err) {
@@ -397,6 +508,84 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
       executedQty: 0,
       executedPrice: req.entryPrice,
       message: err instanceof Error ? err.message : "Lỗi kết nối đặt lệnh Binance Futures",
+    };
+  }
+}
+
+/**
+ * Updates live Binance Futures Stop-Loss trigger (used when moving SL to Breakeven after TP1 or trailing profit lock).
+ */
+export async function updateBinanceFuturesStopLoss(params: {
+  credentials: BrokerCredentialsInput;
+  symbol: string;
+  direction: "BUY" | "SELL";
+  previousSlOrderId?: string | null;
+  newStopLossPrice: number;
+}): Promise<{ ok: boolean; newSlOrderId: string | null; message: string }> {
+  const baseUrl = getBinanceBaseUrl(params.credentials.isTestnet);
+  const symbol = toBinanceFuturesSymbol(params.symbol);
+  const filters = (await getBinanceSymbolFilters(baseUrl, symbol)) ?? {
+    stepSize: "0.001",
+    minQty: 0.001,
+    tickSize: "0.01",
+    minNotional: 5,
+  };
+  const nextSl = roundTickSize(params.newStopLossPrice, filters.tickSize);
+  if (nextSl <= 0) {
+    return { ok: false, newSlOrderId: params.previousSlOrderId ?? null, message: "Invalid Stop-Loss price" };
+  }
+
+  try {
+    if (params.previousSlOrderId && /^\d+$/.test(params.previousSlOrderId)) {
+      const cancelQs = `symbol=${symbol}&orderId=${params.previousSlOrderId}&timestamp=${Date.now()}&recvWindow=5000`;
+      await fetch(
+        `${baseUrl}/fapi/v1/order?${cancelQs}&signature=${signBinanceQuery(cancelQs, params.credentials.apiSecret)}`,
+        {
+          method: "DELETE",
+          headers: { "X-MBX-APIKEY": params.credentials.apiKey },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      ).catch(() => null);
+    }
+
+    const exitSide = params.direction === "BUY" ? "SELL" : "BUY";
+    const p = new URLSearchParams({
+      symbol,
+      side: exitSide,
+      type: "STOP_MARKET",
+      stopPrice: String(nextSl),
+      closePosition: "true",
+      workingType: "MARK_PRICE",
+      timestamp: String(Date.now()),
+      recvWindow: "5000",
+    });
+    const q = p.toString();
+    const res = await fetch(
+      `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, params.credentials.apiSecret)}`,
+      {
+        method: "POST",
+        headers: { "X-MBX-APIKEY": params.credentials.apiKey },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    const json = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || typeof json.code === "number") {
+      return {
+        ok: false,
+        newSlOrderId: params.previousSlOrderId ?? null,
+        message: String(json.msg ?? `Binance SL update HTTP ${res.status}`),
+      };
+    }
+    return {
+      ok: true,
+      newSlOrderId: String(json.orderId ?? ""),
+      message: `Updated Binance Futures SL -> ${nextSl}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      newSlOrderId: params.previousSlOrderId ?? null,
+      message: err instanceof Error ? err.message : "Failed updating Binance Futures SL",
     };
   }
 }
@@ -628,7 +817,16 @@ export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<Exch
     });
 
     const slPrice = roundTickSize(req.stopLossPrice, inst.tickSz);
-    const tpPrice = roundTickSize(req.takeProfit1, inst.tickSz);
+    const tpChunks = computeMultiTierTpChunks({
+      totalQty: contracts,
+      stepSize: inst.lotSz,
+      minQty: inst.minSz,
+      minNotional: 0,
+      tickSize: inst.tickSz,
+      tp1: req.takeProfit1,
+      tp2: req.takeProfit2,
+      tp3: req.takeProfit3,
+    });
     const clOrdId = sanitizeClientOrderId(req.idempotencyKey, 32);
 
     const orderPayload: Record<string, unknown> = {
@@ -642,10 +840,12 @@ export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<Exch
     if (posMode === "long_short_mode") {
       orderPayload.posSide = req.direction === "BUY" ? "long" : "short";
     }
-    if (slPrice > 0 || tpPrice > 0) {
+    const useSingleAttachedTp = tpChunks.length <= 1;
+    const tp1Price = tpChunks[0]?.price ?? roundTickSize(req.takeProfit1, inst.tickSz);
+    if (slPrice > 0 || (useSingleAttachedTp && tp1Price > 0)) {
       orderPayload.attachAlgoOrds = [
         {
-          ...(tpPrice > 0 ? { tpTriggerPx: String(tpPrice), tpOrdPx: "-1" } : {}),
+          ...(useSingleAttachedTp && tp1Price > 0 ? { tpTriggerPx: String(tp1Price), tpOrdPx: "-1" } : {}),
           ...(slPrice > 0 ? { slTriggerPx: String(slPrice), slOrdPx: "-1" } : {}),
         },
       ];
@@ -678,15 +878,54 @@ export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<Exch
       };
     }
 
+    let tpOrderIds: Record<string, string | null> = { TP1: "attached-algo-tp", TP2: null, TP3: null };
+    if (!useSingleAttachedTp) {
+      const algoPath = "/api/v5/trade/order-algo";
+      const exitSide = req.direction === "BUY" ? "sell" : "buy";
+      const results = await Promise.all(
+        tpChunks.map(async (chunk) => {
+          const algoPayload: Record<string, unknown> = {
+            instId,
+            tdMode: "isolated",
+            side: exitSide,
+            ordType: "conditional",
+            sz: String(chunk.qty),
+            reduceOnly: true,
+            tpTriggerPx: String(chunk.price),
+            tpOrdPx: "-1",
+            ...(posMode === "long_short_mode" ? { posSide: req.direction === "BUY" ? "long" : "short" } : {}),
+          };
+          const body = JSON.stringify(algoPayload);
+          const r = await fetch(`${OKX_BASE_URL}${algoPath}`, {
+            method: "POST",
+            headers: buildOkxHeaders(req.credentials, "POST", algoPath, body),
+            body,
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          }).catch(() => null);
+          if (!r || !r.ok) return { tier: chunk.tier, algoId: null };
+          const j = (await r.json().catch(() => ({}))) as { data?: Array<{ algoId?: string; sCode?: string }> };
+          const algoRow = j.data?.[0];
+          return { tier: chunk.tier, algoId: algoRow?.sCode === "0" ? algoRow.algoId ?? null : null };
+        }),
+      );
+      tpOrderIds = { TP1: null, TP2: null, TP3: null };
+      for (const r of results) {
+        tpOrderIds[r.tier] = r.algoId;
+      }
+    }
+
     return {
       ok: true,
       status: "FILLED",
       exchangeOrderId: row.ordId ?? clOrdId,
-      slOrderId: "attached-algo-sl",
-      tpOrderId: "attached-algo-tp",
+      slOrderId: slPrice > 0 ? "attached-algo-sl" : null,
+      tpOrderId: tpOrderIds.TP1,
+      tp2OrderId: tpOrderIds.TP2,
+      tp3OrderId: tpOrderIds.TP3,
+      tpAllocationPlan: tpChunks.map((c) => `${c.tier}:${c.qty}@${c.price}`).join(" | "),
       executedQty: Number((contracts * inst.ctVal).toFixed(6)),
       executedPrice: req.entryPrice,
-      message: `OKX ${req.credentials.isTestnet ? "Demo" : "Live"} khớp #${row.ordId} (${contracts} ct ${instId}, attached SL/TP)`,
+      message: `OKX ${req.credentials.isTestnet ? "Demo" : "Live"} khớp #${row.ordId} (${contracts} ct ${instId}, ${tpChunks.length > 1 ? `${tpChunks.length} mốc TP` : "attached SL/TP"})`,
     };
   } catch (err) {
     return {

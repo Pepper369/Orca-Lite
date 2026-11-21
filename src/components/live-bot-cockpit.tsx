@@ -817,10 +817,16 @@ export function LiveBotCockpit({
                         ((isBuy && pos.stopLossPrice >= pos.entryPrice) ||
                           (!isBuy && pos.stopLossPrice <= pos.entryPrice));
                       let progressPct = 50;
-                      if (pos.stopLossPrice != null && pos.takeProfit1 != null && pos.takeProfit1 !== pos.stopLossPrice) {
+                      const activeTargetTp =
+                        pos.positionStage === "TP2_TRAIL" && pos.takeProfit3
+                          ? pos.takeProfit3
+                          : pos.positionStage === "TP1_BE" && pos.takeProfit2
+                            ? pos.takeProfit2
+                            : pos.takeProfit1;
+                      if (pos.stopLossPrice != null && activeTargetTp != null && activeTargetTp !== pos.stopLossPrice) {
                         const rawPct = isBuy
-                          ? ((pos.markPrice - pos.stopLossPrice) / (pos.takeProfit1 - pos.stopLossPrice)) * 100
-                          : ((pos.stopLossPrice - pos.markPrice) / (pos.stopLossPrice - pos.takeProfit1)) * 100;
+                          ? ((pos.markPrice - pos.stopLossPrice) / (activeTargetTp - pos.stopLossPrice)) * 100
+                          : ((pos.stopLossPrice - pos.markPrice) / (pos.stopLossPrice - activeTargetTp)) * 100;
                         progressPct = Math.max(4, Math.min(98, Math.round(rawPct)));
                       }
                       return (
@@ -836,7 +842,17 @@ export function LiveBotCockpit({
                               <Badge tone={pos.direction === "BUY" ? "up" : "down"}>
                                 {pos.direction}
                               </Badge>
-                              {isBeLocked && (
+                              {pos.positionStage === "TP1_BE" && (
+                                <Badge tone="up" className="text-[9px]">
+                                  TP1 50%+BE
+                                </Badge>
+                              )}
+                              {pos.positionStage === "TP2_TRAIL" && (
+                                <Badge tone="up" className="text-[9px]">
+                                  TP2 LOCK
+                                </Badge>
+                              )}
+                              {isBeLocked && !pos.positionStage?.startsWith("TP") && (
                                 <Badge tone="up" className="text-[9px]">
                                   TRAILING LOCK
                                 </Badge>
@@ -844,6 +860,7 @@ export function LiveBotCockpit({
                             </div>
                             <div className="text-[10px] font-mono text-text-muted">
                               {pos.qtyOrLots} {pos.assetType === "FOREX" ? "lots" : ""} · {pos.leverage}x
+                              {pos.realizedPnlUsd ? ` · Chốt ${fmtSignedUsd(pos.realizedPnlUsd)}` : ""}
                             </div>
                           </td>
                           <td className="px-2.5 py-2">
@@ -862,9 +879,15 @@ export function LiveBotCockpit({
                             <div className={isBeLocked ? "text-positive font-semibold" : "text-negative"}>
                               SL: {pos.stopLossPrice ?? "—"}
                             </div>
-                            <div className="text-positive">TP: {pos.takeProfit1 ?? "—"}</div>
-                            {pos.stopLossPrice != null && pos.takeProfit1 != null && (
-                              <div className="mt-1 ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-panel-3" title={`Tiến độ SL → TP1: ${progressPct}%`}>
+                            <div className="text-positive">
+                              {pos.positionStage === "TP2_TRAIL" && pos.takeProfit3
+                                ? `TP3: ${pos.takeProfit3}`
+                                : pos.positionStage === "TP1_BE" && pos.takeProfit2
+                                  ? `TP2: ${pos.takeProfit2}`
+                                  : `TP1: ${pos.takeProfit1 ?? "—"}`}
+                            </div>
+                            {pos.stopLossPrice != null && activeTargetTp != null && (
+                              <div className="mt-1 ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-panel-3" title={`Tiến độ SL → TP: ${progressPct}%`}>
                                 <div
                                   className={`h-full transition-all ${
                                     pos.unrealizedPnlUsd >= 0 ? "bg-positive" : "bg-warn"

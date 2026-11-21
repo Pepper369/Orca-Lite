@@ -298,6 +298,8 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
         let recommendedLots = 0;
         if (entry && sl && action !== "WAIT" && effectiveRiskPct > 0) {
+          const fxRows = marketsRes?.data?.rows ?? [];
+          const findFx = (target: string) => fxRows.find((r) => r.pair === target && r.price > 0)?.price ?? null;
           const sizer = calculateForexPositionSize({
             accountBalance: 10_000,
             riskPercent: effectiveRiskPct,
@@ -307,6 +309,14 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
             takeProfit1: tp1,
             takeProfit2: tp2,
             takeProfit3: tp3,
+            crossRates: {
+              usdJpy: findFx("USDJPY"),
+              gbpUsd: findFx("GBPUSD"),
+              usdChf: findFx("USDCHF"),
+              usdCad: findFx("USDCAD"),
+              audUsd: findFx("AUDUSD"),
+              nzdUsd: findFx("NZDUSD"),
+            },
           });
           recommendedLots = sizer.standardLots;
         }

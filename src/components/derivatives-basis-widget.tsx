@@ -40,8 +40,10 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
 
   if (!data) return null;
 
-  const isContango = data.basis > 0;
-  const isArbitrageOpportunity = data.arbitrageRecommendation.action !== "NO_ACTION";
+  const isContango = (data.basis ?? 0) > 0;
+  const isArbitrageOpportunity = !data.isUnavailable && data.arbitrageRecommendation.action !== "NO_ACTION";
+  const fmtOpt = (val: number | null | undefined, suffix = "") =>
+    val != null && Number.isFinite(val) ? `${val.toLocaleString("vi-VN")}${suffix}` : "—";
 
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm p-5 space-y-4">
@@ -53,7 +55,11 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
               Định Giá Basis & Cơ Hội Arbitrage Phái Sinh HNX ({data.symbol})
             </h3>
             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-              Live Entrade Zero-Key
+              {data.provenance === "LIVE_QUOTE"
+                ? "Live Quote"
+                : data.provenance === "HISTORICAL_BARS"
+                  ? "Historical Bars"
+                  : "Unavailable"}
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -64,12 +70,14 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
         <div className="flex items-center gap-2">
           <span
             className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
-              isContango
-                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                : "bg-rose-500/15 text-rose-400 border-rose-500/30"
+              data.basis == null
+                ? "bg-surface/40 text-muted-foreground border-border/50"
+                : isContango
+                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                  : "bg-rose-500/15 text-rose-400 border-rose-500/30"
             }`}
           >
-            Basis: {data.basis > 0 ? `+${data.basis}` : data.basis} pts ({data.basisPct}%)
+            Basis: {data.basis == null ? "—" : `${data.basis > 0 ? `+${data.basis}` : data.basis} pts (${data.basisPct ?? 0}%)`}
           </span>
           <span className="text-xs text-muted-foreground">
             Đáo hạn: {data.daysToExpiry} ngày ({data.expiryDateStr})
@@ -82,28 +90,28 @@ export function DerivativesBasisWidget({ symbol = "VN30F1M" }: { symbol?: string
         <div className="p-3 rounded-xl bg-surface/30 border border-border/40">
           <div className="text-muted-foreground text-[11px]">HĐTL {data.symbol}</div>
           <div className="text-base font-bold text-foreground mt-1">
-            {data.derivativePrice.toLocaleString("vi-VN")}
+            {fmtOpt(data.derivativePrice)}
           </div>
         </div>
 
         <div className="p-3 rounded-xl bg-surface/30 border border-border/40">
           <div className="text-muted-foreground text-[11px]">Chỉ số {data.underlyingSymbol} Cơ sở</div>
           <div className="text-base font-bold text-foreground mt-1">
-            {data.underlyingIndexPrice.toLocaleString("vi-VN")}
+            {fmtOpt(data.underlyingIndexPrice)}
           </div>
         </div>
 
         <div className="p-3 rounded-xl bg-surface/30 border border-border/40">
           <div className="text-muted-foreground text-[11px]">Giá trị Lý thuyết (Fair Value)</div>
           <div className="text-base font-bold text-sky-400 mt-1">
-            {data.fairValuePrice.toLocaleString("vi-VN")}
+            {fmtOpt(data.fairValuePrice)}
           </div>
         </div>
 
         <div className="p-3 rounded-xl bg-surface/30 border border-border/40">
           <div className="text-muted-foreground text-[11px]">Độ Lệch Định Giá (Mispricing)</div>
-          <div className={`text-base font-bold mt-1 ${data.mispricing >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-            {data.mispricing > 0 ? `+${data.mispricing}` : data.mispricing} pts
+          <div className={`text-base font-bold mt-1 ${(data.mispricing ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            {data.mispricing == null ? "—" : `${data.mispricing > 0 ? `+${data.mispricing}` : data.mispricing} pts`}
           </div>
         </div>
       </div>

@@ -98,7 +98,7 @@ function checkSlippage(
     masterEntry: signal.entryPrice,
     currentPrice: marketPrice,
     maxSlippagePips: maxAllowedSlippagePips,
-    pipSize: getAssetPipSize(signal.symbol),
+    pipSize: getAssetPipSize(signal.symbol, signal.assetType, marketPrice),
   });
   return { passed: guard.allowed, slippagePips: guard.slippagePips };
 }
@@ -157,11 +157,16 @@ export async function executePlatformOrder(
     symbol: signal.symbol,
     direction: signal.direction,
     copiedLotsOrQty: qtyOrLots,
+    initialLotsOrQty: qtyOrLots,
     entryPrice: signal.entryPrice,
     executionPrice: marketPrice,
     slippagePips,
     stopLossPrice: signal.stopLossPrice,
     takeProfit1: signal.takeProfit1,
+    takeProfit2: signal.takeProfit2 ?? null,
+    takeProfit3: signal.takeProfit3 ?? null,
+    positionStage: "INITIAL",
+    realizedPnlUsd: 0,
     timestamp: now,
     signalId: signal.id,
     idempotencyKey,
@@ -187,14 +192,18 @@ export async function executePlatformOrder(
           entryPrice: marketPrice,
           stopLossPrice: signal.stopLossPrice,
           takeProfit1: signal.takeProfit1,
+          takeProfit2: signal.takeProfit2 ?? null,
+          takeProfit3: signal.takeProfit3 ?? null,
           leverage,
           idempotencyKey,
         },
         acct.platform,
       );
+      const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
       return {
         ...baseOrder,
-        copiedLotsOrQty: res.executedQty > 0 ? res.executedQty : qtyOrLots,
+        copiedLotsOrQty: actualQty,
+        initialLotsOrQty: actualQty,
         executionPrice: res.executedPrice > 0 ? res.executedPrice : marketPrice,
         status: res.ok ? "FILLED" : "REJECTED_EXCHANGE",
         exchangeOrderId: res.exchangeOrderId,
@@ -239,6 +248,8 @@ export async function executePlatformOrder(
             entryPrice: marketPrice,
             stopLossPrice: signal.stopLossPrice,
             takeProfit1: signal.takeProfit1,
+            takeProfit2: signal.takeProfit2 ?? null,
+            takeProfit3: signal.takeProfit3 ?? null,
             leverage,
             idempotencyKey,
           })
@@ -250,13 +261,17 @@ export async function executePlatformOrder(
             entryPrice: marketPrice,
             stopLossPrice: signal.stopLossPrice,
             takeProfit1: signal.takeProfit1,
+            takeProfit2: signal.takeProfit2 ?? null,
+            takeProfit3: signal.takeProfit3 ?? null,
             leverage,
             idempotencyKey,
           });
 
+    const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
     return {
       ...baseOrder,
-      copiedLotsOrQty: res.executedQty > 0 ? res.executedQty : qtyOrLots,
+      copiedLotsOrQty: actualQty,
+      initialLotsOrQty: actualQty,
       executionPrice: res.executedPrice > 0 ? res.executedPrice : marketPrice,
       status: res.ok ? "FILLED" : "REJECTED_EXCHANGE",
       exchangeOrderId: res.exchangeOrderId,
@@ -374,7 +389,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       if (activeSyms?.has(cleanSym)) {
         continue;
       }
-      const maxOpen = Math.max(1, acct.maxOpenPositions ?? 5);
+      const maxOpen = Math.max(1, acct.maxOpenPositions ?? 3);
       const currentOpen = openCountByAccount.get(acct.id) ?? 0;
       if (currentOpen >= maxOpen) {
         continue;

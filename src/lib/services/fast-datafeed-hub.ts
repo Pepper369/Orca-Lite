@@ -1,6 +1,7 @@
 import "server-only";
-import { getVnIndices } from "./stocks-board";
+import { getVnIndices, getVnOhlcv } from "./stocks-board";
 import { getVnStockDetail } from "./stocks";
+import { scalarSmaAt } from "../engines/unified-ta-kernel";
 import { getCommodityMarket } from "./commodities";
 import { resolveCommodityImpact } from "../commodities-impact";
 import { extractTickers } from "../engines/orca-contextual-reasoning-engine";
@@ -174,6 +175,48 @@ export interface FastDatafeedContext {
 // In-memory micro-cache (25s) to keep latency under 1ms for repeated queries
 let cachedMarket: { ts: number; data: FastMarketSnapshot } | null = null;
 const CACHE_TTL_MS = 25_000;
+let cachedVnIndexStats: { ts: number; sma50: number; sma200: number; annualVol: number } | null = null;
+const VNINDEX_STATS_TTL_MS = 5 * 60_000;
+
+async function getVnIndexTechnicalRegimeInputs(): Promise<{ sma50: number; sma200: number; annualVol: number } | null> {
+  const now = Date.now();
+  if (cachedVnIndexStats && now - cachedVnIndexStats.ts < VNINDEX_STATS_TTL_MS) {
+    return {
+      sma50: cachedVnIndexStats.sma50,
+      sma200: cachedVnIndexStats.sma200,
+      annualVol: cachedVnIndexStats.annualVol,
+    };
+  }
+  try {
+    const ohlcv = await Promise.race([
+      getVnOhlcv("VNINDEX", 220, "index").catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_600)),
+    ]);
+    const bars = ohlcv?.bars ?? [];
+    if (bars.length < 50) return cachedVnIndexStats
+      ? { sma50: cachedVnIndexStats.sma50, sma200: cachedVnIndexStats.sma200, annualVol: cachedVnIndexStats.annualVol }
+      : null;
+    const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c) && c > 0);
+    if (closes.length < 50) return null;
+    const sma50 = scalarSmaAt(closes, 50) ?? closes[closes.length - 1]!;
+    const sma200 = scalarSmaAt(closes, Math.min(200, closes.length)) ?? sma50;
+    const retWindow = closes.slice(-21);
+    let annualVol = 0.16;
+    if (retWindow.length >= 10) {
+      const rets: number[] = [];
+      for (let i = 1; i < retWindow.length; i++) {
+        rets.push(Math.log(retWindow[i]! / Math.max(1e-6, retWindow[i - 1]!)));
+      }
+      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1);
+      annualVol = Math.sqrt(Math.max(0, variance) * 252);
+    }
+    cachedVnIndexStats = { ts: now, sma50, sma200, annualVol };
+    return { sma50, sma200, annualVol };
+  } catch {
+    return null;
+  }
+}
 
 // Stock insights L1 LRU micro-cache
 const stockInsightCache = new Map<string, { ts: number; data: FastStockLiveInsight }>();
@@ -186,7 +229,10 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
   }
 
   try {
-    const indicesRes = await getVnIndices();
+    const [indicesRes, vniStats] = await Promise.all([
+      getVnIndices(),
+      getVnIndexTechnicalRegimeInputs(),
+    ]);
     if (!indicesRes?.items || indicesRes.items.length === 0) {
       return cachedMarket ? cachedMarket.data : null;
     }
@@ -204,8 +250,11 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
       return `${idx.code}: ${idx.value.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}đ (${pct})`;
     });
 
-    const vnIndexVal = indices.find((i) => i.code === "VNINDEX")?.value || 1250;
-    const regime = determineMarketRegime(vnIndexVal, 1240, 1210);
+    const vnIndexVal = indices.find((i) => i.code === "VNINDEX")?.value ?? null;
+    const regime: MarketRegime =
+      vnIndexVal != null && vniStats != null
+        ? determineMarketRegime(vnIndexVal, vniStats.sma50, vniStats.sma200, vniStats.annualVol)
+        : "SIDEWAY_CONSOLIDATION";
 
     const regimeDescriptions: Record<MarketRegime, string> = {
       BULL_EXPANSION: "Mở rộng Tăng trưởng (BULL_EXPANSION) — Tâm lý tích cực, ưu tiên nắm giữ cổ phiếu dẫn dắt",
@@ -213,6 +262,10 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
       BEAR_CAPITULATION: "Thu hẹp Giảm điểm (BEAR_CAPITULATION) — Rủi ro điều chỉnh cao, ưu tiên giữ tỷ trọng tiền mặt lớn",
       HIGH_VOLATILITY: "Biến động Cao (HIGH_VOLATILITY) — Rung lắc mạnh, thận trọng quản trị rủi ro",
     };
+    const regimeVi =
+      vnIndexVal != null && vniStats != null
+        ? `${regimeDescriptions[regime]} (SMA50 ${vniStats.sma50.toFixed(1)} · SMA200 ${vniStats.sma200.toFixed(1)})`
+        : "Chế độ trung tính tạm thời — thiếu chuỗi lịch sử VN-Index tính SMA50/SMA200.";
 
     // Enrich with Breadth, Liquidity & Capital Flow
     const session = getVnSession();
@@ -267,7 +320,7 @@ export async function getFastMarketSnapshot(force = false): Promise<FastMarketSn
       indices,
       summaryText: extraSummary.join(" · "),
       regime,
-      regimeVi: regimeDescriptions[regime],
+      regimeVi,
       session,
       breadth,
       liquidity,

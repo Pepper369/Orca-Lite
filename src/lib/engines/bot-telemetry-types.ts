@@ -30,11 +30,16 @@ export interface LiveOpenPosition {
   assetType: "CRYPTO" | "FOREX";
   direction: "BUY" | "SELL";
   qtyOrLots: number;
+  initialQtyOrLots?: number;
   leverage: number;
   entryPrice: number;
   markPrice: number;
   stopLossPrice: number | null;
   takeProfit1: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
+  positionStage?: "INITIAL" | "TP1_BE" | "TP2_TRAIL";
+  realizedPnlUsd?: number;
   unrealizedPnlUsd: number;
   roePct: number;
   liquidationPrice: number | null;

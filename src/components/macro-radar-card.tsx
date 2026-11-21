@@ -62,7 +62,7 @@ export function MacroRadarCard() {
               Radar Vĩ Mô & Chu Kỳ Kinh Tế (Macro Economic Radar)
             </h2>
             <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-              OQuant / Ray Dalio Cycle
+              {data.provenance === "LIVE_MACRO_FEED" ? "Live Macro Feed" : "Bootstrap Cached"}
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
@@ -91,7 +91,9 @@ export function MacroRadarCard() {
       <div>
         <div className="text-xs font-semibold text-foreground mb-3 flex items-center justify-between">
           <span>Các Chỉ Số Vĩ Mô Cốt Lõi (Leading Macro Indicators)</span>
-          <span className="text-[11px] text-muted-foreground">Cập nhật kỳ mới nhất</span>
+          <span className="text-[11px] text-muted-foreground">
+            {data.indicators[0]?.updatedAt ? `Kỳ công bố: ${data.indicators[0].updatedAt}` : "Cập nhật kỳ mới nhất"}
+          </span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {data.indicators.map((ind, i) => (

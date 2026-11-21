@@ -11,7 +11,11 @@
 
 import type { OhlcvBar } from "../types";
 import { atr, ema } from "../technical";
-import { normCdf } from "./advanced-quant-math";
+import {
+  filterOnlineRegimeHmm,
+  forecastHarRealizedVolatility,
+  normCdf,
+} from "./advanced-quant-math";
 import { estimateClvOrderFlowImbalance, getAssetPipSize, normalizeEpochMs, roundPrice } from "./asset-precision";
 
 export interface LiquidityPool {
@@ -528,6 +532,12 @@ export function forecastForwardLiquidityFlow(params: {
     }
   }
 
+  const harVol = forecastHarRealizedVolatility(bars, assetType === "CRYPTO" ? 365 : 252);
+  const hmmRegime = filterOnlineRegimeHmm(bars);
+  const regimeDriftScale =
+    1 + 0.12 * (hmmRegime.probabilities.trendExpansion - hmmRegime.probabilities.meanRevertLowVol);
+  const harDiffusionScale = Math.max(0.85, Math.min(1.25, harVol.expansionRatio));
+
   const scored: LiquidityMagnetTarget[] = [];
   for (const c of rawCandidates) {
     const isAbove = c.side === "BUY_SIDE";
@@ -559,13 +569,16 @@ export function forecastForwardLiquidityFlow(params: {
     const poolStrength = Math.round(Math.min(100, c.baseStrength + c.recencyBonus + c.volBoost));
 
     // Stochastic First-Passage Barrier Reach Probability over H = 12 bars
+    // Scaled causally by online HMM regime drift and HAR-RV realized volatility expansion
     const alignedThrust = (dirSign * directionalFlowThrust) / 100;
-    const mu = alignedThrust * 0.42 * (1 - 0.45 * pathImpedance);
+    const mu = alignedThrust * 0.42 * regimeDriftScale * (1 - 0.45 * pathImpedance);
     const d = Math.max(0.12, distanceAtr);
-    const rootH = Math.sqrt(horizonBars);
+    const rootH = Math.sqrt(horizonBars) * harDiffusionScale;
     const z1 = (mu * horizonBars - d) / rootH;
     const z2 = (-mu * horizonBars - d) / rootH;
-    const expTerm = Math.exp(Math.max(-12, Math.min(4, 2 * mu * d)));
+    const expTerm = Math.exp(
+      Math.max(-12, Math.min(4, (2 * mu * d) / Math.max(0.5, harDiffusionScale * harDiffusionScale))),
+    );
     const pReach = Math.max(0.05, Math.min(0.95, normCdf(z1) + expTerm * normCdf(z2)));
     const reachProbabilityPct = Math.round(pReach * 100);
 

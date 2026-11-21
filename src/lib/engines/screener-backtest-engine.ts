@@ -130,6 +130,7 @@ export interface BacktestRequest {
   marketRegime?: MarketRegimeType;
   dataSource?: "auto" | "vnstock" | "vndirect" | "vps";
   bars?: number;
+  preloadedBars?: { symbol: string; bars: OhlcvBar[] }[];
 }
 
 export interface BacktestTrade {
@@ -140,10 +141,17 @@ export interface BacktestTrade {
   exitDate: string;
   exitPrice: number;
   returnPct: number;
+  grossReturnPct?: number;
+  transactionCostPct?: number;
+  t2Locked?: boolean;
+  floorDelayedDays?: number;
   holdingDays: number;
   outcome: "WIN" | "LOSS";
   exitReason: "STOP_LOSS" | "TAKE_PROFIT" | "TIME_EXIT";
 }
+
+/** Vietnam equity round-trip friction: 0.15% buy fee + 0.15% sell fee + 0.10% sell tax + 0.05% slippage = 0.45% */
+export const VN_EQUITY_ROUND_TRIP_COST_PCT = 0.45;
 
 export interface EquityPoint {
   date: string;
@@ -480,22 +488,30 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
     chosenRegime === "all" || chosenRegime === "uptrend_2020_2021" ? 1400 : 700
   );
 
-  // 1. Fetch OHLCV batch for symbols from resilient VN Data Pipeline
-  const { batchVnOhlcv } = await import("../services/ohlcv-batch");
-  const ohlcvMap = await batchVnOhlcv(symbols, {
-    bars: barsToFetch,
-    perSymbolMs: 4000,
-    concurrency: 4,
-    resilient: true,
-  });
-
+  // 1. Resolve OHLCV batch from preloadedBars (if supplied) or resilient VN Data Pipeline
   const validEntries: { symbol: string; bars: OhlcvBar[] }[] = [];
-  for (const sym of symbols) {
-    const pack = ohlcvMap.get(sym);
-    if (pack && pack.bars && pack.bars.length >= 60) {
-      // Ensure sorted ascending by timestamp
-      const sorted = [...pack.bars].sort((a, b) => a.time - b.time);
-      validEntries.push({ symbol: sym, bars: sorted });
+  if (req.preloadedBars && req.preloadedBars.length > 0) {
+    for (const item of req.preloadedBars) {
+      if (item.bars && item.bars.length >= 60) {
+        const sorted = [...item.bars].sort((a, b) => a.time - b.time);
+        validEntries.push({ symbol: item.symbol, bars: sorted });
+      }
+    }
+  } else {
+    const { batchVnOhlcv } = await import("../services/ohlcv-batch");
+    const ohlcvMap = await batchVnOhlcv(symbols, {
+      bars: barsToFetch,
+      perSymbolMs: 4000,
+      concurrency: 4,
+      resilient: true,
+    });
+
+    for (const sym of symbols) {
+      const pack = ohlcvMap.get(sym);
+      if (pack && pack.bars && pack.bars.length >= 60) {
+        const sorted = [...pack.bars].sort((a, b) => a.time - b.time);
+        validEntries.push({ symbol: sym, bars: sorted });
+      }
     }
   }
 
@@ -754,43 +770,82 @@ export async function runScreenerBacktest(req: BacktestRequest = {}): Promise<Sc
         }
 
         if (signal && i + 1 < bars.length) {
-          // Enter at next bar's open or close
-          inPosition = true;
-          entryBarIdx = i + 1;
-          entryPrice = bars[i + 1].close;
-          i = entryBarIdx; // jump to entry bar
+          const nextBar = bars[i + 1]!;
+          const prevClose = bars[i]!.close;
+          const nextOpen = nextBar.open > 0 ? nextBar.open : nextBar.close;
+          // Vietnam Microstructure Guard 1: Cannot buy at open if stock gaps directly to +7% ceiling with locked range
+          const isCeilingLockedAtOpen =
+            prevClose > 0 &&
+            (nextOpen - prevClose) / prevClose >= 0.068 &&
+            Math.abs(nextBar.high - nextBar.low) <= nextOpen * 0.001;
+
+          if (!isCeilingLockedAtOpen && nextOpen > 0) {
+            inPosition = true;
+            entryBarIdx = i + 1;
+            entryPrice = nextOpen;
+            i = entryBarIdx; // jump to entry bar (T+0; cannot exit on T+0 or T+1)
+          }
         }
       } else {
-        // Evaluate active position
-        const pnlPct = ((currentClose - entryPrice) / entryPrice) * 100;
+        // Evaluate active position under Vietnam T+2.5 Settlement & Floor-Lock Microstructure Rules
         const daysHeld = i - entryBarIdx;
 
+        // Vietnam Microstructure Guard 2: T+2.5 settlement lock (shares are not tradable on T+0 or T+1)
+        if (daysHeld < 2 && i < bars.length - 1) {
+          continue;
+        }
+
+        // Vietnam Microstructure Guard 3: Floor-locked illiquidity (-6.7% drop with zero bid range) delays exit
+        const prevBarClose = i > 0 ? bars[i - 1]!.close : entryPrice;
+        const curBar = bars[i]!;
+        const isFloorLocked =
+          prevBarClose > 0 &&
+          (curBar.close - prevBarClose) / prevBarClose <= -0.067 &&
+          Math.abs(curBar.high - curBar.low) <= curBar.close * 0.001;
+        if (isFloorLocked && i < bars.length - 1) {
+          continue;
+        }
+
+        const barOpen = curBar.open > 0 ? curBar.open : currentClose;
+        const barHigh = curBar.high > 0 ? curBar.high : currentClose;
+        const barLow = curBar.low > 0 ? curBar.low : currentClose;
+        const stopPrice = entryPrice * (1 - stopLossPct / 100);
+        const tpPrice = entryPrice * (1 + takeProfitPct / 100);
+
         let shouldExit = false;
+        let exitPrice = currentClose;
         let exitReason: "STOP_LOSS" | "TAKE_PROFIT" | "TIME_EXIT" = "TIME_EXIT";
 
-        if (pnlPct <= -stopLossPct) {
+        // Intra-bar High/Low barrier check with conservative SL-first tie-breaking
+        if (barLow <= stopPrice) {
           shouldExit = true;
           exitReason = "STOP_LOSS";
-        } else if (pnlPct >= takeProfitPct) {
+          exitPrice = Math.min(barOpen, stopPrice);
+        } else if (barHigh >= tpPrice) {
           shouldExit = true;
           exitReason = "TAKE_PROFIT";
+          exitPrice = Math.max(barOpen, tpPrice);
         } else if (daysHeld >= holdingDays || i === bars.length - 1) {
           shouldExit = true;
           exitReason = "TIME_EXIT";
+          exitPrice = currentClose;
         }
 
         if (shouldExit) {
-          const exitPrice = currentClose;
-          const returnPct = Number((((exitPrice - entryPrice) / entryPrice) * 100).toFixed(2));
+          const grossReturnPct = Number((((exitPrice - entryPrice) / entryPrice) * 100).toFixed(2));
+          const returnPct = Number((grossReturnPct - VN_EQUITY_ROUND_TRIP_COST_PCT).toFixed(2));
           const entryDate = formatBarDate(bars[entryBarIdx].time);
           allTrades.push({
             id: `${symbol}-${entryDate}-${currentDate}`,
             symbol,
             entryDate,
-            entryPrice,
+            entryPrice: Number(entryPrice.toFixed(2)),
             exitDate: currentDate,
-            exitPrice,
+            exitPrice: Number(exitPrice.toFixed(2)),
             returnPct,
+            grossReturnPct,
+            transactionCostPct: VN_EQUITY_ROUND_TRIP_COST_PCT,
+            t2Locked: true,
             holdingDays: daysHeld,
             outcome: returnPct >= 0 ? "WIN" : "LOSS",
             exitReason,

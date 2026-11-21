@@ -8,6 +8,7 @@
  */
 
 import type { ForexQuantSignalItem } from "./forex-signals-hub";
+import { getPriceDecimals, roundPrice } from "@/lib/engines/asset-precision";
 import { isSafeWebhookUrl } from "@/lib/webhook-security";
 
 export interface Mt5EaSignalPayload {
@@ -62,12 +63,12 @@ export function buildMt5EaOrder(signal: ForexQuantSignalItem, magicNumber = 8883
     symbol: signal.pair,
     cmd,
     type,
-    price: Math.round(price * 10000) / 10000,
-    sl: Math.round(sl * 10000) / 10000,
-    tp: Math.round(tp * 10000) / 10000,
-    tp1: Math.round((signal.tp1 ?? tp) * 10000) / 10000,
-    tp2: Math.round((signal.tp2 ?? tp) * 10000) / 10000,
-    tp3: Math.round((signal.tp3 ?? tp) * 10000) / 10000,
+    price: roundPrice(price, signal.pair, "FOREX"),
+    sl: roundPrice(sl, signal.pair, "FOREX"),
+    tp: roundPrice(tp, signal.pair, "FOREX"),
+    tp1: roundPrice(signal.tp1 ?? tp, signal.pair, "FOREX"),
+    tp2: roundPrice(signal.tp2 ?? tp, signal.pair, "FOREX"),
+    tp3: roundPrice(signal.tp3 ?? tp, signal.pair, "FOREX"),
     lots: signal.recommendedLots || 0.1,
     riskPct: 1.0,
     comment: `OrcaQuant_${signal.pair}`,
@@ -80,10 +81,11 @@ export function buildMt5EaOrder(signal: ForexQuantSignalItem, magicNumber = 8883
 export function buildTelegramAlertMessage(signal: ForexQuantSignalItem): string {
   const isBuy = signal.direction === "BUY";
   const icon = isBuy ? "🟢 MUA (BUY)" : "🔴 BÁN (SELL)";
-  const digits = signal.pair.includes("JPY") ? 2 : signal.pair.startsWith("XAU") ? 2 : 4;
+  const refPrice = signal.entryPrice ?? signal.lastPrice ?? 1;
+  const digits = getPriceDecimals(refPrice, signal.pair, "FOREX");
 
   const fmt = (v: number | null | undefined) =>
-    v != null ? (v >= 100 ? v.toFixed(2) : v.toFixed(digits)) : "—";
+    v != null ? v.toFixed(digits) : "—";
 
   return [
     `⚡ *ORCA QUANT FOREX VIP SIGNAL* ⚡`,

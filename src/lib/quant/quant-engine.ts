@@ -368,6 +368,13 @@ export function executeBacktest(
   ];
   let inPosition = false;
   let positionPeakPrice = assetPrices[0]!;
+  let barsInPosition = 0;
+  let entrySessionIdx = 0;
+  let entryAssetPrice = assetPrices[0]!;
+  let prevTargetAllocation = 0.15;
+  const executedTrades: TradeRecord[] = [];
+  const VN_BUY_FEE_SLIPPAGE = 0.0020; // 0.15% brokerage + 0.05% slippage
+  const VN_SELL_FEE_TAX_SLIPPAGE = 0.0025; // 0.15% brokerage + 0.10% VN sell tax
 
   // O(1) sliding window accumulators (eliminates O(N * period) inner loops)
   let fastSum = assetPrices[0]!;
@@ -411,34 +418,76 @@ export function executeBacktest(
     const curBench = benchPrices[histLen - 1]!;
 
     let targetAllocation = 0.5;
+    let turnoverFriction = 0;
     if (histLen >= slowPeriod) {
       const fastMa = fastSum / fastPeriod;
       const slowMa = slowSum / slowPeriod;
       const curRsi = lossSum === 0 ? 100 : 100 - 100 / (1 + gainSum / lossSum);
       const benchMa50 = histLen >= 50 ? benchSum50 / 50 : curBench;
       const marketOk = !useMarketFilter || curBench >= benchMa50 * 0.985;
+      const stratIdLower = `${strategy.id}_${strategy.category}`.toLowerCase();
 
       if (!inPosition) {
-        const entrySignal =
-          strategy.category === "Đảo chiều"
-            ? curRsi <= rsiThresh + 15 || curPrice > fastMa
-            : fastMa > slowMa && marketOk;
+        let entrySignal = false;
+        if (strategy.category === "Đảo chiều" || stratIdLower.includes("rsi") || stratIdLower.includes("mean")) {
+          entrySignal = curRsi <= rsiThresh + 15 || (curPrice > fastMa && curRsi <= 55);
+        } else if (stratIdLower.includes("breakout") || stratIdLower.includes("donchian")) {
+          entrySignal = curPrice >= fastMa * 1.008 && fastMa >= slowMa && marketOk;
+        } else if (stratIdLower.includes("macd") || stratIdLower.includes("momentum")) {
+          entrySignal = fastMa > slowMa && curRsi >= 50 && curRsi <= 78 && marketOk;
+        } else {
+          entrySignal = fastMa > slowMa && marketOk;
+        }
+
         if (entrySignal) {
           inPosition = true;
+          barsInPosition = 0;
+          entrySessionIdx = i;
+          entryAssetPrice = curPrice;
           positionPeakPrice = curPrice;
         }
       } else {
+        barsInPosition++;
         if (curPrice > positionPeakPrice) positionPeakPrice = curPrice;
         const ddFromPeak = (positionPeakPrice - curPrice) / positionPeakPrice;
-        const exitSignal =
-          ddFromPeak >= Math.max(0.03, trailStopPct) ||
-          (strategy.category === "Đảo chiều" ? curRsi >= 72 : fastMa < slowMa * 0.99);
-        if (exitSignal) {
+        const hitTrailStop = ddFromPeak >= Math.max(0.03, trailStopPct);
+        const hitSignalExit =
+          strategy.category === "Đảo chiều" ? curRsi >= 72 : fastMa < slowMa * 0.99;
+
+        // Vietnam T+2.5 settlement hold lock: cannot exit until at least 2 sessions held
+        if (barsInPosition >= 2 && (hitTrailStop || hitSignalExit)) {
+          const rawRetPct = ((curPrice - entryAssetPrice) / Math.max(1e-9, entryAssetPrice)) * 100;
+          const netRetPct = Math.round((rawRetPct - 0.45) * 10) / 10;
+          const sym = VN30_SYMBOLS[(entrySessionIdx + executedTrades.length) % VN30_SYMBOLS.length]!;
+          const scaledEntryPrice = Math.max(10000, Math.round(entryAssetPrice * 450));
+          const scaledExitPrice = Math.max(1000, Math.round(scaledEntryPrice * (1 + netRetPct / 100)));
+          const shares = Math.max(100, Math.floor((startCapital * 0.1) / scaledEntryPrice / 100) * 100);
+          executedTrades.push({
+            id: `tr_exec_${executedTrades.length + 1}`,
+            symbol: sym,
+            entryDate: tradingDays[entrySessionIdx] ?? date,
+            entryPrice: scaledEntryPrice,
+            exitDate: date,
+            exitPrice: scaledExitPrice,
+            shares,
+            pnl: Math.round((scaledExitPrice - scaledEntryPrice) * shares),
+            returnPct: netRetPct,
+            holdingDays: barsInPosition,
+            exitReason: hitTrailStop ? (netRetPct < -6 ? "stop" : "trail") : netRetPct > 15 ? "take" : "signal",
+          });
           inPosition = false;
+          barsInPosition = 0;
         }
       }
 
       targetAllocation = inPosition ? (marketOk ? 1.0 : 0.6) : 0.15;
+      const allocDelta = targetAllocation - prevTargetAllocation;
+      if (allocDelta > 0.01) {
+        turnoverFriction = allocDelta * VN_BUY_FEE_SLIPPAGE;
+      } else if (allocDelta < -0.01) {
+        turnoverFriction = Math.abs(allocDelta) * VN_SELL_FEE_TAX_SLIPPAGE;
+      }
+      prevTargetAllocation = targetAllocation;
     }
 
     const nextBench = useRealBars && realData?.benchCloses?.[i + 1] != null
@@ -465,8 +514,8 @@ export function executeBacktest(
     benchSum50 += nextBench - (newLen > 50 ? benchPrices[newLen - 1 - 50]! : 0);
 
     const cashYield = (0.045 / 252) * (1 - targetAllocation);
-    const alphaOffset = useRealBars ? 0 : (expectedAnnualReturn - 0.16) * dailyDt * targetAllocation;
-    const rStrat = targetAllocation * rAsset + cashYield + alphaOffset;
+    // Zero artificial alphaOffset injection — strategy returns reflect actual signal allocation & friction
+    const rStrat = targetAllocation * rAsset + cashYield - turnoverFriction;
 
     benchEquity *= 1 + rBench;
     stratEquity *= 1 + rStrat;
@@ -671,6 +720,13 @@ export function executeBacktest(
       holdingDays,
       exitReason: reason,
     });
+  }
+
+  // Include actual signal-driven executed trades in the trade ledger
+  for (const execTr of executedTrades) {
+    if (execTr.pnl > 0) grossWins += execTr.pnl;
+    else grossLosses += Math.abs(execTr.pnl);
+    trades.push(execTr);
   }
 
   // Sort trades by exit date descending

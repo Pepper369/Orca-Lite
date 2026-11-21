@@ -7,7 +7,10 @@ import {
   calculateVaRAndCVaR,
   calculateTripleBarrierLevels,
 } from "@/lib/engines/advanced-quant-math";
-import { MiQuantEngine } from "@/lib/engines/miquant-quant-engine";
+import {
+  MiQuantEngine,
+  resolveEmpiricalCovarianceForSymbols,
+} from "@/lib/engines/miquant-quant-engine";
 import { rateLimit } from "@/lib/rate-limit";
 import { isValidTradingSymbol } from "@/app/api/_security";
 
@@ -20,29 +23,25 @@ export async function GET(req: NextRequest) {
 
     if (action === "overview") {
       const bots = await MiQuantEngine.getBots();
-      // Compile institutional analytics for all 6 bots
-      const botAnalytics = bots.map((b) => {
-        const symbols = b.target_holdings.map((h) => h.symbol);
-        const vols = b.target_holdings.map((h) => (h.metrics?.atr_pct || 2.5) / 100);
-        const n = symbols.length;
-        const cov: number[][] = [];
-        for (let i = 0; i < n; i++) {
-          cov[i] = [];
-          for (let j = 0; j < n; j++) {
-            cov[i][j] = i === j ? vols[i] * vols[i] : 0.35 * vols[i] * vols[j];
-          }
-        }
-        const hrp = calculateHRP(symbols, cov);
+      // Compile institutional analytics for all 6 bots using empirical Ledoit-Wolf shrinkage covariance
+      const botAnalytics = await Promise.all(
+        bots.map(async (b) => {
+          const symbols = b.target_holdings.map((h) => h.symbol);
+          const vols = b.target_holdings.map((h) => (h.metrics?.atr_pct || 2.5) / 100);
+          const { covMatrix, source } = await resolveEmpiricalCovarianceForSymbols(symbols, vols);
+          const hrp = calculateHRP(symbols, covMatrix);
 
-        return {
-          id: b.id,
-          name: b.name,
-          backtest: b.backtest,
-          institutional_metrics: b.institutional_metrics,
-          hrp_weights: hrp.weights,
-          ordered_symbols: hrp.orderedSymbols,
-        };
-      });
+          return {
+            id: b.id,
+            name: b.name,
+            backtest: b.backtest,
+            institutional_metrics: b.institutional_metrics,
+            hrp_weights: hrp.weights,
+            ordered_symbols: hrp.orderedSymbols,
+            covariance_source: source,
+          };
+        }),
+      );
 
       return NextResponse.json({
         success: true,
@@ -92,19 +91,16 @@ export async function POST(req: NextRequest) {
       const n = symbols.length;
       let cov: number[][] | undefined = Array.isArray(body.covMatrix) ? (body.covMatrix as number[][]) : undefined;
 
+      let covSource: string = "CALLER_SUPPLIED";
       if (!cov || cov.length !== n || cov.some((row) => !Array.isArray(row) || row.length !== n)) {
-        cov = [];
-        const vols = symbols.map((_, i) => (2.0 + (i % 3) * 0.8) / 100);
-        for (let i = 0; i < n; i++) {
-          cov[i] = [];
-          for (let j = 0; j < n; j++) {
-            cov[i][j] = i === j ? vols[i] * vols[i] : 0.3 * vols[i] * vols[j];
-          }
-        }
+        const fallbackVols = symbols.map(() => 0.025);
+        const emp = await resolveEmpiricalCovarianceForSymbols(symbols, fallbackVols);
+        cov = emp.covMatrix;
+        covSource = emp.source;
       }
 
       const result = calculateHRP(symbols, cov);
-      return NextResponse.json({ success: true, data: result });
+      return NextResponse.json({ success: true, data: { ...result, covariance_source: covSource } });
     }
 
     if (type === "almgren_chriss") {

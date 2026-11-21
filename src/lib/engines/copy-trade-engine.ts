@@ -83,6 +83,8 @@ export type CopyOrderStatus =
   | "PENDING_EA"
   | "CANCELLED";
 
+export type PositionStage = "INITIAL" | "TP1_BE" | "TP2_TRAIL" | "CLOSED";
+
 export interface CopyExecutionOrder {
   orderId: string;
   followerId: string;
@@ -91,12 +93,17 @@ export interface CopyExecutionOrder {
   symbol: string;
   direction: "BUY" | "SELL";
   copiedLotsOrQty: number;
+  initialLotsOrQty?: number;
   entryPrice: number;
   executionPrice: number;
   slippagePips: number;
   status: CopyOrderStatus;
   stopLossPrice: number;
   takeProfit1: number;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
+  positionStage?: PositionStage;
+  realizedPnlUsd?: number;
   timestamp: number;
   message: string;
   signalId?: string;

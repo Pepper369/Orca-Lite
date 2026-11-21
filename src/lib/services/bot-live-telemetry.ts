@@ -16,6 +16,7 @@ import {
   fetchBinanceFuturesTelemetry,
   fetchMetaApiMt5Telemetry,
   fetchOkxTelemetry,
+  updateBinanceFuturesStopLoss,
   type LiveExchangeTelemetryResult,
 } from "@/lib/engines/exchange-execution-client";
 import {
@@ -279,9 +280,9 @@ function buildLocalOpenPositions(
       ? "CRYPTO"
       : "FOREX";
     const rawEntry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
-    const entry = roundPrice(rawEntry, o.symbol);
+    const entry = roundPrice(rawEntry, o.symbol, assetType);
     const { price: rawMarkPrice } = resolveLiveMarkPrice(o.symbol, assetType, entry);
-    const markPrice = roundPrice(rawMarkPrice, o.symbol);
+    const markPrice = roundPrice(rawMarkPrice, o.symbol, assetType);
     const leverage = assetType === "CRYPTO" ? Math.max(1, acct.leverageCap ?? 5) : 100;
     const unrealizedPnlUsd = calculateMarkToMarketPnlUsd({
       symbol: o.symbol,
@@ -312,11 +313,17 @@ function buildLocalOpenPositions(
       assetType,
       direction: o.direction,
       qtyOrLots: o.copiedLotsOrQty,
+      initialQtyOrLots: o.initialLotsOrQty ?? o.copiedLotsOrQty,
       leverage,
       entryPrice: entry,
       markPrice,
       stopLossPrice: o.stopLossPrice > 0 ? o.stopLossPrice : null,
       takeProfit1: o.takeProfit1 > 0 ? o.takeProfit1 : null,
+      takeProfit2: o.takeProfit2 && o.takeProfit2 > 0 ? o.takeProfit2 : null,
+      takeProfit3: o.takeProfit3 && o.takeProfit3 > 0 ? o.takeProfit3 : null,
+      positionStage:
+        o.positionStage && o.positionStage !== "CLOSED" ? o.positionStage : "INITIAL",
+      realizedPnlUsd: o.realizedPnlUsd ?? 0,
       unrealizedPnlUsd,
       roePct,
       liquidationPrice: null,
@@ -374,8 +381,8 @@ export async function closeTrackedBotPosition(params: {
     params.overrideClosePrice && params.overrideClosePrice > 0
       ? params.overrideClosePrice
       : resolveLiveMarkPrice(order.symbol, assetType, entry).price;
-  const closePrice = roundPrice(resolvedPrice, order.symbol);
-  const realizedPnlUsd = calculateMarkToMarketPnlUsd({
+  const closePrice = roundPrice(resolvedPrice, order.symbol, assetType);
+  const chunkRealizedPnlUsd = calculateMarkToMarketPnlUsd({
     symbol: order.symbol,
     assetType,
     direction: order.direction,
@@ -383,19 +390,22 @@ export async function closeTrackedBotPosition(params: {
     markPrice: closePrice,
     qtyOrLots: order.copiedLotsOrQty,
   });
+  const totalRealizedTradePnl = Number(((order.realizedPnlUsd ?? 0) + chunkRealizedPnlUsd).toFixed(2));
 
   CLOSED_ORDER_IDS.add(order.orderId);
-  const pnlSign = realizedPnlUsd >= 0 ? "+" : "";
+  const pnlSign = totalRealizedTradePnl >= 0 ? "+" : "";
   const tag = params.reasonTag ? ` [${params.reasonTag}]` : "";
   await saveBotExecutionOrder({
     ...order,
     status: "CANCELLED",
-    message: `[ĐÃ ĐÓNG]${tag} Chốt tại ${closePrice} · PnL ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
+    positionStage: "CLOSED",
+    realizedPnlUsd: totalRealizedTradePnl,
+    message: `[ĐÃ ĐÓNG]${tag} Chốt phần còn lại tại ${closePrice} · PnL ${pnlSign}$${totalRealizedTradePnl.toFixed(2)}`,
   });
 
-  const nextTotalPnl = Number((acct.totalPnlUsd + realizedPnlUsd).toFixed(2));
-  const nextDailyPnl = Number(((acct.dailyRealizedPnlUsd ?? 0) + realizedPnlUsd).toFixed(2));
-  const nextBalance = Number(Math.max(0, acct.balanceUsd + realizedPnlUsd).toFixed(2));
+  const nextTotalPnl = Number((acct.totalPnlUsd + chunkRealizedPnlUsd).toFixed(2));
+  const nextDailyPnl = Number(((acct.dailyRealizedPnlUsd ?? 0) + chunkRealizedPnlUsd).toFixed(2));
+  const nextBalance = Number(Math.max(0, acct.balanceUsd + chunkRealizedPnlUsd).toFixed(2));
   await updateBrokerConnectionState(acct.id, {
     balanceUsd: nextBalance,
     totalPnlUsd: nextTotalPnl,
@@ -403,44 +413,136 @@ export async function closeTrackedBotPosition(params: {
     dailyPnlDate: new Date().toISOString().slice(0, 10),
   });
 
+  const chunkSign = chunkRealizedPnlUsd >= 0 ? "+" : "";
   recordBotActivity({
-    level: realizedPnlUsd >= 0 ? "ok" : "warn",
+    level: totalRealizedTradePnl >= 0 ? "ok" : "warn",
     category: "CLOSE",
     symbol: order.symbol,
     accountName: acct.name,
     platform: acct.platform,
-    message: `Đóng vị thế${tag} ${order.direction} ${order.symbol} @ ${closePrice} (${pnlSign}$${realizedPnlUsd.toFixed(2)})`,
+    message: `Đóng vị thế${tag} ${order.direction} ${order.symbol} @ ${closePrice} (${chunkSign}$${chunkRealizedPnlUsd.toFixed(2)}, tổng ${pnlSign}$${totalRealizedTradePnl.toFixed(2)})`,
   });
 
   return {
     ok: true,
-    realizedPnlUsd,
+    realizedPnlUsd: chunkRealizedPnlUsd,
     closePrice,
     symbol: order.symbol,
     accountName: acct.name,
-    message: `Đã chốt${tag} ${order.symbol} tại ${closePrice} · Lãi/Lỗ thực hiện: ${pnlSign}$${realizedPnlUsd.toFixed(2)}`,
+    message: `Đã chốt${tag} ${order.symbol} tại ${closePrice} · Lãi/Lỗ chốt: ${chunkSign}$${chunkRealizedPnlUsd.toFixed(2)} (Tổng kèo: ${pnlSign}$${totalRealizedTradePnl.toFixed(2)})`,
   };
 }
 
+function roundOrderQuantity(qty: number, assetType: "CRYPTO" | "FOREX"): number {
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+  return assetType === "FOREX"
+    ? Math.round(qty * 100) / 100
+    : Number(qty.toFixed(4));
+}
+
+async function advancePartialTakeProfitStage(params: {
+  order: CopyExecutionOrder;
+  assetType: "CRYPTO" | "FOREX";
+  entry: number;
+  markPrice: number;
+  closeQty: number;
+  remainQty: number;
+  nextSlPrice: number;
+  nextStage: "TP1_BE" | "TP2_TRAIL";
+  stageLabel: string;
+}): Promise<boolean> {
+  const { order, assetType, entry, markPrice, closeQty, remainQty, nextSlPrice, nextStage, stageLabel } = params;
+  const acct = await getBrokerConnectionById(order.followerId);
+  if (!acct) return false;
+
+  const execClosePrice = roundPrice(markPrice, order.symbol, assetType);
+  const partialPnlUsd = calculateMarkToMarketPnlUsd({
+    symbol: order.symbol,
+    assetType,
+    direction: order.direction,
+    entryPrice: entry,
+    markPrice: execClosePrice,
+    qtyOrLots: closeQty,
+  });
+  const cumulativePnlUsd = Number(((order.realizedPnlUsd ?? 0) + partialPnlUsd).toFixed(2));
+
+  let syncedSlOrderId = order.slOrderId ?? null;
+  if (acct.hasApiKey && acct.platform === "BINANCE_FUTURES" && nextSlPrice > 0) {
+    const secrets = await getBrokerConnectionSecrets(acct.id);
+    if (secrets) {
+      const slSync = await updateBinanceFuturesStopLoss({
+        credentials: secrets,
+        symbol: order.symbol,
+        direction: order.direction,
+        previousSlOrderId: order.slOrderId,
+        newStopLossPrice: nextSlPrice,
+      });
+      if (slSync.ok && slSync.newSlOrderId) {
+        syncedSlOrderId = slSync.newSlOrderId;
+      }
+    }
+  }
+
+  const pnlSign = partialPnlUsd >= 0 ? "+" : "";
+  await saveBotExecutionOrder({
+    ...order,
+    copiedLotsOrQty: remainQty,
+    initialLotsOrQty: order.initialLotsOrQty ?? order.copiedLotsOrQty,
+    stopLossPrice: nextSlPrice,
+    slOrderId: syncedSlOrderId,
+    positionStage: nextStage,
+    realizedPnlUsd: cumulativePnlUsd,
+    message: `[${stageLabel}] Chốt ${closeQty} @ ${execClosePrice} (${pnlSign}$${partialPnlUsd.toFixed(2)}) · SL -> ${nextSlPrice} · Còn ${remainQty}`,
+  });
+
+  await updateBrokerConnectionState(acct.id, {
+    balanceUsd: Number(Math.max(0, acct.balanceUsd + partialPnlUsd).toFixed(2)),
+    totalPnlUsd: Number((acct.totalPnlUsd + partialPnlUsd).toFixed(2)),
+    dailyRealizedPnlUsd: Number(((acct.dailyRealizedPnlUsd ?? 0) + partialPnlUsd).toFixed(2)),
+    dailyPnlDate: new Date().toISOString().slice(0, 10),
+  });
+
+  recordBotActivity({
+    level: "ok",
+    category: "CLOSE",
+    symbol: order.symbol,
+    accountName: acct.name,
+    platform: acct.platform,
+    message: `[${stageLabel}] ${order.direction} ${order.symbol}: Chốt ${closeQty} @ ${execClosePrice} (${pnlSign}$${partialPnlUsd.toFixed(2)}), dời SL -> ${nextSlPrice} (còn ${remainQty})`,
+  });
+
+  return true;
+}
+
 /**
- * Quản trị vị thế tự động theo thời gian thực (Auto TP1 · Auto SL · Breakeven Lock · Dynamic Trailing Stop · Signal Reversal).
+ * Quản trị vị thế tự động 3 chặng theo thời gian thực:
+ * - TP1 (50% + dời SL về Breakeven) -> TP2 (30% + khóa lãi sát TP1) -> TP3 (20% còn lại)
+ * - Auto SL Guard, Signal Reversal & Dynamic Trailing Stop chuẩn pip/precision từng lớp tài sản.
  */
 export async function evaluateRealtimePositionExits(options?: {
   reversals?: Map<string, "BUY" | "SELL">;
-}): Promise<{ closedCount: number; trailedCount: number }> {
-  if (IS_TEST_RUNNER) return { closedCount: 0, trailedCount: 0 };
+  overrideMarkPrices?: Map<string, number>;
+  forceEvaluate?: boolean;
+}): Promise<{ closedCount: number; trailedCount: number; partialClosedCount?: number }> {
+  if (IS_TEST_RUNNER && !options?.forceEvaluate) {
+    return { closedCount: 0, trailedCount: 0, partialClosedCount: 0 };
+  }
   const orders = await listBotExecutionOrders(150);
-  await refreshOpenPositionLiveQuotes(orders);
+  if (!options?.overrideMarkPrices) {
+    await refreshOpenPositionLiveQuotes(orders);
+  }
 
   const openOrders = orders.filter(
     (o) =>
       (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
       !CLOSED_ORDER_IDS.has(o.orderId) &&
+      o.positionStage !== "CLOSED" &&
       !o.message.startsWith("[ĐÃ ĐÓNG]"),
   );
 
   let closedCount = 0;
   let trailedCount = 0;
+  let partialClosedCount = 0;
 
   for (const o of openOrders) {
     const assetType: "CRYPTO" | "FOREX" = isCryptoOrderSymbol(o.symbol, o.platform)
@@ -449,15 +551,63 @@ export async function evaluateRealtimePositionExits(options?: {
     const entry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
     if (!Number.isFinite(entry) || entry <= 0) continue;
 
-    const { price: markPrice, isLiveFeed } = resolveLiveMarkPrice(o.symbol, assetType, entry);
+    const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const overridePx =
+      options?.overrideMarkPrices?.get(cleanSym) ??
+      options?.overrideMarkPrices?.get(o.symbol);
+    const { price: markPrice, isLiveFeed } =
+      overridePx != null && overridePx > 0
+        ? { price: overridePx, isLiveFeed: true }
+        : resolveLiveMarkPrice(o.symbol, assetType, entry);
     if (!isLiveFeed || !Number.isFinite(markPrice) || markPrice <= 0) continue;
 
     const isBuy = o.direction === "BUY";
+    const pip = getAssetPipSize(o.symbol, assetType, markPrice);
     const tp1 = o.takeProfit1;
+    const tp2 = o.takeProfit2 ?? 0;
+    const tp3 = o.takeProfit3 ?? 0;
     const sl = o.stopLossPrice;
+    const stage = o.positionStage ?? "INITIAL";
+    const initialQty =
+      o.initialLotsOrQty && o.initialLotsOrQty > 0 ? o.initialLotsOrQty : o.copiedLotsOrQty;
+    const minViableQty = assetType === "FOREX" ? 0.01 : Math.max(0.0001, initialQty * 0.08);
 
-    // 1) Auto Take-Profit (TP1)
-    if (tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1))) {
+    // 1) Multi-Tier Take-Profit State Machine (TP1 50%+BE -> TP2 30%+Lock -> TP3 20%)
+    if (stage === "INITIAL" && tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1))) {
+      const hasHigherTp = tp2 > 0 && (isBuy ? tp2 > tp1 : tp2 < tp1);
+      const closeQty = roundOrderQuantity(initialQty * 0.5, assetType);
+      const remainQty = roundOrderQuantity(o.copiedLotsOrQty - closeQty, assetType);
+
+      if (hasHigherTp && closeQty > 0 && remainQty >= minViableQty) {
+        const beBuffer = Math.max(pip * 1.5, entry * (assetType === "CRYPTO" ? 0.001 : 0.00015));
+        const rawBeSl = isBuy ? entry + beBuffer : entry - beBuffer;
+        const safeBeSl = roundPrice(
+          isBuy ? Math.min(rawBeSl, markPrice - pip * 2) : Math.max(rawBeSl, markPrice + pip * 2),
+          o.symbol,
+          assetType,
+        );
+        const nextSl = sl > 0
+          ? isBuy ? Math.max(sl, safeBeSl) : Math.min(sl, safeBeSl)
+          : safeBeSl;
+
+        const advanced = await advancePartialTakeProfitStage({
+          order: o,
+          assetType,
+          entry,
+          markPrice,
+          closeQty,
+          remainQty,
+          nextSlPrice: nextSl,
+          nextStage: "TP1_BE",
+          stageLabel: "TP1 50% + BE",
+        });
+        if (advanced) {
+          partialClosedCount++;
+          trailedCount++;
+          continue;
+        }
+      }
+
       const res = await closeTrackedBotPosition({
         orderId: o.orderId,
         reasonTag: "AUTO TP1",
@@ -467,7 +617,64 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 2) Auto Stop-Loss / Trailing Stop Hit
+    if (
+      stage === "TP1_BE" &&
+      tp2 > 0 &&
+      ((isBuy && markPrice >= tp2) || (!isBuy && markPrice <= tp2))
+    ) {
+      const hasTp3 = tp3 > 0 && (isBuy ? tp3 > tp2 : tp3 < tp2);
+      const closeQty = roundOrderQuantity(initialQty * 0.3, assetType);
+      const remainQty = roundOrderQuantity(o.copiedLotsOrQty - closeQty, assetType);
+
+      if (hasTp3 && closeQty > 0 && remainQty >= minViableQty) {
+        const lockRef = tp1 > 0 ? entry + (tp1 - entry) * 0.65 : entry + (tp2 - entry) * 0.45;
+        const lockSl = roundPrice(lockRef, o.symbol, assetType);
+        const nextSl = sl > 0
+          ? isBuy ? Math.max(sl, lockSl) : Math.min(sl, lockSl)
+          : lockSl;
+
+        const advanced = await advancePartialTakeProfitStage({
+          order: o,
+          assetType,
+          entry,
+          markPrice,
+          closeQty,
+          remainQty,
+          nextSlPrice: nextSl,
+          nextStage: "TP2_TRAIL",
+          stageLabel: "TP2 30% + LOCK",
+        });
+        if (advanced) {
+          partialClosedCount++;
+          trailedCount++;
+          continue;
+        }
+      }
+
+      const res = await closeTrackedBotPosition({
+        orderId: o.orderId,
+        reasonTag: "AUTO TP2",
+        overrideClosePrice: markPrice,
+      });
+      if (res.ok) closedCount++;
+      continue;
+    }
+
+    if (
+      (stage === "TP2_TRAIL" || (stage === "TP1_BE" && tp2 <= 0)) &&
+      tp3 > 0 &&
+      ((isBuy && markPrice >= tp3) || (!isBuy && markPrice <= tp3))
+    ) {
+      const res = await closeTrackedBotPosition({
+        orderId: o.orderId,
+        reasonTag: "AUTO TP3",
+        overrideClosePrice: markPrice,
+      });
+      if (res.ok) closedCount++;
+      continue;
+    }
+
+    // 2) Auto Stop-Loss / Breakeven Lock / Trailing Stop Hit
     if (sl > 0 && ((isBuy && markPrice <= sl) || (!isBuy && markPrice >= sl))) {
       const isProfitSl = (isBuy && sl >= entry) || (!isBuy && sl <= entry);
       const res = await closeTrackedBotPosition({
@@ -480,7 +687,6 @@ export async function evaluateRealtimePositionExits(options?: {
     }
 
     // 3) Opposite High-Conviction Quant Signal Reversal Exit
-    const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const reversalDir = options?.reversals?.get(cleanSym);
     if (reversalDir && reversalDir !== o.direction && Date.now() - o.timestamp >= 30_000) {
       const res = await closeTrackedBotPosition({
@@ -492,27 +698,51 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 4) Dynamic Breakeven & Trailing Stop Ratchet
-    if (tp1 > 0 && sl > 0) {
-      const targetDist = Math.abs(tp1 - entry);
+    // 4) Dynamic Breakeven & Trailing Stop Ratchet (asset-accurate pip/tick sizing)
+    const activeTarget =
+      stage === "TP2_TRAIL" && tp3 > 0
+        ? tp3
+        : stage === "TP1_BE" && tp2 > 0
+          ? tp2
+          : tp1;
+    if (activeTarget > 0 && sl > 0) {
+      const targetDist = Math.abs(activeTarget - entry);
       const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
-      const pip = getAssetPipSize(o.symbol);
       if (targetDist > pip * 3 && favorableMove >= targetDist * 0.45) {
         const lockDist =
           favorableMove >= targetDist * 0.7
-            ? favorableMove * 0.52
+            ? favorableMove * 0.55
             : targetDist * 0.08;
         const candidateSl = roundPrice(
           isBuy ? entry + lockDist : entry - lockDist,
           o.symbol,
+          assetType,
         );
         const improved = isBuy
           ? candidateSl > sl + pip * 2
           : candidateSl < sl - pip * 2;
         if (improved) {
+          let syncedSlOrderId = o.slOrderId ?? null;
+          const acct = await getBrokerConnectionById(o.followerId);
+          if (acct?.hasApiKey && acct.platform === "BINANCE_FUTURES") {
+            const secrets = await getBrokerConnectionSecrets(acct.id);
+            if (secrets) {
+              const slSync = await updateBinanceFuturesStopLoss({
+                credentials: secrets,
+                symbol: o.symbol,
+                direction: o.direction,
+                previousSlOrderId: o.slOrderId,
+                newStopLossPrice: candidateSl,
+              });
+              if (slSync.ok && slSync.newSlOrderId) {
+                syncedSlOrderId = slSync.newSlOrderId;
+              }
+            }
+          }
           await saveBotExecutionOrder({
             ...o,
             stopLossPrice: candidateSl,
+            slOrderId: syncedSlOrderId,
           });
           trailedCount++;
           recordBotActivity({
@@ -528,7 +758,7 @@ export async function evaluateRealtimePositionExits(options?: {
     }
   }
 
-  return { closedCount, trailedCount };
+  return { closedCount, trailedCount, partialClosedCount };
 }
 
 export async function buildBotLiveTelemetrySnapshot(
@@ -577,6 +807,10 @@ export async function buildBotLiveTelemetrySnapshot(
     const closedOrders = acctOrders.filter((o) => o.message.startsWith("[ĐÃ ĐÓNG]"));
     let wins = 0;
     for (const co of closedOrders) {
+      if (co.realizedPnlUsd != null && Number.isFinite(co.realizedPnlUsd)) {
+        if (co.realizedPnlUsd > 0) wins++;
+        continue;
+      }
       const m = co.message.match(/PnL\s*([+-]?\$?\d+(?:\.\d+)?)/);
       if (m) {
         const val = Number(m[1].replace("$", ""));

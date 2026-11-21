@@ -11,7 +11,8 @@
  * 3. Post-Only Maker Dynamic Pegging Engine (Zero Taker Fee / Rebate Harvesting).
  */
 
-import { normCdf } from "./advanced-quant-math";
+import { normCdf, studentTCdf } from "./advanced-quant-math";
+import { getAssetPipSize, roundPrice } from "./asset-precision";
 import type { OhlcvBar } from "../types";
 
 export interface ReversalPaceMetrics {
@@ -24,7 +25,9 @@ export interface ReversalPaceMetrics {
   requiredSpeedPerMin: number;
   microVolatilityPerSec: number; // 1-second rolling standard deviation
   zScoreSpeed: number; // RequiredSpeed / microVolatility
-  reversalProbability: number; // P(Reversal) based on fat-tailed Gaussian
+  reversalProbability: number; // P(Reversal) based on fat-tailed Student-t
+  gaussianReversalProbability?: number; // Thin-tail Gaussian reference
+  degreesOfFreedom?: number; // Student-t tail df (default 5)
   favoriteProbability: number; // 1 - reversalProbability
   isIrreversibleLock: boolean; // zScoreSpeed > 3.0 -> >99% confidence
   lockDirection: "BULLISH_LOCKED" | "BEARISH_LOCKED" | "UNLOCKED";
@@ -78,21 +81,25 @@ export interface LateCandleResolutionResult {
  *   Z-Score = RequiredSpeed / (MicroVol * sqrt(SecondsRemaining))
  */
 export function calculateRequiredSpeedPace(params: {
+  symbol?: string;
   currentPrice: number;
   referencePrice: number;
   secondsRemaining: number;
   microVolatilityPerSec: number;
   assetType?: "FOREX" | "CRYPTO";
   pipSize?: number;
+  degreesOfFreedom?: number;
 }): ReversalPaceMetrics {
   const {
+    symbol = "",
     currentPrice,
     referencePrice,
     secondsRemaining,
     microVolatilityPerSec,
     assetType = "FOREX",
-    pipSize = 0.0001,
+    degreesOfFreedom = 5,
   } = params;
+  const pipSize = params.pipSize ?? getAssetPipSize(symbol, assetType, currentPrice);
 
   const gap = Math.abs(currentPrice - referencePrice);
   const gapPipsOrPct = assetType === "FOREX" 
@@ -107,9 +114,9 @@ export function calculateRequiredSpeedPace(params: {
   const effectiveVolOverHorizon = Math.max(1e-7, microVolatilityPerSec * Math.sqrt(safeSec));
   const zScoreSpeed = gap / effectiveVolOverHorizon;
 
-  // Gaussian tail probability: probability that brownian motion covers the gap
-  // P(X >= Gap) = 1 - normCdf(Z)
-  const rawReversalProb = Math.max(0.0001, Math.min(0.5, 1 - normCdf(zScoreSpeed)));
+  // Fat-tailed Student-t reversal probability: P(T_nu >= Z) = 1 - studentTCdf(Z, nu)
+  const gaussianProb = Math.max(0.0001, Math.min(0.5, 1 - normCdf(zScoreSpeed)));
+  const rawReversalProb = Math.max(0.0001, Math.min(0.5, 1 - studentTCdf(zScoreSpeed, degreesOfFreedom)));
   const favoriteProb = 1 - rawReversalProb;
 
   const isIrreversible = zScoreSpeed >= 3.0 && safeSec <= 90;
@@ -130,6 +137,8 @@ export function calculateRequiredSpeedPace(params: {
     microVolatilityPerSec,
     zScoreSpeed: Number(zScoreSpeed.toFixed(2)),
     reversalProbability: Number(rawReversalProb.toFixed(4)),
+    gaussianReversalProbability: Number(gaussianProb.toFixed(4)),
+    degreesOfFreedom,
     favoriteProbability: Number(favoriteProb.toFixed(4)),
     isIrreversibleLock: isIrreversible,
     lockDirection,
@@ -151,13 +160,14 @@ export function evaluateCheapTailMispricing(params: {
   pipSize?: number;
 }): TailMispricingMetrics {
   const {
+    symbol,
     bars,
     currentPrice,
     paceMetrics,
     orderFlowImbalance = 0,
     assetType = "FOREX",
-    pipSize = 0.0001,
   } = params;
+  const pipSize = params.pipSize ?? getAssetPipSize(symbol, assetType, currentPrice);
 
   if (bars.length < 5) {
     return {
@@ -198,7 +208,9 @@ export function evaluateCheapTailMispricing(params: {
   let asymmetricRewardRatio = 1.0;
   let confidenceScore = 30;
 
-  const minPipBuffer = (assetType === "FOREX" ? pipSize * 4 : currentPrice * 0.0008);
+  const minPipBuffer =
+    assetType === "FOREX" ? pipSize * 4 : Math.max(pipSize * 4, currentPrice * 0.0008);
+  const minRiskFloor = Math.max(1e-10, pipSize * 0.1);
 
   if (isLowerAbsorption && paceMetrics.secondsRemaining <= 120) {
     // True statistical probability is elevated due to smart money absorption at low
@@ -210,8 +222,8 @@ export function evaluateCheapTailMispricing(params: {
     // Target is the recent dealing range high (or at least 2.5x the sweep depth)
     const priorHigh = Math.max(...bars.slice(-5).map((b) => b.high));
     targetPrice = Math.max(priorHigh, currentPrice + barRange * 2.0);
-    const risk = Math.max(1e-5, entryLimitPrice - stopLossPrice);
-    const reward = Math.max(1e-5, targetPrice - entryLimitPrice);
+    const risk = Math.max(minRiskFloor, entryLimitPrice - stopLossPrice);
+    const reward = Math.max(minRiskFloor, targetPrice - entryLimitPrice);
     asymmetricRewardRatio = Number((reward / risk).toFixed(1));
     confidenceScore = Math.min(92, Math.round(55 + lowerWickRatio * 30 + (orderFlowImbalance * 0.2)));
   } else if (isUpperAbsorption && paceMetrics.secondsRemaining <= 120) {
@@ -224,8 +236,8 @@ export function evaluateCheapTailMispricing(params: {
     // Target is the recent dealing range low (or at least 2.5x the sweep depth)
     const priorLow = Math.min(...bars.slice(-5).map((b) => b.low));
     targetPrice = Math.min(priorLow, currentPrice - barRange * 2.0);
-    const risk = Math.max(1e-5, stopLossPrice - entryLimitPrice);
-    const reward = Math.max(1e-5, entryLimitPrice - targetPrice);
+    const risk = Math.max(minRiskFloor, stopLossPrice - entryLimitPrice);
+    const reward = Math.max(minRiskFloor, entryLimitPrice - targetPrice);
     asymmetricRewardRatio = Number((reward / risk).toFixed(1));
     confidenceScore = Math.min(92, Math.round(55 + upperWickRatio * 30 + (Math.abs(orderFlowImbalance) * 0.2)));
   }
@@ -239,9 +251,9 @@ export function evaluateCheapTailMispricing(params: {
     impliedMarketOdds: Number(impliedMarketOdds.toFixed(3)),
     edgeMultiplier,
     asymmetricRewardRatio: Math.max(1.0, asymmetricRewardRatio),
-    entryLimitPrice: Number(entryLimitPrice.toFixed(5)),
-    stopLossPrice: Number(stopLossPrice.toFixed(5)),
-    targetPrice: Number(targetPrice.toFixed(5)),
+    entryLimitPrice: roundPrice(entryLimitPrice, symbol, assetType),
+    stopLossPrice: roundPrice(stopLossPrice, symbol, assetType),
+    targetPrice: roundPrice(targetPrice, symbol, assetType),
     confidenceScore,
   };
 }
@@ -251,6 +263,7 @@ export function evaluateCheapTailMispricing(params: {
  * Prepares post-only pricing to capture Maker rebates and zero slippage.
  */
 export function generateMakerPeggingGuide(params: {
+  symbol?: string;
   currentPrice: number;
   direction: "BUY" | "SELL";
   favoriteProbability: number;
@@ -259,13 +272,13 @@ export function generateMakerPeggingGuide(params: {
   assetType?: "FOREX" | "CRYPTO";
 }): MakerPeggingGuide {
   const {
+    symbol = "",
     currentPrice,
     direction,
-    favoriteProbability,
-    tailProbability,
-    pipSize = 0.0001,
     assetType = "FOREX",
+    tailProbability,
   } = params;
+  const pipSize = params.pipSize ?? getAssetPipSize(symbol, assetType, currentPrice);
 
   // Favorite Limit Pricing ($1.00 * (1 - TailProb) - fee buffer)
   const safetyBufferUsd = 0.003; // 0.3% buffer
@@ -278,7 +291,7 @@ export function generateMakerPeggingGuide(params: {
     Math.max(0.012, Math.min(0.080, tailProbability - safetyBufferUsd)).toFixed(4)
   );
 
-  // Dynamic Pegging offset for Spot/Futures Order Book (e.g. 0.5 pip or 0.01%)
+  // Dynamic Pegging offset for Spot/Futures Order Book (e.g. 0.3 pip or 0.01%)
   const offset = assetType === "FOREX" ? pipSize * 0.3 : currentPrice * 0.0001;
   const peggedPrice = direction === "BUY"
     ? currentPrice - offset
@@ -287,7 +300,7 @@ export function generateMakerPeggingGuide(params: {
   return {
     orderType: "POST_ONLY_LIMIT",
     side: direction,
-    peggedPrice: Number(peggedPrice.toFixed(5)),
+    peggedPrice: roundPrice(peggedPrice, symbol, assetType),
     favoriteLimitUsd,
     tailLimitUsd,
     estimatedFeeRebatePct: 0.005, // +0.005% maker rebate
@@ -315,7 +328,6 @@ export function evaluateLateCandleResolution(params: {
     currentTimestampSec = Math.floor(Date.now() / 1000),
     orderFlowImbalance = 0,
     assetType = "FOREX",
-    pipSize = 0.0001,
   } = params;
 
   const tfSeconds = timeframe === "1m" ? 60 : timeframe === "5m" ? 300 : 900;
@@ -330,16 +342,18 @@ export function evaluateLateCandleResolution(params: {
     close: 1.0,
     volume: 1,
   };
+  const pipSize = params.pipSize ?? getAssetPipSize(symbol, assetType, lastBar.close);
 
   // Estimate micro-volatility per second from last 10 bars
   const recentRanges = bars.slice(-10).map((b) => b.high - b.low);
   const avgBarRange = recentRanges.length > 0
     ? recentRanges.reduce((a, b) => a + b, 0) / recentRanges.length
     : pipSize * 10;
-  const microVolatilityPerSec = Math.max(1e-6, avgBarRange / Math.sqrt(tfSeconds));
+  const microVolatilityPerSec = Math.max(1e-9, avgBarRange / Math.sqrt(tfSeconds));
 
   // Pace metrics against the candle's Open price (Reference)
   const paceMetrics = calculateRequiredSpeedPace({
+    symbol,
     currentPrice: lastBar.close,
     referencePrice: lastBar.open,
     secondsRemaining: timeRemainingSec,
@@ -390,6 +404,7 @@ export function evaluateLateCandleResolution(params: {
 
   const peggingGuide = actionDirection !== "NEUTRAL"
     ? generateMakerPeggingGuide({
+        symbol,
         currentPrice: lastBar.close,
         direction: actionDirection,
         favoriteProbability: paceMetrics.favoriteProbability,
