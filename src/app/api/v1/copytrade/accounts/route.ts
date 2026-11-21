@@ -10,10 +10,15 @@ import {
   summarizeLinkedTradingAccounts,
 } from "@/lib/engines/bot-telemetry-types";
 import {
-  verifyBinanceFuturesAccount,
+  ALL_ALLOWED_PLATFORMS,
+  detectBrokerCredentialsPattern,
+  getBrokerMeta,
+  isMt5BrokerPlatform,
+  resolveBrokerDefaultSuffix,
+} from "@/lib/engines/broker-registry";
+import {
+  verifyBrokerCredentials,
   verifyBrokerDualEnvironment,
-  verifyMetaApiMt5Account,
-  verifyOkxAccount,
   type BrokerVerificationResult,
   type DualEnvironmentVerificationResult,
 } from "@/lib/engines/exchange-execution-client";
@@ -32,15 +37,7 @@ import { safeInternalErrorMessage, sanitizeIdentityName, sanitizePlainText } fro
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_PLATFORMS: BrokerPlatform[] = [
-  "BINANCE_FUTURES",
-  "OKX_FUTURES",
-  "MT5_EXNESS",
-  "MT5_XM",
-  "MT5_EA",
-  "BYBIT_FUTURES",
-  "TELEGRAM_1CLICK",
-];
+const ALLOWED_PLATFORMS: BrokerPlatform[] = ALL_ALLOWED_PLATFORMS;
 
 export async function GET(req: Request) {
   const session = await getSessionUser(req);
@@ -122,23 +119,33 @@ export async function POST(req: Request) {
     }
 
     const cleanAccountNumber = body.accountNumber ? sanitizePlainText(body.accountNumber, 64) : undefined;
-    const hasApiCreds = Boolean(body.apiKey?.trim() && body.apiSecret?.trim());
-    if (body.platform === "OKX_FUTURES" && hasApiCreds && !body.passphrase?.trim()) {
-      return badRequest("OKX v5 API yêu cầu bắt buộc phải có Passphrase");
+    const brokerMeta = getBrokerMeta(body.platform);
+    const trimmedKey = body.apiKey?.trim() ?? "";
+    const trimmedSecret = body.apiSecret?.trim() ?? "";
+    const effectivePassphrase =
+      isMt5BrokerPlatform(body.platform)
+        ? resolveBrokerDefaultSuffix(body.platform, body.passphrase) || undefined
+        : body.passphrase?.trim() || undefined;
+    const hasApiCreds = brokerMeta.fields.requiresSecret
+      ? Boolean(trimmedKey && trimmedSecret)
+      : Boolean(trimmedKey);
+
+    if (brokerMeta.fields.requiresPassphrase && hasApiCreds && !effectivePassphrase) {
+      return badRequest(`${brokerMeta.shortName} API yêu cầu bắt buộc phải có Passphrase`);
     }
 
-    const isRestExchange = body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES";
-    const isMt5Platform =
-      body.platform === "MT5_EXNESS" || body.platform === "MT5_XM" || body.platform === "MT5_EA";
+    const isDirectDualVerify = brokerMeta.supportsDirectRestVerify && brokerMeta.supportsDualEnv && !brokerMeta.isMt5Broker;
+    const isDirectSingleVerify = brokerMeta.supportsDirectRestVerify && !brokerMeta.supportsDualEnv && !brokerMeta.isMt5Broker;
+    const isMt5Platform = isMt5BrokerPlatform(body.platform);
 
-    // Unified Dual-Environment onboarding for REST exchanges (Binance / OKX):
-    // 1 API Key + Secret automatically probes BOTH REAL and DEMO and creates verified connections for every authorized environment.
-    if (hasApiCreds && isRestExchange) {
+    // Unified Dual-Environment onboarding for Crypto & Forex REST Hubs:
+    // 1 API Key/Token automatically probes BOTH REAL and DEMO and creates verified connections for every authorized environment.
+    if (hasApiCreds && isDirectDualVerify) {
       const dualVerification: DualEnvironmentVerificationResult = await verifyBrokerDualEnvironment({
-        platform: body.platform as "BINANCE_FUTURES" | "OKX_FUTURES",
-        apiKey: body.apiKey!.trim(),
-        apiSecret: body.apiSecret!.trim(),
-        passphrase: body.passphrase?.trim() || null,
+        platform: body.platform,
+        apiKey: trimmedKey,
+        apiSecret: trimmedSecret,
+        passphrase: effectivePassphrase ?? null,
       });
 
       const baseName = nameCheck.value ?? "";
@@ -233,24 +240,21 @@ export async function POST(req: Request) {
       autoExecuteEnabled: Boolean(body.autoExecuteEnabled),
       maxDailyLossUsd: Number.isFinite(Number(body.maxDailyLossUsd)) ? Number(body.maxDailyLossUsd) : 500,
       maxOpenPositions: Number.isFinite(Number(body.maxOpenPositions)) ? Number(body.maxOpenPositions) : 3,
-      apiKey: body.apiKey,
-      apiSecret: body.apiSecret,
-      passphrase: body.passphrase,
+      apiKey: trimmedKey || undefined,
+      apiSecret: trimmedSecret || (!brokerMeta.fields.requiresSecret && trimmedKey ? "read-only" : undefined),
+      passphrase: effectivePassphrase,
     });
 
     let verification: BrokerVerificationResult | null = null;
     let finalAccount = connection;
 
-    if (hasApiCreds && isMt5Platform) {
-      verification = await verifyMetaApiMt5Account(
-        {
-          apiKey: body.apiKey!.trim(),
-          apiSecret: body.apiSecret!.trim(),
-          passphrase: body.passphrase?.trim() || null,
-          isTestnet: body.isTestnet !== false,
-        },
-        body.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
-      );
+    if (hasApiCreds && (isMt5Platform || isDirectSingleVerify)) {
+      verification = await verifyBrokerCredentials(body.platform, {
+        apiKey: trimmedKey,
+        apiSecret: trimmedSecret,
+        passphrase: effectivePassphrase ?? null,
+        isTestnet: body.isTestnet !== false,
+      });
 
       const updated = await updateBrokerConnectionState(connection.id, {
         connectionStatus:
@@ -269,11 +273,20 @@ export async function POST(req: Request) {
       if (updated) finalAccount = updated;
     }
 
+    const recognition = hasApiCreds
+      ? detectBrokerCredentialsPattern({
+          apiKey: trimmedKey,
+          apiSecret: trimmedSecret,
+          passphrase: effectivePassphrase,
+        })
+      : null;
+
     notifyBotTelemetryChanged("account_created");
     return ok({
       account: finalAccount,
       accounts: [finalAccount],
       verification,
+      recognition,
       oneTimeEaToken,
     });
   } catch (err) {
@@ -411,34 +424,18 @@ export async function PUT(req: Request) {
 
     let verification: BrokerVerificationResult | null = null;
     let finalAccount = connection;
-    const hasNewCreds = Boolean(body.apiKey?.trim() && body.apiSecret?.trim());
-    const isMt5 =
-      existing.platform === "MT5_EXNESS" || existing.platform === "MT5_XM" || existing.platform === "MT5_EA";
+    const putMeta = getBrokerMeta(existing.platform);
+    const hasNewCreds = putMeta.fields.requiresSecret
+      ? Boolean(body.apiKey?.trim() && body.apiSecret?.trim())
+      : Boolean(body.apiKey?.trim());
 
-    if (hasNewCreds && (existing.platform === "BINANCE_FUTURES" || existing.platform === "OKX_FUTURES" || isMt5)) {
-      verification =
-        existing.platform === "BINANCE_FUTURES"
-          ? await verifyBinanceFuturesAccount({
-              apiKey: body.apiKey!.trim(),
-              apiSecret: body.apiSecret!.trim(),
-              isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
-            })
-          : existing.platform === "OKX_FUTURES"
-            ? await verifyOkxAccount({
-                apiKey: body.apiKey!.trim(),
-                apiSecret: body.apiSecret!.trim(),
-                passphrase: body.passphrase?.trim() ?? "",
-                isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
-              })
-            : await verifyMetaApiMt5Account(
-                {
-                  apiKey: body.apiKey!.trim(),
-                  apiSecret: body.apiSecret!.trim(),
-                  passphrase: body.passphrase?.trim() || null,
-                  isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
-                },
-                existing.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
-              );
+    if (hasNewCreds && putMeta.supportsDirectRestVerify) {
+      verification = await verifyBrokerCredentials(existing.platform, {
+        apiKey: body.apiKey!.trim(),
+        apiSecret: body.apiSecret?.trim() || "",
+        passphrase: body.passphrase?.trim() || null,
+        isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
+      });
 
       const updated = await updateBrokerConnectionState(connection.id, {
         connectionStatus:

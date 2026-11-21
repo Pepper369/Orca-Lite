@@ -22,6 +22,9 @@ import {
   type ReversalPaceMetrics,
   type TailMispricingMetrics,
 } from "./quant-reversal-pace";
+import {
+  analyzeIctSmcLiquidity,
+} from "./ict-smc-liquidity-engine";
 import type { SharedBarContext } from "./unified-ta-kernel";
 
 export type GateSetupGrade = "A+" | "A" | "B" | "NO_TRADE";
@@ -76,6 +79,7 @@ export function evaluateHighWinrateGate(params: {
   secondsRemaining?: number;
   timeframeSec?: number;
   precomputed?: SharedBarContext;
+  ictResult?: ReturnType<typeof analyzeIctSmcLiquidity>;
 }): HighWinrateGateResult {
   const {
     series,
@@ -89,6 +93,7 @@ export function evaluateHighWinrateGate(params: {
     secondsRemaining = 60,
     timeframeSec = 300,
     precomputed,
+    ictResult,
   } = params;
 
   const passedGates: string[] = [];
@@ -187,61 +192,50 @@ export function evaluateHighWinrateGate(params: {
   }
 
   // -------------------------------------------------------------
-  // GATE 2: MULTI-BAR CAUSAL LIQUIDITY SWEEP (TURTLE SOUP / JUDAS)
+  // GATE 2: SSOT CAUSAL LIQUIDITY SWEEP (FROM ICT-SMC ENGINE)
   // -------------------------------------------------------------
+  const atrEstVal = precomputed?.atr14 ?? atr(series, 14) ?? lastBar.close * 0.002;
+  const ict =
+    ictResult ??
+    analyzeIctSmcLiquidity({
+      symbol: params.symbol,
+      bars: series,
+      currentPrice: lastBar.close,
+      assetType,
+      pipSize,
+      flowContext: {
+        orderBookImbalance,
+      },
+      precomputed: precomputed
+        ? {
+            closes,
+            ema9: precomputed.ema9,
+            ema21: precomputed.ema21,
+            atrVal: atrEstVal,
+          }
+        : undefined,
+    });
+
   let liquiditySweepDetected = false;
   let sweptSide: "BUY_SIDE" | "SELL_SIDE" | "NONE" = "NONE";
   let sweptPrice: number | null = null;
   let wickRatio = 0;
 
-  // Inspect bars in [-3 .. -1] for a valid causal sweep against preceding 15-bar swing level (zero allocation)
-  for (let idx = series.length - 1; idx >= Math.max(15, series.length - 3); idx--) {
-    const bar = series[idx]!;
-    const pStart = Math.max(0, idx - 15);
-    if (idx - pStart < 5) continue;
-    let prevLow = Infinity;
-    let prevHigh = -Infinity;
-    for (let k = pStart; k < idx; k++) {
-      if (lows[k]! < prevLow) prevLow = lows[k]!;
-      if (highs[k]! > prevHigh) prevHigh = highs[k]!;
-    }
-    const cRange = Math.max(1e-12, bar.high - bar.low);
+  const expectedSweepSide = isBuy ? "SELL_SIDE_SWEPT" : "BUY_SIDE_SWEPT";
+  const matchedSweep = ict.recentSweeps
+    .filter((s) => s.side === expectedSweepSide && s.barIndex >= series.length - 4)
+    .sort((a, b) => b.barIndex - a.barIndex)[0];
 
-    const prevBar = series[idx - 1]!;
-    if (isBuy) {
-      const sweptUnder = bar.low <= prevLow;
-      const lowerWick = Math.min(bar.open, bar.close) - bar.low;
-      const wr = Math.round((lowerWick / cRange) * 100);
-      const bullBodyPct = Math.round((Math.max(0, bar.close - bar.open) / cRange) * 100);
-      const isDisplacementReclaim = bullBodyPct >= 45 && bar.close > prevBar.high && bar.close > prevLow;
-      if (sweptUnder && (wr >= 32 || isDisplacementReclaim) && bar.close >= prevLow && bar.close > bar.low) {
-        liquiditySweepDetected = true;
-        sweptSide = "SELL_SIDE";
-        sweptPrice = prevLow;
-        wickRatio = Math.max(wr, bullBodyPct);
-        score += 18;
-        passedGates.push(`Gate 2: Quét thanh khoản Sell-Side (${wickRatio}% lực rút chân/xác nhận)`);
-        break;
-      }
-    } else {
-      const sweptAbove = bar.high >= prevHigh;
-      const upperWick = bar.high - Math.max(bar.open, bar.close);
-      const wr = Math.round((upperWick / cRange) * 100);
-      const bearBodyPct = Math.round((Math.max(0, bar.open - bar.close) / cRange) * 100);
-      const isDisplacementReclaim = bearBodyPct >= 45 && bar.close < prevBar.low && bar.close < prevHigh;
-      if (sweptAbove && (wr >= 32 || isDisplacementReclaim) && bar.close <= prevHigh && bar.close < bar.high) {
-        liquiditySweepDetected = true;
-        sweptSide = "BUY_SIDE";
-        sweptPrice = prevHigh;
-        wickRatio = Math.max(wr, bearBodyPct);
-        score += 18;
-        passedGates.push(`Gate 2: Quét thanh khoản Buy-Side (${wickRatio}% lực rút chân/xác nhận)`);
-        break;
-      }
-    }
-  }
-
-  if (!liquiditySweepDetected) {
+  if (matchedSweep) {
+    liquiditySweepDetected = true;
+    sweptSide = isBuy ? "SELL_SIDE" : "BUY_SIDE";
+    sweptPrice = matchedSweep.sweptLevel;
+    wickRatio = Math.min(100, Math.max(30, Math.round(matchedSweep.displacementRatio * 100)));
+    score += 18;
+    passedGates.push(
+      `Gate 2: Quét thanh khoản ${isBuy ? "Sell-Side" : "Buy-Side"} (${wickRatio}% xung lực/rút chân)`,
+    );
+  } else {
     failedGates.push(
       isBuy
         ? "Gate 2: Chưa có nhịp quét thanh khoản đáy rõ ràng"
@@ -256,16 +250,13 @@ export function evaluateHighWinrateGate(params: {
   }
 
   // -------------------------------------------------------------
-  // GATE 3: PREMIUM / DISCOUNT OPTIMAL TRADE ENTRY (OTE)
+  // GATE 3: PREMIUM / DISCOUNT OPTIMAL TRADE ENTRY (SSOT ICT OTE)
   // -------------------------------------------------------------
-  const recentRangeBars = series.slice(-40);
-  const rangeHigh = Math.max(...recentRangeBars.map((b) => b.high));
-  const rangeLow = Math.min(...recentRangeBars.map((b) => b.low));
-  const totalDealingRange = Math.max(1e-12, rangeHigh - rangeLow);
-
-  const rangePosition = (entryPrice - rangeLow) / totalDealingRange;
-  const inDiscount = rangePosition <= 0.50;
-  const inPremium = rangePosition >= 0.50;
+  const dr = ict.optimalTradeSetup.dealingRange;
+  const totalDealingRange = Math.max(1e-12, dr.swingHigh - dr.swingLow);
+  const rangePosition = Math.max(0, Math.min(1, (entryPrice - dr.swingLow) / totalDealingRange));
+  const inDiscount = dr.currentZone === "DISCOUNT" || rangePosition <= 0.50;
+  const inPremium = dr.currentZone === "PREMIUM" || rangePosition >= 0.50;
 
   const isOteZone = isBuy
     ? rangePosition <= 0.42 && rangePosition >= 0.15

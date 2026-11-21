@@ -8,14 +8,8 @@
  * 4. Automated Breakeven Trailing execution
  */
 
-export type BrokerPlatform =
-  | "MT5_EXNESS"
-  | "MT5_XM"
-  | "MT5_EA"
-  | "BINANCE_FUTURES"
-  | "OKX_FUTURES"
-  | "BYBIT_FUTURES"
-  | "TELEGRAM_1CLICK";
+import { type BrokerPlatform } from "./broker-registry";
+export type { BrokerPlatform };
 
 export type ConnectionStatus =
   | "CONNECTED_VERIFIED"

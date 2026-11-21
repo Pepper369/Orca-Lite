@@ -13,12 +13,11 @@ import {
 } from "@/lib/realtime/biquote-poll";
 import type { BrokerPlatform, CopyExecutionOrder, FollowerAccount } from "@/lib/engines/copy-trade-engine";
 import {
-  fetchBinanceFuturesTelemetry,
-  fetchMetaApiMt5Telemetry,
-  fetchOkxTelemetry,
+  fetchBrokerLiveTelemetry,
   updateBinanceFuturesStopLoss,
   type LiveExchangeTelemetryResult,
 } from "@/lib/engines/exchange-execution-client";
+import { getBrokerMeta } from "@/lib/engines/broker-registry";
 import {
   aggregateTierSummary,
   assignPoolNavShares,
@@ -215,13 +214,7 @@ async function fetchAccountExchangeTelemetryCached(
   acct: FollowerAccount,
 ): Promise<LiveExchangeTelemetryResult | null> {
   if (!acct.hasApiKey) return null;
-  const isSupported =
-    acct.platform === "BINANCE_FUTURES" ||
-    acct.platform === "OKX_FUTURES" ||
-    acct.platform === "MT5_EXNESS" ||
-    acct.platform === "MT5_XM" ||
-    acct.platform === "MT5_EA";
-  if (!isSupported) return null;
+  if (!getBrokerMeta(acct.platform).supportsDirectRestVerify) return null;
 
   const cached = EXCHANGE_CACHE.get(acct.id);
   if (cached && cached.expiresAt > Date.now()) {
@@ -231,12 +224,8 @@ async function fetchAccountExchangeTelemetryCached(
   const secrets = await getBrokerConnectionSecrets(acct.id);
   if (!secrets) return null;
 
-  const res =
-    acct.platform === "BINANCE_FUTURES"
-      ? await fetchBinanceFuturesTelemetry(secrets)
-      : acct.platform === "OKX_FUTURES"
-        ? await fetchOkxTelemetry(secrets)
-        : await fetchMetaApiMt5Telemetry(secrets);
+  const res = await fetchBrokerLiveTelemetry(acct.platform, secrets);
+  if (!res) return null;
 
   EXCHANGE_CACHE.set(acct.id, {
     data: res,

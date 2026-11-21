@@ -1924,7 +1924,9 @@ export function evaluateMarketScenarioVector(
     0.015 +
     (vpin >= 0.55 ? (vpin - 0.45) * 2.2 : vpin * 0.2) +
     (fundingZ >= 1.8 ? Math.min(1.2, (fundingZ - 1.5) * 0.45) : 0) +
-    (harExp > 1.35 && pCrisisHmm >= 0.25 ? 0.45 : 0);
+    (harExp > 1.35 && pCrisisHmm >= 0.25 ? 0.45 : 0) +
+    // Single-bar sweep volatility jumps without tail/spread collapse map to Squeeze Cascade (limit-only + capped lev), not Crisis Lockout
+    (pCrisisHmm >= 0.45 && pCrisisHmm < 0.78 && nu > 3.6 && ddScale > 0.35 ? pCrisisHmm * 0.85 : 0);
 
   const s4Raw =
     0.015 +
@@ -1932,12 +1934,22 @@ export function evaluateMarketScenarioVector(
     (spreadRatio >= 1.8 ? Math.min(1.5, (spreadRatio - 1.5) * 0.65) : 0) +
     (macroScore < 42 ? ((45 - macroScore) / 45) * 1.1 : 0);
 
+  const hasTailOrLiquidityStress =
+    nu <= 4.5 ||
+    ddScale <= 0.45 ||
+    spreadRatio >= 2.2 ||
+    vpin >= 0.65 ||
+    isLockout;
   const s5Raw =
     0.01 +
-    (pCrisisHmm >= 0.55 ? pCrisisHmm * 1.8 : pCrisisHmm * 0.35) +
-    (nu <= 3.6 ? (4.0 - nu) * 0.75 : 0) +
+    (pCrisisHmm >= 0.78 && hasTailOrLiquidityStress
+      ? pCrisisHmm * 1.9
+      : pCrisisHmm >= 0.55 && hasTailOrLiquidityStress
+        ? pCrisisHmm * 1.35
+        : pCrisisHmm * 0.22) +
+    (nu <= 3.6 ? (4.0 - nu) * 0.85 : 0) +
     (ddScale <= 0.35 ? (0.45 - ddScale) * 2.4 : 0) +
-    (spreadRatio >= 3.2 && vpin >= 0.75 ? 1.1 : 0);
+    (spreadRatio >= 2.8 && vpin >= 0.70 ? 1.2 : 0);
 
   const rawList: [CanonicalMarketScenarioId, number][] = [
     ["S1_TREND_EXPANSION", Math.max(1e-4, s1Raw)],
@@ -1993,7 +2005,7 @@ export function evaluateMarketScenarioVector(
 
   const isHardLockout =
     dominantScenario === "S5_TAIL_CRISIS_LOCKOUT" ||
-    probs.S5_TAIL_CRISIS_LOCKOUT >= 0.48 ||
+    probs.S5_TAIL_CRISIS_LOCKOUT >= 0.52 ||
     ddScale <= 0;
 
   const baseKellyByScenario =

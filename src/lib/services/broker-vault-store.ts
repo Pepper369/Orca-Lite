@@ -11,6 +11,11 @@ import type {
   FollowerAccount,
 } from "@/lib/engines/copy-trade-engine";
 import {
+  getBrokerMeta,
+  isMt5BrokerPlatform,
+  isRestDirectVerifyPlatform,
+} from "@/lib/engines/broker-registry";
+import {
   decryptSecret,
   encryptSecret,
   generateEaToken,
@@ -293,12 +298,19 @@ export async function createBrokerConnection(
   input: CreateBrokerConnectionInput,
 ): Promise<{ connection: FollowerAccount; oneTimeEaToken: string | null }> {
   const id = `conn_${randomUUID().slice(0, 12)}`;
-  const isMt5 = input.platform === "MT5_EXNESS" || input.platform === "MT5_XM" || input.platform === "MT5_EA";
-  const isRestExchange = input.platform === "BINANCE_FUTURES" || input.platform === "OKX_FUTURES";
+  const meta = getBrokerMeta(input.platform);
+  const isMt5 = isMt5BrokerPlatform(input.platform);
+  const isRestExchange = isRestDirectVerifyPlatform(input.platform);
 
-  const hasApiCreds = Boolean(input.apiKey?.trim() && input.apiSecret?.trim());
+  const normalizedSecret =
+    !meta.fields.requiresSecret && input.apiKey?.trim() && !input.apiSecret?.trim()
+      ? "read-only"
+      : input.apiSecret;
+  const hasApiCreds = meta.fields.requiresSecret
+    ? Boolean(input.apiKey?.trim() && normalizedSecret?.trim())
+    : Boolean(input.apiKey?.trim());
   const apiKeyEnc = hasApiCreds ? encryptSecret(input.apiKey!) : null;
-  const apiSecretEnc = hasApiCreds ? encryptSecret(input.apiSecret!) : null;
+  const apiSecretEnc = hasApiCreds ? encryptSecret(normalizedSecret!) : null;
   const passphraseEnc = input.passphrase?.trim() ? encryptSecret(input.passphrase) : null;
 
   let oneTimeEaToken: string | null = null;

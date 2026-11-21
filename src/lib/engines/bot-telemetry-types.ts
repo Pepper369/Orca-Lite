@@ -3,6 +3,7 @@
  * Pure module (zero server-only imports) so React components and Node services share one SSOT.
  */
 import type { BrokerPlatform, ConnectionStatus, FollowerAccount } from "@/lib/engines/copy-trade-engine";
+import { getBrokerMeta } from "@/lib/engines/broker-registry";
 
 export type TradingAccountAssetClass = "CRYPTO" | "FOREX" | "OTHER";
 
@@ -35,12 +36,9 @@ export interface LinkedTradingAccountSummary {
 }
 
 export function classifyBrokerAssetClass(platform: BrokerPlatform): TradingAccountAssetClass {
-  if (platform === "BINANCE_FUTURES" || platform === "OKX_FUTURES" || platform === "BYBIT_FUTURES") {
-    return "CRYPTO";
-  }
-  if (platform === "MT5_EXNESS" || platform === "MT5_XM" || platform === "MT5_EA") {
-    return "FOREX";
-  }
+  const cat = getBrokerMeta(platform).category;
+  if (cat === "CRYPTO") return "CRYPTO";
+  if (cat === "FOREX") return "FOREX";
   return "OTHER";
 }
 

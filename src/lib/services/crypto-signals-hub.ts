@@ -5,12 +5,11 @@ import * as binance from "../providers/binance";
 import { analyzeScalpMulti } from "../engines/scalp";
 import { analyzeFundingRate, evaluateTrueLevel2Dom } from "../engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "../engines/crypto-news-shield";
-import { calculateCryptoPositionSize } from "../engines/crypto-position-sizer";
 import { atr as calcAtr } from "../technical";
 import { resampleOhlcvBars } from "../engines/asset-precision";
 import {
   buildCryptoLiquidityContext,
-  calculateCrossAssetKelly,
+  calculateUnifiedTradeRiskPlan,
   computeGarmanKlassLeverageCap,
   detectCryptoLiquidationClusters,
 } from "../engines/unified-cross-asset-quant";
@@ -289,32 +288,25 @@ async function scanSingleCryptoPair(
     }
 
     const sizeMult = action === "WAIT" ? 0 : precision.recommendedSizeMultiplier;
-    const kellySizing =
-      action !== "WAIT" && sizeMult > 0
-        ? calculateCrossAssetKelly({
-          winRate: probability / 100,
-          payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
-          isCrypto: true,
-          maxCapitalPerTrade: 0.02,
-        })
+    const riskPlan =
+      entry && sl && action !== "WAIT" && sizeMult > 0
+        ? calculateUnifiedTradeRiskPlan({
+            assetType: "CRYPTO",
+            symbol: pair,
+            direction: direction === "SELL" ? "SELL" : "BUY",
+            winRatePct: probability,
+            payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
+            sizeMultiplier: sizeMult,
+            entryPrice: entry,
+            stopLossPrice: sl,
+            takeProfit1: tp1,
+            takeProfit2: tp2,
+            takeProfit3: tp3,
+            accountBalanceUsd: 10_000,
+            leverage: recommendedLeverage,
+          })
         : null;
-    const effectiveRiskPct =
-      kellySizing && kellySizing.recommendedAllocation > 0
-        ? Number((Math.min(1.5, Math.max(0.25, kellySizing.recommendedAllocation * 100)) * sizeMult).toFixed(2))
-        : Number((1.0 * sizeMult).toFixed(2));
-
-    let recommendedMarginUsd = 0;
-    if (entry && sl && action !== "WAIT" && effectiveRiskPct > 0) {
-      const sizer = calculateCryptoPositionSize({
-        accountBalance: 10_000,
-        riskPercent: effectiveRiskPct,
-        entryPrice: entry,
-        stopLossPrice: sl,
-        leverage: recommendedLeverage,
-        direction: direction === "SELL" ? "SELL" : "BUY",
-      });
-      recommendedMarginUsd = sizer.requiredMarginUsd;
-    }
+    const recommendedMarginUsd = riskPlan?.recommendedMarginUsd ?? 0;
 
     const symbolDisplay = pair.replace("USDT", "/USDT");
 
@@ -351,7 +343,7 @@ async function scanSingleCryptoPair(
       netRiskReward: precision.netRiskReward,
       recommendedSizeMultiplier: sizeMult,
       recommendedMarginUsd,
-      riskAmountUsd: action === "WAIT" ? 0 : Math.round(100 * effectiveRiskPct),
+      riskAmountUsd: action === "WAIT" ? 0 : Math.round(riskPlan?.riskAmountUsd ?? 0),
       garmanKlassVolPct: Math.round(leverageGov.garmanKlassVolAnnualized * 1000) / 10,
       volatilityRegime: leverageGov.volatilityRegime,
       liquidationMagnetPrice: liqClusters?.primaryMagnetPrice ?? null,

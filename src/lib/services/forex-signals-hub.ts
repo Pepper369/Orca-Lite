@@ -1,13 +1,12 @@
 import "server-only";
 import { buildMeta } from "../freshness";
 import { buildForexScalpSignal } from "./forex-scalp";
-import { calculateForexPositionSize } from "../engines/forex-position-sizer";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
-import { calculateCrossAssetKelly } from "../engines/unified-cross-asset-quant";
+import { calculateUnifiedTradeRiskPlan } from "../engines/unified-cross-asset-quant";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import { getForexDetail, getForexMarkets } from "./forex";
 import type { Meta } from "../types";
@@ -282,44 +281,37 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         }
 
         const sizeMult = setupGrade === "NO_TRADE" ? 0 : effectivePrecision?.recommendedSizeMultiplier ?? 0.5;
-        const kellySizing =
-          action !== "WAIT" && sizeMult > 0
-            ? calculateCrossAssetKelly({
-                winRate: probability / 100,
-                payoffRatio: Math.max(1.0, effectivePrecision?.netRiskReward ?? effectivePrecision?.grossRiskReward ?? 1.8),
-                isCrypto: false,
-                maxCapitalPerTrade: 0.02,
+        const fxRows = marketsRes?.data?.rows ?? [];
+        const findFx = (target: string) => fxRows.find((r) => r.pair === target && r.price > 0)?.price ?? null;
+        const riskPlan =
+          entry && sl && action !== "WAIT" && sizeMult > 0
+            ? calculateUnifiedTradeRiskPlan({
+                assetType: "FOREX",
+                symbol: pair,
+                direction: direction === "SELL" ? "SELL" : "BUY",
+                winRatePct: probability,
+                payoffRatio: Math.max(
+                  1.0,
+                  effectivePrecision?.netRiskReward ?? effectivePrecision?.grossRiskReward ?? 1.8,
+                ),
+                sizeMultiplier: sizeMult,
+                entryPrice: entry,
+                stopLossPrice: sl,
+                takeProfit1: tp1,
+                takeProfit2: tp2,
+                takeProfit3: tp3,
+                accountBalanceUsd: 10_000,
+                crossRates: {
+                  usdJpy: findFx("USDJPY"),
+                  gbpUsd: findFx("GBPUSD"),
+                  usdChf: findFx("USDCHF"),
+                  usdCad: findFx("USDCAD"),
+                  audUsd: findFx("AUDUSD"),
+                  nzdUsd: findFx("NZDUSD"),
+                },
               })
             : null;
-        const effectiveRiskPct =
-          kellySizing && kellySizing.recommendedAllocation > 0
-            ? Number((Math.min(1.5, Math.max(0.25, kellySizing.recommendedAllocation * 100)) * sizeMult).toFixed(2))
-            : Number((1.0 * sizeMult).toFixed(2));
-
-        let recommendedLots = 0;
-        if (entry && sl && action !== "WAIT" && effectiveRiskPct > 0) {
-          const fxRows = marketsRes?.data?.rows ?? [];
-          const findFx = (target: string) => fxRows.find((r) => r.pair === target && r.price > 0)?.price ?? null;
-          const sizer = calculateForexPositionSize({
-            accountBalance: 10_000,
-            riskPercent: effectiveRiskPct,
-            pair,
-            entryPrice: entry,
-            stopLossPrice: sl,
-            takeProfit1: tp1,
-            takeProfit2: tp2,
-            takeProfit3: tp3,
-            crossRates: {
-              usdJpy: findFx("USDJPY"),
-              gbpUsd: findFx("GBPUSD"),
-              usdChf: findFx("USDCHF"),
-              usdCad: findFx("USDCAD"),
-              audUsd: findFx("AUDUSD"),
-              nzdUsd: findFx("NZDUSD"),
-            },
-          });
-          recommendedLots = sizer.standardLots;
-        }
+        const recommendedLots = riskPlan?.recommendedLotsOrQty ?? 0;
 
         const symbolDisplay = pair === "XAUUSD" ? "XAU/USD (Vàng)" : `${pair.slice(0, 3)}/${pair.slice(3)}`;
 
@@ -370,7 +362,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           recommendedSizeMultiplier: sizeMult,
           csmSpread,
           recommendedLots,
-          riskAmountUsd: action === "WAIT" ? 0 : Math.round(100 * effectiveRiskPct),
+          riskAmountUsd: action === "WAIT" ? 0 : Math.round(riskPlan?.riskAmountUsd ?? 0),
           evidence: [...new Set(evidence)].slice(0, 8),
           riskNotes: [...new Set([...vetoReasons, ...riskNotes])].slice(0, 8),
           updatedAt: Date.now(),

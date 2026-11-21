@@ -18,9 +18,13 @@ import {
 } from "@/lib/engines/copy-trade-engine";
 import { calculateCryptoPositionSize } from "@/lib/engines/crypto-position-sizer";
 import {
-  placeBinanceFuturesOrder,
-  placeMetaApiMt5Order,
-  placeOkxSwapOrder,
+  getBrokerMeta,
+  isCryptoPlatform,
+  isForexPlatform,
+  isMt5BrokerPlatform,
+} from "@/lib/engines/broker-registry";
+import {
+  placePlatformExchangeOrder,
   recordExecutionSlippageTelemetry,
 } from "@/lib/engines/exchange-execution-client";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
@@ -74,21 +78,11 @@ export interface VaultDispatchOptions {
 const INFLIGHT_IDEMPOTENCY_LOCKS = new Set<string>();
 
 function isCryptoSupportedPlatform(platform: FollowerAccount["platform"]): boolean {
-  return (
-    platform === "BINANCE_FUTURES" ||
-    platform === "OKX_FUTURES" ||
-    platform === "BYBIT_FUTURES" ||
-    platform === "TELEGRAM_1CLICK"
-  );
+  return isCryptoPlatform(platform) || platform === "TELEGRAM_1CLICK";
 }
 
 function isForexSupportedPlatform(platform: FollowerAccount["platform"]): boolean {
-  return (
-    platform === "MT5_EXNESS" ||
-    platform === "MT5_XM" ||
-    platform === "MT5_EA" ||
-    platform === "TELEGRAM_1CLICK"
-  );
+  return isForexPlatform(platform) || platform === "TELEGRAM_1CLICK";
 }
 
 export function validateDispatchableSignalGeometry(
@@ -317,7 +311,7 @@ export async function executePlatformOrder(
   const safeLeverage =
     Number.isFinite(leverage) && leverage > 0 ? Math.max(1, Math.min(20, Math.round(leverage))) : 1;
 
-  if (acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA") {
+  if (isMt5BrokerPlatform(acct.platform)) {
     if (acct.hasApiKey) {
       const secrets = await getBrokerConnectionSecrets(acct.id);
       if (!secrets) {
@@ -327,22 +321,19 @@ export async function executePlatformOrder(
           message: `Không tìm thấy khóa MetaApi giải mã cho tài khoản ${acct.name}`,
         };
       }
-      const res = await placeMetaApiMt5Order(
-        {
-          credentials: secrets,
-          symbol: signal.symbol,
-          direction: signal.direction,
-          baseQty: qtyOrLots,
-          entryPrice: marketPrice,
-          stopLossPrice: signal.stopLossPrice,
-          takeProfit1: signal.takeProfit1,
-          takeProfit2: signal.takeProfit2 ?? null,
-          takeProfit3: signal.takeProfit3 ?? null,
-          leverage: safeLeverage,
-          idempotencyKey,
-        },
-        acct.platform,
-      );
+      const res = await placePlatformExchangeOrder(acct.platform, {
+        credentials: secrets,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        baseQty: qtyOrLots,
+        entryPrice: marketPrice,
+        stopLossPrice: signal.stopLossPrice,
+        takeProfit1: signal.takeProfit1,
+        takeProfit2: signal.takeProfit2 ?? null,
+        takeProfit3: signal.takeProfit3 ?? null,
+        leverage: safeLeverage,
+        idempotencyKey,
+      });
       const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
       return {
         ...baseOrder,
@@ -360,16 +351,17 @@ export async function executePlatformOrder(
     return {
       ...baseOrder,
       status: "PENDING_EA",
-      message: `Đang chờ ${acct.platform} EA xác nhận khớp ${qtyOrLots} lots ${signal.symbol}`,
+      message: `Đang chờ ${getBrokerMeta(acct.platform).shortName} EA xác nhận khớp ${qtyOrLots} lots ${signal.symbol}`,
     };
   }
 
-  if (acct.platform === "BINANCE_FUTURES" || acct.platform === "OKX_FUTURES") {
+  const brokerMeta = getBrokerMeta(acct.platform);
+  if (brokerMeta.supportsDirectOrderExecution || isCryptoPlatform(acct.platform) || isForexPlatform(acct.platform)) {
     if (!acct.hasApiKey) {
       return {
         ...baseOrder,
         status: "FILLED_PAPER",
-        message: `Paper Trade ${acct.platform} mô phỏng ${qtyOrLots} ${signal.symbol} @ ${marketPrice} (chưa gắn API Key thật)`,
+        message: `Paper Trade ${brokerMeta.shortName} mô phỏng ${qtyOrLots} ${signal.symbol} @ ${marketPrice} (chưa gắn API Key thật)`,
       };
     }
 
@@ -382,34 +374,19 @@ export async function executePlatformOrder(
       };
     }
 
-    const res =
-      acct.platform === "BINANCE_FUTURES"
-        ? await placeBinanceFuturesOrder({
-            credentials: secrets,
-            symbol: signal.symbol,
-            direction: signal.direction,
-            baseQty: qtyOrLots,
-            entryPrice: marketPrice,
-            stopLossPrice: signal.stopLossPrice,
-            takeProfit1: signal.takeProfit1,
-            takeProfit2: signal.takeProfit2 ?? null,
-            takeProfit3: signal.takeProfit3 ?? null,
-            leverage: safeLeverage,
-            idempotencyKey,
-          })
-        : await placeOkxSwapOrder({
-            credentials: secrets,
-            symbol: signal.symbol,
-            direction: signal.direction,
-            baseQty: qtyOrLots,
-            entryPrice: marketPrice,
-            stopLossPrice: signal.stopLossPrice,
-            takeProfit1: signal.takeProfit1,
-            takeProfit2: signal.takeProfit2 ?? null,
-            takeProfit3: signal.takeProfit3 ?? null,
-            leverage: safeLeverage,
-            idempotencyKey,
-          });
+    const res = await placePlatformExchangeOrder(acct.platform, {
+      credentials: secrets,
+      symbol: signal.symbol,
+      direction: signal.direction,
+      baseQty: qtyOrLots,
+      entryPrice: marketPrice,
+      stopLossPrice: signal.stopLossPrice,
+      takeProfit1: signal.takeProfit1,
+      takeProfit2: signal.takeProfit2 ?? null,
+      takeProfit3: signal.takeProfit3 ?? null,
+      leverage: safeLeverage,
+      idempotencyKey,
+    });
 
     const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
     return {

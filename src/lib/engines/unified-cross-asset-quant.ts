@@ -10,6 +10,11 @@
 
 import { normCdf, normInv } from "./advanced-quant-math";
 import { roundPrice } from "./asset-precision";
+import { calculateCryptoPositionSize } from "./crypto-position-sizer";
+import {
+  calculateForexPositionSize,
+  type CrossRateOverrides,
+} from "./forex-position-sizer";
 
 // ============================================================================
 // 1. Dynamic Fractional Kelly & Volatility Targeting
@@ -1049,5 +1054,124 @@ export function runMultiScenarioPortfolioStressTest(params: {
     breachesDailyBudget,
     recommendedPositionScale,
     rationaleVi,
+  };
+}
+
+// ============================================================================
+// 11. UNIFIED SSOT TRADE RISK PLAN (CRYPTO + FOREX KEIIY & POSITION SIZER)
+// ============================================================================
+
+export interface UnifiedTradeRiskPlanInput {
+  assetType: "CRYPTO" | "FOREX";
+  symbol: string;
+  direction: "BUY" | "SELL";
+  winRatePct: number; // e.g. 76
+  payoffRatio: number; // Net R:R, e.g. 2.1
+  sizeMultiplier: number; // 0..1 from EvaluatePrecisionTradeSetup
+  entryPrice: number;
+  stopLossPrice: number;
+  takeProfit1?: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
+  accountBalanceUsd?: number; // Default 10000
+  leverage?: number; // Crypto Futures leverage (default 1) or Forex leverage (default 100)
+  crossRates?: CrossRateOverrides;
+}
+
+export interface UnifiedTradeRiskPlanResult {
+  kellyAllocation: number;
+  effectiveRiskPct: number;
+  riskAmountUsd: number;
+  recommendedMarginUsd: number;
+  recommendedLotsOrQty: number;
+  estimatedLiquidationPrice: number | null;
+}
+
+/**
+ * Single Source of Truth (SSOT) risk, Kelly allocation, and position sizing plan shared
+ * across Crypto Signal Hub, Forex Signal Hub, Auto-Trade Worker, and Execution Dispatcher.
+ */
+export function calculateUnifiedTradeRiskPlan(
+  input: UnifiedTradeRiskPlanInput,
+): UnifiedTradeRiskPlanResult {
+  const balance =
+    typeof input.accountBalanceUsd === "number" && Number.isFinite(input.accountBalanceUsd) && input.accountBalanceUsd > 0
+      ? input.accountBalanceUsd
+      : 10_000;
+  const sizeMult = Math.max(0, Math.min(1.5, input.sizeMultiplier));
+  if (
+    sizeMult <= 0 ||
+    !Number.isFinite(input.entryPrice) ||
+    input.entryPrice <= 0 ||
+    !Number.isFinite(input.stopLossPrice) ||
+    input.stopLossPrice <= 0 ||
+    Math.abs(input.entryPrice - input.stopLossPrice) <= 1e-12
+  ) {
+    return {
+      kellyAllocation: 0,
+      effectiveRiskPct: 0,
+      riskAmountUsd: 0,
+      recommendedMarginUsd: 0,
+      recommendedLotsOrQty: 0,
+      estimatedLiquidationPrice: null,
+    };
+  }
+
+  const kelly = calculateCrossAssetKelly({
+    winRate: Math.max(0.05, Math.min(0.95, input.winRatePct / 100)),
+    payoffRatio: Math.max(1.0, Number.isFinite(input.payoffRatio) ? input.payoffRatio : 1.8),
+    isCrypto: input.assetType === "CRYPTO",
+    maxCapitalPerTrade: 0.02,
+  });
+
+  const effectiveRiskPct =
+    kelly.recommendedAllocation > 0
+      ? Number((Math.min(1.5, Math.max(0.25, kelly.recommendedAllocation * 100)) * sizeMult).toFixed(2))
+      : Number((1.0 * sizeMult).toFixed(2));
+  const riskAmountUsd = Number(((balance * effectiveRiskPct) / 100).toFixed(2));
+
+  if (input.assetType === "CRYPTO") {
+    const lev = Math.max(1, Math.min(50, Math.round(input.leverage ?? 3)));
+    const sizer = calculateCryptoPositionSize({
+      accountBalance: balance,
+      riskPercent: effectiveRiskPct,
+      entryPrice: input.entryPrice,
+      stopLossPrice: input.stopLossPrice,
+      takeProfit1: input.takeProfit1,
+      takeProfit2: input.takeProfit2,
+      takeProfit3: input.takeProfit3,
+      leverage: lev,
+      direction: input.direction,
+    });
+    return {
+      kellyAllocation: kelly.recommendedAllocation,
+      effectiveRiskPct,
+      riskAmountUsd,
+      recommendedMarginUsd: sizer.requiredMarginUsd,
+      recommendedLotsOrQty: Number(Math.max(0.001, sizer.positionQty).toFixed(4)),
+      estimatedLiquidationPrice: sizer.estimatedLiquidationPrice,
+    };
+  }
+
+  const fxSizer = calculateForexPositionSize({
+    accountBalance: balance,
+    riskPercent: effectiveRiskPct,
+    pair: input.symbol,
+    entryPrice: input.entryPrice,
+    stopLossPrice: input.stopLossPrice,
+    takeProfit1: input.takeProfit1,
+    takeProfit2: input.takeProfit2,
+    takeProfit3: input.takeProfit3,
+    leverage: input.leverage ?? 100,
+    crossRates: input.crossRates,
+  });
+
+  return {
+    kellyAllocation: kelly.recommendedAllocation,
+    effectiveRiskPct,
+    riskAmountUsd,
+    recommendedMarginUsd: fxSizer.marginRequiredUsd,
+    recommendedLotsOrQty: Number(Math.max(0.01, fxSizer.standardLots).toFixed(2)),
+    estimatedLiquidationPrice: null,
   };
 }

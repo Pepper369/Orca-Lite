@@ -1,10 +1,15 @@
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import {
-  verifyBinanceFuturesAccount,
+  ALL_ALLOWED_PLATFORMS,
+  detectBrokerCredentialsPattern,
+  getBrokerMeta,
+  isMt5BrokerPlatform,
+  type BrokerPlatform,
+} from "@/lib/engines/broker-registry";
+import {
+  verifyBrokerCredentials,
   verifyBrokerDualEnvironment,
-  verifyMetaApiMt5Account,
-  verifyOkxAccount,
   type BrokerVerificationResult,
 } from "@/lib/engines/exchange-execution-client";
 import {
@@ -32,11 +37,12 @@ export async function POST(req: Request) {
     const session = await getSessionUser(req);
     const body = (await req.json()) as {
       connectionId?: string;
-      platform?: "BINANCE_FUTURES" | "OKX_FUTURES" | "MT5_EXNESS" | "MT5_XM" | "MT5_EA";
+      platform?: BrokerPlatform;
       apiKey?: string;
       apiSecret?: string;
       passphrase?: string;
       isTestnet?: boolean;
+      autoDetect?: boolean;
     };
 
     if (body.connectionId) {
@@ -54,9 +60,9 @@ export async function POST(req: Request) {
         }
       }
 
-      const isMt5 = acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA";
-      const supportsDirectTest =
-        acct.platform === "BINANCE_FUTURES" || acct.platform === "OKX_FUTURES" || (isMt5 && acct.hasApiKey);
+      const isMt5 = isMt5BrokerPlatform(acct.platform);
+      const brokerMeta = getBrokerMeta(acct.platform);
+      const supportsDirectTest = brokerMeta.supportsDirectRestVerify && Boolean(acct.hasApiKey);
 
       if (!supportsDirectTest) {
         return ok({
@@ -69,8 +75,8 @@ export async function POST(req: Request) {
             canTrade: acct.hasEaToken ?? false,
             latencyMs: 0,
             rawMessage: isMt5
-              ? "XM / Exness đang dùng EA MT5 Bridge (bật OrcaCopyTradeSlave.mq5 trên MT5 để gửi heartbeat, hoặc gắn MetaApi Key để test trực tiếp)"
-              : "Tài khoản chế độ Paper Simulation",
+              ? `${brokerMeta.shortName} đang dùng EA MT5 Bridge (bật OrcaCopyTradeSlave.mq5 trên MT5 để gửi heartbeat, hoặc gắn MetaApi Key để test trực tiếp)`
+              : "Tài khoản chế độ Paper Sandbox / Lưu khóa",
           },
           account: acct,
         });
@@ -85,12 +91,7 @@ export async function POST(req: Request) {
         return badRequest("Kết nối này đang ở chế độ Paper Sandbox và chưa có API Key thật để kiểm tra");
       }
 
-      const verification: BrokerVerificationResult =
-        acct.platform === "BINANCE_FUTURES"
-          ? await verifyBinanceFuturesAccount(secrets)
-          : acct.platform === "OKX_FUTURES"
-            ? await verifyOkxAccount(secrets)
-            : await verifyMetaApiMt5Account(secrets, acct.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA");
+      const verification: BrokerVerificationResult = await verifyBrokerCredentials(acct.platform, secrets);
 
       const updated = await updateBrokerConnectionState(acct.id, {
         connectionStatus:
@@ -121,34 +122,49 @@ export async function POST(req: Request) {
       return fail("UNAUTHENTICATED", "Đăng nhập để kiểm tra kết nối Broker", 401);
     }
 
-    if (!body.platform || !body.apiKey?.trim() || !body.apiSecret?.trim()) {
-      return badRequest("Cần cung cấp platform, API Key và API Secret để kiểm tra kết nối");
+    const recognition = detectBrokerCredentialsPattern({
+      apiKey: body.apiKey,
+      apiSecret: body.apiSecret,
+      passphrase: body.passphrase,
+    });
+
+    const targetPlatform: BrokerPlatform | undefined =
+      body.platform ?? (body.autoDetect ? recognition.bestMatch?.platform : undefined);
+
+    if (!targetPlatform || !ALL_ALLOWED_PLATFORMS.includes(targetPlatform)) {
+      return badRequest("Vui lòng chọn sàn / nhà môi giới hợp lệ hoặc dán API Key để tự nhận diện");
     }
 
-    if (body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES") {
+    const meta = getBrokerMeta(targetPlatform);
+    const trimmedKey = body.apiKey?.trim() ?? "";
+    const trimmedSecret = body.apiSecret?.trim() ?? "";
+    if (!trimmedKey || (meta.fields.requiresSecret && !trimmedSecret)) {
+      return badRequest(`Cần cung cấp ${meta.fields.apiKeyLabel} để kiểm tra kết nối ${meta.shortName}`);
+    }
+
+    if (meta.supportsDirectRestVerify && meta.supportsDualEnv && !meta.isMt5Broker) {
       const dualVerification = await verifyBrokerDualEnvironment({
-        platform: body.platform,
-        apiKey: body.apiKey.trim(),
-        apiSecret: body.apiSecret.trim(),
+        platform: targetPlatform,
+        apiKey: trimmedKey,
+        apiSecret: trimmedSecret,
         passphrase: body.passphrase?.trim() || null,
       });
       return ok({
         verification: dualVerification.primary,
         dualVerification,
+        recognition,
+        resolvedPlatform: targetPlatform,
       });
     }
 
-    const verification = await verifyMetaApiMt5Account(
-      {
-        apiKey: body.apiKey.trim(),
-        apiSecret: body.apiSecret.trim(),
-        passphrase: body.passphrase?.trim() || null,
-        isTestnet: body.isTestnet !== false,
-      },
-      body.platform,
-    );
+    const verification = await verifyBrokerCredentials(targetPlatform, {
+      apiKey: trimmedKey,
+      apiSecret: trimmedSecret,
+      passphrase: body.passphrase?.trim() || null,
+      isTestnet: body.isTestnet !== false,
+    });
 
-    return ok({ verification });
+    return ok({ verification, recognition, resolvedPlatform: targetPlatform });
   } catch (err) {
     return fail("BAD_REQUEST", safeInternalErrorMessage(err, "Lỗi kiểm tra API kết nối"), 400);
   }

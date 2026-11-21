@@ -5,14 +5,13 @@ import { evaluateCryptoShield } from "@/lib/engines/crypto-news-shield";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engines/forex-currency-strength";
 import { evaluateNewsCircuitBreaker } from "@/lib/engines/forex-news-shield";
 import { generateDeepFlowSignal } from "@/lib/engines/forex-order-flow-pro";
-import { calculateForexPositionSize } from "@/lib/engines/forex-position-sizer";
 import {
   evaluatePrecisionTradeSetup,
   type SetupGrade,
 } from "@/lib/engines/fx-crypto-precision-engine";
 import {
   buildCryptoLiquidityContext,
-  calculateCrossAssetKelly,
+  calculateUnifiedTradeRiskPlan,
   computeGarmanKlassLeverageCap,
   detectCryptoLiquidationClusters,
 } from "@/lib/engines/unified-cross-asset-quant";
@@ -222,19 +221,22 @@ async function scanLivePrecisionSetups(params: {
             1,
             Math.min(pairLevCap, Math.round(levGov.maxRecommendedLeverage * gradeFactor)),
           );
-          const kelly = calculateCrossAssetKelly({
-            winRate: precision.calibratedWinRatePct / 100,
+          const riskPlan = calculateUnifiedTradeRiskPlan({
+            assetType: "CRYPTO",
+            symbol: pair,
+            direction: precision.direction,
+            winRatePct: precision.calibratedWinRatePct,
             payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
-            isCrypto: true,
-            maxCapitalPerTrade: 0.02,
+            sizeMultiplier: precision.recommendedSizeMultiplier,
+            entryPrice: livePrice,
+            stopLossPrice: precision.stopLoss,
+            takeProfit1: precision.tp1,
+            takeProfit2: precision.tp2,
+            takeProfit3: precision.tp3,
+            accountBalanceUsd: 10_000,
+            leverage: recommendedLeverage,
           });
-          const effectiveRiskPct =
-            kelly.recommendedAllocation > 0
-              ? Math.min(1.5, Math.max(0.25, kelly.recommendedAllocation * 100)) * precision.recommendedSizeMultiplier
-              : 1.0 * precision.recommendedSizeMultiplier;
-          const riskUsd = 100 * effectiveRiskPct;
-          const stopDistPct = Math.max(0.002, Math.abs(livePrice - precision.stopLoss) / livePrice);
-          const baseQty = Math.max(0.001, riskUsd / (livePrice * stopDistPct));
+          const baseQty = Math.max(0.001, riskPlan.recommendedLotsOrQty);
 
           return {
             signal: {
@@ -366,12 +368,19 @@ async function scanLivePrecisionSetups(params: {
 
           const entryPrice = roundPrice(livePrice, pair, "FOREX");
           const stopLossPrice = roundPrice(precision.stopLoss, pair, "FOREX");
-          const sizer = calculateForexPositionSize({
-            accountBalance: 10_000,
-            riskPercent: 1.0 * precision.recommendedSizeMultiplier,
-            pair,
+          const riskPlan = calculateUnifiedTradeRiskPlan({
+            assetType: "FOREX",
+            symbol: pair,
+            direction: precision.direction,
+            winRatePct: precision.calibratedWinRatePct,
+            payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
+            sizeMultiplier: precision.recommendedSizeMultiplier,
             entryPrice,
             stopLossPrice,
+            takeProfit1: precision.tp1,
+            takeProfit2: precision.tp2,
+            takeProfit3: precision.tp3,
+            accountBalanceUsd: 10_000,
             crossRates,
           });
 
@@ -386,7 +395,7 @@ async function scanLivePrecisionSetups(params: {
               takeProfit1: roundPrice(precision.tp1, pair, "FOREX"),
               takeProfit2: precision.tp2 != null ? roundPrice(precision.tp2, pair, "FOREX") : undefined,
               takeProfit3: precision.tp3 != null ? roundPrice(precision.tp3, pair, "FOREX") : undefined,
-              masterLotsOrQty: Math.max(0.01, sizer.standardLots),
+              masterLotsOrQty: Math.max(0.01, riskPlan.recommendedLotsOrQty),
               masterCapitalUsd: 10_000,
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,

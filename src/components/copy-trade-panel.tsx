@@ -18,6 +18,15 @@ import type {
   FollowerAccount,
   MasterTraderPerformance,
 } from "@/lib/engines/copy-trade-engine";
+import {
+  BROKER_CATALOG,
+  detectBrokerCredentialsPattern,
+  getBrokerMeta,
+  getCryptoBrokerCatalog,
+  getForexBrokerCatalog,
+  isMt5BrokerPlatform,
+  type BrokerCategory,
+} from "@/lib/engines/broker-registry";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import {
   AlertTriangle,
@@ -115,15 +124,12 @@ interface DualTestConnectionResult {
   summaryMessage: string;
 }
 
-const PLATFORM_LABELS: Record<BrokerPlatform, string> = {
-  BINANCE_FUTURES: "Binance USDT-M Futures",
-  OKX_FUTURES: "OKX Futures / Swap v5",
-  MT5_EXNESS: "Exness MT5 (EA Bridge)",
-  MT5_XM: "XM MT5 (EA Bridge)",
-  MT5_EA: "MT5 Khác (EA Bridge)",
-  BYBIT_FUTURES: "Bybit Futures (Paper)",
-  TELEGRAM_1CLICK: "Telegram Alert Bot",
-};
+const PLATFORM_LABELS: Record<BrokerPlatform, string> = Object.fromEntries(
+  BROKER_CATALOG.map((item) => [item.platform, item.name]),
+) as Record<BrokerPlatform, string>;
+
+const CRYPTO_CATALOG = getCryptoBrokerCatalog();
+const FOREX_CATALOG = getForexBrokerCatalog();
 
 function statusBadgeTone(status?: FollowerAccount["connectionStatus"]): "up" | "down" | "warn" | "neutral" | "accent" {
   switch (status) {
@@ -167,58 +173,6 @@ function orderStatusTone(status: CopyOrderStatus): "up" | "down" | "warn" | "neu
   if (status === "PENDING_EA") return "warn";
   return "down";
 }
-
-const QUICK_CONNECT_BROKERS: Array<{
-  platform: BrokerPlatform;
-  title: string;
-  assetTag: string;
-  methodTag: string;
-  description: string;
-  defaultBalance: number;
-  defaultLeverage: number;
-  accentClass: string;
-}> = [
-  {
-    platform: "BINANCE_FUTURES",
-    title: "Binance Futures",
-    assetTag: "CRYPTO",
-    methodTag: "REST API Key + Secret",
-    description: "Khớp lệnh USDT-M Futures trực tiếp (Testnet / Mainnet) kèm SL/TP tự động.",
-    defaultBalance: 1000,
-    defaultLeverage: 5,
-    accentClass: "border-amber-400/35 bg-amber-400/5",
-  },
-  {
-    platform: "OKX_FUTURES",
-    title: "OKX Swap v5",
-    assetTag: "CRYPTO",
-    methodTag: "API Key + Secret + Passphrase",
-    description: "Hỗ trợ OKX Perpetual Swap v5 (Demo / Live) với attached Algo SL/TP.",
-    defaultBalance: 1000,
-    defaultLeverage: 5,
-    accentClass: "border-cyan-400/35 bg-cyan-400/5",
-  },
-  {
-    platform: "MT5_EXNESS",
-    title: "Exness (Forex & Vàng)",
-    assetTag: "FOREX",
-    methodTag: "MetaApi Cloud hoặc MT5 EA",
-    description: "Gắn MetaApi Cloud API Key (trade 24/7) hoặc chạy EA OrcaCopyTradeSlave.mq5 trên MT5.",
-    defaultBalance: 2000,
-    defaultLeverage: 1,
-    accentClass: "border-emerald-400/35 bg-emerald-400/5",
-  },
-  {
-    platform: "MT5_XM",
-    title: "XM (Forex & Vàng)",
-    assetTag: "FOREX",
-    methodTag: "MetaApi Cloud hoặc MT5 EA",
-    description: "Gắn MetaApi Cloud API Key (trade 24/7) hoặc chạy EA Bearer Token trên XM MT5.",
-    defaultBalance: 2000,
-    defaultLeverage: 1,
-    accentClass: "border-violet-400/35 bg-violet-400/5",
-  },
-];
 
 function demoSubtypeBadgeLabel(sub: DemoAccountSubtype | null): string {
   if (sub === "EXCHANGE_TESTNET") return "DEMO · TESTNET";
@@ -267,6 +221,8 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const [modalTesting, setModalTesting] = useState(false);
   const [modalTestRes, setModalTestRes] = useState<TestConnectionResult | null>(null);
   const [modalDualTestRes, setModalDualTestRes] = useState<DualTestConnectionResult | null>(null);
+  const [brokerMarketTab, setBrokerMarketTab] = useState<"CRYPTO" | "FOREX">("CRYPTO");
+  const [modalCategory, setModalCategory] = useState<BrokerCategory>("CRYPTO");
 
   // One-time MT5 EA Token modal
   const [eaTokenModal, setEaTokenModal] = useState<{ name: string; platform: string; token: string } | null>(null);
@@ -293,15 +249,26 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
         ? demoAccountsList
         : accounts;
 
-  const isRestExchange = formPlatform === "BINANCE_FUTURES" || formPlatform === "OKX_FUTURES";
-  const isMt5Bridge = formPlatform === "MT5_EXNESS" || formPlatform === "MT5_XM" || formPlatform === "MT5_EA";
+  const selectedBrokerMeta = getBrokerMeta(formPlatform);
+  const isMt5Bridge = isMt5BrokerPlatform(formPlatform);
   const isMetaApiMode = isMt5Bridge && formMt5Mode === "metaapi";
+  const isRestExchange = !isMt5Bridge && formPlatform !== "TELEGRAM_1CLICK";
+
+  const keyRecognition = formApiKey.trim().length >= 6
+    ? detectBrokerCredentialsPattern({
+        apiKey: formApiKey,
+        apiSecret: formApiSecret,
+        passphrase: formPassphrase,
+      })
+    : null;
 
   const openQuickConnect = (platform: BrokerPlatform, defaultBalance = 1000, defaultLeverage = 5) => {
     resetModalForm();
+    const meta = getBrokerMeta(platform);
+    setModalCategory(meta.category);
     setFormPlatform(platform);
     setFormBalance(defaultBalance);
-    setFormLeverageCap(defaultLeverage);
+    setFormLeverageCap(meta.category === "FOREX" ? 1 : defaultLeverage);
     setFormMt5Mode("metaapi");
     setShowAddModal(true);
   };
@@ -501,12 +468,22 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
 
   const handleModalDryTest = async () => {
     const canTest = isRestExchange || isMetaApiMode;
-    if (!canTest || !formApiKey.trim() || !formApiSecret.trim()) {
+    const missingKey = !formApiKey.trim();
+    const missingSecret = selectedBrokerMeta.fields.requiresSecret && !formApiSecret.trim();
+    const missingMt5 = isMetaApiMode && (!formApiKey.trim() || !formApiSecret.trim());
+    if (!canTest || missingKey || missingSecret || missingMt5) {
       setBanner({
         tone: "warn",
         text: isMetaApiMode
           ? "Vui lòng nhập đầy đủ MetaApi Token và MetaApi Account ID trước khi kiểm tra"
-          : "Vui lòng nhập đầy đủ API Key & API Secret trước khi kiểm tra",
+          : `Vui lòng nhập đầy đủ ${selectedBrokerMeta.fields.apiKeyLabel} trước khi kiểm tra`,
+      });
+      return;
+    }
+    if (selectedBrokerMeta.fields.requiresPassphrase && !formPassphrase.trim()) {
+      setBanner({
+        tone: "warn",
+        text: `${selectedBrokerMeta.shortName} bắt buộc nhập Passphrase trước khi kiểm tra`,
       });
       return;
     }
@@ -585,9 +562,12 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
           isTestnet: formIsTestnet,
           autoExecuteEnabled: formAutoExecute,
           apiKey: (isRestExchange || isMetaApiMode) && formApiKey.trim() ? formApiKey.trim() : undefined,
-          apiSecret: (isRestExchange || isMetaApiMode) && formApiSecret.trim() ? formApiSecret.trim() : undefined,
+          apiSecret:
+            (isRestExchange || isMetaApiMode) && (formApiSecret.trim() || (!selectedBrokerMeta.fields.requiresSecret && formApiKey.trim()))
+              ? formApiSecret.trim() || "read-only"
+              : undefined,
           passphrase:
-            (formPlatform === "OKX_FUTURES" || isMetaApiMode) && formPassphrase.trim()
+            (selectedBrokerMeta.fields.requiresPassphrase || isMetaApiMode || isRestExchange) && formPassphrase.trim()
               ? formPassphrase.trim()
               : undefined,
         }),
@@ -971,36 +951,88 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-          {QUICK_CONNECT_BROKERS.map((broker) => {
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line/50 pt-3">
+          <div className="inline-flex rounded-xl border border-line bg-surface-elevated p-1 text-[11.5px]">
+            <button
+              type="button"
+              onClick={() => setBrokerMarketTab("CRYPTO")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+                brokerMarketTab === "CRYPTO"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-400/40"
+                  : "text-ink-3 hover:text-ink"
+              }`}
+            >
+              Sàn Crypto &amp; Phái Sinh ({CRYPTO_CATALOG.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setBrokerMarketTab("FOREX")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition-colors ${
+                brokerMarketTab === "FOREX"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/40"
+                  : "text-ink-3 hover:text-ink"
+              }`}
+            >
+              Nhà Môi Giới &amp; Trung Tâm Forex ({FOREX_CATALOG.length})
+            </button>
+          </div>
+          <span className="text-[11px] text-ink-3">
+            Tự nhận diện định dạng API Key khi dán · Quét song song REAL + DEMO
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {(brokerMarketTab === "CRYPTO" ? CRYPTO_CATALOG : FOREX_CATALOG).map((broker) => {
             const matched = accounts.filter((a) => a.platform === broker.platform);
             const verifiedCount = matched.filter(
               (a) => a.connectionStatus === "CONNECTED_VERIFIED" || a.hasApiKey || a.hasEaToken,
             ).length;
+            const accentClass =
+              broker.category === "CRYPTO"
+                ? verifiedCount > 0
+                  ? "border-amber-400/50 bg-amber-400/10"
+                  : "border-amber-400/25 bg-surface-elevated/60"
+                : verifiedCount > 0
+                  ? "border-emerald-400/50 bg-emerald-400/10"
+                  : "border-emerald-400/25 bg-surface-elevated/60";
             return (
               <div
                 key={broker.platform}
-                className={`flex flex-col justify-between rounded-xl border p-3 transition-colors ${broker.accentClass}`}
+                className={`flex flex-col justify-between rounded-xl border p-3 transition-colors ${accentClass}`}
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-bold text-ink">{broker.title}</span>
-                    <Badge tone={verifiedCount > 0 ? "up" : "neutral"}>
-                      {verifiedCount > 0 ? `${verifiedCount} đã gắn` : broker.assetTag}
+                    <span className="text-[12.5px] font-bold text-ink">{broker.shortName}</span>
+                    <Badge tone={verifiedCount > 0 ? "up" : broker.supportsDirectRestVerify ? "accent" : "neutral"}>
+                      {verifiedCount > 0
+                        ? `${verifiedCount} đã gắn`
+                        : broker.supportsDualEnv
+                          ? "REAL + DEMO"
+                          : broker.isMt5Broker
+                            ? "MT5 HUB"
+                            : broker.category}
                     </Badge>
                   </div>
-                  <div className="mt-1 text-[10.5px] font-mono text-accent-2">{broker.methodTag}</div>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3">{broker.description}</p>
+                  <div className="mt-0.5 text-[10.5px] font-medium text-ink-2">{broker.venueType}</div>
+                  <div className="mt-1 text-[10px] font-mono text-accent-2">
+                    {broker.tierLabel}
+                    {broker.defaultSymbolSuffix ? ` · Suffix "${broker.defaultSymbolSuffix}"` : ""}
+                  </div>
+                  <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-3">{broker.keyFormatHintVi}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() =>
-                    openQuickConnect(broker.platform, broker.defaultBalance, broker.defaultLeverage)
+                    openQuickConnect(
+                      broker.platform,
+                      broker.category === "CRYPTO" ? 1000 : 2000,
+                      broker.category === "CRYPTO" ? 5 : 1,
+                    )
                   }
-                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity"
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11px] font-semibold text-white hover:opacity-90 transition-opacity"
                 >
                   <KeyRound className="h-3.5 w-3.5" />
-                  {verifiedCount > 0 ? `Thêm tài khoản ${broker.title.split(" ")[0]}` : `Gắn API ${broker.title.split(" ")[0]}`}
+                  {verifiedCount > 0 ? `Thêm TK ${broker.shortName}` : `Kết nối ${broker.shortName}`}
                 </button>
               </div>
             );
@@ -1275,12 +1307,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                      {acc.hasApiKey &&
-                        (acc.platform === "BINANCE_FUTURES" ||
-                          acc.platform === "OKX_FUTURES" ||
-                          acc.platform === "MT5_EXNESS" ||
-                          acc.platform === "MT5_XM" ||
-                          acc.platform === "MT5_EA") && (
+                      {acc.hasApiKey && getBrokerMeta(acc.platform).supportsDirectRestVerify && (
                           <button
                             type="button"
                             disabled={testingConnId === acc.id}
@@ -1291,10 +1318,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                             Test API
                           </button>
                         )}
-                      {!acc.hasApiKey &&
-                        (acc.platform === "MT5_EXNESS" ||
-                          acc.platform === "MT5_XM" ||
-                          acc.platform === "MT5_EA") && (
+                      {!acc.hasApiKey && isMt5BrokerPlatform(acc.platform) && (
                           <button
                             type="button"
                             disabled={rotatingConnId === acc.id}
@@ -1424,23 +1448,65 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
 
             <form onSubmit={handleAddAccount} className="mt-4 space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-ink-2">Sàn giao dịch / Nền tảng</label>
+                <label className="block text-[11px] font-semibold text-ink-2">
+                  Phân loại thị trường (Crypto Exchanges vs Forex Brokers &amp; Liquidity Hubs)
+                </label>
+                <div className="mt-1 grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: "CRYPTO", label: `Sàn Crypto (${CRYPTO_CATALOG.length})` },
+                      { id: "FOREX", label: `Sàn Forex (${FOREX_CATALOG.length})` },
+                      { id: "NOTIFICATION", label: "Telegram 1-Click" },
+                    ] as const
+                  ).map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setModalCategory(cat.id);
+                        const first = BROKER_CATALOG.find((b) => b.category === cat.id);
+                        if (first) {
+                          setFormPlatform(first.platform);
+                          setFormLeverageCap(cat.id === "FOREX" ? 1 : 5);
+                        }
+                        setModalTestRes(null);
+                        setModalDualTestRes(null);
+                      }}
+                      className={`rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                        modalCategory === cat.id
+                          ? "border-accent-primary bg-accent-primary/15 text-ink"
+                          : "border-line bg-surface-elevated text-ink-3 hover:text-ink"
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-ink-2">
+                  Chọn sàn / nhà môi giới ({modalCategory === "CRYPTO" ? "Crypto Exchanges" : modalCategory === "FOREX" ? "Forex Brokers & Hubs" : "Alert Bot"})
+                </label>
                 <select
                   value={formPlatform}
                   onChange={(e) => {
-                    setFormPlatform(e.target.value as BrokerPlatform);
+                    const nextPlat = e.target.value as BrokerPlatform;
+                    const nextMeta = getBrokerMeta(nextPlat);
+                    setFormPlatform(nextPlat);
+                    setModalCategory(nextMeta.category);
                     setModalTestRes(null);
+                    setModalDualTestRes(null);
                   }}
                   className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 text-[12.5px] text-ink"
                 >
-                  <option value="BINANCE_FUTURES">Binance USDT-M Futures (REST API Key)</option>
-                  <option value="OKX_FUTURES">OKX Futures / Swap v5 (API Key + Passphrase)</option>
-                  <option value="MT5_EXNESS">Exness MT5 (EA Bearer Bridge - Forex/Gold)</option>
-                  <option value="MT5_XM">XM MT5 (EA Bearer Bridge - Forex/Gold)</option>
-                  <option value="MT5_EA">MT5 Khác (EA Bearer Bridge)</option>
-                  <option value="BYBIT_FUTURES">Bybit Futures (Paper Sandbox)</option>
-                  <option value="TELEGRAM_1CLICK">Telegram 1-Click Signal Bot</option>
+                  {BROKER_CATALOG.filter((b) => b.category === modalCategory).map((b) => (
+                    <option key={b.platform} value={b.platform}>
+                      {b.name} — {b.venueType}
+                    </option>
+                  ))}
                 </select>
+                <p className="mt-1 text-[10.5px] text-ink-3">{selectedBrokerMeta.keyFormatHintVi}</p>
               </div>
 
               <div>
@@ -1515,46 +1581,88 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                   <div className="flex items-start gap-2 text-[11px] text-warn">
                     <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                     <span>
-                      <strong>Đồng bộ Dual-Mode (REAL + DEMO):</strong> Chỉ cần nhập 1 bộ API Key &amp; Secret, hệ thống sẽ tự động kiểm tra và kết nối <strong>cả tài khoản REAL lẫn DEMO</strong> nếu API Key hỗ trợ (hoặc tự nhận đúng môi trường khả dụng). Chỉ bật quyền <strong>Read + Enable Futures / Trade</strong>, tuyệt đối <strong>TẮT Withdraw</strong>.
+                      {selectedBrokerMeta.supportsDualEnv ? (
+                        <>
+                          <strong>Đồng bộ Dual-Mode ({selectedBrokerMeta.shortName} REAL + DEMO):</strong> Chỉ cần nhập 1 bộ khóa API, hệ thống tự quét{" "}
+                          <strong>{selectedBrokerMeta.realEndpointLabel}</strong> và{" "}
+                          <strong>{selectedBrokerMeta.demoEndpointLabel}</strong>. Chỉ bật quyền Read/Trade, tuyệt đối <strong>TẮT Withdraw</strong>.
+                        </>
+                      ) : (
+                        <>
+                          <strong>{selectedBrokerMeta.name}:</strong> Kết nối tới {selectedBrokerMeta.realEndpointLabel} ·{" "}
+                          {selectedBrokerMeta.keyFormatHintVi}
+                        </>
+                      )}
                     </span>
                   </div>
 
+                  {keyRecognition?.bestMatch && (
+                    <div className="rounded-lg border border-accent-primary/40 bg-accent-primary/10 px-2.5 py-2 text-[10.5px]">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold text-accent-primary">
+                          Nhận diện API Key: {keyRecognition.bestMatch.detectedFormatLabel} ({keyRecognition.bestMatch.confidence}%)
+                        </span>
+                        {keyRecognition.bestMatch.platform !== formPlatform && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const target = keyRecognition.bestMatch!.platform;
+                              setFormPlatform(target);
+                              setModalCategory(getBrokerMeta(target).category);
+                              setModalTestRes(null);
+                              setModalDualTestRes(null);
+                            }}
+                            className="rounded-md bg-accent-primary px-2 py-0.5 text-[10px] font-bold text-white hover:opacity-90"
+                          >
+                            Chuyển sang {getBrokerMeta(keyRecognition.bestMatch.platform).shortName}
+                          </button>
+                        )}
+                      </div>
+                      {keyRecognition.warningsVi.length > 0 && (
+                        <div className="mt-1 text-amber-300">{keyRecognition.warningsVi[0]}</div>
+                      )}
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-[11px] font-semibold text-ink-2">
-                      API Key (để trống nếu chỉ muốn chạy Paper Sandbox)
+                      {selectedBrokerMeta.fields.apiKeyLabel}
                     </label>
                     <input
                       type="text"
                       value={formApiKey}
                       onChange={(e) => setFormApiKey(e.target.value)}
-                      placeholder="Nhập API Key từ Binance / OKX..."
+                      placeholder={selectedBrokerMeta.fields.apiKeyPlaceholder}
                       autoComplete="off"
                       className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-ink-2">API Secret</label>
+                    <label className="block text-[11px] font-semibold text-ink-2">
+                      {selectedBrokerMeta.fields.apiSecretLabel}
+                    </label>
                     <input
                       type="password"
                       value={formApiSecret}
                       onChange={(e) => setFormApiSecret(e.target.value)}
-                      placeholder="Nhập API Secret..."
+                      placeholder={selectedBrokerMeta.fields.apiSecretPlaceholder}
                       autoComplete="new-password"
                       className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
                     />
                   </div>
 
-                  {formPlatform === "OKX_FUTURES" && (
+                  {(selectedBrokerMeta.fields.requiresPassphrase || selectedBrokerMeta.fields.passphraseLabel) && (
                     <div>
                       <label className="block text-[11px] font-semibold text-ink-2">
-                        OKX Passphrase <span className="text-down">*</span>
+                        {selectedBrokerMeta.fields.passphraseLabel ?? "Passphrase"}{" "}
+                        {selectedBrokerMeta.fields.requiresPassphrase && <span className="text-down">*</span>}
                       </label>
                       <input
-                        type="password"
+                        type={selectedBrokerMeta.fields.requiresPassphrase ? "password" : "text"}
                         value={formPassphrase}
                         onChange={(e) => setFormPassphrase(e.target.value)}
-                        placeholder="Passphrase bạn đặt lúc tạo OKX v5 API Key..."
+                        placeholder={selectedBrokerMeta.fields.passphrasePlaceholder ?? "Nhập Passphrase..."}
                         autoComplete="new-password"
                         className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 font-mono text-[12px] text-ink"
                       />
@@ -1565,7 +1673,12 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        disabled={modalTesting || !formApiKey.trim() || !formApiSecret.trim()}
+                        disabled={
+                          modalTesting ||
+                          !selectedBrokerMeta.supportsDirectRestVerify ||
+                          !formApiKey.trim() ||
+                          (selectedBrokerMeta.fields.requiresSecret && !formApiSecret.trim())
+                        }
                         onClick={handleModalDryTest}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 disabled:opacity-40"
                       >

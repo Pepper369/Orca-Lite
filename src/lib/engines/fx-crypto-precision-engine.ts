@@ -16,6 +16,7 @@ import {
   applySymmetricCusumFilter,
   computeScenarioDynamicExitPolicy,
   computeYangZhangVolatility,
+  estimateTailDegreesOfFreedom,
   evaluateMarketScenarioVector,
   filterOnlineRegimeHmm,
   forecastHarRealizedVolatility,
@@ -575,17 +576,21 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   let resolvedDir: "BUY" | "SELL" | "NEUTRAL" = "NEUTRAL";
   if (candidateDirection === "BUY" || candidateDirection === "SELL") {
     resolvedDir = candidateDirection;
-  } else if (bullSweepRecent && bullMss && !bearSweepRecent) {
-    // Fresh confirmed liquidity sweep takes precedence over lagged EMA trend readings
+  } else if (bullSweepRecent && !bearSweepRecent && (bullMss || ict.optimalTradeSetup.direction === "BUY")) {
     resolvedDir = "BUY";
-  } else if (bearSweepRecent && bearMss && !bullSweepRecent) {
+  } else if (bearSweepRecent && !bullSweepRecent && (bearMss || ict.optimalTradeSetup.direction === "SELL")) {
     resolvedDir = "SELL";
   } else {
     const gap = Math.abs(bullPts - bearPts);
+    const hasTrendPullbackEdge =
+      (microSignals.bullPullbackReclaim && htfBias === "BULLISH") ||
+      (microSignals.bearPullbackReclaim && htfBias === "BEARISH");
     const minGap =
-      bullSweepRecent || bearSweepRecent || microSignals.bullBreakout || microSignals.bearBreakout
-        ? 10
-        : 12;
+      hasTrendPullbackEdge || bullSweepRecent || bearSweepRecent
+        ? 6
+        : microSignals.bullBreakout || microSignals.bearBreakout
+          ? 8
+          : 12;
     if (gap >= minGap) {
       resolvedDir = bullPts > bearPts ? "BUY" : "SELL";
     }
@@ -645,6 +650,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if (hasExhaustionShift) {
     precisionScore += 10;
     gatesPassed.push("Gate 1: Đảo chiều phân phối sau đỉnh/đáy quá mua/quá bán (Post-Exhaustion Shift)");
+  } else if (hasSweep && hasMss) {
+    precisionScore += 4;
+    gatesPassed.push("Gate 1: Đảo chiều cấu trúc Sweep+MSS tại vùng thanh khoản cực trị");
   } else if (htfOpposes) {
     precisionScore -= 8;
     gatesFailed.push(`Gate 1: HTF (${htfBias}) chưa đồng thuận`);
@@ -941,11 +949,20 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   }
 
   // Phase 4A & 4B: Synthesize 5-Scenario Probability Vector & Scenario-Conditioned Dynamic Exit Policy
+  const tailReturns: number[] = [];
+  const retStart = Math.max(1, n - 45);
+  for (let i = retStart; i < n; i++) {
+    const prev = closes[i - 1]!;
+    const cur = closes[i]!;
+    if (prev > 0 && cur > 0) tailReturns.push(Math.log(cur / prev));
+  }
+  const tailNu = estimateTailDegreesOfFreedom(tailReturns);
   const scenarioVector = evaluateMarketScenarioVector({
     hmmProbabilities: hmmRegime.probabilities,
     efficiencyRatio: erVal,
     adx14: adxVal,
     harExpansionRatio: harVol.expansionRatio,
+    tailDegreesOfFreedom: tailNu,
     spreadSpikeRatio:
       spreadPipsOrPct != null && spreadPipsOrPct > 0
         ? assetType === "FOREX"
@@ -958,9 +975,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const prelimGrossRr = Number((target2Dist / Math.max(1e-12, stopDist)).toFixed(2));
   const exitPolicy = computeScenarioDynamicExitPolicy(scenarioVector, prelimGrossRr);
 
-  // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3; S2 tightens TP1 for range harvest)
+  // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3 while capping at 2.85R for fast capital turnover; S2 tightens TP1)
   const tp1Dist = stopDist * Math.min(1.05, Math.max(0.85, exitPolicy.tp1RMultiple));
-  const tp3Dist = Math.max(target2Dist * 1.35, stopDist * exitPolicy.tp3RMultiple);
+  const cappedTp3R = Math.min(2.85, exitPolicy.tp3RMultiple);
+  const tp3Dist = Math.max(target2Dist * 1.22, stopDist * cappedTp3R);
 
   const tp1Raw = isBuy ? rawEntry + tp1Dist : rawEntry - tp1Dist;
   const tp2Raw = isBuy ? rawEntry + target2Dist : rawEntry - target2Dist;
@@ -981,7 +999,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 6: SL cấu trúc & Net R:R 1:${netRiskReward} (Friction ${frictionR}R)`);
   }
 
-  // Run High-Winrate Gate cross-check to ensure full harmonization
+  // Run High-Winrate Gate cross-check reusing SSOT ICT result (zero duplicate sweep/OTE computation)
   const gateCheck = evaluateHighWinrateGate({
     symbol,
     series: barsExecution,
@@ -995,6 +1013,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     secondsRemaining,
     timeframeSec,
     precomputed: execCtx,
+    ictResult: ict,
   });
 
   if (gateCheck.isHighWinrateVerified) {
@@ -1024,7 +1043,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   // Calibrated outcome probabilities & net Expectancy E[R] under scenario-conditioned TP1/TP2/TP3 scaling
   const linearPTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));
-  const pTp1 = Math.min(0.86, Math.max(0.38, 0.65 * linearPTp1 + 0.35 * metaPred.calibratedProbability));
+  const pTp1 = Math.min(0.86, Math.max(0.38, 0.72 * linearPTp1 + 0.28 * metaPred.calibratedProbability));
   const pTp2 = Math.max(0.24, pTp1 * 0.72);
   const pTp3 = Math.max(0.12, pTp1 * 0.44);
   const calibratedWinRatePct = Math.round(pTp1 * 100);
@@ -1045,9 +1064,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   // Assign final setup grade
   let grade: SetupGrade = "NO_TRADE";
   if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL" && !scenarioVector.isHardLockout) {
-    if (precisionScore >= 78 && expectancyR >= 0.30) grade = "A+";
-    else if (precisionScore >= 65 && expectancyR >= 0.16) grade = "A";
-    else if (precisionScore >= 54 && expectancyR >= 0.05) grade = "B";
+    if (precisionScore >= 78 && expectancyR >= 0.28) grade = "A+";
+    else if (precisionScore >= 65 && expectancyR >= 0.14) grade = "A";
+    else if (precisionScore >= 54 && expectancyR >= 0.03) grade = "B";
   }
 
   const enrichedRegime: PrecisionTradeSetup["regime"] = {

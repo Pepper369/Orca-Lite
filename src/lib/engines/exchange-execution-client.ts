@@ -1,6 +1,12 @@
 import { createHash, createHmac } from "node:crypto";
 import { calculateAlmgrenChrissExecution } from "./advanced-quant-math";
 import { generateMakerPeggingGuide } from "./quant-reversal-pace";
+import {
+  getBrokerMeta,
+  isMt5BrokerPlatform,
+  resolveBrokerDefaultSuffix,
+  type BrokerPlatform,
+} from "./broker-registry";
 
 export interface BrokerCredentialsInput {
   apiKey: string;
@@ -11,7 +17,7 @@ export interface BrokerCredentialsInput {
 
 export interface BrokerVerificationResult {
   verified: boolean;
-  platform: "BINANCE_FUTURES" | "OKX_FUTURES" | "MT5_EXNESS" | "MT5_XM" | "MT5_EA";
+  platform: BrokerPlatform;
   isTestnet: boolean;
   balanceUsd: number | null;
   availableMarginUsd: number | null;
@@ -834,7 +840,7 @@ async function getBinanceSymbolFilters(baseUrl: string, symbol: string): Promise
 }
 
 export interface DualEnvironmentVerificationResult {
-  platform: "BINANCE_FUTURES" | "OKX_FUTURES";
+  platform: BrokerPlatform;
   real: BrokerVerificationResult;
   demo: BrokerVerificationResult;
   connectedEnvironments: Array<"REAL" | "DEMO">;
@@ -987,7 +993,7 @@ export async function verifyBinanceFuturesAccount(
  * or auto-detect the exact authorized environment without manual toggle mismatch errors.
  */
 export async function verifyBrokerDualEnvironment(params: {
-  platform: "BINANCE_FUTURES" | "OKX_FUTURES";
+  platform: BrokerPlatform;
   apiKey: string;
   apiSecret: string;
   passphrase?: string | null;
@@ -996,16 +1002,10 @@ export async function verifyBrokerDualEnvironment(params: {
   const apiSecret = cleanBinanceCred(params.apiSecret);
   const passphrase = params.passphrase?.trim() || null;
 
-  const [real, demo] =
-    params.platform === "BINANCE_FUTURES"
-      ? await Promise.all([
-          verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: false }, { skipCrossEnvProbe: true }),
-          verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: true }, { skipCrossEnvProbe: true }),
-        ])
-      : await Promise.all([
-          verifyOkxAccount({ apiKey, apiSecret, passphrase, isTestnet: false }),
-          verifyOkxAccount({ apiKey, apiSecret, passphrase, isTestnet: true }),
-        ]);
+  const [real, demo] = await Promise.all([
+    verifyBrokerCredentials(params.platform, { apiKey, apiSecret, passphrase, isTestnet: false }, { skipCrossEnvProbe: true }),
+    verifyBrokerCredentials(params.platform, { apiKey, apiSecret, passphrase, isTestnet: true }, { skipCrossEnvProbe: true }),
+  ]);
 
   const connectedEnvironments: Array<"REAL" | "DEMO"> = [];
   if (real.verified) connectedEnvironments.push("REAL");
@@ -1738,7 +1738,7 @@ export function toMt5BrokerSymbol(symbol: string, suffix?: string | null): strin
  */
 export async function verifyMetaApiMt5Account(
   creds: BrokerCredentialsInput,
-  platform: "MT5_EXNESS" | "MT5_XM" | "MT5_EA" = "MT5_EXNESS",
+  platform: BrokerPlatform = "MT5_EXNESS",
 ): Promise<BrokerVerificationResult> {
   const started = Date.now();
   const authToken = creds.apiKey.trim();
@@ -1821,7 +1821,7 @@ export async function verifyMetaApiMt5Account(
 
 export async function placeMetaApiMt5Order(
   req: ExchangeOrderRequest,
-  platform: "MT5_EXNESS" | "MT5_XM" | "MT5_EA" = "MT5_EXNESS",
+  platform: BrokerPlatform = "MT5_EXNESS",
 ): Promise<ExchangeOrderResult> {
   const geom = validateExchangeOrderGeometry(req);
   if (!geom.valid) {
@@ -1838,7 +1838,8 @@ export async function placeMetaApiMt5Order(
   }
   const authToken = req.credentials.apiKey.trim();
   const accountId = req.credentials.apiSecret.trim();
-  const symbol = toMt5BrokerSymbol(req.symbol, req.credentials.passphrase);
+  const suffix = resolveBrokerDefaultSuffix(platform, req.credentials.passphrase);
+  const symbol = toMt5BrokerSymbol(req.symbol, suffix);
   const volume = Math.max(0.01, Number(req.baseQty.toFixed(2)));
 
   if (!authToken || !accountId) {
@@ -2281,5 +2282,1253 @@ export async function fetchMetaApiMt5Telemetry(
       fetchedAt: Date.now(),
       error: err instanceof Error ? err.message : "Lỗi đồng bộ telemetry MetaApi MT5",
     };
+  }
+}
+
+/* ============================================================================
+ * MULTI-EXCHANGE CRYPTO & FOREX CONNECTORS
+ * Supports Bybit v5, Bitget v2, Gate.io v4, KuCoin Futures, BingX v2,
+ * Hyperliquid DEX, and OANDA v20 REST Forex Hub.
+ * ============================================================================ */
+
+function normalizeLinearUsdtSymbol(symbol: string): string {
+  const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return clean.endsWith("USDT") ? clean : `${clean.replace(/(USD|USDC|BUSD|PERP)$/i, "")}USDT`;
+}
+
+function toOandaInstrument(symbol: string): string {
+  const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (clean.length === 6) return `${clean.slice(0, 3)}_${clean.slice(3, 6)}`;
+  return symbol.toUpperCase().replace(/[/-]/g, "_");
+}
+
+/* ---------------- 1. Bybit Unified v5 Connector ---------------- */
+
+function buildBybitV5Headers(
+  creds: BrokerCredentialsInput,
+  payloadStr: string,
+): Record<string, string> {
+  const ts = String(Date.now());
+  const recvWindow = "5000";
+  const prehash = `${ts}${creds.apiKey.trim()}${recvWindow}${payloadStr}`;
+  const sign = createHmac("sha256", creds.apiSecret.trim()).update(prehash).digest("hex");
+  return {
+    "X-BAPI-API-KEY": creds.apiKey.trim(),
+    "X-BAPI-SIGN": sign,
+    "X-BAPI-TIMESTAMP": ts,
+    "X-BAPI-RECV-WINDOW": recvWindow,
+    "Content-Type": "application/json",
+  };
+}
+
+export async function verifyBybitFuturesAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  const apiKey = creds.apiKey.trim();
+  const apiSecret = creds.apiSecret.trim();
+  if (!apiKey || !apiSecret) {
+    return {
+      verified: false,
+      platform: "BYBIT_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Thiếu Bybit API Key hoặc Secret Key",
+    };
+  }
+
+  const hosts = creds.isTestnet
+    ? ["https://api-testnet.bybit.com", "https://api-demo.bybit.com"]
+    : ["https://api.bybit.com"];
+  const query = "accountType=UNIFIED";
+  let lastError = "Không thể kết nối Bybit v5 API";
+
+  for (const host of hosts) {
+    try {
+      const res = await fetch(`${host}/v5/account/wallet-balance?${query}`, {
+        method: "GET",
+        headers: buildBybitV5Headers({ ...creds, apiKey, apiSecret }, query),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const json = (await res.json()) as {
+        retCode?: number;
+        retMsg?: string;
+        result?: {
+          list?: Array<{ totalEquity?: string; totalAvailableBalance?: string; totalWalletBalance?: string }>;
+        };
+      };
+      if (res.ok && json.retCode === 0) {
+        const acct = json.result?.list?.[0];
+        const eq = Number(acct?.totalEquity ?? acct?.totalWalletBalance ?? 0);
+        const avail = Number(acct?.totalAvailableBalance ?? eq);
+        return {
+          verified: true,
+          platform: "BYBIT_FUTURES",
+          isTestnet: creds.isTestnet,
+          balanceUsd: Number.isFinite(eq) ? eq : 0,
+          availableMarginUsd: Number.isFinite(avail) ? avail : 0,
+          canTrade: true,
+          resolvedEndpoint: host,
+          latencyMs: Date.now() - started,
+          rawMessage: `Bybit v5 (${creds.isTestnet ? "Testnet/Demo" : "Mainnet"}) sẵn sàng giao dịch`,
+        };
+      }
+      lastError = json.retMsg ? `Bybit [${json.retCode}]: ${json.retMsg}` : `Bybit HTTP ${res.status}`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "Lỗi mạng Bybit v5";
+    }
+  }
+
+  return {
+    verified: false,
+    platform: "BYBIT_FUTURES",
+    isTestnet: creds.isTestnet,
+    balanceUsd: null,
+    availableMarginUsd: null,
+    canTrade: false,
+    latencyMs: Date.now() - started,
+    rawMessage: lastError,
+  };
+}
+
+export async function fetchBybitTelemetry(creds: BrokerCredentialsInput): Promise<LiveExchangeTelemetryResult> {
+  const host = creds.isTestnet ? "https://api-testnet.bybit.com" : "https://api.bybit.com";
+  try {
+    const balQuery = "accountType=UNIFIED";
+    const posQuery = "category=linear&settleCoin=USDT";
+    const [balRes, posRes] = await Promise.all([
+      fetch(`${host}/v5/account/wallet-balance?${balQuery}`, {
+        headers: buildBybitV5Headers(creds, balQuery),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      fetch(`${host}/v5/position/list?${posQuery}`, {
+        headers: buildBybitV5Headers(creds, posQuery),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    ]);
+
+    const balJson = (await balRes.json()) as {
+      retCode?: number;
+      retMsg?: string;
+      result?: { list?: Array<{ totalWalletBalance?: string; totalEquity?: string; totalAvailableBalance?: string; totalPerpUPL?: string }> };
+    };
+    if (!balRes.ok || balJson.retCode !== 0) {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: balJson.retMsg || `Bybit HTTP ${balRes.status}`,
+      };
+    }
+
+    const row = balJson.result?.list?.[0];
+    const wallet = Number(row?.totalWalletBalance ?? row?.totalEquity ?? 0);
+    const equity = Number(row?.totalEquity ?? wallet);
+    const avail = Number(row?.totalAvailableBalance ?? wallet);
+    let totalUpnl = Number(row?.totalPerpUPL ?? 0);
+    const openPositions: LiveExchangePosition[] = [];
+
+    if (posRes.ok) {
+      const posJson = (await posRes.json()) as {
+        retCode?: number;
+        result?: { list?: Array<Record<string, string>> };
+      };
+      if (posJson.retCode === 0 && Array.isArray(posJson.result?.list)) {
+        for (const p of posJson.result.list) {
+          const size = Number(p.size ?? 0);
+          if (!Number.isFinite(size) || size <= 0) continue;
+          const upnl = Number(p.unrealisedPnl ?? 0);
+          const entry = Number(p.avgPrice ?? 0);
+          const mark = Number(p.markPrice ?? entry);
+          const lev = Math.max(1, Number(p.leverage ?? 1));
+          const liq = Number(p.liqPrice ?? 0);
+          openPositions.push({
+            positionId: `bybit_${p.symbol}_${p.side}`,
+            symbol: String(p.symbol ?? ""),
+            assetType: "CRYPTO",
+            direction: p.side === "Sell" ? "SELL" : "BUY",
+            qtyOrLots: size,
+            leverage: lev,
+            entryPrice: entry,
+            markPrice: mark,
+            stopLossPrice: Number(p.stopLoss ?? 0) > 0 ? Number(p.stopLoss) : null,
+            takeProfit1: Number(p.takeProfit ?? 0) > 0 ? Number(p.takeProfit) : null,
+            unrealizedPnlUsd: Number(upnl.toFixed(4)),
+            roePct: Number((upnl / Math.max(1e-6, (size * entry) / lev) * 100).toFixed(2)),
+            liquidationPrice: liq > 0 ? liq : null,
+            openedAt: Number(p.updatedTime ?? Date.now()),
+          });
+          if (totalUpnl === 0) totalUpnl += upnl;
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      walletBalanceUsd: Number.isFinite(wallet) ? Number(wallet.toFixed(2)) : null,
+      equityUsd: Number.isFinite(equity) ? Number(equity.toFixed(2)) : null,
+      availableMarginUsd: Number.isFinite(avail) ? Number(avail.toFixed(2)) : null,
+      unrealizedPnlUsd: Number.isFinite(totalUpnl) ? Number(totalUpnl.toFixed(2)) : 0,
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ telemetry Bybit v5",
+    };
+  }
+}
+
+export async function placeBybitFuturesOrder(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `Bybit order rejected before dispatch: ${geom.reason}`,
+    };
+  }
+  const host = req.credentials.isTestnet ? "https://api-testnet.bybit.com" : "https://api.bybit.com";
+  const symbol = normalizeLinearUsdtSymbol(req.symbol);
+  const qty = Math.max(0.001, Number(req.baseQty.toFixed(3)));
+  const payload = {
+    category: "linear",
+    symbol,
+    side: req.direction === "BUY" ? "Buy" : "Sell",
+    orderType: "Market",
+    qty: String(qty),
+    stopLoss: String(req.stopLossPrice),
+    takeProfit: String(req.takeProfit1),
+    orderLinkId: sanitizeClientOrderId(req.idempotencyKey, 32),
+  };
+  const bodyStr = JSON.stringify(payload);
+  try {
+    const res = await fetch(`${host}/v5/order/create`, {
+      method: "POST",
+      headers: buildBybitV5Headers(req.credentials, bodyStr),
+      body: bodyStr,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      retCode?: number;
+      retMsg?: string;
+      result?: { orderId?: string };
+    };
+    if (!res.ok || json.retCode !== 0) {
+      return {
+        ok: false,
+        status: "REJECTED_EXCHANGE",
+        exchangeOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        executedQty: 0,
+        executedPrice: req.entryPrice,
+        message: json.retMsg || `Bybit HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      status: "FILLED",
+      exchangeOrderId: json.result?.orderId ?? payload.orderLinkId,
+      slOrderId: "attached-sl",
+      tpOrderId: "attached-tp",
+      executedQty: qty,
+      executedPrice: req.entryPrice,
+      message: `Bybit v5 ${req.credentials.isTestnet ? "Testnet" : "Mainnet"} khớp lệnh #${json.result?.orderId ?? "OK"} (${qty} ${symbol})`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: req.entryPrice,
+      message: err instanceof Error ? err.message : "Lỗi đặt lệnh Bybit v5",
+    };
+  }
+}
+
+/* ---------------- 2. Bitget v2 Mix Futures Connector ---------------- */
+
+function buildBitgetHeaders(
+  creds: BrokerCredentialsInput,
+  method: "GET" | "POST",
+  requestPath: string,
+  body = "",
+): Record<string, string> {
+  const ts = String(Date.now());
+  const prehash = `${ts}${method}${requestPath}${body}`;
+  const sign = createHmac("sha256", creds.apiSecret.trim()).update(prehash).digest("base64");
+  const headers: Record<string, string> = {
+    "ACCESS-KEY": creds.apiKey.trim(),
+    "ACCESS-SIGN": sign,
+    "ACCESS-TIMESTAMP": ts,
+    "ACCESS-PASSPHRASE": creds.passphrase?.trim() ?? "",
+    "Content-Type": "application/json",
+    locale: "en-US",
+  };
+  if (creds.isTestnet) headers.paptrading = "1";
+  return headers;
+}
+
+export async function verifyBitgetFuturesAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  if (!creds.apiKey.trim() || !creds.apiSecret.trim() || !creds.passphrase?.trim()) {
+    return {
+      verified: false,
+      platform: "BITGET_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Bitget v2 API yêu cầu đủ API Key, Secret Key và Passphrase",
+    };
+  }
+
+  const reqPath = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
+  try {
+    const res = await fetch(`https://api.bitget.com${reqPath}`, {
+      method: "GET",
+      headers: buildBitgetHeaders(creds, "GET", reqPath),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      code?: string;
+      msg?: string;
+      data?: Array<{ available?: string; usdtEquity?: string; accountEquity?: string }>;
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || json.code !== "00000") {
+      return {
+        verified: false,
+        platform: "BITGET_FUTURES",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: json.msg || `Bitget v2 HTTP ${res.status}`,
+      };
+    }
+    const acct = json.data?.[0];
+    const eq = Number(acct?.usdtEquity ?? acct?.accountEquity ?? acct?.available ?? 0);
+    const avail = Number(acct?.available ?? eq);
+    return {
+      verified: true,
+      platform: "BITGET_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(eq) ? eq : 0,
+      availableMarginUsd: Number.isFinite(avail) ? avail : 0,
+      canTrade: true,
+      resolvedEndpoint: creds.isTestnet ? "https://api.bitget.com (paptrading=1)" : "https://api.bitget.com",
+      latencyMs,
+      rawMessage: `Bitget v2 Mix (${creds.isTestnet ? "Simulated Demo" : "Mainnet"}) sẵn sàng giao dịch`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "BITGET_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối Bitget v2 API",
+    };
+  }
+}
+
+export async function fetchBitgetTelemetry(creds: BrokerCredentialsInput): Promise<LiveExchangeTelemetryResult> {
+  const balPath = "/api/v2/mix/account/accounts?productType=USDT-FUTURES";
+  const posPath = "/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT";
+  try {
+    const [balRes, posRes] = await Promise.all([
+      fetch(`https://api.bitget.com${balPath}`, {
+        headers: buildBitgetHeaders(creds, "GET", balPath),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      fetch(`https://api.bitget.com${posPath}`, {
+        headers: buildBitgetHeaders(creds, "GET", posPath),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    ]);
+    const balJson = (await balRes.json()) as {
+      code?: string;
+      msg?: string;
+      data?: Array<{ available?: string; usdtEquity?: string; unrealizedPL?: string }>;
+    };
+    if (!balRes.ok || balJson.code !== "00000") {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: balJson.msg || `Bitget HTTP ${balRes.status}`,
+      };
+    }
+    const row = balJson.data?.[0];
+    const eq = Number(row?.usdtEquity ?? row?.available ?? 0);
+    const avail = Number(row?.available ?? eq);
+    const upnl = Number(row?.unrealizedPL ?? 0);
+    const openPositions: LiveExchangePosition[] = [];
+    if (posRes.ok) {
+      const posJson = (await posRes.json()) as {
+        code?: string;
+        data?: Array<Record<string, string>>;
+      };
+      if (posJson.code === "00000" && Array.isArray(posJson.data)) {
+        for (const p of posJson.data) {
+          const total = Number(p.total ?? 0);
+          if (!Number.isFinite(total) || total <= 0) continue;
+          const entry = Number(p.openPriceAvg ?? 0);
+          const mark = Number(p.markPrice ?? entry);
+          const lev = Math.max(1, Number(p.leverage ?? 1));
+          const profit = Number(p.unrealizedPL ?? 0);
+          openPositions.push({
+            positionId: `bitget_${p.symbol}_${p.holdSide}`,
+            symbol: String(p.symbol ?? ""),
+            assetType: "CRYPTO",
+            direction: p.holdSide === "short" ? "SELL" : "BUY",
+            qtyOrLots: total,
+            leverage: lev,
+            entryPrice: entry,
+            markPrice: mark,
+            stopLossPrice: null,
+            takeProfit1: null,
+            unrealizedPnlUsd: Number(profit.toFixed(4)),
+            roePct: Number((profit / Math.max(1e-6, (total * entry) / lev) * 100).toFixed(2)),
+            liquidationPrice: Number(p.liquidationPrice ?? 0) || null,
+            openedAt: Number(p.uTime ?? Date.now()),
+          });
+        }
+      }
+    }
+    return {
+      ok: true,
+      walletBalanceUsd: Number((eq - upnl).toFixed(2)),
+      equityUsd: Number(eq.toFixed(2)),
+      availableMarginUsd: Number(avail.toFixed(2)),
+      unrealizedPnlUsd: Number(upnl.toFixed(2)),
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ Bitget telemetry",
+    };
+  }
+}
+
+export async function placeBitgetFuturesOrder(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `Bitget order rejected before dispatch: ${geom.reason}`,
+    };
+  }
+  const symbol = normalizeLinearUsdtSymbol(req.symbol);
+  const qty = Math.max(0.001, Number(req.baseQty.toFixed(3)));
+  const path = "/api/v2/mix/order/place-order";
+  const bodyObj = {
+    symbol,
+    productType: "USDT-FUTURES",
+    marginMode: "isolated",
+    marginCoin: "USDT",
+    size: String(qty),
+    side: req.direction === "BUY" ? "buy" : "sell",
+    orderType: "market",
+    clientOid: sanitizeClientOrderId(req.idempotencyKey, 32),
+    presetStopLossPrice: String(req.stopLossPrice),
+    presetStopSurplusPrice: String(req.takeProfit1),
+  };
+  const bodyStr = JSON.stringify(bodyObj);
+  try {
+    const res = await fetch(`https://api.bitget.com${path}`, {
+      method: "POST",
+      headers: buildBitgetHeaders(req.credentials, "POST", path, bodyStr),
+      body: bodyStr,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      code?: string;
+      msg?: string;
+      data?: { orderId?: string };
+    };
+    if (!res.ok || json.code !== "00000") {
+      return {
+        ok: false,
+        status: "REJECTED_EXCHANGE",
+        exchangeOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        executedQty: 0,
+        executedPrice: req.entryPrice,
+        message: json.msg || `Bitget HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      status: "FILLED",
+      exchangeOrderId: json.data?.orderId ?? bodyObj.clientOid,
+      slOrderId: "preset-sl",
+      tpOrderId: "preset-tp",
+      executedQty: qty,
+      executedPrice: req.entryPrice,
+      message: `Bitget v2 ${req.credentials.isTestnet ? "Demo" : "Live"} khớp #${json.data?.orderId ?? "OK"} (${qty} ${symbol})`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: req.entryPrice,
+      message: err instanceof Error ? err.message : "Lỗi đặt lệnh Bitget v2",
+    };
+  }
+}
+
+/* ---------------- 3. Gate.io v4 / KuCoin / BingX / Hyperliquid Connectors ---------------- */
+
+function buildGateV4Headers(
+  creds: BrokerCredentialsInput,
+  method: "GET" | "POST",
+  path: string,
+  query = "",
+  body = "",
+): Record<string, string> {
+  const ts = String(Math.floor(Date.now() / 1000));
+  const bodyHash = createHash("sha512").update(body).digest("hex");
+  const payload = `${method}\n${path}\n${query}\n${bodyHash}\n${ts}`;
+  const sign = createHmac("sha512", creds.apiSecret.trim()).update(payload).digest("hex");
+  return {
+    KEY: creds.apiKey.trim(),
+    SIGN: sign,
+    Timestamp: ts,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+}
+
+export async function verifyGateFuturesAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  if (!creds.apiKey.trim() || !creds.apiSecret.trim()) {
+    return {
+      verified: false,
+      platform: "GATE_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Thiếu Gate.io APIv4 Key hoặc Secret",
+    };
+  }
+  const host = creds.isTestnet ? "https://fx-api-testnet.gateio.ws" : "https://api.gateio.ws";
+  const path = "/api/v4/futures/usdt/accounts";
+  try {
+    const res = await fetch(`${host}${path}`, {
+      headers: buildGateV4Headers(creds, "GET", path),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      total?: string;
+      available?: string;
+      label?: string;
+      message?: string;
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || json.label) {
+      return {
+        verified: false,
+        platform: "GATE_FUTURES",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: json.message || json.label || `Gate.io HTTP ${res.status}`,
+      };
+    }
+    const total = Number(json.total ?? 0);
+    const avail = Number(json.available ?? total);
+    return {
+      verified: true,
+      platform: "GATE_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(total) ? total : 0,
+      availableMarginUsd: Number.isFinite(avail) ? avail : 0,
+      canTrade: true,
+      resolvedEndpoint: host,
+      latencyMs,
+      rawMessage: `Gate.io USDT Futures (${creds.isTestnet ? "Testnet" : "Mainnet"}) sẵn sàng`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "GATE_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối Gate.io v4 API",
+    };
+  }
+}
+
+export async function verifyKuCoinFuturesAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  if (!creds.apiKey.trim() || !creds.apiSecret.trim() || !creds.passphrase?.trim()) {
+    return {
+      verified: false,
+      platform: "KUCOIN_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "KuCoin Futures yêu cầu đủ API Key, Secret và Passphrase",
+    };
+  }
+  const host = creds.isTestnet ? "https://api-sandbox-futures.kucoin.com" : "https://api-futures.kucoin.com";
+  const reqPath = "/api/v1/account-overview?currency=USDT";
+  const ts = String(Date.now());
+  const sign = createHmac("sha256", creds.apiSecret.trim()).update(`${ts}GET${reqPath}`).digest("base64");
+  const passSign = createHmac("sha256", creds.apiSecret.trim()).update(creds.passphrase.trim()).digest("base64");
+  try {
+    const res = await fetch(`${host}${reqPath}`, {
+      headers: {
+        "KC-API-KEY": creds.apiKey.trim(),
+        "KC-API-SIGN": sign,
+        "KC-API-TIMESTAMP": ts,
+        "KC-API-PASSPHRASE": passSign,
+        "KC-API-KEY-VERSION": "2",
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      code?: string;
+      msg?: string;
+      data?: { accountEquity?: number; availableBalance?: number };
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || json.code !== "200000") {
+      return {
+        verified: false,
+        platform: "KUCOIN_FUTURES",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: json.msg || `KuCoin HTTP ${res.status}`,
+      };
+    }
+    return {
+      verified: true,
+      platform: "KUCOIN_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number(json.data?.accountEquity ?? 0),
+      availableMarginUsd: Number(json.data?.availableBalance ?? 0),
+      canTrade: true,
+      resolvedEndpoint: host,
+      latencyMs,
+      rawMessage: `KuCoin Futures (${creds.isTestnet ? "Sandbox" : "Live"}) kết nối thành công`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "KUCOIN_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối KuCoin Futures API",
+    };
+  }
+}
+
+export async function verifyBingXFuturesAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  if (!creds.apiKey.trim() || !creds.apiSecret.trim()) {
+    return {
+      verified: false,
+      platform: "BINGX_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Thiếu BingX API Key hoặc Secret Key",
+    };
+  }
+  const host = creds.isTestnet ? "https://open-api-vst.bingx.com" : "https://open-api.bingx.com";
+  const ts = String(Date.now());
+  const params = `timestamp=${ts}`;
+  const sig = createHmac("sha256", creds.apiSecret.trim()).update(params).digest("hex");
+  try {
+    const res = await fetch(`${host}/openApi/swap/v2/user/balance?${params}&signature=${sig}`, {
+      headers: { "X-BX-APIKEY": creds.apiKey.trim() },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      code?: number;
+      msg?: string;
+      data?: { balance?: { equity?: string; availableMargin?: string; balance?: string } };
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || json.code !== 0) {
+      return {
+        verified: false,
+        platform: "BINGX_FUTURES",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: json.msg || `BingX HTTP ${res.status}`,
+      };
+    }
+    const b = json.data?.balance;
+    const eq = Number(b?.equity ?? b?.balance ?? 0);
+    const avail = Number(b?.availableMargin ?? eq);
+    return {
+      verified: true,
+      platform: "BINGX_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(eq) ? eq : 0,
+      availableMarginUsd: Number.isFinite(avail) ? avail : 0,
+      canTrade: true,
+      resolvedEndpoint: host,
+      latencyMs,
+      rawMessage: `BingX Perpetual (${creds.isTestnet ? "VST Demo" : "Real USDT"}) kết nối thành công`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "BINGX_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối BingX OpenAPI",
+    };
+  }
+}
+
+export async function verifyHyperliquidAccount(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  const address = creds.apiKey.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    return {
+      verified: false,
+      platform: "HYPERLIQUID",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Hyperliquid yêu cầu địa chỉ ví EVM hợp lệ (0x...40 ký tự hex)",
+    };
+  }
+  const url = creds.isTestnet
+    ? "https://api.hyperliquid-testnet.xyz/info"
+    : "https://api.hyperliquid.xyz/info";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "clearinghouseState", user: address }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      marginSummary?: { accountValue?: string };
+      withdrawable?: string;
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || !json.marginSummary) {
+      return {
+        verified: false,
+        platform: "HYPERLIQUID",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: `Hyperliquid HTTP ${res.status}`,
+      };
+    }
+    const eq = Number(json.marginSummary.accountValue ?? 0);
+    const avail = Number(json.withdrawable ?? eq);
+    return {
+      verified: true,
+      platform: "HYPERLIQUID",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(eq) ? eq : 0,
+      availableMarginUsd: Number.isFinite(avail) ? avail : 0,
+      canTrade: creds.apiSecret.trim().startsWith("0x"),
+      resolvedEndpoint: url,
+      latencyMs,
+      rawMessage: `Hyperliquid L1 (${creds.isTestnet ? "Testnet" : "Mainnet"}) đồng bộ số dư thành công`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "HYPERLIQUID",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi truy vấn Hyperliquid L1 Info API",
+    };
+  }
+}
+
+/* ---------------- 4. OANDA v20 Native Forex REST Connector ---------------- */
+
+export async function verifyOandaV20Account(
+  creds: BrokerCredentialsInput,
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  const token = creds.apiKey.trim();
+  const accountId = creds.apiSecret.trim();
+  if (!token || !accountId) {
+    return {
+      verified: false,
+      platform: "OANDA_V20",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "OANDA v20 yêu cầu Personal Access Token và Account ID",
+    };
+  }
+  const host = creds.isTestnet ? "https://api-fxpractice.oanda.com" : "https://api-fxtrade.oanda.com";
+  try {
+    const res = await fetch(`${host}/v3/accounts/${encodeURIComponent(accountId)}/summary`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      errorMessage?: string;
+      account?: {
+        balance?: string;
+        NAV?: string;
+        marginAvailable?: string;
+        currency?: string;
+        hedgingEnabled?: boolean;
+      };
+    };
+    const latencyMs = Date.now() - started;
+    if (!res.ok || !json.account) {
+      return {
+        verified: false,
+        platform: "OANDA_V20",
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: json.errorMessage || `OANDA v20 HTTP ${res.status}`,
+      };
+    }
+    const nav = Number(json.account.NAV ?? json.account.balance ?? 0);
+    const marginAvail = Number(json.account.marginAvailable ?? nav);
+    return {
+      verified: true,
+      platform: "OANDA_V20",
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(nav) ? nav : 0,
+      availableMarginUsd: Number.isFinite(marginAvail) ? marginAvail : 0,
+      canTrade: true,
+      positionMode: json.account.hedgingEnabled ? "HEDGING" : "NETTING",
+      resolvedEndpoint: host,
+      latencyMs,
+      rawMessage: `OANDA v20 (${creds.isTestnet ? "fxPractice Demo" : "fxTrade Live"} · ${json.account.currency ?? "USD"}) sẵn sàng giao dịch`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform: "OANDA_V20",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối OANDA v20 REST",
+    };
+  }
+}
+
+export async function fetchOandaV20Telemetry(creds: BrokerCredentialsInput): Promise<LiveExchangeTelemetryResult> {
+  const token = creds.apiKey.trim();
+  const accountId = creds.apiSecret.trim();
+  const host = creds.isTestnet ? "https://api-fxpractice.oanda.com" : "https://api-fxtrade.oanda.com";
+  const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+  try {
+    const [sumRes, posRes] = await Promise.all([
+      fetch(`${host}/v3/accounts/${encodeURIComponent(accountId)}/summary`, {
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      fetch(`${host}/v3/accounts/${encodeURIComponent(accountId)}/openPositions`, {
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    ]);
+    const sumJson = (await sumRes.json()) as {
+      errorMessage?: string;
+      account?: { balance?: string; NAV?: string; marginAvailable?: string; unrealizedPL?: string };
+    };
+    if (!sumRes.ok || !sumJson.account) {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: sumJson.errorMessage || `OANDA HTTP ${sumRes.status}`,
+      };
+    }
+    const balance = Number(sumJson.account.balance ?? 0);
+    const equity = Number(sumJson.account.NAV ?? balance);
+    const marginAvail = Number(sumJson.account.marginAvailable ?? balance);
+    const upnl = Number(sumJson.account.unrealizedPL ?? 0);
+    const openPositions: LiveExchangePosition[] = [];
+
+    if (posRes.ok) {
+      const posJson = (await posRes.json()) as {
+        positions?: Array<{
+          instrument?: string;
+          long?: { units?: string; averagePrice?: string; unrealizedPL?: string };
+          short?: { units?: string; averagePrice?: string; unrealizedPL?: string };
+        }>;
+      };
+      for (const p of posJson.positions ?? []) {
+        const longUnits = Number(p.long?.units ?? 0);
+        const shortUnits = Math.abs(Number(p.short?.units ?? 0));
+        const units = longUnits > 0 ? longUnits : shortUnits;
+        if (units <= 0) continue;
+        const isBuy = longUnits > 0;
+        const entry = Number(isBuy ? p.long?.averagePrice : p.short?.averagePrice) || 0;
+        const pUpnl = Number(isBuy ? p.long?.unrealizedPL : p.short?.unrealizedPL) || 0;
+        openPositions.push({
+          positionId: `oanda_${p.instrument}_${isBuy ? "L" : "S"}`,
+          symbol: String(p.instrument ?? "").replace(/_/g, ""),
+          assetType: "FOREX",
+          direction: isBuy ? "BUY" : "SELL",
+          qtyOrLots: Number((units / 100_000).toFixed(2)),
+          leverage: 50,
+          entryPrice: entry,
+          markPrice: entry,
+          stopLossPrice: null,
+          takeProfit1: null,
+          unrealizedPnlUsd: Number(pUpnl.toFixed(2)),
+          roePct: 0,
+          liquidationPrice: null,
+          openedAt: Date.now(),
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      walletBalanceUsd: Number(balance.toFixed(2)),
+      equityUsd: Number(equity.toFixed(2)),
+      availableMarginUsd: Number(marginAvail.toFixed(2)),
+      unrealizedPnlUsd: Number(upnl.toFixed(2)),
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ OANDA v20 telemetry",
+    };
+  }
+}
+
+export async function placeOandaV20Order(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `OANDA order rejected before dispatch: ${geom.reason}`,
+    };
+  }
+  const token = req.credentials.apiKey.trim();
+  const accountId = req.credentials.apiSecret.trim();
+  const host = req.credentials.isTestnet ? "https://api-fxpractice.oanda.com" : "https://api-fxtrade.oanda.com";
+  const units = Math.max(100, Math.round(req.baseQty * 100_000)) * (req.direction === "BUY" ? 1 : -1);
+  const instrument = toOandaInstrument(req.symbol);
+  try {
+    const res = await fetch(`${host}/v3/accounts/${encodeURIComponent(accountId)}/orders`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        order: {
+          type: "MARKET",
+          instrument,
+          units: String(units),
+          timeInForce: "FOK",
+          positionFill: "DEFAULT",
+          stopLossOnFill: { price: String(req.stopLossPrice) },
+          takeProfitOnFill: { price: String(req.takeProfit1) },
+          clientExtensions: { id: sanitizeClientOrderId(req.idempotencyKey, 32) },
+        },
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const json = (await res.json()) as {
+      errorMessage?: string;
+      orderFillTransaction?: { id?: string; price?: string };
+      orderCreateTransaction?: { id?: string };
+    };
+    if (!res.ok || json.errorMessage) {
+      return {
+        ok: false,
+        status: "REJECTED_EXCHANGE",
+        exchangeOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        executedQty: 0,
+        executedPrice: req.entryPrice,
+        message: json.errorMessage || `OANDA HTTP ${res.status}`,
+      };
+    }
+    const orderId = json.orderFillTransaction?.id ?? json.orderCreateTransaction?.id ?? "oanda-filled";
+    const fillPx = Number(json.orderFillTransaction?.price ?? req.entryPrice);
+    return {
+      ok: true,
+      status: "FILLED",
+      exchangeOrderId: orderId,
+      slOrderId: "attached-sl",
+      tpOrderId: "attached-tp",
+      executedQty: Number(req.baseQty.toFixed(2)),
+      executedPrice: Number.isFinite(fillPx) && fillPx > 0 ? fillPx : req.entryPrice,
+      message: `OANDA v20 ${req.credentials.isTestnet ? "fxPractice" : "fxTrade"} khớp #${orderId} (${Math.abs(units)} units ${instrument})`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: req.entryPrice,
+      message: err instanceof Error ? err.message : "Lỗi đặt lệnh OANDA v20",
+    };
+  }
+}
+
+/* ---------------- 5. Unified SSOT Multi-Platform Router ---------------- */
+
+export async function verifyBrokerCredentials(
+  platform: BrokerPlatform,
+  creds: BrokerCredentialsInput,
+  options?: { skipCrossEnvProbe?: boolean },
+): Promise<BrokerVerificationResult> {
+  if (isMt5BrokerPlatform(platform)) {
+    return verifyMetaApiMt5Account(creds, platform);
+  }
+  switch (platform) {
+    case "BINANCE_FUTURES":
+      return verifyBinanceFuturesAccount(creds, options);
+    case "OKX_FUTURES":
+      return verifyOkxAccount(creds);
+    case "BYBIT_FUTURES":
+      return verifyBybitFuturesAccount(creds);
+    case "BITGET_FUTURES":
+      return verifyBitgetFuturesAccount(creds);
+    case "GATE_FUTURES":
+      return verifyGateFuturesAccount(creds);
+    case "KUCOIN_FUTURES":
+      return verifyKuCoinFuturesAccount(creds);
+    case "BINGX_FUTURES":
+      return verifyBingXFuturesAccount(creds);
+    case "HYPERLIQUID":
+      return verifyHyperliquidAccount(creds);
+    case "OANDA_V20":
+      return verifyOandaV20Account(creds);
+    default: {
+      const meta = getBrokerMeta(platform);
+      return {
+        verified: false,
+        platform,
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs: 0,
+        rawMessage: `${meta.name} sử dụng kết nối lưu khóa / EA / Webhook — chưa hỗ trợ xác thực REST trực tiếp`,
+      };
+    }
+  }
+}
+
+export async function fetchBrokerLiveTelemetry(
+  platform: BrokerPlatform,
+  creds: BrokerCredentialsInput,
+): Promise<LiveExchangeTelemetryResult | null> {
+  if (isMt5BrokerPlatform(platform)) {
+    return fetchMetaApiMt5Telemetry(creds);
+  }
+  switch (platform) {
+    case "BINANCE_FUTURES":
+      return fetchBinanceFuturesTelemetry(creds);
+    case "OKX_FUTURES":
+      return fetchOkxTelemetry(creds);
+    case "BYBIT_FUTURES":
+      return fetchBybitTelemetry(creds);
+    case "BITGET_FUTURES":
+      return fetchBitgetTelemetry(creds);
+    case "OANDA_V20":
+      return fetchOandaV20Telemetry(creds);
+    case "GATE_FUTURES": {
+      const v = await verifyGateFuturesAccount(creds);
+      return v.verified
+        ? {
+            ok: true,
+            walletBalanceUsd: v.balanceUsd,
+            equityUsd: v.balanceUsd,
+            availableMarginUsd: v.availableMarginUsd,
+            unrealizedPnlUsd: 0,
+            openPositions: [],
+            fetchedAt: Date.now(),
+            error: null,
+          }
+        : null;
+    }
+    case "HYPERLIQUID": {
+      const v = await verifyHyperliquidAccount(creds);
+      return v.verified
+        ? {
+            ok: true,
+            walletBalanceUsd: v.balanceUsd,
+            equityUsd: v.balanceUsd,
+            availableMarginUsd: v.availableMarginUsd,
+            unrealizedPnlUsd: 0,
+            openPositions: [],
+            fetchedAt: Date.now(),
+            error: null,
+          }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
+export async function placePlatformExchangeOrder(
+  platform: BrokerPlatform,
+  req: ExchangeOrderRequest,
+): Promise<ExchangeOrderResult> {
+  if (isMt5BrokerPlatform(platform)) {
+    return placeMetaApiMt5Order(req, platform);
+  }
+  switch (platform) {
+    case "BINANCE_FUTURES":
+      return placeBinanceFuturesOrder(req);
+    case "OKX_FUTURES":
+      return placeOkxSwapOrder(req);
+    case "BYBIT_FUTURES":
+      return placeBybitFuturesOrder(req);
+    case "BITGET_FUTURES":
+      return placeBitgetFuturesOrder(req);
+    case "OANDA_V20":
+      return placeOandaV20Order(req);
+    default: {
+      const meta = getBrokerMeta(platform);
+      return {
+        ok: false,
+        status: "REJECTED_EXCHANGE",
+        exchangeOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        executedQty: 0,
+        executedPrice: req.entryPrice,
+        message: `${meta.name} hiện hỗ trợ đồng bộ tài khoản & cảnh báo; chưa hỗ trợ Auto-Execute trực tiếp`,
+      };
+    }
   }
 }

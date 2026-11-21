@@ -9,6 +9,7 @@ import {
   type AccountEnvironment,
 } from "@/lib/engines/bot-telemetry-types";
 import type { FollowerAccount } from "@/lib/engines/copy-trade-engine";
+import { isCryptoPlatform, isForexPlatform } from "@/lib/engines/broker-registry";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import { CheckCircle2, KeyRound, ShieldAlert, Zap } from "lucide-react";
 
@@ -54,19 +55,9 @@ export function BrokerQuickTradeBar({
   const relevantAccounts = useMemo(() => {
     const all = data?.accounts ?? [];
     if (assetType === "CRYPTO") {
-      return all.filter(
-        (a) =>
-          a.platform === "BINANCE_FUTURES" ||
-          a.platform === "OKX_FUTURES" ||
-          a.platform === "BYBIT_FUTURES",
-      );
+      return all.filter((a) => isCryptoPlatform(a.platform));
     }
-    return all.filter(
-      (a) =>
-        a.platform === "MT5_EXNESS" ||
-        a.platform === "MT5_XM" ||
-        a.platform === "MT5_EA",
-    );
+    return all.filter((a) => isForexPlatform(a.platform));
   }, [data, assetType]);
 
   const { realAccounts, demoAccounts, realNavUsd, demoNavUsd } = useMemo(() => {
@@ -84,7 +75,7 @@ export function BrokerQuickTradeBar({
     };
   }, [relevantAccounts]);
 
-  const brokerLabel = assetType === "CRYPTO" ? "Binance / OKX" : "Exness / XM";
+  const brokerLabel = assetType === "CRYPTO" ? "Sàn Crypto (Binance/OKX/Bybit/Bitget...)" : "Nhà môi giới Forex (OANDA/Exness/XM/ICMarkets...)";
 
   const handleDispatch = async () => {
     if (!order || busy) return;
