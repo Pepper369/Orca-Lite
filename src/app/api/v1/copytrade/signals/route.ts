@@ -9,12 +9,13 @@ import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const session = await getSessionUser(req);
     const [fxRes, crRes, logs] = await Promise.allSettled([
       getForexSignalsHubData(),
       getCryptoSignalsHubData(),
-      listBotExecutionOrders(50),
+      listBotExecutionOrders(50, session?.id ?? null),
     ]);
 
     const copyableSignals: Array<{
@@ -159,7 +160,7 @@ export async function POST(req: Request) {
       targetEnvironment,
     });
 
-    const recentLogs = await listBotExecutionOrders(50);
+    const recentLogs = await listBotExecutionOrders(50, session?.id ?? null);
 
     return ok({
       dispatchedOrders: orders,

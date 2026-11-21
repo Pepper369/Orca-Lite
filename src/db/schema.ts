@@ -321,7 +321,7 @@ export const brokerConnections = pgTable(
   "broker_connections",
   {
     id: text("id").primaryKey(),
-    userId: uuid("user_id"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     platform: text("platform").notNull(),
     accountNumberMasked: text("account_number_masked").notNull(),
@@ -360,7 +360,10 @@ export const botExecutionOrders = pgTable(
   "bot_execution_orders",
   {
     id: text("id").primaryKey(),
-    connectionId: text("connection_id").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => brokerConnections.id, { onDelete: "cascade" }),
     signalId: text("signal_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull().unique(),
     symbol: text("symbol").notNull(),
@@ -383,6 +386,7 @@ export const botExecutionOrders = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    index("bot_execution_orders_user_idx").on(t.userId),
     index("bot_execution_orders_conn_idx").on(t.connectionId),
     index("bot_execution_orders_signal_idx").on(t.signalId),
   ],

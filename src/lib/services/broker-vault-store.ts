@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db, databaseConfigured } from "@/db";
 import { auditLogs, botExecutionOrders, brokerConnections } from "@/db/schema";
 import type {
@@ -534,14 +534,27 @@ export async function hasExecutionOrderByIdempotency(idempotencyKey: string): Pr
   );
 }
 
-export async function saveBotExecutionOrder(order: CopyExecutionOrder): Promise<CopyExecutionOrder> {
+export async function saveBotExecutionOrder(
+  order: CopyExecutionOrder,
+  userId?: string | null,
+): Promise<CopyExecutionOrder> {
   const idempotencyKey = order.idempotencyKey ?? `${order.followerId}:${order.orderId}`;
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
+      let resolvedUserId = userId ?? null;
+      if (!resolvedUserId) {
+        const [conn] = await db
+          .select({ userId: brokerConnections.userId })
+          .from(brokerConnections)
+          .where(eq(brokerConnections.id, order.followerId))
+          .limit(1);
+        resolvedUserId = conn?.userId ?? null;
+      }
       await db
         .insert(botExecutionOrders)
         .values({
           id: order.orderId,
+          userId: resolvedUserId,
           connectionId: order.followerId,
           signalId: order.signalId ?? order.orderId,
           idempotencyKey,
@@ -574,8 +587,8 @@ export async function saveBotExecutionOrder(order: CopyExecutionOrder): Promise<
           },
         });
       return order;
-    } catch {
-      // Fallback
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
 
@@ -589,16 +602,26 @@ export async function saveBotExecutionOrder(order: CopyExecutionOrder): Promise<
   return order;
 }
 
-export async function listBotExecutionOrders(limit = 50): Promise<CopyExecutionOrder[]> {
+export async function listBotExecutionOrders(
+  limit = 50,
+  userId?: string | null,
+): Promise<CopyExecutionOrder[]> {
   if (shouldUseVaultDb()) {
     try {
-      const conns = await listBrokerConnections();
+      const conns = await listBrokerConnections(userId);
       const nameById = new Map(conns.map((c) => [c.id, c.name]));
-      const rows = await db
-        .select()
-        .from(botExecutionOrders)
-        .orderBy(desc(botExecutionOrders.createdAt))
-        .limit(limit);
+      const rows = userId
+        ? await db
+            .select()
+            .from(botExecutionOrders)
+            .where(eq(botExecutionOrders.userId, userId))
+            .orderBy(desc(botExecutionOrders.createdAt))
+            .limit(limit)
+        : await db
+            .select()
+            .from(botExecutionOrders)
+            .orderBy(desc(botExecutionOrders.createdAt))
+            .limit(limit);
       if (rows.length > 0) {
         return rows.map((r) => ({
           orderId: r.id,
@@ -624,6 +647,7 @@ export async function listBotExecutionOrders(limit = 50): Promise<CopyExecutionO
           isTestnet: r.isTestnet,
         }));
       }
+      if (userId) return [];
     } catch (err) {
       tripVaultDbCooldown(err);
     }
@@ -638,15 +662,18 @@ export async function listPendingEaOrdersForConnection(connectionId: string): Pr
 
 export async function deleteBrokerConnection(id: string, userId?: string | null): Promise<boolean> {
   let deleted = false;
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
+      const cond = userId
+        ? and(eq(brokerConnections.id, id), eq(brokerConnections.userId, userId))
+        : eq(brokerConnections.id, id);
       const rows = await db
         .delete(brokerConnections)
-        .where(eq(brokerConnections.id, id))
+        .where(cond)
         .returning({ id: brokerConnections.id });
       if (rows.length > 0) deleted = true;
-    } catch {
-      // Fallback below
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
   const idx = DEV_CONNECTIONS_STORE.findIndex((c) => c.id === id);
