@@ -14,10 +14,14 @@ import {
 } from "./ict-smc-liquidity-engine";
 import {
   applySymmetricCusumFilter,
+  computeScenarioDynamicExitPolicy,
   computeYangZhangVolatility,
+  evaluateMarketScenarioVector,
   filterOnlineRegimeHmm,
   forecastHarRealizedVolatility,
   type HmmRegimeState,
+  type MarketScenarioVectorResult,
+  type ScenarioDynamicExitPolicy,
 } from "./advanced-quant-math";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
 import { predictMetaLabelProbability } from "./meta-labeling-calibration";
@@ -86,11 +90,15 @@ export interface PrecisionTradeSetup {
     harForecastVolPct?: number;
   };
   metaLabelProbability?: number;
+  scenario?: MarketScenarioVectorResult;
+  exitPolicy?: ScenarioDynamicExitPolicy;
   gatesPassed: string[];
   gatesFailed: string[];
   vetoReasons: string[];
   breakevenPlan: {
     tp1ClosePct: number;
+    tp2ClosePct?: number;
+    tp3ClosePct?: number;
     moveSlToBeAtTp1: boolean;
     trailingAtrMult: number;
   };
@@ -932,16 +940,34 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (candidates.length > 0) target2Dist = rawEntry - candidates[0]!;
   }
 
-  // Lock 50% TP1 & move SL to Breakeven at 0.95R to shield high winrate before intraday mean-reversion
-  const tp1Dist = stopDist * 0.95;
-  const tp3Dist = Math.max(target2Dist * 1.35, stopDist * 3.1);
+  // Phase 4A & 4B: Synthesize 5-Scenario Probability Vector & Scenario-Conditioned Dynamic Exit Policy
+  const scenarioVector = evaluateMarketScenarioVector({
+    hmmProbabilities: hmmRegime.probabilities,
+    efficiencyRatio: erVal,
+    adx14: adxVal,
+    harExpansionRatio: harVol.expansionRatio,
+    spreadSpikeRatio:
+      spreadPipsOrPct != null && spreadPipsOrPct > 0
+        ? assetType === "FOREX"
+          ? spreadPipsOrPct / 1.2
+          : spreadPipsOrPct / 0.0005
+        : 1.0,
+    isNewsOrCascadeLockout,
+  });
+
+  const prelimGrossRr = Number((target2Dist / Math.max(1e-12, stopDist)).toFixed(2));
+  const exitPolicy = computeScenarioDynamicExitPolicy(scenarioVector, prelimGrossRr);
+
+  // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3; S2 tightens TP1 for range harvest)
+  const tp1Dist = stopDist * Math.min(1.05, Math.max(0.85, exitPolicy.tp1RMultiple));
+  const tp3Dist = Math.max(target2Dist * 1.35, stopDist * exitPolicy.tp3RMultiple);
 
   const tp1Raw = isBuy ? rawEntry + tp1Dist : rawEntry - tp1Dist;
   const tp2Raw = isBuy ? rawEntry + target2Dist : rawEntry - target2Dist;
   const tp3Raw = isBuy ? rawEntry + tp3Dist : rawEntry - tp3Dist;
 
   const frictionR = Number((totalFrictionPrice / Math.max(1e-12, stopDist)).toFixed(3));
-  const grossRiskReward = Number((target2Dist / Math.max(1e-12, stopDist)).toFixed(2));
+  const grossRiskReward = prelimGrossRr;
   const netRiskReward = Number(Math.max(0, (target2Dist - totalFrictionPrice) / Math.max(1e-12, stopDist)).toFixed(2));
 
   if (frictionR > 0.22) {
@@ -996,19 +1022,29 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     frictionR,
   });
 
-  // Calibrated outcome probabilities & net Expectancy E[R] under 50% TP1 BE (0.95R) / 30% TP2 / 20% TP3 scaling
+  // Calibrated outcome probabilities & net Expectancy E[R] under scenario-conditioned TP1/TP2/TP3 scaling
   const linearPTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));
   const pTp1 = Math.min(0.86, Math.max(0.38, 0.65 * linearPTp1 + 0.35 * metaPred.calibratedProbability));
   const pTp2 = Math.max(0.24, pTp1 * 0.72);
   const pTp3 = Math.max(0.12, pTp1 * 0.44);
   const calibratedWinRatePct = Math.round(pTp1 * 100);
+  const w1 = exitPolicy.tp1ClosePct / 100;
+  const w2 = exitPolicy.tp2ClosePct / 100;
+  const w3 = exitPolicy.tp3ClosePct / 100;
+  const tp1R = tp1Dist / Math.max(1e-12, stopDist);
+  const tp3R = tp3Dist / Math.max(1e-12, stopDist);
   const expectancyR = Number(
-    (pTp1 * (0.5 * 0.95) + pTp2 * (0.3 * grossRiskReward) + pTp3 * (0.2 * 3.1) - (1 - pTp1) * 1.0 - frictionR).toFixed(2),
+    (pTp1 * (w1 * tp1R) + pTp2 * (w2 * grossRiskReward) + pTp3 * (w3 * tp3R) - (1 - pTp1) * 1.0 - frictionR).toFixed(2),
   );
+
+  // Enforce LIMIT_PULLBACK when scenario requires strict maker entry (S3 Squeeze / S4 Macro Shock)
+  if (scenarioVector.requireLimitEntryOnly && entryMode === "MARKET_CONFIRMED") {
+    entryMode = "LIMIT_PULLBACK";
+  }
 
   // Assign final setup grade
   let grade: SetupGrade = "NO_TRADE";
-  if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL") {
+  if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL" && !scenarioVector.isHardLockout) {
     if (precisionScore >= 78 && expectancyR >= 0.30) grade = "A+";
     else if (precisionScore >= 65 && expectancyR >= 0.16) grade = "A";
     else if (precisionScore >= 54 && expectancyR >= 0.05) grade = "B";
@@ -1024,6 +1060,14 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     cusumBreak: cusumFilter.latestBreak,
     yangZhangVolPct: Number((yzVol.annualizedVol * 100).toFixed(2)),
     harForecastVolPct: harVol.forecastAnnualVolPct,
+  };
+
+  const breakevenPlan: PrecisionTradeSetup["breakevenPlan"] = {
+    tp1ClosePct: exitPolicy.tp1ClosePct,
+    tp2ClosePct: exitPolicy.tp2ClosePct,
+    tp3ClosePct: exitPolicy.tp3ClosePct,
+    moveSlToBeAtTp1: exitPolicy.moveSlToBeAtTp1,
+    trailingAtrMult: exitPolicy.trailingAtrMultiplier,
   };
 
   if (grade === "NO_TRADE") {
@@ -1050,10 +1094,12 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       frictionR,
       regime: enrichedRegime,
       metaLabelProbability: metaPred.calibratedProbability,
+      scenario: scenarioVector,
+      exitPolicy,
       gatesPassed,
       gatesFailed,
       vetoReasons,
-      breakevenPlan: { tp1ClosePct: 50, moveSlToBeAtTp1: true, trailingAtrMult: 1.0 },
+      breakevenPlan,
       isHighWinrateVerified: gateCheck.isHighWinrateVerified,
       winrateScore: gateCheck.winrateScore,
       liquiditySweepDetected: gateCheck.liquiditySweepDetected,
@@ -1062,7 +1108,8 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     };
   }
 
-  const sizeMult = grade === "A+" ? 1.0 : grade === "A" ? 0.85 : 0.5;
+  const baseGradeMult = grade === "A+" ? 1.0 : grade === "A" ? 0.85 : 0.5;
+  const sizeMult = Number((baseGradeMult * scenarioVector.entropyDampener).toFixed(2));
   const entryZone: [number, number] = isBuy
     ? [fmtP(rawEntry - stopDist * 0.25), fmtP(rawEntry)]
     : [fmtP(rawEntry), fmtP(rawEntry + stopDist * 0.25)];
@@ -1087,14 +1134,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     frictionR,
     regime: enrichedRegime,
     metaLabelProbability: metaPred.calibratedProbability,
+    scenario: scenarioVector,
+    exitPolicy,
     gatesPassed,
     gatesFailed,
     vetoReasons,
-    breakevenPlan: { tp1ClosePct: 50, moveSlToBeAtTp1: true, trailingAtrMult: 1.0 },
+    breakevenPlan,
     isHighWinrateVerified: gateCheck.isHighWinrateVerified,
     winrateScore: gateCheck.winrateScore,
     liquiditySweepDetected: gateCheck.liquiditySweepDetected,
     forwardLiquidity: fwdLiq,
-    summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
+    summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | ${scenarioVector.dominantScenario} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
   };
 }

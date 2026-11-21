@@ -635,3 +635,92 @@ export async function getDerivativesArbitrageSignal(
     updatedAt: new Date().toISOString(),
   };
 }
+
+export interface Vn30fScenarioTailHedgeResult {
+  recommendedShortContracts: number;
+  hedgeCoverageRatio: number; // [0, 1]
+  contractMultiplierVnd: number; // 100,000 VND / point
+  contractNotionalVnd: number;
+  effectiveHedgeBeta: number;
+  isHedgeTriggered: boolean;
+  rationaleVi: string;
+}
+
+/**
+ * Phase 4C: Computes the exact number of VN30F1M short contracts required to hedge
+ * a T+2.5 locked Vietnam Equity portfolio when Macro Shock (S4) or Tail Crisis (S5)
+ * probability rises above the protection threshold.
+ * - Uses the official HNX VN30F contract multiplier: 100,000 VND per index point.
+ * - Scales hedge coverage smoothly by Kalman Dynamic Hedge Ratio & tail scenario probability.
+ */
+export function computeVn30fScenarioTailHedge(params: {
+  equityPortfolioVnd: number;
+  t2LockedFraction?: number; // [0, 1], default 0.70
+  portfolioBeta?: number; // default 1.05
+  vn30FuturesPrice: number; // e.g. 1320.5 points
+  kalmanHedgeRatio?: number; // from estimateKalmanDynamicHedgeRatio, default 1.0
+  macroAndCrisisProb: number; // p(S4) + p(S5) in [0, 1]
+}): Vn30fScenarioTailHedgeResult {
+  const CONTRACT_MULTIPLIER_VND = 100_000;
+  const safeEquityVnd =
+    typeof params.equityPortfolioVnd === "number" &&
+    Number.isFinite(params.equityPortfolioVnd) &&
+    params.equityPortfolioVnd > 0
+      ? Math.min(1e15, params.equityPortfolioVnd)
+      : 0;
+  const safeFuturesPrice =
+    typeof params.vn30FuturesPrice === "number" &&
+    Number.isFinite(params.vn30FuturesPrice) &&
+    params.vn30FuturesPrice > 100
+      ? Math.min(10_000, params.vn30FuturesPrice)
+      : 1300;
+  const t2Locked =
+    typeof params.t2LockedFraction === "number" && Number.isFinite(params.t2LockedFraction)
+      ? Math.min(1, Math.max(0, params.t2LockedFraction))
+      : 0.7;
+  const beta =
+    typeof params.portfolioBeta === "number" && Number.isFinite(params.portfolioBeta)
+      ? Math.min(3.0, Math.max(0.2, params.portfolioBeta))
+      : 1.05;
+  const kalmanRatio =
+    typeof params.kalmanHedgeRatio === "number" && Number.isFinite(params.kalmanHedgeRatio)
+      ? Math.min(2.0, Math.max(0.4, params.kalmanHedgeRatio))
+      : 1.0;
+  const tailProb =
+    typeof params.macroAndCrisisProb === "number" && Number.isFinite(params.macroAndCrisisProb)
+      ? Math.min(1, Math.max(0, params.macroAndCrisisProb))
+      : 0;
+
+  const contractNotionalVnd = Math.round(safeFuturesPrice * CONTRACT_MULTIPLIER_VND);
+  const effectiveHedgeBeta = Number((beta * kalmanRatio).toFixed(3));
+
+  if (safeEquityVnd <= 0 || tailProb < 0.35 || t2Locked <= 0) {
+    return {
+      recommendedShortContracts: 0,
+      hedgeCoverageRatio: 0,
+      contractMultiplierVnd: CONTRACT_MULTIPLIER_VND,
+      contractNotionalVnd,
+      effectiveHedgeBeta,
+      isHedgeTriggered: false,
+      rationaleVi: `Rủi ro kịch bản đuôi (${(tailProb * 100).toFixed(1)}%) dưới ngưỡng 35% -> Không cần mở hợp đồng Short VN30F phòng hộ.`,
+    };
+  }
+
+  // Smoothly scale coverage from 35% up to 100% of T+2.5 locked equity as tailProb rises from 0.35 to 0.80
+  const rawCoverage = Math.min(1.0, 0.35 + ((tailProb - 0.35) / 0.45) * 0.65) * t2Locked;
+  const hedgeCoverageRatio = Number(rawCoverage.toFixed(3));
+  const hedgedEquityVnd = safeEquityVnd * hedgeCoverageRatio * effectiveHedgeBeta;
+  const recommendedShortContracts = Math.max(0, Math.round(hedgedEquityVnd / contractNotionalVnd));
+
+  return {
+    recommendedShortContracts,
+    hedgeCoverageRatio,
+    contractMultiplierVnd: CONTRACT_MULTIPLIER_VND,
+    contractNotionalVnd,
+    effectiveHedgeBeta,
+    isHedgeTriggered: recommendedShortContracts > 0,
+    rationaleVi:
+      `Phòng hộ T+2.5 VN30F: Xác suất sốc vĩ mô/khủng hoảng ${(tailProb * 100).toFixed(1)}% -> ` +
+      `Khuyến nghị SHORT ${recommendedShortContracts} HĐ VN30F1M (Beta hiệu dụng ${effectiveHedgeBeta}, bảo vệ ${(hedgeCoverageRatio * 100).toFixed(0)}% danh mục cơ sở).`,
+  };
+}

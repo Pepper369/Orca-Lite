@@ -6,6 +6,7 @@ import {
   calculateDeflatedSharpeRatio,
   filterOnlineRegimeHmm,
   forecastHarRealizedVolatility,
+  type CanonicalMarketScenarioId,
 } from "./advanced-quant-math";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "./fx-crypto-precision-engine";
 import {
@@ -245,6 +246,7 @@ function simulateTradeOutcome(params: {
   tp3: number;
   frictionPrice: number;
   useBreakevenScaling: boolean;
+  tpWeights?: [number, number, number];
 }): { filled: boolean; netR: number; tp1Hit: boolean; barsHeld: number } {
   const {
     barsFuture,
@@ -257,6 +259,7 @@ function simulateTradeOutcome(params: {
     tp3,
     frictionPrice,
     useBreakevenScaling,
+    tpWeights = [0.5, 0.3, 0.2],
   } = params;
 
   if (!barsFuture.length) return { filled: false, netR: 0, tp1Hit: false, barsHeld: 0 };
@@ -301,7 +304,10 @@ function simulateTradeOutcome(params: {
     return { filled: true, netR: rawR, tp1Hit: false, barsHeld: Math.min(24, barsFuture.length - startIdx) };
   }
 
-  // Upgraded partial TP1 (50% + move SL to BE), TP2 (30%), TP3 (20%)
+  // Upgraded scenario-dynamic partial TP1 (+ move SL to BE), TP2, TP3
+  const w1 = Number.isFinite(tpWeights[0]) && tpWeights[0] > 0 ? tpWeights[0] : 0.5;
+  const w2 = Number.isFinite(tpWeights[1]) && tpWeights[1] > 0 ? tpWeights[1] : 0.3;
+  const w3 = Number.isFinite(1 - w1 - w2) && 1 - w1 - w2 > 0 ? Number((1 - w1 - w2).toFixed(4)) : 0.2;
   let currentSl = stopLoss;
   let tp1Hit = false;
   let tp2Hit = false;
@@ -322,8 +328,8 @@ function simulateTradeOutcome(params: {
       if (hitTp1) {
         tp1Hit = true;
         const r1 = Math.abs(tp1 - fillPrice) / riskDist;
-        realizedR += 0.5 * r1;
-        remainingWeight = 0.5;
+        realizedR += w1 * r1;
+        remainingWeight = Number((1 - w1).toFixed(4));
         currentSl = fillPrice; // Move SL to Breakeven!
       }
     }
@@ -333,8 +339,8 @@ function simulateTradeOutcome(params: {
       if (hitTp2) {
         tp2Hit = true;
         const r2 = Math.abs(tp2 - fillPrice) / riskDist;
-        realizedR += 0.3 * r2;
-        remainingWeight = 0.2;
+        realizedR += w2 * r2;
+        remainingWeight = w3;
       }
     }
 
@@ -342,7 +348,7 @@ function simulateTradeOutcome(params: {
       const hitTp3 = direction === "BUY" ? b.high >= tp3 : b.low <= tp3;
       if (hitTp3) {
         const r3 = Math.abs(tp3 - fillPrice) / riskDist;
-        realizedR += 0.2 * r3;
+        realizedR += w3 * r3;
         return { filled: true, netR: realizedR - frictionR, tp1Hit, barsHeld: k - startIdx + 1 };
       }
     }
@@ -570,6 +576,47 @@ export function runWalkForwardComparison(params: {
   };
 }
 
+export interface ScenarioAttributionBucket {
+  trades: number;
+  wins: number;
+  winRatePct: number;
+  expectancyR: number;
+  totalNetR: number;
+}
+
+export type ScenarioAttributionMap = Record<CanonicalMarketScenarioId, ScenarioAttributionBucket>;
+
+function buildScenarioAttribution(
+  items: { netR: number; scenario?: CanonicalMarketScenarioId }[],
+): ScenarioAttributionMap {
+  const keys: CanonicalMarketScenarioId[] = [
+    "S1_TREND_EXPANSION",
+    "S2_MEAN_REVERT_RANGE",
+    "S3_SQUEEZE_CASCADE",
+    "S4_MACRO_EVENT_SHOCK",
+    "S5_TAIL_CRISIS_LOCKOUT",
+  ];
+  const map = {} as ScenarioAttributionMap;
+  for (const k of keys) {
+    map[k] = { trades: 0, wins: 0, winRatePct: 0, expectancyR: 0, totalNetR: 0 };
+  }
+  for (const it of items) {
+    const sc = it.scenario ?? "S2_MEAN_REVERT_RANGE";
+    const b = map[sc];
+    b.trades += 1;
+    if (it.netR > 0) b.wins += 1;
+    b.totalNetR = Number((b.totalNetR + it.netR).toFixed(3));
+  }
+  for (const k of keys) {
+    const b = map[k];
+    if (b.trades > 0) {
+      b.winRatePct = Number(((b.wins / b.trades) * 100).toFixed(1));
+      b.expectancyR = Number((b.totalNetR / b.trades).toFixed(3));
+    }
+  }
+  return map;
+}
+
 export interface PurgedMetaLabelWalkForwardReport {
   calibrationSamplesCount: number;
   holdoutSamplesCount: number;
@@ -579,6 +626,7 @@ export interface PurgedMetaLabelWalkForwardReport {
   brierImprovementPct: number;
   metaFilteredMetrics: BacktestMetrics;
   pbo: PboEvaluationResult;
+  scenarioAttribution: ScenarioAttributionMap;
 }
 
 export interface HistoricalAssetSeriesInput {
@@ -595,6 +643,7 @@ export interface RealHistoricalWalkForwardReport {
   oosBrierBefore: number;
   oosBrierAfter: number;
   pbo: PboEvaluationResult;
+  scenarioAttribution: ScenarioAttributionMap;
 }
 
 function collectWalkForwardMetaSamples(params: {
@@ -610,6 +659,7 @@ function collectWalkForwardMetaSamples(params: {
     grade: SetupGrade;
     rawProb: number;
     features: MetaLabelFeatureVector;
+    scenario?: CanonicalMarketScenarioId;
   }[];
   totalEvaluations: number;
 } {
@@ -622,6 +672,7 @@ function collectWalkForwardMetaSamples(params: {
     grade: SetupGrade;
     rawProb: number;
     features: MetaLabelFeatureVector;
+    scenario?: CanonicalMarketScenarioId;
   }[] = [];
   let totalEvaluations = 0;
   let globalIdxOffset = 0;
@@ -662,6 +713,13 @@ function collectWalkForwardMetaSamples(params: {
             prec.tp2 != null &&
             prec.tp3 != null
           ) {
+            const tpWeights: [number, number, number] | undefined = prec.exitPolicy
+              ? [
+                  prec.exitPolicy.tp1ClosePct / 100,
+                  prec.exitPolicy.tp2ClosePct / 100,
+                  prec.exitPolicy.tp3ClosePct / 100,
+                ]
+              : undefined;
             const out = simulateTradeOutcome({
               barsFuture: futureBars,
               direction: prec.direction,
@@ -673,6 +731,7 @@ function collectWalkForwardMetaSamples(params: {
               tp3: prec.tp3,
               frictionPrice,
               useBreakevenScaling: true,
+              tpWeights,
             });
 
             if (out.filled) {
@@ -717,6 +776,7 @@ function collectWalkForwardMetaSamples(params: {
                 grade: prec.grade,
                 rawProb: rawLinearProb,
                 features,
+                scenario: prec.scenario?.dominantScenario,
               });
 
               nextAllowedPrecision = t + Math.max(4, out.barsHeld);
@@ -801,6 +861,7 @@ export function runPurgedMetaLabelWalkForward(params?: {
     brierImprovementPct,
     metaFilteredMetrics,
     pbo,
+    scenarioAttribution: buildScenarioAttribution(hold.records),
   };
 }
 
@@ -818,6 +879,7 @@ export function runRealHistoricalWalkForwardBacktest(
     isTrap: boolean;
     rawProb: number;
     features: MetaLabelFeatureVector;
+    scenario?: CanonicalMarketScenarioId;
   }[] = [];
   let totalBarsEvaluated = 0;
   let globalOffset = 0;
@@ -908,6 +970,7 @@ export function runRealHistoricalWalkForwardBacktest(
               isTrap: false,
               rawProb,
               features,
+              scenario: prec.scenario?.dominantScenario,
             });
           }
           nextAllowed = t + Math.max(3, out.barsHeld);
@@ -956,5 +1019,6 @@ export function runRealHistoricalWalkForwardBacktest(
     oosBrierBefore,
     oosBrierAfter,
     pbo,
+    scenarioAttribution: buildScenarioAttribution(holdRecords),
   };
 }

@@ -1832,3 +1832,464 @@ export function evaluateContinuousDrawdownGovernor(params: {
     rationaleVi,
   };
 }
+
+// ============================================================================
+// 13. Phase 4A & 4B: Multi-Scenario Probability Synthesizer, Dynamic Exit Policy
+//     & Online Contextual Strategy Ensemble (Zero Look-Ahead)
+// ============================================================================
+
+export type CanonicalMarketScenarioId =
+  | "S1_TREND_EXPANSION"
+  | "S2_MEAN_REVERT_RANGE"
+  | "S3_SQUEEZE_CASCADE"
+  | "S4_MACRO_EVENT_SHOCK"
+  | "S5_TAIL_CRISIS_LOCKOUT";
+
+export interface MarketScenarioInput {
+  hmmProbabilities?: {
+    trendExpansion?: number;
+    meanRevertLowVol?: number;
+    crisisHighVol?: number;
+  } | null;
+  efficiencyRatio?: number | null; // [0, 1]
+  adx14?: number | null; // [0, 100]
+  harExpansionRatio?: number | null; // HAR forecast / historical vol
+  tailDegreesOfFreedom?: number | null; // Student-t nu in [2.1, 30]
+  vpinOrToxicity?: number | null; // [0, 1]
+  spreadSpikeRatio?: number | null; // currentSpread / medianSpread
+  fundingExtremeZ?: number | null; // |funding z-score|
+  macroScore?: number | null; // [0, 100], <40 is contractionary shock
+  isNewsOrCascadeLockout?: boolean | null;
+  drawdownDeleverageScale?: number | null; // [0, 1]
+}
+
+export interface MarketScenarioVectorResult {
+  probabilities: Record<CanonicalMarketScenarioId, number>;
+  dominantScenario: CanonicalMarketScenarioId;
+  dominantProbability: number;
+  shannonEntropy: number; // Normalized [0, 1]
+  entropyDampener: number; // [0.50, 1.00]
+  recommendedKellyScale: number; // [0.00, 0.50]
+  maxLeverageCap: number; // [1, 20]
+  requireLimitEntryOnly: boolean;
+  isHardLockout: boolean;
+  rationaleVi: string;
+}
+
+/**
+ * Causal Multi-Scenario Probability Synthesizer.
+ * Maps online HMM posteriors, HAR-RV expansion, fat-tail degrees of freedom,
+ * order-flow toxicity (VPIN/Spread), and macro health into a normalized 5-scenario
+ * simplex vector p_t with Shannon entropy uncertainty dampening.
+ */
+export function evaluateMarketScenarioVector(
+  input: MarketScenarioInput = {},
+): MarketScenarioVectorResult {
+  const safeNum = (v: unknown, fallback: number, min: number, max: number): number => {
+    if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+    return Math.min(max, Math.max(min, v));
+  };
+
+  const pTrendHmm = safeNum(input?.hmmProbabilities?.trendExpansion, 0.34, 0, 1);
+  const pMeanRevHmm = safeNum(input?.hmmProbabilities?.meanRevertLowVol, 0.46, 0, 1);
+  const pCrisisHmm = safeNum(input?.hmmProbabilities?.crisisHighVol, 0.20, 0, 1);
+
+  const er = safeNum(input?.efficiencyRatio, 0.35, 0, 1);
+  const adx = safeNum(input?.adx14, 22, 0, 100);
+  const harExp = safeNum(input?.harExpansionRatio, 1.0, 0.2, 5.0);
+  const nu = safeNum(input?.tailDegreesOfFreedom, 6.0, 2.1, 30.0);
+  const vpin = safeNum(input?.vpinOrToxicity, 0.30, 0, 1);
+  const spreadRatio = safeNum(input?.spreadSpikeRatio, 1.0, 0.5, 20.0);
+  const fundingZ = safeNum(input?.fundingExtremeZ, 0.5, 0, 10.0);
+  const macroScore = safeNum(input?.macroScore, 60, 0, 100);
+  const ddScale = safeNum(input?.drawdownDeleverageScale, 1.0, 0, 1.25);
+  const isLockout = Boolean(input?.isNewsOrCascadeLockout);
+
+  // Raw unnormalized scenario affinities (strictly positive to avoid log(0))
+  const s1Raw =
+    0.02 +
+    pTrendHmm * 1.45 +
+    (er >= 0.42 ? (er - 0.35) * 1.3 : 0) +
+    (adx >= 24 ? Math.min(0.6, (adx - 20) / 45) : 0) +
+    (harExp >= 0.9 && harExp <= 1.45 ? 0.25 : 0);
+
+  const s2Raw =
+    0.02 +
+    pMeanRevHmm * 1.45 +
+    (er < 0.35 ? (0.40 - er) * 1.25 : 0) +
+    (adx < 22 ? Math.min(0.55, (24 - adx) / 30) : 0) +
+    (harExp < 0.95 ? 0.30 : 0);
+
+  const s3Raw =
+    0.015 +
+    (vpin >= 0.55 ? (vpin - 0.45) * 2.2 : vpin * 0.2) +
+    (fundingZ >= 1.8 ? Math.min(1.2, (fundingZ - 1.5) * 0.45) : 0) +
+    (harExp > 1.35 && pCrisisHmm >= 0.25 ? 0.45 : 0);
+
+  const s4Raw =
+    0.015 +
+    (isLockout ? 1.65 : 0) +
+    (spreadRatio >= 1.8 ? Math.min(1.5, (spreadRatio - 1.5) * 0.65) : 0) +
+    (macroScore < 42 ? ((45 - macroScore) / 45) * 1.1 : 0);
+
+  const s5Raw =
+    0.01 +
+    (pCrisisHmm >= 0.55 ? pCrisisHmm * 1.8 : pCrisisHmm * 0.35) +
+    (nu <= 3.6 ? (4.0 - nu) * 0.75 : 0) +
+    (ddScale <= 0.35 ? (0.45 - ddScale) * 2.4 : 0) +
+    (spreadRatio >= 3.2 && vpin >= 0.75 ? 1.1 : 0);
+
+  const rawList: [CanonicalMarketScenarioId, number][] = [
+    ["S1_TREND_EXPANSION", Math.max(1e-4, s1Raw)],
+    ["S2_MEAN_REVERT_RANGE", Math.max(1e-4, s2Raw)],
+    ["S3_SQUEEZE_CASCADE", Math.max(1e-4, s3Raw)],
+    ["S4_MACRO_EVENT_SHOCK", Math.max(1e-4, s4Raw)],
+    ["S5_TAIL_CRISIS_LOCKOUT", Math.max(1e-4, s5Raw)],
+  ];
+
+  const totalRaw = rawList.reduce((acc, [, v]) => acc + v, 0);
+  const probs: Record<CanonicalMarketScenarioId, number> = {
+    S1_TREND_EXPANSION: 0.2,
+    S2_MEAN_REVERT_RANGE: 0.2,
+    S3_SQUEEZE_CASCADE: 0.2,
+    S4_MACRO_EVENT_SHOCK: 0.2,
+    S5_TAIL_CRISIS_LOCKOUT: 0.2,
+  };
+
+  let sumRounded = 0;
+  for (let i = 0; i < rawList.length; i++) {
+    const [id, val] = rawList[i]!;
+    if (i < rawList.length - 1) {
+      const p = Number((val / totalRaw).toFixed(4));
+      probs[id] = p;
+      sumRounded += p;
+    } else {
+      // Exact simplex conservation: sum(p_k) === 1
+      probs[id] = Number(Math.max(0, 1 - sumRounded).toFixed(4));
+    }
+  }
+
+  let dominantScenario: CanonicalMarketScenarioId = "S2_MEAN_REVERT_RANGE";
+  let dominantProbability = -1;
+  let rawEntropy = 0;
+  for (const [id] of rawList) {
+    const p = probs[id];
+    if (p > dominantProbability) {
+      dominantProbability = p;
+      dominantScenario = id;
+    }
+    if (p > 1e-9) {
+      rawEntropy -= p * Math.log(p);
+    }
+  }
+
+  const shannonEntropy = Number(
+    Math.min(1, Math.max(0, rawEntropy / Math.log(5))).toFixed(4),
+  );
+  // Dampen position size when scenario distribution is highly dispersed (H > 0.75)
+  const entropyDampener = Number(
+    (shannonEntropy > 0.75 ? Math.max(0.55, 1.0 - 0.45 * shannonEntropy) : 1.0).toFixed(3),
+  );
+
+  const isHardLockout =
+    dominantScenario === "S5_TAIL_CRISIS_LOCKOUT" ||
+    probs.S5_TAIL_CRISIS_LOCKOUT >= 0.48 ||
+    ddScale <= 0;
+
+  const baseKellyByScenario =
+    probs.S1_TREND_EXPANSION * 0.50 +
+    probs.S2_MEAN_REVERT_RANGE * 0.40 +
+    probs.S3_SQUEEZE_CASCADE * 0.25 +
+    probs.S4_MACRO_EVENT_SHOCK * 0.15 +
+    probs.S5_TAIL_CRISIS_LOCKOUT * 0.0;
+
+  const recommendedKellyScale = isHardLockout
+    ? 0
+    : Number(
+        Math.min(0.5, Math.max(0.05, baseKellyByScenario * entropyDampener * Math.min(1, ddScale))).toFixed(3),
+      );
+
+  const maxLeverageCap = isHardLockout
+    ? 1
+    : dominantScenario === "S4_MACRO_EVENT_SHOCK" || dominantScenario === "S3_SQUEEZE_CASCADE"
+      ? 3
+      : dominantScenario === "S2_MEAN_REVERT_RANGE"
+        ? 5
+        : 10;
+
+  const requireLimitEntryOnly =
+    isHardLockout ||
+    dominantScenario === "S3_SQUEEZE_CASCADE" ||
+    dominantScenario === "S4_MACRO_EVENT_SHOCK" ||
+    probs.S3_SQUEEZE_CASCADE + probs.S4_MACRO_EVENT_SHOCK >= 0.45;
+
+  const rationaleVi =
+    `Kịch bản chủ đạo: ${dominantScenario} (${(dominantProbability * 100).toFixed(1)}%) | ` +
+    `Entropy=${shannonEntropy.toFixed(2)} (Dampener ${entropyDampener}x) -> ` +
+    `KellyScale=${recommendedKellyScale}x, MaxLev=${maxLeverageCap}x${requireLimitEntryOnly ? " [LIMIT-ONLY]" : ""}.`;
+
+  return {
+    probabilities: probs,
+    dominantScenario,
+    dominantProbability,
+    shannonEntropy,
+    entropyDampener,
+    recommendedKellyScale,
+    maxLeverageCap,
+    requireLimitEntryOnly,
+    isHardLockout,
+    rationaleVi,
+  };
+}
+
+export interface ScenarioDynamicExitPolicy {
+  tp1ClosePct: number; // integer % e.g. 35..65
+  tp2ClosePct: number; // integer %
+  tp3ClosePct: number; // integer %, tp1 + tp2 + tp3 === 100
+  tp1RMultiple: number; // e.g. 0.90 .. 1.15
+  tp2RMultiple: number; // e.g. 1.65 .. 2.40
+  tp3RMultiple: number; // e.g. 2.60 .. 4.00
+  trailingAtrMultiplier: number; // e.g. 0.75 .. 1.45
+  moveSlToBeAtTp1: boolean;
+  rationaleVi: string;
+}
+
+/**
+ * Computes scenario-interpolated multi-tier Take-Profit weights [TP1%, TP2%, TP3%]
+ * and R-multiple distances from the 5-scenario probability vector.
+ * - S1_TREND_EXPANSION shifts weight toward TP3 runner (30/30/40) with wider trailing stop.
+ * - S2_MEAN_REVERT_RANGE front-loads TP1 at Equilibrium (60/30/10) to harvest range sweeps.
+ * - S3/S4/S5 lock in 65-70% at TP1 with tight trailing stops.
+ */
+export function computeScenarioDynamicExitPolicy(
+  scenarioVector: MarketScenarioVectorResult,
+  baseGrossRr = 2.0,
+): ScenarioDynamicExitPolicy {
+  const p = scenarioVector?.probabilities ?? {
+    S1_TREND_EXPANSION: 0.2,
+    S2_MEAN_REVERT_RANGE: 0.4,
+    S3_SQUEEZE_CASCADE: 0.2,
+    S4_MACRO_EVENT_SHOCK: 0.1,
+    S5_TAIL_CRISIS_LOCKOUT: 0.1,
+  };
+  const safeBaseRr =
+    typeof baseGrossRr === "number" && Number.isFinite(baseGrossRr) && baseGrossRr >= 1.2
+      ? Math.min(6.0, baseGrossRr)
+      : 2.0;
+
+  const p1 = Number.isFinite(p.S1_TREND_EXPANSION) ? Math.max(0, p.S1_TREND_EXPANSION) : 0.2;
+  const p2 = Number.isFinite(p.S2_MEAN_REVERT_RANGE) ? Math.max(0, p.S2_MEAN_REVERT_RANGE) : 0.4;
+  const p3 = Number.isFinite(p.S3_SQUEEZE_CASCADE) ? Math.max(0, p.S3_SQUEEZE_CASCADE) : 0.2;
+  const p4 = Number.isFinite(p.S4_MACRO_EVENT_SHOCK) ? Math.max(0, p.S4_MACRO_EVENT_SHOCK) : 0.1;
+  const p5 = Number.isFinite(p.S5_TAIL_CRISIS_LOCKOUT) ? Math.max(0, p.S5_TAIL_CRISIS_LOCKOUT) : 0.1;
+  const norm = Math.max(1e-6, p1 + p2 + p3 + p4 + p5);
+
+  const wS1 = p1 / norm;
+  const wS2 = p2 / norm;
+  const wS345 = (p3 + p4 + p5) / norm;
+
+  // Convex interpolation of TP1 and TP2 percentages
+  const rawTp1Pct = wS1 * 32 + wS2 * 58 + wS345 * 64;
+  const rawTp2Pct = wS1 * 30 + wS2 * 30 + wS345 * 24;
+
+  const tp1ClosePct = Math.min(70, Math.max(30, Math.round(rawTp1Pct)));
+  const tp2ClosePct = Math.min(100 - tp1ClosePct - 5, Math.max(15, Math.round(rawTp2Pct)));
+  const tp3ClosePct = 100 - tp1ClosePct - tp2ClosePct;
+
+  const tp1RMultiple = Number((wS1 * 1.05 + wS2 * 0.90 + wS345 * 0.85).toFixed(2));
+  const tp2RMultiple = Number(
+    Math.max(tp1RMultiple + 0.45, safeBaseRr * (wS1 * 1.12 + wS2 * 0.95 + wS345 * 0.88)).toFixed(2),
+  );
+  const tp3RMultiple = Number(
+    Math.max(tp2RMultiple + 0.70, safeBaseRr * (wS1 * 1.85 + wS2 * 1.40 + wS345 * 1.25)).toFixed(2),
+  );
+  const trailingAtrMultiplier = Number((wS1 * 1.35 + wS2 * 0.90 + wS345 * 0.75).toFixed(2));
+
+  const dom = scenarioVector?.dominantScenario ?? "S2_MEAN_REVERT_RANGE";
+  const rationaleVi =
+    `Exit Policy [${dom}]: Chốt lời động ${tp1ClosePct}%/${tp2ClosePct}%/${tp3ClosePct}% ` +
+    `tại ${tp1RMultiple}R / ${tp2RMultiple}R / ${tp3RMultiple}R (Trail ${trailingAtrMultiplier}x ATR).`;
+
+  return {
+    tp1ClosePct,
+    tp2ClosePct,
+    tp3ClosePct,
+    tp1RMultiple,
+    tp2RMultiple,
+    tp3RMultiple,
+    trailingAtrMultiplier,
+    moveSlToBeAtTp1: true,
+    rationaleVi,
+  };
+}
+
+export type StrategyArchetypeId =
+  | "TREND_BREAKOUT"
+  | "ICT_LIQUIDITY_SWEEP"
+  | "OU_MEAN_REVERSION"
+  | "FUNDING_CARRY"
+  | "VALUE_QUALITY";
+
+export interface AdaptiveStrategyWeightsResult {
+  weights: Record<StrategyArchetypeId, number>;
+  topStrategy: StrategyArchetypeId;
+  expectedEnsembleSharpe: number;
+  rationaleVi: string;
+}
+
+const DEFAULT_SCENARIO_SHARPE_PRIORS: Record<
+  StrategyArchetypeId,
+  Record<CanonicalMarketScenarioId, number>
+> = {
+  TREND_BREAKOUT: {
+    S1_TREND_EXPANSION: 1.85,
+    S2_MEAN_REVERT_RANGE: -0.35,
+    S3_SQUEEZE_CASCADE: 0.40,
+    S4_MACRO_EVENT_SHOCK: -0.20,
+    S5_TAIL_CRISIS_LOCKOUT: -0.90,
+  },
+  ICT_LIQUIDITY_SWEEP: {
+    S1_TREND_EXPANSION: 1.15,
+    S2_MEAN_REVERT_RANGE: 1.75,
+    S3_SQUEEZE_CASCADE: 1.55,
+    S4_MACRO_EVENT_SHOCK: 0.35,
+    S5_TAIL_CRISIS_LOCKOUT: -0.40,
+  },
+  OU_MEAN_REVERSION: {
+    S1_TREND_EXPANSION: -0.25,
+    S2_MEAN_REVERT_RANGE: 1.65,
+    S3_SQUEEZE_CASCADE: 0.85,
+    S4_MACRO_EVENT_SHOCK: 0.20,
+    S5_TAIL_CRISIS_LOCKOUT: -0.50,
+  },
+  FUNDING_CARRY: {
+    S1_TREND_EXPANSION: 0.95,
+    S2_MEAN_REVERT_RANGE: 1.25,
+    S3_SQUEEZE_CASCADE: 1.10,
+    S4_MACRO_EVENT_SHOCK: 1.30,
+    S5_TAIL_CRISIS_LOCKOUT: 0.45,
+  },
+  VALUE_QUALITY: {
+    S1_TREND_EXPANSION: 1.25,
+    S2_MEAN_REVERT_RANGE: 1.10,
+    S3_SQUEEZE_CASCADE: 0.60,
+    S4_MACRO_EVENT_SHOCK: 0.95,
+    S5_TAIL_CRISIS_LOCKOUT: 0.30,
+  },
+};
+
+/**
+ * Online Contextual Strategy Ensemble (Multiplicative Weights / EXP3 over Scenario Posteriors).
+ * Blends causal empirical Sharpe observations with institutional scenario priors and computes
+ * softmax capital weights across the 5 strategy archetypes.
+ */
+export function computeAdaptiveStrategyWeights(params: {
+  scenarioVector: MarketScenarioVectorResult;
+  empiricalScenarioSharpe?: Partial<
+    Record<StrategyArchetypeId, Partial<Record<CanonicalMarketScenarioId, number>>>
+  > | null;
+  learningRateEta?: number; // default 1.15
+  forgettingGamma?: number; // default 0.90 weight on empirical when provided
+}): AdaptiveStrategyWeightsResult {
+  const {
+    scenarioVector,
+    empiricalScenarioSharpe,
+    learningRateEta = 1.15,
+    forgettingGamma = 0.65,
+  } = params;
+
+  const eta =
+    typeof learningRateEta === "number" && Number.isFinite(learningRateEta) && learningRateEta > 0
+      ? Math.min(5.0, Math.max(0.1, learningRateEta))
+      : 1.15;
+  const gamma =
+    typeof forgettingGamma === "number" && Number.isFinite(forgettingGamma)
+      ? Math.min(0.95, Math.max(0.05, forgettingGamma))
+      : 0.65;
+
+  const probs = scenarioVector?.probabilities ?? {
+    S1_TREND_EXPANSION: 0.2,
+    S2_MEAN_REVERT_RANGE: 0.2,
+    S3_SQUEEZE_CASCADE: 0.2,
+    S4_MACRO_EVENT_SHOCK: 0.2,
+    S5_TAIL_CRISIS_LOCKOUT: 0.2,
+  };
+
+  const strategies: StrategyArchetypeId[] = [
+    "TREND_BREAKOUT",
+    "ICT_LIQUIDITY_SWEEP",
+    "OU_MEAN_REVERSION",
+    "FUNDING_CARRY",
+    "VALUE_QUALITY",
+  ];
+  const scenarios: CanonicalMarketScenarioId[] = [
+    "S1_TREND_EXPANSION",
+    "S2_MEAN_REVERT_RANGE",
+    "S3_SQUEEZE_CASCADE",
+    "S4_MACRO_EVENT_SHOCK",
+    "S5_TAIL_CRISIS_LOCKOUT",
+  ];
+
+  const expectedSharpeByStrat: Record<StrategyArchetypeId, number> = {
+    TREND_BREAKOUT: 0,
+    ICT_LIQUIDITY_SWEEP: 0,
+    OU_MEAN_REVERSION: 0,
+    FUNDING_CARRY: 0,
+    VALUE_QUALITY: 0,
+  };
+
+  for (const strat of strategies) {
+    let expSharpe = 0;
+    for (const sc of scenarios) {
+      const pSc = Number.isFinite(probs[sc]) ? Math.max(0, probs[sc]) : 0.2;
+      const priorS = DEFAULT_SCENARIO_SHARPE_PRIORS[strat][sc];
+      const empRaw = empiricalScenarioSharpe?.[strat]?.[sc];
+      const blendedS =
+        typeof empRaw === "number" && Number.isFinite(empRaw)
+          ? gamma * Math.min(4.0, Math.max(-3.0, empRaw)) + (1 - gamma) * priorS
+          : priorS;
+      expSharpe += pSc * blendedS;
+    }
+    expectedSharpeByStrat[strat] = expSharpe;
+  }
+
+  // Numerical stability: shift exponents by max score
+  const maxScore = Math.max(...strategies.map((s) => eta * expectedSharpeByStrat[s]));
+  const rawExp = strategies.map((s) => Math.exp(eta * expectedSharpeByStrat[s] - maxScore));
+  const sumExp = Math.max(1e-12, rawExp.reduce((a, b) => a + b, 0));
+
+  const weights: Record<StrategyArchetypeId, number> = {
+    TREND_BREAKOUT: 0.2,
+    ICT_LIQUIDITY_SWEEP: 0.2,
+    OU_MEAN_REVERSION: 0.2,
+    FUNDING_CARRY: 0.2,
+    VALUE_QUALITY: 0.2,
+  };
+
+  let sumW = 0;
+  let topStrategy: StrategyArchetypeId = "ICT_LIQUIDITY_SWEEP";
+  let topWeight = -1;
+  let expectedEnsembleSharpe = 0;
+
+  for (let i = 0; i < strategies.length; i++) {
+    const strat = strategies[i]!;
+    const w =
+      i < strategies.length - 1
+        ? Number((rawExp[i]! / sumExp).toFixed(4))
+        : Number(Math.max(0, 1 - sumW).toFixed(4));
+    if (i < strategies.length - 1) sumW += w;
+    weights[strat] = w;
+    if (w > topWeight) {
+      topWeight = w;
+      topStrategy = strat;
+    }
+    expectedEnsembleSharpe += w * expectedSharpeByStrat[strat];
+  }
+
+  return {
+    weights,
+    topStrategy,
+    expectedEnsembleSharpe: Number(expectedEnsembleSharpe.toFixed(3)),
+    rationaleVi: `Phân bổ Chiến lược Đa kịch bản: Ưu tiên ${topStrategy} (${(topWeight * 100).toFixed(1)}%) | Kỳ vọng Sharpe Tổ hợp=${expectedEnsembleSharpe.toFixed(2)}.`,
+  };
+}

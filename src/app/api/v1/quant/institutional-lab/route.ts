@@ -7,7 +7,14 @@ import {
   calculateDeflatedSharpeRatio,
   calculateVaRAndCVaR,
   evaluateContinuousDrawdownGovernor,
+  evaluateMarketScenarioVector,
+  computeScenarioDynamicExitPolicy,
+  computeAdaptiveStrategyWeights,
 } from "@/lib/engines/advanced-quant-math";
+import {
+  runMultiScenarioPortfolioStressTest,
+  type PortfolioStressPosition,
+} from "@/lib/engines/unified-cross-asset-quant";
 import {
   getEmpiricalFrictionTelemetry,
   planSmartOrderExecution,
@@ -374,6 +381,99 @@ export async function POST(req: NextRequest) {
         bestBid: optClampFinite(body.bestBid, 1e-6, 1e9),
         bestAsk: optClampFinite(body.bestAsk, 1e-6, 1e9),
         top5BookDepthUsd: optClampFinite(body.top5BookDepthUsd, 0, 1e12),
+      });
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "scenario_synthesis") {
+      const scenarioVector = evaluateMarketScenarioVector({
+        hmmProbabilities:
+          body.hmmProbabilities && typeof body.hmmProbabilities === "object"
+            ? {
+                trendExpansion: optClampFinite(
+                  (body.hmmProbabilities as Record<string, unknown>).trendExpansion,
+                  0,
+                  1,
+                ),
+                meanRevertLowVol: optClampFinite(
+                  (body.hmmProbabilities as Record<string, unknown>).meanRevertLowVol,
+                  0,
+                  1,
+                ),
+                crisisHighVol: optClampFinite(
+                  (body.hmmProbabilities as Record<string, unknown>).crisisHighVol,
+                  0,
+                  1,
+                ),
+              }
+            : undefined,
+        efficiencyRatio: optClampFinite(body.efficiencyRatio, 0, 1),
+        adx14: optClampFinite(body.adx14, 0, 100),
+        harExpansionRatio: optClampFinite(body.harExpansionRatio, 0.2, 5.0),
+        tailDegreesOfFreedom: optClampFinite(body.tailDegreesOfFreedom, 2.1, 30),
+        vpinOrToxicity: optClampFinite(body.vpinOrToxicity, 0, 1),
+        spreadSpikeRatio: optClampFinite(body.spreadSpikeRatio, 0.5, 20),
+        fundingExtremeZ: optClampFinite(body.fundingExtremeZ, 0, 10),
+        macroScore: optClampFinite(body.macroScore, 0, 100),
+        isNewsOrCascadeLockout: Boolean(body.isNewsOrCascadeLockout),
+        drawdownDeleverageScale: optClampFinite(body.drawdownDeleverageScale, 0, 1.25),
+      });
+      const exitPolicy = computeScenarioDynamicExitPolicy(
+        scenarioVector,
+        clampFinite(body.baseGrossRr, 2.0, 1.2, 6.0),
+      );
+      const strategyEnsemble = computeAdaptiveStrategyWeights({
+        scenarioVector,
+        learningRateEta: clampFinite(body.learningRateEta, 1.15, 0.1, 5.0),
+      });
+      return NextResponse.json({
+        success: true,
+        data: {
+          scenarioVector,
+          exitPolicy,
+          strategyEnsemble,
+        },
+      });
+    }
+
+    if (type === "portfolio_stress_test") {
+      if (body.positions !== undefined && !Array.isArray(body.positions)) {
+        return NextResponse.json(
+          { success: false, error: "Invalid positions payload" },
+          { status: 400 },
+        );
+      }
+      const rawPositions = Array.isArray(body.positions) ? body.positions.slice(0, 50) : [];
+      const cleanPositions: PortfolioStressPosition[] = [];
+      for (const item of rawPositions) {
+        if (!item || typeof item !== "object") continue;
+        const rec = item as Record<string, unknown>;
+        if (!isValidTradingSymbol(rec.symbol)) continue;
+        const assetType =
+          rec.assetType === "VN_EQUITY" ||
+          rec.assetType === "VN30F" ||
+          rec.assetType === "CRYPTO" ||
+          rec.assetType === "FOREX"
+            ? rec.assetType
+            : "CRYPTO";
+        const direction = rec.direction === "SELL" ? "SELL" : "BUY";
+        const notionalUsd = clampFinite(rec.notionalUsd, 0, 0, 1e12);
+        if (notionalUsd <= 0) continue;
+        cleanPositions.push({
+          symbol: String(rec.symbol).trim().toUpperCase(),
+          assetType,
+          direction,
+          notionalUsd,
+          stopDistancePct: optClampFinite(rec.stopDistancePct, 0.001, 0.5),
+          isT2Locked: Boolean(rec.isT2Locked),
+        });
+      }
+      const result = runMultiScenarioPortfolioStressTest({
+        positions: cleanPositions,
+        accountBalanceUsd: clampFinite(body.accountBalanceUsd, 10_000, 100, 1e12),
+        maxDailyLossUsd: clampFinite(body.maxDailyLossUsd, 500, 10, 1e12),
+        currentDailyRealizedPnlUsd: clampFinite(body.currentDailyRealizedPnlUsd, 0, -1e12, 1e12),
+        crisisProbability: clampFinite(body.crisisProbability, 0.25, 0, 1),
       });
       return NextResponse.json({ success: true, data: result });
     }

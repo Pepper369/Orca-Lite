@@ -5,6 +5,10 @@ import {
   evaluateFactorExposureBudget,
   type FactorExposurePosition,
 } from "@/lib/engines/advanced-quant-math";
+import {
+  runMultiScenarioPortfolioStressTest,
+  type PortfolioStressPosition,
+} from "@/lib/engines/unified-cross-asset-quant";
 import { getAssetPipSize } from "@/lib/engines/asset-precision";
 import {
   calculateProportionalCopySize,
@@ -559,6 +563,43 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         continue;
       }
       factorSizeMultiplier = factorBudget.sizeMultiplier;
+
+      // Phase 4C: Pre-Trade Counterfactual Multi-Scenario Stress Test Gate
+      const openList = openPositionsByAccount.get(acct.id) ?? [];
+      const estCandidateStopPct =
+        signal.entryPrice > 0
+          ? Math.max(0.001, Math.abs(signal.entryPrice - signal.stopLossPrice) / signal.entryPrice)
+          : 0.015;
+      const estCandidateNotionalUsd =
+        (Math.max(100, acct.balanceUsd) * 0.01 * Math.min(3, acct.riskMultiplier)) / estCandidateStopPct;
+      const stressPositions: PortfolioStressPosition[] = [
+        ...openList.map((p) => ({
+          symbol: p.symbol,
+          assetType: p.assetType,
+          direction: p.direction,
+          notionalUsd: Math.max(100, acct.balanceUsd) * 0.5,
+          stopDistancePct: p.assetType === "FOREX" ? 0.005 : 0.018,
+        })),
+        {
+          symbol: cleanSym,
+          assetType: signal.assetType,
+          direction: signal.direction,
+          notionalUsd: estCandidateNotionalUsd,
+          stopDistancePct: estCandidateStopPct,
+        },
+      ];
+      const stressRes = runMultiScenarioPortfolioStressTest({
+        positions: stressPositions,
+        accountBalanceUsd: acct.balanceUsd,
+        maxDailyLossUsd: acct.maxDailyLossUsd ?? 500,
+        currentDailyRealizedPnlUsd: acct.dailyRealizedPnlUsd ?? 0,
+      });
+      factorSizeMultiplier = Number(
+        (factorSizeMultiplier * stressRes.recommendedPositionScale).toFixed(3),
+      );
+      if (factorSizeMultiplier <= 0) {
+        continue;
+      }
     }
 
     // 3) Asset-Class compatibility check

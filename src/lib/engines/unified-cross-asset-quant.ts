@@ -814,3 +814,240 @@ export function buildCryptoLiquidityContext(liqClusters: LiquidationClusterResul
   }));
   return { liquidationClusterAligned, externalMagnets };
 }
+
+// ============================================================================
+// 5. Phase 4C: Counterfactual Multi-Scenario Portfolio Stress Test & Tail Guard
+// ============================================================================
+
+export interface PortfolioStressPosition {
+  symbol: string;
+  assetType: "VN_EQUITY" | "VN30F" | "CRYPTO" | "FOREX";
+  direction: "BUY" | "SELL";
+  notionalUsd: number;
+  stopDistancePct?: number; // e.g. 0.015 (1.5%)
+  isT2Locked?: boolean; // True for unsettled VN equities in T+0..T+2
+}
+
+export interface ScenarioStressShockResult {
+  shockId:
+    | "VN_EQUITY_FLOOR_LOCK_T25"
+    | "USD_YIELD_SPIKE"
+    | "CRYPTO_DELEVERAGING_FLUSH"
+    | "CORRELATION_BREAKDOWN_80";
+  shockNameVi: string;
+  estimatedLossUsd: number;
+  estimatedLossPctOfEquity: number;
+  slippageAmplificationFactor: number;
+}
+
+export interface MultiScenarioStressTestResult {
+  shocks: ScenarioStressShockResult[];
+  worstCaseShockId: ScenarioStressShockResult["shockId"];
+  worstCaseLossUsd: number;
+  scenarioWeightedExpectedShortfallUsd: number; // StressCVaR
+  maxDailyLossBudgetUsd: number;
+  budgetUtilizationPct: number;
+  breachesDailyBudget: boolean;
+  recommendedPositionScale: number; // [0.00, 1.00]
+  rationaleVi: string;
+}
+
+/**
+ * Runs a fast (<1ms) counterfactual multi-scenario stress test across open + candidate
+ * positions before order dispatch. Evaluates 4 canonical systemic shocks:
+ * 1. VN_EQUITY_FLOOR_LOCK_T25: -6.8% gap over 2.5 days with T+2.5 illiquidity slippage
+ * 2. USD_YIELD_SPIKE: DXY +1.8% shock hitting EURUSD/XAUUSD/USDVND
+ * 3. CRYPTO_DELEVERAGING_FLUSH: -12% flash cascade with 2.2x stop-loss slippage
+ * 4. CORRELATION_BREAKDOWN_80: Historical correlations converge to 0.80 under crisis
+ */
+export function runMultiScenarioPortfolioStressTest(params: {
+  positions: PortfolioStressPosition[];
+  accountBalanceUsd: number;
+  maxDailyLossUsd: number;
+  currentDailyRealizedPnlUsd?: number;
+  crisisProbability?: number; // e.g. S3 + S4 + S5 probability in [0, 1]
+}): MultiScenarioStressTestResult {
+  const safeBalance =
+    typeof params.accountBalanceUsd === "number" &&
+    Number.isFinite(params.accountBalanceUsd) &&
+    params.accountBalanceUsd > 0
+      ? Math.max(100, Math.min(1e12, params.accountBalanceUsd))
+      : 10_000;
+
+  const safeMaxDaily =
+    typeof params.maxDailyLossUsd === "number" &&
+    Number.isFinite(params.maxDailyLossUsd) &&
+    params.maxDailyLossUsd > 0
+      ? Math.max(10, Math.min(1e12, params.maxDailyLossUsd))
+      : 500;
+
+  const currentPnl =
+    typeof params.currentDailyRealizedPnlUsd === "number" &&
+    Number.isFinite(params.currentDailyRealizedPnlUsd)
+      ? Math.max(-1e12, Math.min(1e12, params.currentDailyRealizedPnlUsd))
+      : 0;
+
+  const crisisProb =
+    typeof params.crisisProbability === "number" && Number.isFinite(params.crisisProbability)
+      ? Math.min(1, Math.max(0, params.crisisProbability))
+      : 0.25;
+
+  const remainingDailyBudgetUsd = Math.max(0, safeMaxDaily + Math.min(0, currentPnl));
+  const cleanPositions = (Array.isArray(params.positions) ? params.positions : []).filter(
+    (p) =>
+      p &&
+      typeof p.symbol === "string" &&
+      typeof p.notionalUsd === "number" &&
+      Number.isFinite(p.notionalUsd) &&
+      p.notionalUsd > 0,
+  );
+
+  if (cleanPositions.length === 0) {
+    return {
+      shocks: [],
+      worstCaseShockId: "CORRELATION_BREAKDOWN_80",
+      worstCaseLossUsd: 0,
+      scenarioWeightedExpectedShortfallUsd: 0,
+      maxDailyLossBudgetUsd: safeMaxDaily,
+      budgetUtilizationPct: 0,
+      breachesDailyBudget: false,
+      recommendedPositionScale: 1.0,
+      rationaleVi: "Danh mục chưa có vị thế mở -> Sức chịu đựng Stress Test 100% thông thoáng.",
+    };
+  }
+
+  let lossShock1 = 0;
+  let lossShock2 = 0;
+  let lossShock3 = 0;
+  const individualStopLosses: number[] = [];
+
+  for (const pos of cleanPositions) {
+    const notional = Math.min(1e12, pos.notionalUsd);
+    const stopPct =
+      typeof pos.stopDistancePct === "number" &&
+      Number.isFinite(pos.stopDistancePct) &&
+      pos.stopDistancePct > 0
+        ? Math.min(0.5, Math.max(0.001, pos.stopDistancePct))
+        : pos.assetType === "FOREX"
+          ? 0.005
+          : 0.018;
+    const baseStopLossUsd = notional * stopPct;
+    individualStopLosses.push(baseStopLossUsd);
+
+    // Shock 1: VN Equity T+2.5 Floor Lock (-11% cumulative gap if T+2 locked, else 1.8x stop)
+    if (pos.assetType === "VN_EQUITY") {
+      const mult = pos.direction === "BUY" ? (pos.isT2Locked ? 0.11 : Math.max(stopPct * 1.8, 0.068)) : 0.02;
+      lossShock1 += notional * mult;
+    } else if (pos.assetType === "VN30F") {
+      // Short VN30F offsets equity floor lock!
+      lossShock1 += pos.direction === "SELL" ? -notional * 0.055 : notional * stopPct * 1.75;
+    } else {
+      lossShock1 += baseStopLossUsd * 0.5;
+    }
+
+    // Shock 2: USD & Yield Spike (+1.8% DXY, 2.0x stop slippage on FX/Gold)
+    if (pos.assetType === "FOREX") {
+      lossShock2 += baseStopLossUsd * 1.85;
+    } else {
+      lossShock2 += baseStopLossUsd * 1.1;
+    }
+
+    // Shock 3: Crypto De-leveraging Flush (-12% cascade, 2.2x stop slippage on Crypto)
+    if (pos.assetType === "CRYPTO") {
+      lossShock3 += baseStopLossUsd * 2.15;
+    } else {
+      lossShock3 += baseStopLossUsd * 0.75;
+    }
+  }
+
+  lossShock1 = Math.max(0, lossShock1);
+
+  // Shock 4: Correlation Breakdown (rho -> 0.80 across all positions simultaneously)
+  const sumIndividual = individualStopLosses.reduce((a, b) => a + b, 0);
+  const sumSquares = individualStopLosses.reduce((a, b) => a + b * b, 0);
+  const rhoCrisis = 0.80;
+  const crisisPortfolioVariance =
+    sumSquares + rhoCrisis * Math.max(0, sumIndividual * sumIndividual - sumSquares);
+  const lossShock4 = Math.sqrt(Math.max(0, crisisPortfolioVariance)) * 1.45;
+
+  const shocks: ScenarioStressShockResult[] = [
+    {
+      shockId: "VN_EQUITY_FLOOR_LOCK_T25",
+      shockNameVi: "Cú sốc Sàn thanh khoản T+2.5 Cổ phiếu VN (-6.8%/phiên)",
+      estimatedLossUsd: Number(lossShock1.toFixed(2)),
+      estimatedLossPctOfEquity: Number(((lossShock1 / safeBalance) * 100).toFixed(2)),
+      slippageAmplificationFactor: 1.8,
+    },
+    {
+      shockId: "USD_YIELD_SPIKE",
+      shockNameVi: "Cú sốc Tỷ giá DXY & Lợi suất Trái phiếu (+1.8% Spike)",
+      estimatedLossUsd: Number(lossShock2.toFixed(2)),
+      estimatedLossPctOfEquity: Number(((lossShock2 / safeBalance) * 100).toFixed(2)),
+      slippageAmplificationFactor: 1.85,
+    },
+    {
+      shockId: "CRYPTO_DELEVERAGING_FLUSH",
+      shockNameVi: "Cú sốc Thanh lý Dây chuyền Crypto Perp (-12% Cascade)",
+      estimatedLossUsd: Number(lossShock3.toFixed(2)),
+      estimatedLossPctOfEquity: Number(((lossShock3 / safeBalance) * 100).toFixed(2)),
+      slippageAmplificationFactor: 2.15,
+    },
+    {
+      shockId: "CORRELATION_BREAKDOWN_80",
+      shockNameVi: "Cú sốc Đồng pha Tương quan Khủng hoảng (ρ = 0.80)",
+      estimatedLossUsd: Number(lossShock4.toFixed(2)),
+      estimatedLossPctOfEquity: Number(((lossShock4 / safeBalance) * 100).toFixed(2)),
+      slippageAmplificationFactor: 1.45,
+    },
+  ];
+
+  let worstShock = shocks[0]!;
+  for (const s of shocks) {
+    if (s.estimatedLossUsd > worstShock.estimatedLossUsd) {
+      worstShock = s;
+    }
+  }
+
+  const avgShockLoss =
+    shocks.reduce((acc, s) => acc + s.estimatedLossUsd, 0) / shocks.length;
+  const scenarioWeightedExpectedShortfallUsd = Number(
+    ((1 - crisisProb) * avgShockLoss + crisisProb * worstShock.estimatedLossUsd).toFixed(2),
+  );
+
+  const budgetUtilizationPct =
+    remainingDailyBudgetUsd > 0
+      ? Number(((scenarioWeightedExpectedShortfallUsd / remainingDailyBudgetUsd) * 100).toFixed(1))
+      : 999;
+
+  const breachesDailyBudget =
+    remainingDailyBudgetUsd <= 0 ||
+    scenarioWeightedExpectedShortfallUsd > remainingDailyBudgetUsd;
+
+  const recommendedPositionScale =
+    remainingDailyBudgetUsd <= 0
+      ? 0
+      : scenarioWeightedExpectedShortfallUsd <= remainingDailyBudgetUsd
+        ? 1.0
+        : Number(
+            Math.max(
+              0.15,
+              Math.min(1.0, remainingDailyBudgetUsd / Math.max(1e-6, scenarioWeightedExpectedShortfallUsd)),
+            ).toFixed(3),
+          );
+
+  const rationaleVi = breachesDailyBudget
+    ? `Cảnh báo Stress Test [${worstShock.shockId}]: StressCVaR $${scenarioWeightedExpectedShortfallUsd} vượt ngân sách lỗ ngày còn lại ($${remainingDailyBudgetUsd.toFixed(2)}) -> Co quy mô vị thế về ${(recommendedPositionScale * 100).toFixed(0)}%.`
+    : `Đạt chuẩn Stress Test 4 kịch bản: StressCVaR $${scenarioWeightedExpectedShortfallUsd} (${budgetUtilizationPct}% hạn mức ngày $${remainingDailyBudgetUsd.toFixed(2)}).`;
+
+  return {
+    shocks,
+    worstCaseShockId: worstShock.shockId,
+    worstCaseLossUsd: worstShock.estimatedLossUsd,
+    scenarioWeightedExpectedShortfallUsd,
+    maxDailyLossBudgetUsd: safeMaxDaily,
+    budgetUtilizationPct,
+    breachesDailyBudget,
+    recommendedPositionScale,
+    rationaleVi,
+  };
+}
