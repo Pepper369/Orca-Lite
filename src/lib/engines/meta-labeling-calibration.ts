@@ -77,13 +77,25 @@ export interface PboEvaluationResult {
 }
 
 function sigmoid(x: number): number {
+  if (!Number.isFinite(x)) return x > 0 ? 1 / (1 + Math.exp(-18)) : x < 0 ? 1 / (1 + Math.exp(18)) : 0.5;
   const clamped = Math.max(-18, Math.min(18, x));
   return 1 / (1 + Math.exp(-clamped));
 }
 
 function logit(p: number): number {
-  const c = Math.max(1e-4, Math.min(1 - 1e-4, p));
+  const safeP = Number.isFinite(p) ? p : 0.5;
+  const c = Math.max(1e-4, Math.min(1 - 1e-4, safeP));
   return Math.log(c / (1 - c));
+}
+
+const MAX_HORIZON_BARS = 500_000;
+
+function normalizeEventBounds(e: TradeHorizonEvent, maxBarLimit = MAX_HORIZON_BARS): { start: number; end: number } {
+  const rawS = Number.isFinite(e?.startIdx) ? Math.floor(e.startIdx) : 0;
+  const rawE = Number.isFinite(e?.endIdx) ? Math.floor(e.endIdx) : rawS;
+  const lo = Math.max(0, Math.min(maxBarLimit - 1, Math.min(rawS, rawE)));
+  const hi = Math.max(lo, Math.min(maxBarLimit - 1, Math.max(rawS, rawE)));
+  return { start: lo, end: hi };
 }
 
 /**
@@ -95,19 +107,23 @@ export function computeSampleUniquenessWeights(
   events: TradeHorizonEvent[],
   totalBars?: number,
 ): number[] {
+  if (!Array.isArray(events)) return [];
   const n = events.length;
   if (n === 0) return [];
 
-  let maxBar = totalBars ?? 0;
-  for (const e of events) {
-    if (e.endIdx + 1 > maxBar) maxBar = e.endIdx + 1;
+  const normalized = events.map((e) => normalizeEventBounds(e));
+  let maxBar = Number.isFinite(totalBars) && (totalBars ?? 0) > 0
+    ? Math.min(MAX_HORIZON_BARS, Math.floor(totalBars!))
+    : 0;
+  for (const e of normalized) {
+    if (e.end + 1 > maxBar) maxBar = e.end + 1;
   }
-  maxBar = Math.max(1, maxBar);
+  maxBar = Math.max(1, Math.min(MAX_HORIZON_BARS, maxBar));
 
   const concurrency = new Float64Array(maxBar);
-  for (const e of events) {
-    const s = Math.max(0, Math.min(maxBar - 1, Math.floor(e.startIdx)));
-    const end = Math.max(s, Math.min(maxBar - 1, Math.floor(e.endIdx)));
+  for (const e of normalized) {
+    const s = Math.max(0, Math.min(maxBar - 1, e.start));
+    const end = Math.max(s, Math.min(maxBar - 1, e.end));
     for (let t = s; t <= end; t++) {
       concurrency[t] += 1;
     }
@@ -116,21 +132,21 @@ export function computeSampleUniquenessWeights(
   const rawWeights: number[] = new Array(n).fill(1);
   let sumW = 0;
   for (let i = 0; i < n; i++) {
-    const e = events[i]!;
-    const s = Math.max(0, Math.min(maxBar - 1, Math.floor(e.startIdx)));
-    const end = Math.max(s, Math.min(maxBar - 1, Math.floor(e.endIdx)));
+    const e = normalized[i]!;
+    const s = Math.max(0, Math.min(maxBar - 1, e.start));
+    const end = Math.max(s, Math.min(maxBar - 1, e.end));
     let uniqSum = 0;
     let span = 0;
     for (let t = s; t <= end; t++) {
       uniqSum += 1 / Math.max(1, concurrency[t]!);
       span++;
     }
-    const w = span > 0 ? uniqSum / span : 1;
+    const w = span > 0 && Number.isFinite(uniqSum) ? uniqSum / span : 1;
     rawWeights[i] = w;
     sumW += w;
   }
 
-  if (sumW <= 1e-12) return new Array(n).fill(1);
+  if (!Number.isFinite(sumW) || sumW <= 1e-12) return new Array(n).fill(1);
   return rawWeights.map((w) => Number(((w * n) / sumW).toFixed(4)));
 }
 
@@ -142,15 +158,19 @@ export function buildPurgedEmbargoedSplits(
   kFolds = 5,
   embargoPct = 0.02,
 ): PurgedFoldSplit[] {
+  if (!Array.isArray(events)) return [];
   const n = events.length;
-  const k = Math.max(2, Math.min(kFolds, Math.floor(n / 2)));
+  const safeKFolds = Number.isFinite(kFolds) && kFolds >= 2 ? Math.floor(kFolds) : 2;
+  const k = Math.max(2, Math.min(safeKFolds, Math.floor(n / 2)));
   if (n < 4 || k < 2) return [];
 
+  const normalized = events.map((e) => normalizeEventBounds(e));
   let maxBar = 0;
-  for (const e of events) {
-    if (e.endIdx > maxBar) maxBar = e.endIdx;
+  for (const e of normalized) {
+    if (e.end > maxBar) maxBar = e.end;
   }
-  const embargoBars = Math.max(1, Math.ceil(maxBar * Math.max(0, embargoPct)));
+  const safeEmbargoPct = Number.isFinite(embargoPct) ? Math.max(0, Math.min(0.5, embargoPct)) : 0.02;
+  const embargoBars = Math.max(1, Math.ceil(maxBar * safeEmbargoPct));
   const foldSize = Math.floor(n / k);
   const splits: PurgedFoldSplit[] = [];
 
@@ -163,9 +183,9 @@ export function buildPurgedEmbargoedSplits(
 
     for (let i = testStart; i <= testEnd; i++) {
       testIndices.push(i);
-      const ev = events[i]!;
-      if (ev.startIdx < testMinBar) testMinBar = ev.startIdx;
-      if (ev.endIdx > testMaxBar) testMaxBar = ev.endIdx;
+      const ev = normalized[i]!;
+      if (ev.start < testMinBar) testMinBar = ev.start;
+      if (ev.end > testMaxBar) testMaxBar = ev.end;
     }
 
     const trainIndices: number[] = [];
@@ -174,15 +194,15 @@ export function buildPurgedEmbargoedSplits(
 
     for (let i = 0; i < n; i++) {
       if (i >= testStart && i <= testEnd) continue;
-      const ev = events[i]!;
-      // Purge if training sample's [startIdx, endIdx] overlaps test fold's [testMinBar, testMaxBar]
-      const overlapsTest = ev.startIdx <= testMaxBar && ev.endIdx >= testMinBar;
+      const ev = normalized[i]!;
+      // Purge if training sample's [start, end] overlaps test fold's [testMinBar, testMaxBar]
+      const overlapsTest = ev.start <= testMaxBar && ev.end >= testMinBar;
       if (overlapsTest) {
         purgedCount++;
         continue;
       }
       // Embargo training samples immediately following the test fold
-      const inEmbargo = ev.startIdx > testMaxBar && ev.startIdx <= testMaxBar + embargoBars;
+      const inEmbargo = ev.start > testMaxBar && ev.start <= testMaxBar + embargoBars;
       if (inEmbargo) {
         embargoedCount++;
         continue;
@@ -210,18 +230,24 @@ export function computeBrierScore(
   outcomes: (0 | 1 | boolean)[],
   weights?: number[],
 ): number {
-  const n = Math.min(probs.length, outcomes.length);
+  const n = Math.min(
+    Array.isArray(probs) ? probs.length : 0,
+    Array.isArray(outcomes) ? outcomes.length : 0,
+  );
   if (n === 0) return 0.25;
   let weightedSqErr = 0;
   let totalW = 0;
   for (let i = 0; i < n; i++) {
-    const p = Math.max(0, Math.min(1, probs[i]!));
+    const rawP = probs[i];
+    const p = Number.isFinite(rawP) ? Math.max(0, Math.min(1, rawP!)) : 0.5;
     const y = outcomes[i] ? 1 : 0;
-    const w = weights?.[i] != null && weights[i]! > 0 ? weights[i]! : 1;
+    const rawW = weights?.[i];
+    const w = rawW != null && Number.isFinite(rawW) && rawW > 0 ? Math.min(1e6, rawW) : 1;
     weightedSqErr += w * (p - y) ** 2;
     totalW += w;
   }
-  return Number((weightedSqErr / Math.max(1e-9, totalW)).toFixed(5));
+  const res = weightedSqErr / Math.max(1e-9, totalW);
+  return Number((Number.isFinite(res) ? res : 0.25).toFixed(5));
 }
 
 /**
@@ -233,7 +259,10 @@ export function fitIsotonicCalibration(
   outcomes: (0 | 1 | boolean)[],
   sampleWeights?: number[],
 ): IsotonicCalibrationModel {
-  const n = Math.min(rawProbs.length, outcomes.length);
+  const n = Math.min(
+    Array.isArray(rawProbs) ? rawProbs.length : 0,
+    Array.isArray(outcomes) ? outcomes.length : 0,
+  );
   if (n < 4) {
     return {
       bins: [{ minRawProb: 0, maxRawProb: 1, calibratedProb: 0.55, totalWeight: 1 }],
@@ -246,11 +275,17 @@ export function fitIsotonicCalibration(
   }
 
   const brierBefore = computeBrierScore(rawProbs, outcomes, sampleWeights);
-  const items = Array.from({ length: n }, (_, i) => ({
-    raw: Math.max(0.01, Math.min(0.99, rawProbs[i]!)),
-    y: outcomes[i] ? 1 : 0,
-    w: sampleWeights?.[i] != null && sampleWeights[i]! > 0 ? sampleWeights[i]! : 1,
-  })).sort((a, b) => a.raw - b.raw);
+  const items = Array.from({ length: n }, (_, i) => {
+    const rp = rawProbs[i];
+    const safeRaw = Number.isFinite(rp) ? Math.max(0.01, Math.min(0.99, rp!)) : 0.5;
+    const rw = sampleWeights?.[i];
+    const safeW = rw != null && Number.isFinite(rw) && rw > 0 ? Math.min(1e6, rw) : 1;
+    return {
+      raw: safeRaw,
+      y: outcomes[i] ? 1 : 0,
+      w: safeW,
+    };
+  }).sort((a, b) => a.raw - b.raw);
 
   // Pool-Adjacent-Violators Algorithm (PAVA)
   const blocks: { minRaw: number; maxRaw: number; sumWY: number; sumW: number }[] = [];
@@ -325,52 +360,80 @@ export function applyIsotonicCalibration(
   rawProb: number,
   model?: IsotonicCalibrationModel | null,
 ): number {
-  const p = Math.max(0.01, Math.min(0.99, rawProb));
-  if (!model || model.bins.length === 0) {
+  const safeRaw = Number.isFinite(rawProb) ? rawProb : 0.5;
+  const p = Math.max(0.01, Math.min(0.99, safeRaw));
+  if (!model || !Array.isArray(model.bins) || model.bins.length === 0) {
     return Number(p.toFixed(4));
   }
 
-  const plattP = sigmoid(model.plattSlope * logit(p) + model.plattIntercept);
+  const safeSlope = Number.isFinite(model.plattSlope) ? model.plattSlope : 1.0;
+  const safeIntercept = Number.isFinite(model.plattIntercept) ? model.plattIntercept : 0.0;
+  const plattP = sigmoid(safeSlope * logit(p) + safeIntercept);
   const bins = model.bins;
 
-  let isoP = bins[0]!.calibratedProb;
-  if (p <= bins[0]!.minRawProb) {
-    isoP = bins[0]!.calibratedProb;
-  } else if (p >= bins[bins.length - 1]!.maxRawProb) {
-    isoP = bins[bins.length - 1]!.calibratedProb;
+  const safeBinProb = (b: IsotonicBin | undefined): number => {
+    const cp = b?.calibratedProb;
+    return Number.isFinite(cp) ? Math.max(0.05, Math.min(0.96, cp!)) : p;
+  };
+
+  let isoP = safeBinProb(bins[0]);
+  if (p <= (bins[0]!.minRawProb ?? 0)) {
+    isoP = safeBinProb(bins[0]);
+  } else if (p >= (bins[bins.length - 1]!.maxRawProb ?? 1)) {
+    isoP = safeBinProb(bins[bins.length - 1]);
   } else {
     for (let i = 0; i < bins.length; i++) {
       const b = bins[i]!;
-      if (p >= b.minRawProb && p <= b.maxRawProb) {
-        isoP = b.calibratedProb;
+      const bMin = Number.isFinite(b.minRawProb) ? b.minRawProb : 0;
+      const bMax = Number.isFinite(b.maxRawProb) ? b.maxRawProb : 1;
+      if (p >= bMin && p <= bMax) {
+        isoP = safeBinProb(b);
         break;
       }
-      if (i + 1 < bins.length && p > b.maxRawProb && p < bins[i + 1]!.minRawProb) {
+      if (i + 1 < bins.length) {
         const nextB = bins[i + 1]!;
-        const span = Math.max(1e-6, nextB.minRawProb - b.maxRawProb);
-        const t = (p - b.maxRawProb) / span;
-        isoP = b.calibratedProb * (1 - t) + nextB.calibratedProb * t;
-        break;
+        const nextMin = Number.isFinite(nextB.minRawProb) ? nextB.minRawProb : bMax;
+        if (p > bMax && p < nextMin) {
+          const span = Math.max(1e-6, nextMin - bMax);
+          const t = Math.max(0, Math.min(1, (p - bMax) / span));
+          isoP = safeBinProb(b) * (1 - t) + safeBinProb(nextB) * t;
+          break;
+        }
       }
     }
   }
 
   // Blend 70% Isotonic PAVA + 30% smooth Platt sigmoid for strictly monotonic tie-breaking
-  const blended = Math.max(0.05, Math.min(0.96, 0.7 * isoP + 0.3 * plattP));
+  const rawBlended = 0.7 * isoP + 0.3 * plattP;
+  const blended = Number.isFinite(rawBlended) ? Math.max(0.05, Math.min(0.96, rawBlended)) : 0.5;
   return Number(blended.toFixed(4));
 }
 
+function safeFeatureVal(v: number, fallback: number, min: number, max: number): number {
+  return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : fallback;
+}
+
 function featureVectorToArray(f: MetaLabelFeatureVector): number[] {
+  const primaryScoreNorm = safeFeatureVal(f?.primaryScoreNorm, 0.5, 0, 1);
+  const hmmTrendProb = safeFeatureVal(f?.hmmTrendProb, 0.33, 0, 1);
+  const hmmCrisisProb = safeFeatureVal(f?.hmmCrisisProb, 0.17, 0, 1);
+  const cusumAligned = safeFeatureVal(f?.cusumAligned, 0, -1, 1);
+  const efficiencyRatio = safeFeatureVal(f?.efficiencyRatio, 0.3, 0, 1);
+  const harVolExpansionRatio = safeFeatureVal(f?.harVolExpansionRatio, 1.0, 0, 10);
+  const orderFlowAligned = safeFeatureVal(f?.orderFlowAligned, 0, -1, 1);
+  const liquiditySweepConfirmed = safeFeatureVal(f?.liquiditySweepConfirmed, 0, 0, 1);
+  const frictionR = safeFeatureVal(f?.frictionR, 0.08, 0, 5);
+
   return [
-    (f.primaryScoreNorm - 0.65) * 3.2,
-    f.hmmTrendProb - 0.35,
-    -(f.hmmCrisisProb - 0.20) * 1.5,
-    f.cusumAligned * 0.45,
-    f.efficiencyRatio - 0.30,
-    -Math.max(0, f.harVolExpansionRatio - 1.45),
-    f.orderFlowAligned * 0.5,
-    f.liquiditySweepConfirmed * 0.45,
-    -f.frictionR * 2.5,
+    (primaryScoreNorm - 0.65) * 3.2,
+    hmmTrendProb - 0.35,
+    -(hmmCrisisProb - 0.20) * 1.5,
+    cusumAligned * 0.45,
+    efficiencyRatio - 0.30,
+    -Math.max(0, harVolExpansionRatio - 1.45),
+    orderFlowAligned * 0.5,
+    liquiditySweepConfirmed * 0.45,
+    -frictionR * 2.5,
   ];
 }
 
@@ -391,19 +454,22 @@ export function predictMetaLabelProbability(
   confidenceMultiplier: number;
 } {
   const x = featureVectorToArray(features);
-  const w = trainedModel?.weights ?? DEFAULT_META_WEIGHTS;
-  const bias = trainedModel?.bias ?? DEFAULT_META_BIAS;
+  const w = Array.isArray(trainedModel?.weights) ? trainedModel!.weights : DEFAULT_META_WEIGHTS;
+  const rawBias = trainedModel?.bias;
+  const bias = Number.isFinite(rawBias) ? rawBias! : DEFAULT_META_BIAS;
 
   let z = bias;
   for (let i = 0; i < x.length; i++) {
-    z += (w[i] ?? 0) * x[i]!;
+    const wi = Number.isFinite(w[i]) ? w[i]! : (DEFAULT_META_WEIGHTS[i] ?? 0);
+    z += wi * x[i]!;
   }
   const rawProb = sigmoid(z);
   const calibrated = trainedModel?.calibration
     ? applyIsotonicCalibration(rawProb, trainedModel.calibration)
     : Number(Math.max(0.32, Math.min(0.91, rawProb)).toFixed(4));
 
-  const metaApprove = calibrated >= 0.52 && features.hmmCrisisProb < 0.72;
+  const safeCrisisProb = safeFeatureVal(features?.hmmCrisisProb, 0.17, 0, 1);
+  const metaApprove = calibrated >= 0.52 && safeCrisisProb < 0.72;
   const confidenceMultiplier = !metaApprove
     ? 0
     : Number(Math.max(0.5, Math.min(1.15, (calibrated - 0.38) / 0.45)).toFixed(2));
@@ -424,9 +490,10 @@ export function trainPurgedMetaLabelClassifier(
   samples: MetaLabelTrainingSample[],
   kFolds = 5,
 ): TrainedMetaLabelModel {
-  const n = samples.length;
-  const uniquenessWeights = computeSampleUniquenessWeights(samples);
-  const splits = buildPurgedEmbargoedSplits(samples, kFolds, 0.02);
+  const safeSamples = Array.isArray(samples) ? samples.filter((s) => s != null && s.features != null) : [];
+  const n = safeSamples.length;
+  const uniquenessWeights = computeSampleUniquenessWeights(safeSamples);
+  const splits = buildPurgedEmbargoedSplits(safeSamples, kFolds, 0.02);
 
   const fitLogisticOnIndices = (indices: number[]): { weights: number[]; bias: number } => {
     const w = [...DEFAULT_META_WEIGHTS];
@@ -441,24 +508,29 @@ export function trainPurgedMetaLabelClassifier(
       let sumW = 0;
 
       for (const idx of indices) {
-        const s = samples[idx]!;
-        const sw = uniquenessWeights[idx] ?? 1;
+        const s = safeSamples[idx]!;
+        const sw = Number.isFinite(uniquenessWeights[idx]) && uniquenessWeights[idx]! > 0
+          ? uniquenessWeights[idx]!
+          : 1;
         const x = featureVectorToArray(s.features);
+        const y = s.outcome ? 1 : 0;
         let z = bias;
         for (let j = 0; j < w.length; j++) z += w[j]! * x[j]!;
         const pred = sigmoid(z);
-        const err = (pred - s.outcome) * sw;
+        const err = (pred - y) * sw;
         for (let j = 0; j < w.length; j++) gradW[j]! += err * x[j]!;
         gradB += err;
         sumW += sw;
       }
 
-      if (sumW > 0) {
+      if (sumW > 0 && Number.isFinite(sumW)) {
         for (let j = 0; j < w.length; j++) {
           const prior = DEFAULT_META_WEIGHTS[j] ?? 0;
-          w[j] = w[j]! - lr * (gradW[j]! / sumW + l2 * (w[j]! - prior));
+          const nextWj = w[j]! - lr * (gradW[j]! / sumW + l2 * (w[j]! - prior));
+          if (Number.isFinite(nextWj)) w[j] = Math.max(-10, Math.min(10, nextWj));
         }
-        bias = bias - lr * (gradB / sumW + l2 * (bias - DEFAULT_META_BIAS));
+        const nextBias = bias - lr * (gradB / sumW + l2 * (bias - DEFAULT_META_BIAS));
+        if (Number.isFinite(nextBias)) bias = Math.max(-10, Math.min(10, nextBias));
       }
     }
     return {
@@ -477,7 +549,7 @@ export function trainPurgedMetaLabelClassifier(
           : Array.from({ length: n }, (_, i) => i),
       );
       for (const testIdx of sp.testIndices) {
-        const x = featureVectorToArray(samples[testIdx]!.features);
+        const x = featureVectorToArray(safeSamples[testIdx]!.features);
         let z = foldFit.bias;
         for (let j = 0; j < foldFit.weights.length; j++) z += foldFit.weights[j]! * x[j]!;
         oofRawProbs[testIdx] = sigmoid(z);
@@ -486,14 +558,14 @@ export function trainPurgedMetaLabelClassifier(
   } else {
     const fullFit = fitLogisticOnIndices(Array.from({ length: n }, (_, i) => i));
     for (let i = 0; i < n; i++) {
-      const x = featureVectorToArray(samples[i]!.features);
+      const x = featureVectorToArray(safeSamples[i]!.features);
       let z = fullFit.bias;
       for (let j = 0; j < fullFit.weights.length; j++) z += fullFit.weights[j]! * x[j]!;
       oofRawProbs[i] = sigmoid(z);
     }
   }
 
-  const outcomes = samples.map((s) => s.outcome);
+  const outcomes: (0 | 1)[] = safeSamples.map((s) => (s.outcome ? 1 : 0));
   const calibration = fitIsotonicCalibration(oofRawProbs, outcomes, uniquenessWeights);
   const fullModel = fitLogisticOnIndices(Array.from({ length: n }, (_, i) => i));
 
@@ -525,8 +597,11 @@ export function trainPurgedMetaLabelClassifier(
 export function calculateCombinatorialPurgedPbo(
   strategyByFoldPerf: number[][],
 ): PboEvaluationResult {
-  const mCount = strategyByFoldPerf.length;
-  const sCount = mCount > 0 ? strategyByFoldPerf[0]!.length : 0;
+  const validRows = Array.isArray(strategyByFoldPerf)
+    ? strategyByFoldPerf.filter((row) => Array.isArray(row) && row.length > 0)
+    : [];
+  const mCount = validRows.length;
+  const sCount = mCount > 0 ? Math.min(...validRows.map((r) => r.length)) : 0;
   if (mCount < 2 || sCount < 4) {
     return {
       pbo: 0.08,
@@ -570,13 +645,19 @@ export function calculateCombinatorialPurgedPbo(
     const oosScores: number[] = new Array(mCount).fill(0);
 
     for (let m = 0; m < mCount; m++) {
-      const row = strategyByFoldPerf[m]!;
+      const row = validRows[m]!;
       let trS = 0;
-      for (const s of trainSet) trS += row[s] ?? 0;
+      for (const s of trainSet) {
+        const val = row[s];
+        trS += Number.isFinite(val) ? Math.max(-50, Math.min(50, val!)) : 0;
+      }
       isScores[m] = trS / Math.max(1, trainSet.length);
 
       let teS = 0;
-      for (const s of testSet) teS += row[s] ?? 0;
+      for (const s of testSet) {
+        const val = row[s];
+        teS += Number.isFinite(val) ? Math.max(-50, Math.min(50, val!)) : 0;
+      }
       oosScores[m] = teS / Math.max(1, testSet.length);
     }
 
@@ -600,18 +681,19 @@ export function calculateCombinatorialPurgedPbo(
     // High omegaBar (> 0.5) means IS winner performed above OOS median -> negativeoverfit logit
     const overfitRank = 1 - omegaBar;
     const lambda = Math.log(overfitRank / (1 - overfitRank));
-    logits.push(lambda);
+    logits.push(Number.isFinite(lambda) ? lambda : 0);
     if (omegaBar < 0.5) underMedianCount++;
   }
 
   logits.sort((a, b) => a - b);
   const medianLogit = logits.length > 0 ? logits[Math.floor(logits.length / 2)]! : -2.0;
   const pbo = trainCombos.length > 0 ? underMedianCount / trainCombos.length : 0;
-  const retention = isSum > 1e-6 ? Math.max(0, Math.min(120, Math.round((oosSum / isSum) * 100))) : 90;
+  const rawRetention = isSum > 1e-6 && Number.isFinite(oosSum / isSum) ? (oosSum / isSum) * 100 : 90;
+  const retention = Math.max(0, Math.min(120, Math.round(rawRetention)));
 
   return {
-    pbo: Number(pbo.toFixed(3)),
-    medianLogit: Number(medianLogit.toFixed(3)),
+    pbo: Number((Number.isFinite(pbo) ? pbo : 0).toFixed(3)),
+    medianLogit: Number((Number.isFinite(medianLogit) ? medianLogit : -2.0).toFixed(3)),
     oosSharpeRetentionPct: retention,
     combinationsEvaluated: trainCombos.length,
     isOverfit: pbo >= 0.25,

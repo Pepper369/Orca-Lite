@@ -98,17 +98,23 @@ export function calculateHRP(
   }
 
   // Derive correlation matrix if not supplied
-  const corr: number[][] = corrMatrix || [];
-  if (!corrMatrix) {
-    const stds = symbols.map((_, i) => Math.sqrt(Math.max(1e-8, covMatrix[i][i])));
-    for (let i = 0; i < n; i++) {
-      corr[i] = [];
-      for (let j = 0; j < n; j++) {
-        if (i === j) corr[i][j] = 1.0;
-        else {
-          const val = covMatrix[i][j] / (stds[i] * stds[j]);
-          corr[i][j] = Math.max(-1.0, Math.min(1.0, isNaN(val) ? 0 : val));
-        }
+  const safeCov = (i: number, j: number): number => {
+    const v = covMatrix[i]?.[j];
+    if (i === j) return Number.isFinite(v) && v! > 1e-8 ? v! : 1e-8;
+    return Number.isFinite(v) ? v! : 0;
+  };
+  const corr: number[][] = [];
+  const stds = symbols.map((_, i) => Math.sqrt(safeCov(i, i)));
+  for (let i = 0; i < n; i++) {
+    corr[i] = [];
+    for (let j = 0; j < n; j++) {
+      if (i === j) {
+        corr[i][j] = 1.0;
+      } else if (corrMatrix && Number.isFinite(corrMatrix[i]?.[j])) {
+        corr[i][j] = Math.max(-1.0, Math.min(1.0, corrMatrix[i]![j]!));
+      } else {
+        const val = safeCov(i, j) / Math.max(1e-12, stds[i]! * stds[j]!);
+        corr[i][j] = Math.max(-1.0, Math.min(1.0, Number.isFinite(val) ? val : 0));
       }
     }
   }
@@ -118,7 +124,8 @@ export function calculateHRP(
   for (let i = 0; i < n; i++) {
     dist[i] = [];
     for (let j = 0; j < n; j++) {
-      dist[i][j] = Math.sqrt(Math.max(0, 0.5 * (1.0 - corr[i][j])));
+      const r = Number.isFinite(corr[i]?.[j]) ? corr[i]![j]! : 0;
+      dist[i][j] = Math.sqrt(Math.max(0, 0.5 * (1.0 - r)));
     }
   }
 
@@ -181,19 +188,19 @@ export function calculateHRP(
   const weightsArray = new Array<number>(n).fill(1.0);
 
   function getClusterVariance(indices: number[]): number {
-    if (indices.length === 1) return covMatrix[indices[0]][indices[0]];
+    if (indices.length === 1) return safeCov(indices[0]!, indices[0]!);
     // Inverse-variance allocation inside cluster
-    const invVars = indices.map((idx) => 1.0 / Math.max(1e-8, covMatrix[idx][idx]));
-    const sumInv = invVars.reduce((a, b) => a + b, 0);
+    const invVars = indices.map((idx) => 1.0 / safeCov(idx, idx));
+    const sumInv = Math.max(1e-12, invVars.reduce((a, b) => a + b, 0));
     const subW = invVars.map((v) => v / sumInv);
 
     let v = 0;
     for (let i = 0; i < indices.length; i++) {
       for (let j = 0; j < indices.length; j++) {
-        v += subW[i] * subW[j] * covMatrix[indices[i]][indices[j]];
+        v += subW[i]! * subW[j]! * safeCov(indices[i]!, indices[j]!);
       }
     }
-    return Math.max(1e-8, v);
+    return Number.isFinite(v) && v > 1e-8 ? v : 1e-8;
   }
 
   function recursiveBisection(items: number[]) {
@@ -206,7 +213,9 @@ export function calculateHRP(
     const varLeft = getClusterVariance(leftItems);
     const varRight = getClusterVariance(rightItems);
 
-    const alpha = 1.0 - varLeft / (varLeft + varRight);
+    const denom = varLeft + varRight;
+    const rawAlpha = denom > 0 && Number.isFinite(denom) ? 1.0 - varLeft / denom : 0.5;
+    const alpha = Number.isFinite(rawAlpha) ? Math.max(0, Math.min(1, rawAlpha)) : 0.5;
 
     for (const idx of leftItems) weightsArray[idx] *= alpha;
     for (const idx of rightItems) weightsArray[idx] *= 1.0 - alpha;
@@ -218,10 +227,12 @@ export function calculateHRP(
   recursiveBisection(orderedIndices);
 
   // Normalize weights
-  const sumW = weightsArray.reduce((a, b) => a + b, 0);
+  const rawSumW = weightsArray.reduce((a, b) => a + (Number.isFinite(b) && b >= 0 ? b : 0), 0);
+  const sumW = rawSumW > 1e-12 ? rawSumW : n;
   const weights: Record<string, number> = {};
   for (let i = 0; i < n; i++) {
-    weights[symbols[i]] = Number((weightsArray[i] / sumW).toFixed(4));
+    const wVal = rawSumW > 1e-12 && Number.isFinite(weightsArray[i]) ? weightsArray[i]! / sumW : 1.0 / n;
+    weights[symbols[i]!] = Number(wVal.toFixed(4));
   }
 
   return {
@@ -254,11 +265,16 @@ export interface OUResult {
  * Solved via discrete AR(1) OLS regression: (S_t - S_{t-1}) = a + b * S_{t-1} + e
  */
 export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): OUResult {
-  const n = series.length;
+  const cleanSeries = (Array.isArray(series) ? series : []).filter(
+    (v) => Number.isFinite(v) && Math.abs(v) < 1e15,
+  );
+  const safeDt = Number.isFinite(dt) && dt > 1e-6 ? Math.min(1e6, dt) : 1.0;
+  const n = cleanSeries.length;
   if (n < 5) {
+    const fallbackMu = n > 0 ? Number(cleanSeries[n - 1]!.toFixed(2)) : 0;
     return {
       theta: 0,
-      mu: series[n - 1] || 0,
+      mu: fallbackMu,
       sigma: 0,
       halfLife: Infinity,
       currentZScore: 0,
@@ -275,8 +291,8 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   const count = n - 1;
 
   for (let i = 1; i < n; i++) {
-    const x = series[i - 1];
-    const y = series[i] - series[i - 1];
+    const x = cleanSeries[i - 1]!;
+    const y = cleanSeries[i]! - cleanSeries[i - 1]!;
     sumX += x;
     sumY += y;
     sumXY += x * y;
@@ -284,10 +300,10 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   }
 
   const denominator = count * sumX2 - sumX * sumX;
-  if (Math.abs(denominator) < 1e-12) {
+  if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-12) {
     return {
       theta: 0,
-      mu: series[n - 1],
+      mu: Number(cleanSeries[n - 1]!.toFixed(2)),
       sigma: 0,
       halfLife: Infinity,
       currentZScore: 0,
@@ -303,37 +319,51 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   // Discrete AR(1) coefficient phi = 1 + b = exp(-theta * dt) MUST lie strictly in (0, 1), i.e., -1 < b < 0.
   // Negative AR(1) roots (-2 < b <= -1, phi <= 0) oscillate sign every bar and cannot come from an OU process.
   const rawPhi = 1.0 + b;
-  const isStationary = b < -1e-5 && b > -1.0 && rawPhi > 1e-4 && rawPhi < 1.0;
+  const isStationary =
+    Number.isFinite(b) &&
+    Number.isFinite(a) &&
+    b < -1e-5 &&
+    b > -1.0 &&
+    rawPhi > 1e-4 &&
+    rawPhi < 1.0;
   const phi = isStationary ? rawPhi : 1.0;
-  const theta = isStationary ? -Math.log(phi) / dt : 0;
-  const rawMu = isStationary ? -a / b : series[n - 1];
-  const lastPrice = series[n - 1];
+  const theta = isStationary ? -Math.log(phi) / safeDt : 0;
+  const lastPrice = cleanSeries[n - 1]!;
+  const rawMu = isStationary ? -a / b : lastPrice;
+  const loBound = Math.min(lastPrice * 0.2, lastPrice * 5.0);
+  const hiBound = Math.max(lastPrice * 0.2, lastPrice * 5.0);
   const mu = Number.isFinite(rawMu)
-    ? Math.max(lastPrice * 0.2, Math.min(lastPrice * 5.0, rawMu))
+    ? lastPrice === 0
+      ? Math.max(-1e9, Math.min(1e9, rawMu))
+      : Math.max(loBound, Math.min(hiBound, rawMu))
     : lastPrice;
   const halfLife = isStationary && theta > 0 ? Number((Math.log(2.0) / theta).toFixed(2)) : Infinity;
 
   // Compute residuals variance
   let resSumSq = 0;
   for (let i = 1; i < n; i++) {
-    const x = series[i - 1];
-    const y = series[i] - series[i - 1];
+    const x = cleanSeries[i - 1]!;
+    const y = cleanSeries[i]! - cleanSeries[i - 1]!;
     const pred = a + b * x;
     resSumSq += (y - pred) ** 2;
   }
   const dof = Math.max(1, count - 2);
-  const resVar = resSumSq / dof;
-  const sigma =
-    isStationary && theta > 0
-      ? Math.sqrt(Math.max(1e-8, (resVar * 2 * theta) / (1 - Math.exp(-2 * theta * dt))))
+  const rawResVar = resSumSq / dof;
+  const resVar = Number.isFinite(rawResVar) && rawResVar >= 0 ? rawResVar : 0;
+  const denomExp = 1 - Math.exp(-2 * theta * safeDt);
+  const rawSigma =
+    isStationary && theta > 0 && denomExp > 1e-12
+      ? Math.sqrt(Math.max(1e-8, (resVar * 2 * theta) / denomExp))
       : Math.sqrt(Math.max(1e-8, resVar));
+  const sigma = Number.isFinite(rawSigma) ? rawSigma : 0;
   const eqStd =
-    isStationary && theta > 0
+    isStationary && theta > 0 && sigma > 0
       ? sigma / Math.sqrt(2 * theta)
       : Math.sqrt(Math.max(1e-8, resVar));
 
-  const currentVal = series[n - 1];
-  const currentZScore = eqStd > 0 ? Number(((currentVal - mu) / eqStd).toFixed(2)) : 0;
+  const currentVal = cleanSeries[n - 1]!;
+  const rawZ = eqStd > 0 && Number.isFinite(eqStd) ? (currentVal - mu) / eqStd : 0;
+  const currentZScore = Number.isFinite(rawZ) ? Number(Math.max(-50, Math.min(50, rawZ)).toFixed(2)) : 0;
 
   let actionRecommendation: OUResult["actionRecommendation"] = "MEAN_REVERTED_NEUTRAL";
   if (!isStationary || halfLife > 60) {
@@ -345,9 +375,9 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   }
 
   return {
-    theta: Number(theta.toFixed(4)),
-    mu: Number(mu.toFixed(2)),
-    sigma: Number(sigma.toFixed(4)),
+    theta: Number((Number.isFinite(theta) ? theta : 0).toFixed(4)),
+    mu: Number((Number.isFinite(mu) ? mu : 0).toFixed(2)),
+    sigma: Number((Number.isFinite(sigma) ? sigma : 0).toFixed(4)),
     halfLife,
     currentZScore,
     isStationary,
@@ -406,18 +436,25 @@ export function calculateAlmgrenChrissExecution(
     currentPrice,
   } = params;
 
-  const X = totalShares;
-  const T = totalTimeHours;
-  const N = Math.max(2, intervalsCount);
+  const X = Number.isFinite(totalShares) && totalShares > 0 ? Math.min(1e12, Math.round(totalShares)) : 0;
+  const T = Number.isFinite(totalTimeHours) && totalTimeHours > 1e-4 ? Math.min(1e4, totalTimeHours) : 1.0;
+  const N = Number.isFinite(intervalsCount)
+    ? Math.max(2, Math.min(500, Math.floor(intervalsCount)))
+    : 2;
   const dt = T / N;
+  const safePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? Math.min(1e12, currentPrice) : 0;
 
-  const sigmaDaily = dailyVolatilityPct / 100;
+  const safeVolPct = Number.isFinite(dailyVolatilityPct) && dailyVolatilityPct >= 0
+    ? Math.min(500, dailyVolatilityPct)
+    : 2.0;
+  const sigmaDaily = safeVolPct / 100;
   const sigmaPerHour = sigmaDaily / Math.sqrt(4.5); // 4.5 trading hours/day
-  const eta = Math.max(1e-8, tempImpactFactor);
-  const lambda = Math.max(0, riskAversion);
+  const eta = Number.isFinite(tempImpactFactor) && tempImpactFactor > 1e-8 ? tempImpactFactor : 1e-8;
+  const lambda = Number.isFinite(riskAversion) && riskAversion > 0 ? Math.min(1e6, riskAversion) : 0;
 
   // Urgency parameter kappa = sqrt(lambda * sigma^2 / eta)
-  const kappa = Math.sqrt((lambda * sigmaPerHour * sigmaPerHour) / eta);
+  const rawKappa = Math.sqrt((lambda * sigmaPerHour * sigmaPerHour) / eta);
+  const kappa = Number.isFinite(rawKappa) ? Math.min(1000, Math.max(0, rawKappa)) : 0;
   const halfLifeHours = kappa > 0 ? Math.log(2.0) / kappa : T / 2;
 
   const schedule: ExecutionSlice[] = [];
@@ -425,21 +462,29 @@ export function calculateAlmgrenChrissExecution(
 
   let prevX = X;
   let prevTwapX = X;
-  const twapSlice = X / N;
 
   for (let j = 0; j <= N; j++) {
     const t = j * dt;
     let x_j: number;
 
-    if (kappa < 1e-4) {
+    if (j === N) {
+      x_j = 0;
+    } else if (kappa < 1e-4) {
       // Linear TWAP limit as kappa -> 0
       x_j = X * (1.0 - t / T);
+    } else if (kappa * T > 50) {
+      // Asymptotic exponential form when sinh(kappa * T) would overflow IEEE-754 double
+      x_j = X * Math.exp(-kappa * t);
     } else {
-      x_j = X * (Math.sinh(kappa * (T - t)) / Math.sinh(kappa * T));
+      const denomSinh = Math.sinh(kappa * T);
+      const ratio = denomSinh > 0 && Number.isFinite(denomSinh)
+        ? Math.sinh(kappa * (T - t)) / denomSinh
+        : 1.0 - t / T;
+      x_j = X * (Number.isFinite(ratio) ? ratio : 0);
     }
-    x_j = Math.max(0, Math.round(x_j));
+    x_j = Math.max(0, Math.min(prevX, Math.round(x_j)));
 
-    const twapX_j = Math.max(0, Math.round(X * (1.0 - t / T)));
+    const twapX_j = j === N ? 0 : Math.max(0, Math.min(prevTwapX, Math.round(X * (1.0 - t / T))));
 
     if (j > 0) {
       const tradeAC = prevX - x_j;
@@ -454,7 +499,7 @@ export function calculateAlmgrenChrissExecution(
         timeLabel,
         sharesRemaining: x_j,
         sharesToTrade: tradeAC,
-        pctOfTotal: Number(((tradeAC / X) * 100).toFixed(1)),
+        pctOfTotal: X > 0 ? Number(((tradeAC / X) * 100).toFixed(1)) : 0,
       });
 
       twapComparison.push({
@@ -462,7 +507,7 @@ export function calculateAlmgrenChrissExecution(
         timeLabel,
         sharesRemaining: twapX_j,
         sharesToTrade: tradeTWAP,
-        pctOfTotal: Number(((tradeTWAP / X) * 100).toFixed(1)),
+        pctOfTotal: X > 0 ? Number(((tradeTWAP / X) * 100).toFixed(1)) : 0,
       });
     }
 
@@ -471,12 +516,13 @@ export function calculateAlmgrenChrissExecution(
   }
 
   // Impact cost estimate
-  const expectedImpactCostVnd = Math.round(
-    schedule.reduce((sum, s) => sum + eta * s.sharesToTrade * s.sharesToTrade * currentPrice, 0)
+  const rawImpactCost = schedule.reduce(
+    (sum, s) => sum + eta * s.sharesToTrade * s.sharesToTrade * safePrice,
+    0,
   );
-  const timingRiskVnd = Math.round(
-    0.5 * lambda * sigmaPerHour * sigmaPerHour * currentPrice * X * dt
-  );
+  const expectedImpactCostVnd = Number.isFinite(rawImpactCost) ? Math.round(rawImpactCost) : 0;
+  const rawTimingRisk = 0.5 * lambda * sigmaPerHour * sigmaPerHour * safePrice * X * dt;
+  const timingRiskVnd = Number.isFinite(rawTimingRisk) ? Math.round(rawTimingRisk) : 0;
 
   let urgencyType: AlmgrenChrissResult["summary"]["urgencyType"] = "LINEAR_TWAP";
   if (kappa > 0.8) urgencyType = "AGGRESSIVE_FRONT_LOADED";
@@ -484,7 +530,7 @@ export function calculateAlmgrenChrissExecution(
 
   return {
     kappa: Number(kappa.toFixed(4)),
-    halfLifeHours: Number(halfLifeHours.toFixed(2)),
+    halfLifeHours: Number((Number.isFinite(halfLifeHours) ? halfLifeHours : T / 2).toFixed(2)),
     schedule,
     twapComparison,
     summary: {
@@ -531,27 +577,34 @@ export function calculateDeflatedSharpeRatio(params: DSRParams): DSRResult {
     varSharpeEstimates = 0.25,
   } = params;
 
-  const N = Math.max(1, trialsCount);
-  const T = Math.max(10, sampleLengthBars);
+  const safeSr = Number.isFinite(observedSharpe) ? Math.max(-50, Math.min(50, observedSharpe)) : 0;
+  const N = Number.isFinite(trialsCount) ? Math.max(1, Math.min(1e9, Math.floor(trialsCount))) : 1;
+  const T = Number.isFinite(sampleLengthBars) ? Math.max(10, Math.min(1e9, Math.floor(sampleLengthBars))) : 10;
+  const safeSkew = Number.isFinite(skewness) ? Math.max(-20, Math.min(20, skewness)) : 0;
+  const safeKurt = Number.isFinite(kurtosis) ? Math.max(1.0, Math.min(100, kurtosis)) : 3.0;
+  const safeVarSr = Number.isFinite(varSharpeEstimates) && varSharpeEstimates >= 0
+    ? Math.min(100, varSharpeEstimates)
+    : 0.25;
   const gammaEuler = 0.5772156649; // Euler-Mascheroni constant
 
   // Expected Maximum Sharpe Ratio under Null Hypothesis (annualized scale)
   let srStar = 0;
   if (N > 1) {
     const sqrt2LnN = Math.sqrt(2.0 * Math.log(N));
-    srStar = Math.sqrt(varSharpeEstimates) * (sqrt2LnN + gammaEuler / sqrt2LnN);
+    srStar = Math.sqrt(safeVarSr) * (sqrt2LnN + gammaEuler / sqrt2LnN);
   }
 
   // Convert annualized Sharpe ratios to per-bar frequency (SR_bar = SR_annual / sqrt(252))
   // to match daily sample length T in Bailey & López de Prado (2014) Eq. (11)
   const sqrtAnnual = Math.sqrt(252);
-  const srBar = observedSharpe / sqrtAnnual;
+  const srBar = safeSr / sqrtAnnual;
   const srStarBar = srStar / sqrtAnnual;
 
   // Standard Error of per-bar Sharpe Ratio under non-normality:
   // SE(SR_bar) = sqrt((1 - skew * SR_bar + ((kurt - 1) / 4) * SR_bar^2) / (T - 1))
-  const varianceFactor =
-    1.0 - skewness * srBar + ((kurtosis - 1.0) / 4.0) * (srBar * srBar);
+  const rawVarFactor =
+    1.0 - safeSkew * srBar + ((safeKurt - 1.0) / 4.0) * (srBar * srBar);
+  const varianceFactor = Number.isFinite(rawVarFactor) && rawVarFactor > 1e-6 ? rawVarFactor : 1e-6;
   const seSrBar = Math.sqrt(Math.max(1e-8, varianceFactor / (T - 1)));
 
   // Test statistic Z = (SR_hat_bar - SR*_bar) / SE(SR_bar)
@@ -559,10 +612,10 @@ export function calculateDeflatedSharpeRatio(params: DSRParams): DSRResult {
   const dsr = normCdf(z);
   const pValue = 1.0 - dsr;
 
-  const haircutPct = observedSharpe > 0 ? Math.min(100, Math.max(0, ((observedSharpe - srStar) / observedSharpe) * 100)) : 0;
+  const haircutPct = safeSr > 0 ? Math.min(100, Math.max(0, ((safeSr - srStar) / safeSr) * 100)) : 0;
 
   return {
-    observedSharpe: Number(observedSharpe.toFixed(2)),
+    observedSharpe: Number(safeSr.toFixed(2)),
     expectedMaxSharpeNull: Number(srStar.toFixed(2)),
     deflatedSharpeRatio: Number(dsr.toFixed(4)),
     isStatisticallySignificant: dsr >= 0.95,
@@ -604,19 +657,25 @@ export function calculateTripleBarrierLevels(
   slMultiplier: number = 2.0,
   maxBars: number = 10
 ): TripleBarrierLevels {
-  const dynamicVolatility = Math.max(1.0, atrPct);
-  const targetReturnPct = Number((ptMultiplier * dynamicVolatility).toFixed(1));
-  const stopLossReturnPct = Number((slMultiplier * dynamicVolatility).toFixed(1));
+  const safePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : 1.0;
+  const safeAtr = Number.isFinite(atrPct) && atrPct > 0 ? Math.min(200, atrPct) : 1.0;
+  const safePt = Number.isFinite(ptMultiplier) && ptMultiplier > 0 ? Math.min(50, ptMultiplier) : 3.0;
+  const safeSl = Number.isFinite(slMultiplier) && slMultiplier > 0 ? Math.min(50, slMultiplier) : 2.0;
+  const safeBars = Number.isFinite(maxBars) && maxBars >= 1 ? Math.min(1000, Math.floor(maxBars)) : 10;
 
-  const upperBarrierPrice = roundBarrierPrice(currentPrice * (1.0 + targetReturnPct / 100));
-  const lowerBarrierPrice = roundBarrierPrice(currentPrice * (1.0 - stopLossReturnPct / 100));
+  const dynamicVolatility = Math.max(1.0, safeAtr);
+  const targetReturnPct = Number((safePt * dynamicVolatility).toFixed(1));
+  const stopLossReturnPct = Math.max(0.1, Number((safeSl * dynamicVolatility).toFixed(1)));
+
+  const upperBarrierPrice = roundBarrierPrice(safePrice * (1.0 + targetReturnPct / 100));
+  const lowerBarrierPrice = roundBarrierPrice(Math.max(1e-8, safePrice * (1.0 - Math.min(99, stopLossReturnPct) / 100)));
   const riskRewardRatio = Number((targetReturnPct / stopLossReturnPct).toFixed(2));
 
   return {
-    currentPrice,
+    currentPrice: safePrice,
     upperBarrierPrice,
     lowerBarrierPrice,
-    verticalBarrierBars: maxBars,
+    verticalBarrierBars: safeBars,
     targetReturnPct,
     stopLossReturnPct,
     riskRewardRatio,
@@ -642,7 +701,10 @@ export interface RiskMetricsResult {
  * Computes parametric, historical, and Cornish-Fisher non-Gaussian VaR.
  */
 export function calculateVaRAndCVaR(returns: number[]): RiskMetricsResult {
-  const n = returns.length;
+  const cleanReturns = (Array.isArray(returns) ? returns : [])
+    .filter((r) => Number.isFinite(r))
+    .map((r) => Math.max(-0.9999, Math.min(10.0, r)));
+  const n = cleanReturns.length;
   if (n < 5) {
     return {
       var95Pct: 2.5,
@@ -656,24 +718,26 @@ export function calculateVaRAndCVaR(returns: number[]): RiskMetricsResult {
   }
 
   // Mean & Std
-  const mean = returns.reduce((a, b) => a + b, 0) / n;
-  const variance = returns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (n - 1);
-  const std = Math.sqrt(variance);
+  const mean = cleanReturns.reduce((a, b) => a + b, 0) / n;
+  const variance = cleanReturns.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (n - 1);
+  const std = Number.isFinite(variance) && variance > 1e-16 ? Math.sqrt(variance) : 0;
 
   // Skewness & Kurtosis
-  const m3 = returns.reduce((sum, r) => sum + (r - mean) ** 3, 0) / n;
-  const m4 = returns.reduce((sum, r) => sum + (r - mean) ** 4, 0) / n;
-  const skewness = std > 0 ? m3 / (std ** 3) : 0;
-  const kurtosis = std > 0 ? m4 / (std ** 4) : 3;
+  const m3 = cleanReturns.reduce((sum, r) => sum + (r - mean) ** 3, 0) / n;
+  const m4 = cleanReturns.reduce((sum, r) => sum + (r - mean) ** 4, 0) / n;
+  const rawSkew = std > 1e-12 ? m3 / (std ** 3) : 0;
+  const rawKurt = std > 1e-12 ? m4 / (std ** 4) : 3;
+  const skewness = Number.isFinite(rawSkew) ? Math.max(-20, Math.min(20, rawSkew)) : 0;
+  const kurtosis = Number.isFinite(rawKurt) ? Math.max(1, Math.min(100, rawKurt)) : 3;
 
   // Sorted returns for historical VaR/CVaR with linear quantile interpolation & non-negative loss clamp
-  const sorted = [...returns].sort((a, b) => a - b);
+  const sorted = [...cleanReturns].sort((a, b) => a - b);
   const interpQuantile = (alpha: number): number => {
     const pos = alpha * (n - 1);
     const lo = Math.floor(pos);
     const hi = Math.min(n - 1, lo + 1);
     const frac = pos - lo;
-    return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+    return sorted[lo]! * (1 - frac) + sorted[hi]! * frac;
   };
 
   const q05 = interpQuantile(0.05);
@@ -699,7 +763,8 @@ export function calculateVaRAndCVaR(returns: number[]): RiskMetricsResult {
     ((z05 ** 2 - 1) * skewness) / 6.0 +
     ((z05 ** 3 - 3 * z05) * (kurtosis - 3.0)) / 24.0 -
     ((2 * z05 ** 3 - 5 * z05) * (skewness ** 2)) / 36.0;
-  const cfVaR95 = Math.max(0, -(mean + zCf * std));
+  const rawCfVaR95 = -(mean + zCf * std);
+  const cfVaR95 = Number.isFinite(rawCfVaR95) ? Math.max(0, rawCfVaR95) : histVaR95;
 
   return {
     var95Pct: Number((histVaR95 * 100).toFixed(2)),
@@ -733,20 +798,27 @@ export function computeEmpiricalShrinkageCovariance(
   fallbackDailyVols?: number[],
   shrinkageAlpha = 0.25,
 ): EmpiricalCovarianceResult {
-  const n = returnsByAsset.length;
+  const n = Array.isArray(returnsByAsset) ? returnsByAsset.length : 0;
   if (n === 0) {
     return { covMatrix: [], isEmpirical: false, sampleLength: 0, shrinkageIntensity: 1 };
   }
 
-  const validLengths = returnsByAsset.map((s) => s.length);
+  const sanitizedSeries = returnsByAsset.map((s) =>
+    (Array.isArray(s) ? s : [])
+      .filter((r) => Number.isFinite(r))
+      .map((r) => Math.max(-0.9999, Math.min(10.0, r))),
+  );
+  const validLengths = sanitizedSeries.map((s) => s.length);
   const minLen = Math.min(...validLengths);
-  const alpha = Math.max(0, Math.min(1, shrinkageAlpha));
+  const alpha = Number.isFinite(shrinkageAlpha) ? Math.max(0, Math.min(1, shrinkageAlpha)) : 0.25;
 
   if (minLen < 12) {
     const diagCov: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
     for (let i = 0; i < n; i++) {
-      const s = returnsByAsset[i] ?? [];
-      let v = Math.max(1e-4, fallbackDailyVols?.[i] ?? 0.025) ** 2;
+      const s = sanitizedSeries[i] ?? [];
+      const fbVol = fallbackDailyVols?.[i];
+      const safeFbVol = Number.isFinite(fbVol) && fbVol! > 1e-4 ? Math.min(5.0, fbVol!) : 0.025;
+      let v = safeFbVol ** 2;
       if (s.length >= 5) {
         const mean = s.reduce((a, b) => a + b, 0) / s.length;
         const empVar = s.reduce((sum, r) => sum + (r - mean) ** 2, 0) / Math.max(1, s.length - 1);
@@ -762,7 +834,7 @@ export function computeEmpiricalShrinkageCovariance(
     };
   }
 
-  const aligned = returnsByAsset.map((s) => s.slice(-minLen));
+  const aligned = sanitizedSeries.map((s) => s.slice(-minLen));
   const means = aligned.map((s) => s.reduce((a, b) => a + b, 0) / minLen);
 
   // Sample covariance matrix S
@@ -774,7 +846,8 @@ export function computeEmpiricalShrinkageCovariance(
       for (let t = 0; t < minLen; t++) {
         sum += (aligned[i]![t]! - means[i]!) * (aligned[j]![t]! - means[j]!);
       }
-      const cov = sum / Math.max(1, minLen - 1);
+      const rawCov = sum / Math.max(1, minLen - 1);
+      const cov = Number.isFinite(rawCov) ? rawCov : 0;
       sampleCov[i]![j] = cov;
       sampleCov[j]![i] = cov;
     }
@@ -787,7 +860,8 @@ export function computeEmpiricalShrinkageCovariance(
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       const c = sampleCov[i]![j]! / Math.max(1e-8, vols[i]! * vols[j]!);
-      corrSum += Math.max(-0.99, Math.min(0.99, c));
+      const safeC = Number.isFinite(c) ? c : 0;
+      corrSum += Math.max(-0.99, Math.min(0.99, safeC));
       corrPairs++;
     }
   }
@@ -797,7 +871,8 @@ export function computeEmpiricalShrinkageCovariance(
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
       const target = i === j ? Math.max(1e-8, sampleCov[i]![i]!) : avgCorr * vols[i]! * vols[j]!;
-      shrunkCov[i]![j] = (1 - alpha) * sampleCov[i]![j]! + alpha * target;
+      const val = (1 - alpha) * sampleCov[i]![j]! + alpha * target;
+      shrunkCov[i]![j] = Number.isFinite(val) ? (i === j ? Math.max(1e-8, val) : val) : (i === j ? 1e-8 : 0);
     }
   }
 
@@ -819,22 +894,24 @@ export function computeEmpiricalShrinkageCovariance(
  * Captures heavy tails (kurtosis > 3) in intraday FX, Crypto, and Equity returns.
  */
 export function studentTCdf(t: number, nu = 5): number {
+  if (Number.isNaN(t)) return 0.5;
   if (!Number.isFinite(t)) return t > 0 ? 1 : 0;
-  const df = Math.max(2.5, Math.min(200, nu));
+  const safeNu = Number.isFinite(nu) ? nu : 5;
+  const df = Math.max(2.5, Math.min(200, safeNu));
   if (df >= 120) return normCdf(t);
 
   // Hill's (1970) / Peizer-Pratt Cornish-Fisher normal mapping for Student-t quantile -> CDF
   // Accurate to < 1e-4 across the entire tail (|t| up to 12) without iterative beta divergence
-  const absT = Math.abs(t);
+  const absT = Math.min(1e6, Math.abs(t));
   const a = df - 0.5;
   const b = 48 * a * a;
   const z2 = a * Math.log1p((absT * absT) / df);
-  const z = Math.sqrt(z2);
+  const z = Math.sqrt(Math.max(0, z2));
   const zCorr =
     z +
     ((z ** 3 + 3 * z) / b) -
     ((4 * z ** 7 + 33 * z ** 5 + 240 * z ** 3 + 855 * z) / (10 * b * b + 8 * b * z ** 4 + 1000 * b));
-  const tailProb = 1 - normCdf(Math.max(0, zCorr));
+  const tailProb = 1 - normCdf(Math.max(0, Number.isFinite(zCorr) ? zCorr : z));
   return t >= 0 ? 1 - tailProb : tailProb;
 }
 
@@ -842,14 +919,18 @@ export function studentTCdf(t: number, nu = 5): number {
  * Estimates empirical tail degrees of freedom `nu` in [4, 30] from sample excess kurtosis.
  */
 export function estimateTailDegreesOfFreedom(returns: number[], fallbackNu = 5): number {
-  const valid = returns.filter((r) => Number.isFinite(r));
+  const safeFallback = Number.isFinite(fallbackNu) ? Math.max(3.5, Math.min(30, fallbackNu)) : 5;
+  const valid = (Array.isArray(returns) ? returns : []).filter(
+    (r) => Number.isFinite(r) && Math.abs(r) < 1e6,
+  );
   const n = valid.length;
-  if (n < 15) return fallbackNu;
+  if (n < 15) return Number(safeFallback.toFixed(2));
   const mean = valid.reduce((a, b) => a + b, 0) / n;
   const variance = valid.reduce((s, r) => s + (r - mean) ** 2, 0) / Math.max(1, n - 1);
-  if (variance <= 1e-14) return 15;
+  if (!Number.isFinite(variance) || variance <= 1e-14) return 15;
   const std = Math.sqrt(variance);
   const m4 = valid.reduce((s, r) => s + ((r - mean) / std) ** 4, 0) / n;
+  if (!Number.isFinite(m4)) return Number(safeFallback.toFixed(2));
   const excessKurt = Math.max(0, m4 - 3);
   if (excessKurt <= 0.15) return 25;
   // For Student-t(nu), excess kurtosis = 6 / (nu - 4) -> nu = 4 + 6 / excessKurt
@@ -873,6 +954,28 @@ export interface YangZhangVolatilityResult {
   volRatio: number; // Current short-window YZ vol vs baseline YZ vol
 }
 
+function sanitizeOhlcBars(bars: OhlcBarLike[]): OhlcBarLike[] {
+  if (!Array.isArray(bars)) return [];
+  const valid: OhlcBarLike[] = [];
+  for (const b of bars) {
+    if (!b || !Number.isFinite(b.close) || b.close <= 0) continue;
+    const c = Math.max(1e-8, Math.min(1e12, b.close));
+    const o = Number.isFinite(b.open) && b.open > 0 ? Math.max(1e-8, Math.min(1e12, b.open)) : c;
+    const rawH = Number.isFinite(b.high) && b.high > 0 ? Math.max(1e-8, Math.min(1e12, b.high)) : Math.max(o, c);
+    const rawL = Number.isFinite(b.low) && b.low > 0 ? Math.max(1e-8, Math.min(1e12, b.low)) : Math.min(o, c);
+    const h = Math.max(o, c, rawH, rawL);
+    const l = Math.min(o, c, rawH, rawL);
+    valid.push({
+      open: o,
+      high: h,
+      low: Math.max(1e-8, l),
+      close: c,
+      volume: Number.isFinite(b.volume) && (b.volume ?? 0) >= 0 ? b.volume : 0,
+    });
+  }
+  return valid;
+}
+
 /**
  * Minimum-variance unbiased Yang-Zhang (2000) OHLC Volatility Estimator.
  * Accounts for overnight opening jumps + intraday Rogers-Satchell drift-independent range variance.
@@ -882,11 +985,15 @@ export function computeYangZhangVolatility(
   window = 20,
   annualizePeriods = 252,
 ): YangZhangVolatilityResult {
-  const n = bars.length;
+  const cleanBars = sanitizeOhlcBars(bars);
+  const safeAnn = Number.isFinite(annualizePeriods) && annualizePeriods > 0
+    ? Math.min(1e6, annualizePeriods)
+    : 252;
+  const n = cleanBars.length;
   if (n < 4) {
     return {
       dailyVol: 0.015,
-      annualizedVol: Number((0.015 * Math.sqrt(annualizePeriods)).toFixed(4)),
+      annualizedVol: Number((0.015 * Math.sqrt(safeAnn)).toFixed(4)),
       overnightVol: 0.005,
       rogersSatchellVol: 0.012,
       volRatio: 1.0,
@@ -901,18 +1008,19 @@ export function computeYangZhangVolatility(
     let rsSum = 0;
 
     for (let i = 1; i < slice.length; i++) {
-      const prevC = Math.max(1e-12, slice[i - 1]!.close);
-      const o = Math.max(1e-12, slice[i]!.open);
+      const prevC = Math.max(1e-8, slice[i - 1]!.close);
+      const o = Math.max(1e-8, slice[i]!.open);
       const h = Math.max(o, slice[i]!.high);
-      const l = Math.min(o, Math.max(1e-12, slice[i]!.low));
-      const c = Math.max(1e-12, slice[i]!.close);
+      const l = Math.min(o, Math.max(1e-8, slice[i]!.low));
+      const c = Math.max(1e-8, slice[i]!.close);
 
-      oRets.push(Math.log(o / prevC));
-      cRets.push(Math.log(c / o));
+      const oLog = Math.max(-10, Math.min(10, Math.log(o / prevC)));
+      const cLog = Math.max(-10, Math.min(10, Math.log(c / o)));
+      const u = Math.max(0, Math.min(10, Math.log(h / o)));
+      const d = Math.min(0, Math.max(-10, Math.log(l / o)));
 
-      const u = Math.log(h / o);
-      const d = Math.log(l / o);
-      const cLog = Math.log(c / o);
+      oRets.push(oLog);
+      cRets.push(cLog);
       rsSum += u * (u - cLog) + d * (d - cLog);
     }
 
@@ -923,26 +1031,28 @@ export function computeYangZhangVolatility(
     const varRs = Math.max(0, rsSum / m);
 
     const k = 0.34 / (1.34 + (m + 1) / Math.max(1, m - 1));
-    const varYz = Math.max(1e-10, varO + k * varC + (1 - k) * varRs);
+    const rawVarYz = varO + k * varC + (1 - k) * varRs;
+    const varYz = Number.isFinite(rawVarYz) && rawVarYz > 1e-10 ? rawVarYz : 1e-10;
     return {
       yz: Math.sqrt(varYz),
-      on: Math.sqrt(Math.max(0, varO)),
-      rs: Math.sqrt(varRs),
+      on: Math.sqrt(Number.isFinite(varO) && varO > 0 ? varO : 0),
+      rs: Math.sqrt(Number.isFinite(varRs) && varRs > 0 ? varRs : 0),
     };
   };
 
-  const w = Math.max(3, Math.min(window, n - 1));
-  const recent = calcSliceYz(bars.slice(-(w + 1)));
+  const safeWindow = Number.isFinite(window) && window >= 3 ? Math.floor(window) : 20;
+  const w = Math.max(3, Math.min(safeWindow, n - 1));
+  const recent = calcSliceYz(cleanBars.slice(-(w + 1)));
   const baseW = Math.max(w, Math.min(60, n - 1));
-  const baseline = calcSliceYz(bars.slice(-(baseW + 1)));
+  const baseline = calcSliceYz(cleanBars.slice(-(baseW + 1)));
   const volRatio = baseline.yz > 1e-9 ? recent.yz / baseline.yz : 1.0;
 
   return {
     dailyVol: Number(recent.yz.toFixed(6)),
-    annualizedVol: Number((recent.yz * Math.sqrt(annualizePeriods)).toFixed(4)),
+    annualizedVol: Number((recent.yz * Math.sqrt(safeAnn)).toFixed(4)),
     overnightVol: Number(recent.on.toFixed(6)),
     rogersSatchellVol: Number(recent.rs.toFixed(6)),
-    volRatio: Number(volRatio.toFixed(3)),
+    volRatio: Number((Number.isFinite(volRatio) ? volRatio : 1.0).toFixed(3)),
   };
 }
 
@@ -965,11 +1075,15 @@ export function forecastHarRealizedVolatility(
   bars: OhlcBarLike[],
   annualizePeriods = 252,
 ): HarVolatilityForecast {
-  const n = bars.length;
+  const cleanBars = sanitizeOhlcBars(bars);
+  const safeAnn = Number.isFinite(annualizePeriods) && annualizePeriods > 0
+    ? Math.min(1e6, annualizePeriods)
+    : 252;
+  const n = cleanBars.length;
   if (n < 6) {
     return {
       forecastBarVolPct: 1.5,
-      forecastAnnualVolPct: Number((1.5 * Math.sqrt(annualizePeriods)).toFixed(2)),
+      forecastAnnualVolPct: Number((1.5 * Math.sqrt(safeAnn)).toFixed(2)),
       rvDailyPct: 1.5,
       rvWeeklyPct: 1.5,
       rvMonthlyPct: 1.5,
@@ -982,17 +1096,20 @@ export function forecastHarRealizedVolatility(
   const barRvs: number[] = [];
   const ln4 = 4 * Math.LN2;
   for (let i = 1; i < n; i++) {
-    const prevC = Math.max(1e-12, bars[i - 1]!.close);
-    const o = Math.max(1e-12, bars[i]!.open);
-    const h = Math.max(o, bars[i]!.high);
-    const l = Math.min(o, Math.max(1e-12, bars[i]!.low));
-    const c = Math.max(1e-12, bars[i]!.close);
+    const prevC = Math.max(1e-8, cleanBars[i - 1]!.close);
+    const o = Math.max(1e-8, cleanBars[i]!.open);
+    const h = Math.max(o, cleanBars[i]!.high);
+    const l = Math.min(o, Math.max(1e-8, cleanBars[i]!.low));
+    const c = Math.max(1e-8, cleanBars[i]!.close);
 
-    const parkVar = (Math.log(h / l) ** 2) / ln4;
-    const gapVar = Math.log(o / prevC) ** 2;
-    const ccVar = Math.log(c / prevC) ** 2;
+    const logHL = Math.max(0, Math.min(10, Math.log(h / l)));
+    const logOC = Math.max(-10, Math.min(10, Math.log(o / prevC)));
+    const logCC = Math.max(-10, Math.min(10, Math.log(c / prevC)));
+    const parkVar = (logHL ** 2) / ln4;
+    const gapVar = logOC ** 2;
+    const ccVar = logCC ** 2;
     const rv = Math.sqrt(Math.max(1e-10, 0.55 * parkVar + 0.25 * gapVar + 0.20 * ccVar));
-    barRvs.push(rv);
+    barRvs.push(Number.isFinite(rv) ? rv : 0.01);
   }
 
   const m = barRvs.length;
@@ -1013,7 +1130,8 @@ export function forecastHarRealizedVolatility(
 
   // Causal HAR weights (Corsi multi-scale persistence cascade: 0.36 short + 0.36 medium + 0.28 long)
   const forecastRv = Math.max(1e-6, 0.36 * rvD + 0.36 * rvW + 0.28 * rvM);
-  const expansionRatio = rvM > 1e-9 ? forecastRv / rvM : 1.0;
+  const rawExp = rvM > 1e-9 ? forecastRv / rvM : 1.0;
+  const expansionRatio = Number.isFinite(rawExp) ? rawExp : 1.0;
 
   let harRegime: HarVolatilityForecast["harRegime"] = "VOL_NORMAL";
   if (expansionRatio >= 1.85) harRegime = "VOL_SHOCK";
@@ -1022,7 +1140,7 @@ export function forecastHarRealizedVolatility(
 
   return {
     forecastBarVolPct: Number((forecastRv * 100).toFixed(4)),
-    forecastAnnualVolPct: Number((forecastRv * Math.sqrt(annualizePeriods) * 100).toFixed(2)),
+    forecastAnnualVolPct: Number((forecastRv * Math.sqrt(safeAnn) * 100).toFixed(2)),
     rvDailyPct: Number((rvD * 100).toFixed(4)),
     rvWeeklyPct: Number((rvW * 100).toFixed(4)),
     rvMonthlyPct: Number((rvM * 100).toFixed(4)),
@@ -1050,7 +1168,8 @@ export interface OnlineHmmRegimeResult {
  * (zero Viterbi look-ahead bias).
  */
 export function filterOnlineRegimeHmm(bars: OhlcBarLike[]): OnlineHmmRegimeResult {
-  const n = bars.length;
+  const cleanBars = sanitizeOhlcBars(bars);
+  const n = cleanBars.length;
   if (n < 12) {
     return {
       dominantState: "MEAN_REVERT_LOWVOL",
@@ -1072,8 +1191,8 @@ export function filterOnlineRegimeHmm(bars: OhlcBarLike[]): OnlineHmmRegimeResul
   const startIdx = Math.max(6, n - 48);
   const ranges: number[] = [];
   for (let i = 1; i < n; i++) {
-    const prevC = Math.max(1e-12, bars[i - 1]!.close);
-    ranges.push(Math.abs(bars[i]!.high - bars[i]!.low) / prevC);
+    const prevC = Math.max(1e-8, cleanBars[i - 1]!.close);
+    ranges.push(Math.abs(cleanBars[i]!.high - cleanBars[i]!.low) / prevC);
   }
   const sortedRanges = [...ranges].sort((a, b) => a - b);
   const medRange = Math.max(1e-6, sortedRanges[Math.floor(sortedRanges.length / 2)] ?? 0.005);
@@ -1081,19 +1200,21 @@ export function filterOnlineRegimeHmm(bars: OhlcBarLike[]): OnlineHmmRegimeResul
   let pi = [0.35, 0.50, 0.15];
 
   for (let t = startIdx; t < n; t++) {
-    const prevC = Math.max(1e-12, bars[t - 1]!.close);
-    const curC = Math.max(1e-12, bars[t]!.close);
-    const barRange = Math.abs(bars[t]!.high - bars[t]!.low) / prevC;
-    const volRatio = barRange / medRange;
+    const prevC = Math.max(1e-8, cleanBars[t - 1]!.close);
+    const curC = Math.max(1e-8, cleanBars[t]!.close);
+    const barRange = Math.abs(cleanBars[t]!.high - cleanBars[t]!.low) / prevC;
+    const rawVolRatio = barRange / medRange;
+    const volRatio = Number.isFinite(rawVolRatio) ? Math.min(20, Math.max(0, rawVolRatio)) : 1.0;
 
     // 6-bar causal Kaufman Efficiency Ratio
     const erWin = Math.min(8, t);
-    const netMove = Math.abs(curC - bars[t - erWin]!.close);
+    const netMove = Math.abs(curC - cleanBars[t - erWin]!.close);
     let pathMove = 0;
     for (let k = t - erWin + 1; k <= t; k++) {
-      pathMove += Math.abs(bars[k]!.close - bars[k - 1]!.close);
+      pathMove += Math.abs(cleanBars[k]!.close - cleanBars[k - 1]!.close);
     }
-    const er = pathMove > 1e-12 ? netMove / pathMove : 0;
+    const rawEr = pathMove > 1e-12 ? netMove / pathMove : 0;
+    const er = Number.isFinite(rawEr) ? Math.min(1, Math.max(0, rawEr)) : 0;
 
     // Student-t / Gaussian emission likelihoods for the 3 latent states:
     // 0) Trend Expansion: high ER (~0.55), moderate volRatio (~1.15)
@@ -1104,9 +1225,9 @@ export function filterOnlineRegimeHmm(bars: OhlcBarLike[]): OnlineHmmRegimeResul
     const lCrisis = Math.exp(-(((Math.min(4.0, volRatio) - 2.35) / 0.85) ** 2));
 
     const emissions = [
-      Math.max(1e-6, lTrend),
-      Math.max(1e-6, lMeanRev),
-      Math.max(1e-6, lCrisis),
+      Number.isFinite(lTrend) ? Math.max(1e-6, lTrend) : 1e-6,
+      Number.isFinite(lMeanRev) ? Math.max(1e-6, lMeanRev) : 1e-6,
+      Number.isFinite(lCrisis) ? Math.max(1e-6, lCrisis) : 1e-6,
     ];
 
     const pred = [0, 0, 0];
@@ -1116,7 +1237,7 @@ export function filterOnlineRegimeHmm(bars: OhlcBarLike[]): OnlineHmmRegimeResul
         emissions[j]!;
     }
     const norm = pred[0]! + pred[1]! + pred[2]!;
-    if (norm > 0) {
+    if (norm > 0 && Number.isFinite(norm)) {
       pi = [pred[0]! / norm, pred[1]! / norm, pred[2]! / norm];
     }
   }
@@ -1165,7 +1286,8 @@ export function applySymmetricCusumFilter(
   bars: OhlcBarLike[],
   thresholdVolMult = 1.15,
 ): CusumFilterResult {
-  const n = bars.length;
+  const cleanBars = sanitizeOhlcBars(bars);
+  const n = cleanBars.length;
   if (n < 6) {
     return {
       latestBreak: "NONE",
@@ -1177,8 +1299,11 @@ export function applySymmetricCusumFilter(
     };
   }
 
-  const yz = computeYangZhangVolatility(bars, Math.min(20, n - 1));
-  const h = Math.max(1e-5, yz.dailyVol * Math.max(0.3, thresholdVolMult));
+  const safeMult = Number.isFinite(thresholdVolMult) && thresholdVolMult > 0
+    ? Math.min(20, Math.max(0.3, thresholdVolMult))
+    : 1.15;
+  const yz = computeYangZhangVolatility(cleanBars, Math.min(20, n - 1));
+  const h = Math.max(1e-5, yz.dailyVol * safeMult);
 
   let sPos = 0;
   let sNeg = 0;
@@ -1187,9 +1312,10 @@ export function applySymmetricCusumFilter(
   const eventIndices: number[] = [];
 
   for (let i = 1; i < n; i++) {
-    const prevC = Math.max(1e-12, bars[i - 1]!.close);
-    const curC = Math.max(1e-12, bars[i]!.close);
-    const r = Math.log(curC / prevC);
+    const prevC = Math.max(1e-8, cleanBars[i - 1]!.close);
+    const curC = Math.max(1e-8, cleanBars[i]!.close);
+    const rawR = Math.log(curC / prevC);
+    const r = Number.isFinite(rawR) ? Math.max(-10, Math.min(10, rawR)) : 0;
 
     sPos = Math.max(0, sPos + r);
     sNeg = Math.min(0, sNeg + r);
@@ -1263,11 +1389,16 @@ export function calculateNestedClusteredOptimization(
   }
 
   // Derive correlation & Mantegna distance matrix
-  const stds = symbols.map((_, i) => Math.sqrt(Math.max(1e-8, covMatrix[i]?.[i] ?? 0.0006)));
+  const safeCov = (i: number, j: number): number => {
+    const v = covMatrix[i]?.[j];
+    if (i === j) return Number.isFinite(v) && v! > 1e-8 ? v! : 0.0006;
+    return Number.isFinite(v) ? v! : 0;
+  };
+  const stds = symbols.map((_, i) => Math.sqrt(safeCov(i, i)));
   const dist: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const c = (covMatrix[i]?.[j] ?? 0) / Math.max(1e-8, stds[i]! * stds[j]!);
+      const c = safeCov(i, j) / Math.max(1e-8, stds[i]! * stds[j]!);
       const corr = Math.max(-0.99, Math.min(0.99, Number.isFinite(c) ? c : 0));
       const d = Math.sqrt(Math.max(0, 0.5 * (1 - corr)));
       dist[i]![j] = d;
@@ -1275,10 +1406,10 @@ export function calculateNestedClusteredOptimization(
     }
   }
 
-  const targetK = Math.max(
-    2,
-    Math.min(maxClusters ?? Math.max(2, Math.floor(Math.sqrt(n))), Math.ceil(n / 2)),
-  );
+  const safeMaxK = maxClusters != null && Number.isFinite(maxClusters) && maxClusters >= 2
+    ? Math.floor(maxClusters)
+    : Math.max(2, Math.floor(Math.sqrt(n)));
+  const targetK = Math.max(2, Math.min(safeMaxK, Math.ceil(n / 2)));
 
   // Agglomerative clustering until targetK clusters remain
   let indexClusters: number[][] = symbols.map((_, i) => [i]);
@@ -1320,21 +1451,22 @@ export function calculateNestedClusteredOptimization(
     const rawW: number[] = [];
     let sumW = 0;
     for (const idx of members) {
-      const varI = Math.max(1e-8, covMatrix[idx]?.[idx] ?? 0.0006);
+      const varI = safeCov(idx, idx);
       // Penalize members with high average correlation inside the cluster
       let avgIntraCorr = 0;
       for (const other of members) {
         if (other !== idx) {
-          const c = (covMatrix[idx]?.[other] ?? 0) / Math.max(1e-8, stds[idx]! * stds[other]!);
-          avgIntraCorr += Math.max(0, c);
+          const c = safeCov(idx, other) / Math.max(1e-8, stds[idx]! * stds[other]!);
+          if (Number.isFinite(c)) avgIntraCorr += Math.max(0, Math.min(1, c));
         }
       }
       const corrPenalty = members.length > 1 ? 1 + avgIntraCorr / (members.length - 1) : 1;
-      const w = 1 / (varI * corrPenalty);
-      rawW.push(w);
-      sumW += w;
+      const w = 1 / Math.max(1e-12, varI * corrPenalty);
+      const safeW = Number.isFinite(w) && w > 0 ? w : 1;
+      rawW.push(safeW);
+      sumW += safeW;
     }
-    const normW = rawW.map((w) => w / Math.max(1e-12, sumW));
+    const normW = rawW.map((w) => (sumW > 1e-12 ? w / sumW : 1 / members.length));
     intraVecs.push(normW);
     members.forEach((idx, mPos) => {
       intraClusterWeights[symbols[idx]!] = Number(normW[mPos]!.toFixed(4));
@@ -1352,11 +1484,12 @@ export function calculateNestedClusteredOptimization(
         for (let ib = 0; ib < memB.length; ib++) {
           const u = memA[ia]!;
           const v = memB[ib]!;
-          covAB += intraVecs[a]![ia]! * intraVecs[b]![ib]! * (covMatrix[u]?.[v] ?? 0);
+          covAB += intraVecs[a]![ia]! * intraVecs[b]![ib]! * safeCov(u, v);
         }
       }
-      reducedCov[a]![b] = covAB;
-      reducedCov[b]![a] = covAB;
+      const safeCovAB = Number.isFinite(covAB) ? covAB : 0;
+      reducedCov[a]![b] = safeCovAB;
+      reducedCov[b]![a] = safeCovAB;
     }
   }
 
@@ -1364,29 +1497,37 @@ export function calculateNestedClusteredOptimization(
   const rawInter: number[] = [];
   let sumInter = 0;
   for (let a = 0; a < kCount; a++) {
-    const clusterVar = Math.max(1e-8, reducedCov[a]![a]!);
+    const clusterVar = Number.isFinite(reducedCov[a]![a]) && reducedCov[a]![a]! > 1e-8
+      ? reducedCov[a]![a]!
+      : 1e-8;
     const w = 1 / clusterVar;
-    rawInter.push(w);
-    sumInter += w;
+    const safeW = Number.isFinite(w) && w > 0 ? w : 1;
+    rawInter.push(safeW);
+    sumInter += safeW;
   }
-  const interClusterWeights = rawInter.map((w) => Number((w / Math.max(1e-12, sumInter)).toFixed(4)));
+  const interClusterWeights = rawInter.map((w) =>
+    Number((sumInter > 1e-12 ? w / sumInter : 1 / kCount).toFixed(4)),
+  );
 
   // Step 5: Combine intra-cluster and inter-cluster weights
   const finalWeights: Record<string, number> = {};
   let totalFinal = 0;
   for (let k = 0; k < kCount; k++) {
     const members = indexClusters[k]!;
-    const wCluster = rawInter[k]! / Math.max(1e-12, sumInter);
+    const wCluster = sumInter > 1e-12 ? rawInter[k]! / sumInter : 1 / kCount;
     for (let mPos = 0; mPos < members.length; mPos++) {
       const sym = symbols[members[mPos]!]!;
       const val = wCluster * intraVecs[k]![mPos]!;
-      finalWeights[sym] = val;
-      totalFinal += val;
+      const safeVal = Number.isFinite(val) && val >= 0 ? val : 0;
+      finalWeights[sym] = safeVal;
+      totalFinal += safeVal;
     }
   }
 
   for (const sym of symbols) {
-    finalWeights[sym] = Number(((finalWeights[sym] ?? 0) / Math.max(1e-12, totalFinal)).toFixed(4));
+    finalWeights[sym] = Number(
+      (totalFinal > 1e-12 ? (finalWeights[sym] ?? 0) / totalFinal : 1 / n).toFixed(4),
+    );
   }
 
   return {
@@ -1478,8 +1619,21 @@ export function evaluateFactorExposureBudget(params: {
     maxClusterRiskPct = 2.2,
   } = params;
 
+  const safeCandidateRisk =
+    Number.isFinite(candidateRiskPct) && candidateRiskPct >= 0
+      ? Math.min(100, candidateRiskPct)
+      : 1.0;
+  const safeMaxPositions =
+    Number.isFinite(maxSameClusterPositions) && maxSameClusterPositions >= 1
+      ? Math.min(100, Math.floor(maxSameClusterPositions))
+      : 2;
+  const safeMaxRiskPct =
+    Number.isFinite(maxClusterRiskPct) && maxClusterRiskPct > 0
+      ? Math.min(100, maxClusterRiskPct)
+      : 2.2;
+
   const candidateCluster = classifyAssetFactorCluster(
-    candidateSymbol,
+    String(candidateSymbol ?? ""),
     candidateAssetType,
     candidateDirection,
   );
@@ -1487,42 +1641,47 @@ export function evaluateFactorExposureBudget(params: {
   let sameClusterOpenCount = 0;
   let existingClusterRiskPct = 0;
 
-  for (const pos of openPositions) {
+  for (const pos of Array.isArray(openPositions) ? openPositions : []) {
+    if (!pos || typeof pos.symbol !== "string") continue;
     const posAssetType =
       pos.assetType ??
       (pos.symbol.toUpperCase().endsWith("USDT") ? "CRYPTO" : "FOREX");
     const c = classifyAssetFactorCluster(pos.symbol, posAssetType, pos.direction);
     if (c === candidateCluster) {
       sameClusterOpenCount++;
-      existingClusterRiskPct += pos.riskFractionPct ?? 1.0;
+      const posRisk =
+        pos.riskFractionPct != null && Number.isFinite(pos.riskFractionPct) && pos.riskFractionPct >= 0
+          ? Math.min(100, pos.riskFractionPct)
+          : 1.0;
+      existingClusterRiskPct += posRisk;
     }
   }
 
-  const cumulativeClusterRiskPct = Number((existingClusterRiskPct + candidateRiskPct).toFixed(2));
+  const cumulativeClusterRiskPct = Number((existingClusterRiskPct + safeCandidateRisk).toFixed(2));
 
-  if (sameClusterOpenCount >= maxSameClusterPositions) {
+  if (sameClusterOpenCount >= safeMaxPositions) {
     return {
       candidateCluster,
       sameClusterOpenCount,
-      maxAllowedClusterPositions: maxSameClusterPositions,
+      maxAllowedClusterPositions: safeMaxPositions,
       cumulativeClusterRiskPct,
-      maxAllowedClusterRiskPct: maxClusterRiskPct,
+      maxAllowedClusterRiskPct: safeMaxRiskPct,
       allowed: false,
       sizeMultiplier: 0,
-      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Danh mục đã mở ${sameClusterOpenCount}/${maxSameClusterPositions} vị thế cùng cụm rủi ro vĩ mô.`,
+      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Danh mục đã mở ${sameClusterOpenCount}/${safeMaxPositions} vị thế cùng cụm rủi ro vĩ mô.`,
     };
   }
 
-  if (existingClusterRiskPct >= maxClusterRiskPct) {
+  if (existingClusterRiskPct >= safeMaxRiskPct) {
     return {
       candidateCluster,
       sameClusterOpenCount,
-      maxAllowedClusterPositions: maxSameClusterPositions,
+      maxAllowedClusterPositions: safeMaxPositions,
       cumulativeClusterRiskPct,
-      maxAllowedClusterRiskPct: maxClusterRiskPct,
+      maxAllowedClusterRiskPct: safeMaxRiskPct,
       allowed: false,
       sizeMultiplier: 0,
-      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Rủi ro tích lũy của cụm (${existingClusterRiskPct.toFixed(2)}%) đã chạm trần ${maxClusterRiskPct}%.`,
+      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Rủi ro tích lũy của cụm (${existingClusterRiskPct.toFixed(2)}%) đã chạm trần ${safeMaxRiskPct}%.`,
     };
   }
 
@@ -1530,15 +1689,15 @@ export function evaluateFactorExposureBudget(params: {
   const sizeMultiplier = sameClusterOpenCount === 0 ? 1.0 : 0.70;
   const rationaleVi =
     sameClusterOpenCount === 0
-      ? `Cụm nhân tố [${candidateCluster}] thông thoáng (0/${maxSameClusterPositions} vị thế) -> Cấp 100% quy mô chuẩn.`
+      ? `Cụm nhân tố [${candidateCluster}] thông thoáng (0/${safeMaxPositions} vị thế) -> Cấp 100% quy mô chuẩn.`
       : `Cụm nhân tố [${candidateCluster}] đã có ${sameClusterOpenCount} vị thế -> Giảm quy mô lệnh mới xuống ${(sizeMultiplier * 100).toFixed(0)}% để chống tập trung rủi ro.`;
 
   return {
     candidateCluster,
     sameClusterOpenCount,
-    maxAllowedClusterPositions: maxSameClusterPositions,
+    maxAllowedClusterPositions: safeMaxPositions,
     cumulativeClusterRiskPct,
-    maxAllowedClusterRiskPct: maxClusterRiskPct,
+    maxAllowedClusterRiskPct: safeMaxRiskPct,
     allowed: true,
     sizeMultiplier,
     rationaleVi,
@@ -1583,17 +1742,39 @@ export function evaluateContinuousDrawdownGovernor(params: {
     minDeleveragedScale = 0.25,
   } = params;
 
-  const bal = Math.max(100, currentBalanceUsd);
-  const peak = Math.max(bal, peakBalanceUsd ?? bal);
+  const bal = Number.isFinite(currentBalanceUsd) && currentBalanceUsd > 0
+    ? Math.max(100, Math.min(1e12, currentBalanceUsd))
+    : 100;
+  const peak = Number.isFinite(peakBalanceUsd) && (peakBalanceUsd ?? 0) > bal
+    ? Math.min(1e12, peakBalanceUsd!)
+    : bal;
   const peakDdPct = ((peak - bal) / peak) * 100;
-  const dailyLossUsd = Math.max(0, -(dailyRealizedPnlUsd ?? 0));
-  const dailyDdPct = (dailyLossUsd / bal) * 100;
-  const effectiveDrawdownPct = Number(Math.max(peakDdPct, dailyDdPct).toFixed(2));
+  const safeDailyPnl = Number.isFinite(dailyRealizedPnlUsd)
+    ? Math.max(-1e12, Math.min(1e12, dailyRealizedPnlUsd!))
+    : 0;
+  const dailyLossUsd = Math.max(0, -safeDailyPnl);
+  const dailyDdPct = Math.min(100, (dailyLossUsd / bal) * 100);
+  const effectiveDrawdownPct = Number(Math.min(100, Math.max(0, peakDdPct, dailyDdPct)).toFixed(2));
 
-  const maxDaily = Math.max(10, maxDailyLossUsd ?? 500);
-  const dailyLossUtilizationPct = Number(((dailyLossUsd / maxDaily) * 100).toFixed(1));
+  const maxDaily = Number.isFinite(maxDailyLossUsd) && (maxDailyLossUsd ?? 0) > 0
+    ? Math.max(10, Math.min(1e12, maxDailyLossUsd!))
+    : 500;
+  const dailyLossUtilizationPct = Number(Math.min(1000, (dailyLossUsd / maxDaily) * 100).toFixed(1));
 
-  if (dailyLossUsd >= maxDaily || effectiveDrawdownPct >= hardDrawdownLimitPct) {
+  const safeSoftDd = Number.isFinite(softDrawdownStartPct) && softDrawdownStartPct >= 0
+    ? Math.min(95, softDrawdownStartPct)
+    : 1.5;
+  const safeHardDd = Number.isFinite(hardDrawdownLimitPct) && hardDrawdownLimitPct > safeSoftDd
+    ? Math.min(100, hardDrawdownLimitPct)
+    : Math.max(6.0, safeSoftDd + 1.0);
+  const safeMinScale = Number.isFinite(minDeleveragedScale)
+    ? Math.max(0.05, Math.min(1.0, minDeleveragedScale))
+    : 0.25;
+  const safeTargetVol = Number.isFinite(targetAnnualizedVol) && targetAnnualizedVol > 0
+    ? Math.max(0.01, Math.min(5.0, targetAnnualizedVol))
+    : 0.18;
+
+  if (dailyLossUsd >= maxDaily || effectiveDrawdownPct >= safeHardDd) {
     return {
       effectiveDrawdownPct,
       dailyLossUtilizationPct,
@@ -1607,11 +1788,11 @@ export function evaluateContinuousDrawdownGovernor(params: {
 
   // Linear de-leveraging curve between softDrawdownStartPct and hardDrawdownLimitPct
   let ddScale = 1.0;
-  if (effectiveDrawdownPct > softDrawdownStartPct) {
+  if (effectiveDrawdownPct > safeSoftDd) {
     const progress =
-      (effectiveDrawdownPct - softDrawdownStartPct) /
-      Math.max(0.5, hardDrawdownLimitPct - softDrawdownStartPct);
-    ddScale = Math.max(minDeleveragedScale, 1.0 - (1.0 - minDeleveragedScale) * Math.min(1, progress));
+      (effectiveDrawdownPct - safeSoftDd) /
+      Math.max(0.5, safeHardDd - safeSoftDd);
+    ddScale = Math.max(safeMinScale, 1.0 - (1.0 - safeMinScale) * Math.min(1, progress));
   }
 
   // Also de-leverage smoothly if daily loss utilization exceeds 30% of daily limit
@@ -1619,8 +1800,8 @@ export function evaluateContinuousDrawdownGovernor(params: {
   if (dailyLossUtilizationPct > 30) {
     const utilProgress = (dailyLossUtilizationPct - 30) / 70;
     dailyUtilScale = Math.max(
-      minDeleveragedScale,
-      1.0 - (1.0 - minDeleveragedScale) * Math.min(1, utilProgress),
+      safeMinScale,
+      1.0 - (1.0 - safeMinScale) * Math.min(1, utilProgress),
     );
   }
 
@@ -1629,12 +1810,12 @@ export function evaluateContinuousDrawdownGovernor(params: {
   let volTargetingScale = 1.0;
   if (portfolioAnnualizedVol != null && Number.isFinite(portfolioAnnualizedVol) && portfolioAnnualizedVol > 0) {
     volTargetingScale = Number(
-      Math.max(0.40, Math.min(1.25, targetAnnualizedVol / Math.max(0.05, portfolioAnnualizedVol))).toFixed(3),
+      Math.max(0.40, Math.min(1.25, safeTargetVol / Math.max(0.05, portfolioAnnualizedVol))).toFixed(3),
     );
   }
 
   const recommendedSizeScale = Number(
-    Math.max(minDeleveragedScale, Math.min(1.25, drawdownDeleverageScale * volTargetingScale)).toFixed(3),
+    Math.max(safeMinScale, Math.min(1.25, drawdownDeleverageScale * volTargetingScale)).toFixed(3),
   );
 
   const rationaleVi =
