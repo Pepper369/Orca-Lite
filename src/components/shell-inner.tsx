@@ -637,7 +637,14 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { data: me, mutate } = useApi<{ user: { email: string; name: string | null } }>("/api/v1/auth/me");
+  const { data: me, mutate } = useApi<{
+    user: { email: string; name: string | null };
+    tradingAccounts?: {
+      totalApiAccounts: number;
+      cryptoAccountsCount: number;
+      forexAccountsCount: number;
+    };
+  }>("/api/v1/auth/me");
 
   useEffect(() => {
     const onDoc = (e: Event) => {
@@ -696,6 +703,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
               <div className="border-b border-border-subtle px-3 py-2.5">
                 <div className="truncate text-[12.5px] font-semibold">{displayName || me.user.email}</div>
                 <div className="truncate text-[10.5px] text-text-muted">{me.user.email}</div>
+                <Link
+                  href="/copytrade"
+                  onClick={() => setOpen(false)}
+                  className="mt-2 flex items-center justify-between gap-1.5 rounded-md border border-border-subtle bg-surface-elevated/80 px-2 py-1 text-[10.5px] hover:border-accent-primary/50 transition-colors"
+                >
+                  <span className="text-amber-300 font-semibold">
+                    Crypto: {me.tradingAccounts?.cryptoAccountsCount ?? 0} TK
+                  </span>
+                  <span className="text-text-muted">·</span>
+                  <span className="text-emerald-300 font-semibold">
+                    Forex: {me.tradingAccounts?.forexAccountsCount ?? 0} TK
+                  </span>
+                </Link>
               </div>
               <Link
                 href="/settings"

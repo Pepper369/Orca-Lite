@@ -180,9 +180,16 @@ function avatarPresetClass(style: string, cls: string | null, active: boolean) {
 export function ProfileTab({ onOpenSecurity }: { onOpenSecurity?: () => void }) {
   const { settings, update } = useSettings();
   const p = settings.profile;
-  const { data: me, mutate } = useApi<{ user: { id: string; email: string; name: string | null } }>(
-    "/api/v1/auth/me",
-  );
+  const { data: me, mutate } = useApi<{
+    user: { id: string; email: string; name: string | null };
+    tradingAccounts?: {
+      totalApiAccounts: number;
+      cryptoAccountsCount: number;
+      forexAccountsCount: number;
+      cryptoVerifiedCount: number;
+      forexVerifiedCount: number;
+    };
+  }>("/api/v1/auth/me");
   const defaultName = p.displayName || me?.user?.name || "";
   const defaultBio = p.bio || "";
   const [name, setName] = useState(defaultName);
@@ -322,6 +329,22 @@ export function ProfileTab({ onOpenSecurity }: { onOpenSecurity?: () => void }) 
                   <span className="rounded-full border border-border-subtle bg-surface-elevated px-2 py-0.5 text-[10.5px] text-text-muted">
                     {p.region === "vn" ? "Việt Nam" : "Toàn cầu"}
                   </span>
+                  {loggedIn && (
+                    <>
+                      <Link
+                        href="/copytrade"
+                        className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10.5px] font-semibold text-amber-300 hover:bg-amber-400/20"
+                      >
+                        Crypto: {me?.tradingAccounts?.cryptoAccountsCount ?? 0} TK API
+                      </Link>
+                      <Link
+                        href="/copytrade"
+                        className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-300 hover:bg-emerald-400/20"
+                      >
+                        Forex: {me?.tradingAccounts?.forexAccountsCount ?? 0} TK API
+                      </Link>
+                    </>
+                  )}
                 </div>
                 {p.bio ? (
                   <p className="mt-1.5 max-w-md text-[11.5px] leading-snug text-text-secondary line-clamp-2">

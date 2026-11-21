@@ -4,7 +4,10 @@ import {
   getMasterTraderPerformance,
   type BrokerPlatform,
 } from "@/lib/engines/copy-trade-engine";
-import { classifyAccountEnvironment } from "@/lib/engines/bot-telemetry-types";
+import {
+  classifyAccountEnvironment,
+  summarizeLinkedTradingAccounts,
+} from "@/lib/engines/bot-telemetry-types";
 import {
   verifyBinanceFuturesAccount,
   verifyBrokerDualEnvironment,
@@ -54,9 +57,12 @@ export async function GET(req: Request) {
     .filter((a) => a.isActive)
     .reduce((sum, a) => sum + a.balanceUsd, 0);
 
+  const tradingAccountSummary = summarizeLinkedTradingAccounts(accounts);
+
   return ok(
     {
       accounts,
+      tradingAccountSummary,
       performance: getMasterTraderPerformance(),
       workerStatus: getAutoTradeWorkerStatus(),
       realNavUsd,

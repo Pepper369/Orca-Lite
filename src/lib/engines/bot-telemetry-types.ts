@@ -2,7 +2,140 @@
  * Shared client/server types & pure PnL/ROI math for Real-Time Bot Trading Telemetry.
  * Pure module (zero server-only imports) so React components and Node services share one SSOT.
  */
-import type { BrokerPlatform, ConnectionStatus } from "@/lib/engines/copy-trade-engine";
+import type { BrokerPlatform, ConnectionStatus, FollowerAccount } from "@/lib/engines/copy-trade-engine";
+
+export type TradingAccountAssetClass = "CRYPTO" | "FOREX" | "OTHER";
+
+export interface LinkedTradingAccountItem {
+  keyId: string;
+  name: string;
+  platform: BrokerPlatform;
+  assetClass: TradingAccountAssetClass;
+  credentialMasked: string;
+  environments: AccountEnvironment[];
+  verified: boolean;
+  activeAuto: boolean;
+  totalBalanceUsd: number;
+  connectionIds: string[];
+}
+
+export interface LinkedTradingAccountSummary {
+  /** Tổng số tài khoản giao dịch được chứng minh bằng bộ API Key / EA Token (1 bộ API key = 1 tài khoản). */
+  totalApiAccounts: number;
+  /** Số tài khoản giao dịch Crypto (Binance / OKX / Bybit có API Key). */
+  cryptoAccountsCount: number;
+  /** Số tài khoản giao dịch Forex (Exness / XM / MT5 có MetaApi Key hoặc EA Token). */
+  forexAccountsCount: number;
+  /** Số tài khoản Crypto đã xác minh API thành công. */
+  cryptoVerifiedCount: number;
+  /** Số tài khoản Forex đã xác minh kết nối thành công. */
+  forexVerifiedCount: number;
+  /** Danh sách chi tiết từng tài khoản giao dịch theo từng bộ API Key duy nhất. */
+  accounts: LinkedTradingAccountItem[];
+}
+
+export function classifyBrokerAssetClass(platform: BrokerPlatform): TradingAccountAssetClass {
+  if (platform === "BINANCE_FUTURES" || platform === "OKX_FUTURES" || platform === "BYBIT_FUTURES") {
+    return "CRYPTO";
+  }
+  if (platform === "MT5_EXNESS" || platform === "MT5_XM" || platform === "MT5_EA") {
+    return "FOREX";
+  }
+  return "OTHER";
+}
+
+/**
+ * SSOT: Đếm và gom nhóm số lượng tài khoản giao dịch Crypto & Forex thuộc tài khoản Orca.
+ * Quy tắc: Mỗi bộ API Key (hoặc EA Token MT5) duy nhất chứng minh cho 1 tài khoản giao dịch;
+ * nếu 1 bộ API Key kết nối song song cả REAL & DEMO thì vẫn tính là 1 tài khoản có 2 môi trường.
+ * Không đếm tài khoản Paper Sandbox mặc định chưa gắn API Key / EA Token.
+ */
+export function summarizeLinkedTradingAccounts(
+  accounts: Array<
+    Pick<
+      FollowerAccount,
+      | "id"
+      | "name"
+      | "platform"
+      | "accountNumberMasked"
+      | "balanceUsd"
+      | "isTestnet"
+      | "isActive"
+      | "autoExecuteEnabled"
+      | "killSwitched"
+      | "connectionStatus"
+      | "hasApiKey"
+      | "hasEaToken"
+    >
+  >,
+): LinkedTradingAccountSummary {
+  const byKey = new Map<string, LinkedTradingAccountItem>();
+
+  for (const acc of accounts) {
+    const hasCredentialProof = Boolean(acc.hasApiKey || acc.hasEaToken);
+    if (!hasCredentialProof) continue;
+
+    const assetClass = classifyBrokerAssetClass(acc.platform);
+    const credMasked = (acc.accountNumberMasked || "").trim();
+    const keyId = acc.hasApiKey && credMasked
+      ? `${acc.platform}:API:${credMasked}`
+      : `${acc.platform}:EA:${acc.id}`;
+
+    const env = classifyAccountEnvironment({
+      isTestnet: acc.isTestnet,
+      hasApiKey: acc.hasApiKey,
+      hasEaToken: acc.hasEaToken,
+      connectionStatus: acc.connectionStatus,
+      platform: acc.platform,
+    }).environment;
+
+    const isVerified = acc.connectionStatus === "CONNECTED_VERIFIED";
+    const isAutoRunning = Boolean(acc.isActive && acc.autoExecuteEnabled && !acc.killSwitched);
+    const cleanName = acc.name.replace(/\s*\((REAL|DEMO)\)\s*$/i, "").trim() || acc.name;
+
+    const existing = byKey.get(keyId);
+    if (!existing) {
+      byKey.set(keyId, {
+        keyId,
+        name: cleanName,
+        platform: acc.platform,
+        assetClass,
+        credentialMasked: credMasked || acc.id.slice(-8),
+        environments: [env],
+        verified: isVerified,
+        activeAuto: isAutoRunning,
+        totalBalanceUsd: Number.isFinite(acc.balanceUsd) ? Number(acc.balanceUsd.toFixed(2)) : 0,
+        connectionIds: [acc.id],
+      });
+    } else {
+      if (!existing.environments.includes(env)) {
+        existing.environments.push(env);
+        existing.environments.sort((a, b) => (a === "REAL" ? -1 : b === "REAL" ? 1 : 0));
+      }
+      existing.verified = existing.verified || isVerified;
+      existing.activeAuto = existing.activeAuto || isAutoRunning;
+      if (Number.isFinite(acc.balanceUsd)) {
+        existing.totalBalanceUsd = Number((existing.totalBalanceUsd + acc.balanceUsd).toFixed(2));
+      }
+      if (!existing.connectionIds.includes(acc.id)) {
+        existing.connectionIds.push(acc.id);
+      }
+    }
+  }
+
+  const list = Array.from(byKey.values());
+  const crypto = list.filter((x) => x.assetClass === "CRYPTO");
+  const forex = list.filter((x) => x.assetClass === "FOREX");
+
+  return {
+    totalApiAccounts: list.length,
+    cryptoAccountsCount: crypto.length,
+    forexAccountsCount: forex.length,
+    cryptoVerifiedCount: crypto.filter((x) => x.verified).length,
+    forexVerifiedCount: forex.filter((x) => x.verified).length,
+    accounts: list,
+  };
+}
 
 export type AccountTier = "LIVE_REAL" | "TESTNET_DEMO" | "PAPER_SANDBOX";
 

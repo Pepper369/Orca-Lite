@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui";
 import { LiveBotCockpit } from "@/components/live-bot-cockpit";
 import {
   classifyAccountEnvironment,
+  summarizeLinkedTradingAccounts,
   type AccountEnvironment,
   type DemoAccountSubtype,
+  type LinkedTradingAccountSummary,
 } from "@/lib/engines/bot-telemetry-types";
 import type {
   BrokerPlatform,
@@ -49,6 +51,7 @@ interface WorkerStatus {
 
 interface CopyTradeAccountsPayload {
   accounts: FollowerAccount[];
+  tradingAccountSummary?: LinkedTradingAccountSummary;
   performance: MasterTraderPerformance;
   workerStatus?: WorkerStatus;
   realNavUsd?: number;
@@ -270,6 +273,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const [copiedEaToken, setCopiedEaToken] = useState(false);
 
   const accounts = accountsData?.accounts ?? [];
+  const tradingSummary = accountsData?.tradingAccountSummary ?? summarizeLinkedTradingAccounts(accounts);
   const workerStatus = accountsData?.workerStatus;
   const availableSignals = signalsData?.signals ?? [];
   const executionLogs = signalsData?.executionLogs ?? [];
@@ -850,6 +854,87 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
           </button>
         </div>
       )}
+
+      {/* Orca Linked Trading Accounts Inventory (1 API Key Set = 1 Trading Account) */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-[13.5px] font-bold text-ink flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-positive" />
+              Tài Khoản Giao Dịch Liên Kết Trên Orca (Theo Bộ API Key)
+            </h2>
+            <p className="mt-0.5 text-[11.5px] text-ink-3">
+              Mỗi bộ API Key / EA Token duy nhất đại diện cho 1 tài khoản giao dịch đã xác thực với Orca Engine (không tính Paper Sandbox).
+            </p>
+          </div>
+          <Badge tone={tradingSummary.totalApiAccounts > 0 ? "up" : "neutral"}>
+            Tổng: {tradingSummary.totalApiAccounts} tài khoản API
+          </Badge>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          <div className="rounded-xl border border-amber-400/35 bg-amber-400/[0.05] p-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-amber-300">
+              <span>Tài khoản Crypto</span>
+              <Badge tone={tradingSummary.cryptoAccountsCount > 0 ? "up" : "neutral"}>
+                {tradingSummary.cryptoVerifiedCount}/{tradingSummary.cryptoAccountsCount} Verified
+              </Badge>
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-ink num">{tradingSummary.cryptoAccountsCount}</span>
+              <span className="text-[11px] text-ink-3">tài khoản (Binance / OKX / Bybit)</span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-emerald-400/35 bg-emerald-400/[0.05] p-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-300">
+              <span>Tài khoản Forex</span>
+              <Badge tone={tradingSummary.forexAccountsCount > 0 ? "up" : "neutral"}>
+                {tradingSummary.forexVerifiedCount}/{tradingSummary.forexAccountsCount} Verified
+              </Badge>
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-ink num">{tradingSummary.forexAccountsCount}</span>
+              <span className="text-[11px] text-ink-3">tài khoản (Exness / XM / MT5)</span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-accent-primary/35 bg-accent-primary/[0.05] p-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-accent-primary">
+              <span>Tổng Quy Mô Liên Kết</span>
+              <Badge tone="accent">AES-256-GCM</Badge>
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-2xl font-extrabold text-ink num">{tradingSummary.totalApiAccounts}</span>
+              <span className="text-[11px] text-ink-3">bộ API Key đang kết nối Engine</span>
+            </div>
+          </div>
+        </div>
+
+        {tradingSummary.accounts.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {tradingSummary.accounts.map((item) => (
+              <div
+                key={item.keyId}
+                className="inline-flex items-center gap-2 rounded-lg border border-line/80 bg-surface-elevated/80 px-2.5 py-1.5 text-[11px]"
+              >
+                <span
+                  className={`size-2 rounded-full ${item.verified ? "bg-positive" : "bg-warn"}`}
+                  title={item.verified ? "Đã xác minh API" : "Chưa xác minh / Lỗi"}
+                />
+                <span className="font-semibold text-ink">{item.name}</span>
+                <span className="rounded bg-panel-3 px-1.5 py-0.5 text-[10px] font-bold text-ink-2">
+                  {item.assetClass}
+                </span>
+                <span className="font-mono text-[10px] text-ink-3">{item.credentialMasked}</span>
+                <span className="text-[10px] font-semibold text-cyan-300">
+                  {item.environments.join(" + ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Quick-Connect Broker Cards (Binance · OKX · Exness · XM) */}
       <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">

@@ -36,6 +36,7 @@ import {
   calculatePositionRoePct,
   classifyAccountEnvironment,
   classifyAccountTier,
+  summarizeLinkedTradingAccounts,
 } from "@/lib/engines/bot-telemetry-types";
 import {
   buildBotLiveTelemetrySnapshot,
@@ -605,4 +606,85 @@ test("Real vs Demo NAV Separation: Per-account NAV isolation, pool shares & targ
   // 4) Live Price Reference Feed updates Mark-to-Market PnL & NAV in real time
   updateLivePriceReference("BTCUSDT", 92500);
   assert.equal(getLivePriceReference("BTCUSDT"), 92500);
+});
+
+test("Linked Trading Accounts Inventory: 1 API Key set = 1 account (dedupes dual REAL+DEMO, splits Crypto vs Forex, ignores Paper)", () => {
+  const summary = summarizeLinkedTradingAccounts([
+    // Paper Sandbox without API key -> MUST NOT be counted
+    makeTestAccount({
+      id: "paper-binance-sandbox",
+      name: "Binance Paper",
+      platform: "BINANCE_FUTURES",
+      hasApiKey: false,
+      hasEaToken: false,
+      connectionStatus: "PAPER_SIMULATED",
+    }),
+    // Dual-mode Binance key (REAL + DEMO sharing same masked API key) -> counts as 1 Crypto account with both environments
+    makeTestAccount({
+      id: "conn_bn_real",
+      name: "Binance Main (REAL)",
+      platform: "BINANCE_FUTURES",
+      accountNumberMasked: "bn01****9999",
+      isTestnet: false,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      balanceUsd: 2000,
+    }),
+    makeTestAccount({
+      id: "conn_bn_demo",
+      name: "Binance Main (DEMO)",
+      platform: "BINANCE_FUTURES",
+      accountNumberMasked: "bn01****9999",
+      isTestnet: true,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      balanceUsd: 10000,
+    }),
+    // Distinct 2nd Crypto API key (OKX) -> counts as 2nd Crypto account
+    makeTestAccount({
+      id: "conn_okx_1",
+      name: "OKX Pro",
+      platform: "OKX_FUTURES",
+      accountNumberMasked: "okx2****1234",
+      isTestnet: false,
+      hasApiKey: true,
+      connectionStatus: "UNVERIFIED",
+      balanceUsd: 1500,
+    }),
+    // Forex Exness MetaApi key -> counts as 1 Forex account
+    makeTestAccount({
+      id: "conn_exness_1",
+      name: "Exness Gold",
+      platform: "MT5_EXNESS",
+      accountNumberMasked: "meta****7777",
+      isTestnet: false,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      balanceUsd: 3500,
+    }),
+    // Forex XM EA Token -> counts as 2nd Forex account
+    makeTestAccount({
+      id: "conn_xm_ea",
+      name: "XM MT5",
+      platform: "MT5_XM",
+      accountNumberMasked: "MT5-XM01",
+      isTestnet: true,
+      hasApiKey: false,
+      hasEaToken: true,
+      connectionStatus: "AWAITING_EA",
+      balanceUsd: 1000,
+    }),
+  ]);
+
+  assert.equal(summary.totalApiAccounts, 4);
+  assert.equal(summary.cryptoAccountsCount, 2);
+  assert.equal(summary.forexAccountsCount, 2);
+  assert.equal(summary.cryptoVerifiedCount, 1);
+  assert.equal(summary.forexVerifiedCount, 1);
+
+  const bn = summary.accounts.find((a) => a.credentialMasked === "bn01****9999");
+  assert.ok(bn);
+  assert.equal(bn.name, "Binance Main");
+  assert.deepEqual(bn.environments, ["REAL", "DEMO"]);
+  assert.equal(bn.connectionIds.length, 2);
 });
