@@ -1,9 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { MiQuantProvider } from "@/lib/providers/miquant";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req?: NextRequest) {
+  if (req) {
+    const limited = await rateLimit(req, {
+      name: "quant_market_signals_get",
+      binding: "RL_AI",
+      limit: 60,
+      windowSec: 60,
+    });
+    if (limited) return limited;
+  }
   try {
     const [signals, overview, supportResistance] = await Promise.all([
       MiQuantProvider.getMarketSignals(),
@@ -24,9 +34,9 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
-        error: (err as Error).message || "Internal server error",
+        error: "Internal server error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
