@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useSWRConfig } from "swr";
 import { LogIn } from "lucide-react";
 import type { ApiResponse } from "@/lib/types";
 import { Button } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { mutate } = useSWRConfig();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +23,7 @@ export default function LoginPage() {
     try {
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
@@ -28,6 +31,7 @@ export default function LoginPage() {
       if (!json.success) {
         setError(json.error.message);
       } else {
+        await Promise.all([mutate("/api/v1/auth/me"), mutate("/api/v1/copytrade/accounts")]);
         router.push("/");
         router.refresh();
       }
@@ -46,6 +50,7 @@ export default function LoginPage() {
       const token = await cred.user.getIdToken();
       const res = await fetch("/api/v1/auth/firebase", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -55,6 +60,7 @@ export default function LoginPage() {
       if (!json.success) {
         setError(json.error.message);
       } else {
+        await Promise.all([mutate("/api/v1/auth/me"), mutate("/api/v1/copytrade/accounts")]);
         router.push("/");
         router.refresh();
       }

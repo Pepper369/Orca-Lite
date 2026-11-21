@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useSWRConfig } from "swr";
 import { UserPlus } from "lucide-react";
 import type { ApiResponse } from "@/lib/types";
 import { Button } from "@/components/ui";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { mutate } = useSWRConfig();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,12 +24,14 @@ export default function RegisterPage() {
     try {
       const res = await fetch("/api/v1/auth/register", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name || undefined, email, password }),
       });
       const json = (await res.json()) as ApiResponse<unknown>;
       if (!json.success) setError(json.error.message);
       else {
+        await Promise.all([mutate("/api/v1/auth/me"), mutate("/api/v1/copytrade/accounts")]);
         router.push("/");
         router.refresh();
       }
@@ -46,6 +50,7 @@ export default function RegisterPage() {
       const token = await cred.user.getIdToken();
       const res = await fetch("/api/v1/auth/firebase", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -55,6 +60,7 @@ export default function RegisterPage() {
       if (!json.success) {
         setError(json.error.message);
       } else {
+        await Promise.all([mutate("/api/v1/auth/me"), mutate("/api/v1/copytrade/accounts")]);
         router.push("/");
         router.refresh();
       }

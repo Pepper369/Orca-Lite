@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { sessions, auditLogs } from "@/db/schema";
 import { and, eq, gt } from "drizzle-orm";
 import { badRequest, fail, ok } from "@/lib/envelope";
-import { getSessionUser, clearSessionCookie } from "@/lib/auth";
+import { getSessionUser, clearSessionCookie, buildClearSessionCookieHeader } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -40,8 +40,14 @@ export async function DELETE(req: Request) {
 
   const isCurrent = body.id === session.sessionId;
   if (isCurrent) {
-    await clearSessionCookie();
+    await clearSessionCookie(req);
   }
 
-  return ok({ revoked: true, current: isCurrent }, { source: "orca-auth" });
+  return ok(
+    { revoked: true, current: isCurrent },
+    { source: "orca-auth" },
+    isCurrent
+      ? { "Set-Cookie": buildClearSessionCookieHeader(), "Cache-Control": "no-store" }
+      : { "Cache-Control": "no-store" },
+  );
 }

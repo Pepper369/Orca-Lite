@@ -1,6 +1,6 @@
 import { adminAuth } from "@/lib/firebase-admin";
 import { getOrCreateUser } from "@/db/users";
-import { createSessionCookie } from "@/lib/auth";
+import { buildSessionCookieHeader, createSessionCookie } from "@/lib/auth";
 import { db } from "@/db";
 import { auditLogs } from "@/db/schema";
 import { ok, fail } from "@/lib/envelope";
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       return fail("USER_SYNC_FAILED", "Không thể đồng bộ người dùng với cơ sở dữ liệu", 500);
     }
 
-    await createSessionCookie(user.id);
+    const sessionToken = await createSessionCookie(user.id, req);
     await db.insert(auditLogs).values({ userId: user.id, action: "login_firebase" }).catch(() => {});
 
     return ok(
@@ -45,6 +45,7 @@ export async function POST(req: Request) {
         },
       },
       { source: "firebase-auth" },
+      { "Set-Cookie": buildSessionCookieHeader(sessionToken), "Cache-Control": "no-store" },
     );
   } catch (error) {
     console.error("[auth-firebase] Token verification failed:", error);

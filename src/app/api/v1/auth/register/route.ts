@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { users, auditLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { fail, badRequest, ok } from "@/lib/envelope";
-import { createSessionCookie, hashPassword, isValidEmail } from "@/lib/auth";
+import { buildSessionCookieHeader, createSessionCookie, hashPassword, isValidEmail } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { sanitizeIdentityName } from "@/app/api/_security";
 
@@ -28,9 +28,13 @@ export async function POST(req: Request) {
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
     if (existing.length) return fail("EMAIL_EXISTS", "Email đã được đăng ký", 409);
     const [user] = await db.insert(users).values({ email, passwordHash: hashPassword(password), name }).returning({ id: users.id });
-    await createSessionCookie(user.id);
+    const token = await createSessionCookie(user.id, req);
     await db.insert(auditLogs).values({ userId: user.id, action: "register" }).catch(() => {});
-    return ok({ user: { id: user.id, email, name } }, { source: "orca-auth" });
+    return ok(
+      { user: { id: user.id, email, name } },
+      { source: "orca-auth" },
+      { "Set-Cookie": buildSessionCookieHeader(token), "Cache-Control": "no-store" },
+    );
   } catch (e) {
     console.error("[auth-register] Unexpected error:", e);
     return fail("REGISTER_FAILED", "Đã xảy ra lỗi máy chủ khi đăng ký tài khoản. Vui lòng thử lại sau.", 500);

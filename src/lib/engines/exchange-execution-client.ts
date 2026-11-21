@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { calculateAlmgrenChrissExecution } from "./advanced-quant-math";
 import { generateMakerPeggingGuide } from "./quant-reversal-pace";
 
@@ -17,6 +17,7 @@ export interface BrokerVerificationResult {
   availableMarginUsd: number | null;
   canTrade: boolean;
   positionMode?: string;
+  resolvedEndpoint?: string;
   latencyMs: number;
   rawMessage: string;
 }
@@ -660,8 +661,134 @@ interface BinanceSymbolFilter {
   minNotional: number;
 }
 
-function getBinanceBaseUrl(isTestnet: boolean): string {
-  return isTestnet ? "https://testnet.binancefuture.com" : "https://fapi.binance.com";
+const BINANCE_MAINNET_FAPI = "https://fapi.binance.com";
+const BINANCE_DEMO_FAPI = "https://demo-fapi.binance.com";
+const BINANCE_LEGACY_TESTNET_FAPI = "https://testnet.binancefuture.com";
+const BINANCE_SPOT_MAINNET_API = "https://api.binance.com";
+const BINANCE_RECV_WINDOW = 10_000;
+const BINANCE_TIME_SYNC_TTL_MS = 5 * 60 * 1000;
+
+const BINANCE_TIME_OFFSET_CACHE = new Map<string, { offsetMs: number; expiresAt: number }>();
+const BINANCE_TESTNET_ENDPOINT_CACHE = new Map<string, string>();
+
+function binanceKeyFingerprint(apiKey: string): string {
+  return createHash("sha256").update(apiKey.trim()).digest("hex").slice(0, 16);
+}
+
+function cleanBinanceCred(v: string): string {
+  return v.trim().replace(/[\r\n]+/g, "");
+}
+
+function getBinanceBaseUrl(isTestnet: boolean, apiKey?: string): string {
+  if (!isTestnet) return BINANCE_MAINNET_FAPI;
+  if (apiKey) {
+    const cached = BINANCE_TESTNET_ENDPOINT_CACHE.get(binanceKeyFingerprint(apiKey));
+    if (cached) return cached;
+  }
+  return BINANCE_DEMO_FAPI;
+}
+
+/** Syncs local clock against Binance `/fapi/v1/time` to avoid `-1021` forward-skew rejections. */
+export async function getBinanceSyncedTimestamp(baseUrl: string): Promise<number> {
+  const now = Date.now();
+  const cached = BINANCE_TIME_OFFSET_CACHE.get(baseUrl);
+  if (cached && cached.expiresAt > now) {
+    return now + cached.offsetMs;
+  }
+  try {
+    const timePath = baseUrl === BINANCE_SPOT_MAINNET_API ? "/api/v3/time" : "/fapi/v1/time";
+    const t0 = Date.now();
+    const res = await fetch(`${baseUrl}${timePath}`, {
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { serverTime?: number };
+      const t1 = Date.now();
+      if (typeof json.serverTime === "number" && Number.isFinite(json.serverTime)) {
+        const midpoint = Math.round((t0 + t1) / 2);
+        const offsetMs = json.serverTime - midpoint;
+        BINANCE_TIME_OFFSET_CACHE.set(baseUrl, {
+          offsetMs,
+          expiresAt: t1 + BINANCE_TIME_SYNC_TTL_MS,
+        });
+        return t1 + offsetMs;
+      }
+    }
+  } catch {
+    // Fall back to local timestamp if /time probe fails
+  }
+  return Date.now();
+}
+
+async function probeBinanceFuturesAccountEndpoint(
+  baseUrl: string,
+  apiKey: string,
+  apiSecret: string,
+): Promise<{
+  ok: boolean;
+  httpStatus: number;
+  code: number | null;
+  msg: string;
+  json: Record<string, unknown>;
+}> {
+  const ts = await getBinanceSyncedTimestamp(baseUrl);
+  const qs = `timestamp=${ts}&recvWindow=${BINANCE_RECV_WINDOW}`;
+  const sig = signBinanceQuery(qs, apiSecret);
+  const res = await fetch(`${baseUrl}/fapi/v2/account?${qs}&signature=${sig}`, {
+    method: "GET",
+    headers: { "X-MBX-APIKEY": apiKey },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try {
+    json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    json = {};
+  }
+  const code = typeof json.code === "number" ? json.code : null;
+  const msg = String(json.msg ?? `Binance HTTP ${res.status}`);
+  return {
+    ok: res.ok && code === null,
+    httpStatus: res.status,
+    code,
+    msg,
+    json,
+  };
+}
+
+async function probeBinanceSpotAccount(apiKey: string, apiSecret: string): Promise<boolean> {
+  try {
+    const ts = await getBinanceSyncedTimestamp(BINANCE_SPOT_MAINNET_API);
+    const qs = `timestamp=${ts}&recvWindow=${BINANCE_RECV_WINDOW}`;
+    const sig = signBinanceQuery(qs, apiSecret);
+    const res = await fetch(`${BINANCE_SPOT_MAINNET_API}/api/v3/account?${qs}&signature=${sig}`, {
+      method: "GET",
+      headers: { "X-MBX-APIKEY": apiKey },
+      signal: AbortSignal.timeout(5_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function formatBinanceAuthErrorVi(code: number | null, rawMsg: string, isTestnet: boolean): string {
+  if (code === -2014) {
+    return `Định dạng API Key không hợp lệ (${rawMsg}). Vui lòng kiểm tra không dán nhầm API Secret vào ô API Key hoặc dư ký tự lạ.`;
+  }
+  if (code === -1022) {
+    return `Chữ ký API Secret không khớp (${rawMsg}). Vui lòng kiểm tra lại API Secret chính xác với API Key này.`;
+  }
+  if (code === -1021) {
+    return `Lệch đồng hồ hệ thống với máy chủ Binance (${rawMsg}). Vui lòng đồng bộ giờ Windows và thử lại.`;
+  }
+  if (code === -2015) {
+    return isTestnet
+      ? `API Key bị từ chối ở chế độ DEMO/TESTNET (${rawMsg}). Hãy kiểm tra: (1) Key tạo từ demo.binance.com / testnet.binancefuture.com (nếu là Key Mainnet tiền thật hãy chuyển sang REAL / LIVE), (2) đã bật quyền Enable Futures, (3) không giới hạn sai IP.`
+      : `API Key bị từ chối ở chế độ REAL/LIVE (${rawMsg}). Hãy kiểm tra: (1) Đã mở ví Binance Futures & bật quyền "Enable Futures" cho API Key, (2) Nếu dùng Key Demo/Testnet hãy chuyển sang chế độ DEMO / TESTNET, (3) Nếu bật IP Whitelist hãy thêm IP máy chủ hiện tại.`;
+  }
+  return rawMsg;
 }
 
 async function getBinanceSymbolFilters(baseUrl: string, symbol: string): Promise<BinanceSymbolFilter | null> {
@@ -710,21 +837,90 @@ export async function verifyBinanceFuturesAccount(
   creds: BrokerCredentialsInput,
 ): Promise<BrokerVerificationResult> {
   const started = Date.now();
-  const baseUrl = getBinanceBaseUrl(creds.isTestnet);
-  const qs = `timestamp=${Date.now()}&recvWindow=5000`;
-  const sig = signBinanceQuery(qs, creds.apiSecret);
+  const apiKey = cleanBinanceCred(creds.apiKey);
+  const apiSecret = cleanBinanceCred(creds.apiSecret);
+
+  if (!apiKey || !apiSecret) {
+    return {
+      verified: false,
+      platform: "BINANCE_FUTURES",
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Thiếu Binance API Key hoặc API Secret",
+    };
+  }
 
   try {
-    const res = await fetch(`${baseUrl}/fapi/v2/account?${qs}&signature=${sig}`, {
-      method: "GET",
-      headers: { "X-MBX-APIKEY": creds.apiKey },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const text = await res.text();
-    const json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    // Binance supports both new Demo Trading (`demo-fapi.binance.com`) and legacy Futures Testnet (`testnet.binancefuture.com`)
+    const candidates = creds.isTestnet
+      ? [BINANCE_DEMO_FAPI, BINANCE_LEGACY_TESTNET_FAPI]
+      : [BINANCE_MAINNET_FAPI];
+
+    let lastProbe: Awaited<ReturnType<typeof probeBinanceFuturesAccountEndpoint>> | null = null;
+    let matchedBaseUrl: string | null = null;
+
+    for (const candidateUrl of candidates) {
+      const probe = await probeBinanceFuturesAccountEndpoint(candidateUrl, apiKey, apiSecret);
+      lastProbe = probe;
+      if (probe.ok) {
+        matchedBaseUrl = candidateUrl;
+        if (creds.isTestnet) {
+          BINANCE_TESTNET_ENDPOINT_CACHE.set(binanceKeyFingerprint(apiKey), candidateUrl);
+        }
+        break;
+      }
+      // Retry once with refreshed clock offset if Binance returned -1021
+      if (probe.code === -1021) {
+        BINANCE_TIME_OFFSET_CACHE.delete(candidateUrl);
+        const retryProbe = await probeBinanceFuturesAccountEndpoint(candidateUrl, apiKey, apiSecret);
+        lastProbe = retryProbe;
+        if (retryProbe.ok) {
+          matchedBaseUrl = candidateUrl;
+          if (creds.isTestnet) {
+            BINANCE_TESTNET_ENDPOINT_CACHE.set(binanceKeyFingerprint(apiKey), candidateUrl);
+          }
+          break;
+        }
+      }
+    }
+
     const latencyMs = Date.now() - started;
 
-    if (!res.ok || typeof json.code === "number") {
+    if (!matchedBaseUrl || !lastProbe || !lastProbe.ok) {
+      const code = lastProbe?.code ?? null;
+      const rawMsg = lastProbe?.msg ?? "Không thể xác thực Binance Futures API";
+      let diagnostic = formatBinanceAuthErrorVi(code, rawMsg, creds.isTestnet);
+
+      // Cross-check opposite environment / Spot-only permission to give exact actionable feedback (still verified=false!)
+      if (code === -2015) {
+        if (creds.isTestnet) {
+          const mainnetProbe = await probeBinanceFuturesAccountEndpoint(BINANCE_MAINNET_FAPI, apiKey, apiSecret).catch(
+            () => null,
+          );
+          if (mainnetProbe?.ok) {
+            diagnostic =
+              "API Key này thuộc Binance MAINNET (Tiền thật), nhưng bạn đang chọn chế độ DEMO / TESTNET. Hãy chuyển nút sang REAL / LIVE để kết nối.";
+          }
+        } else {
+          const demoProbe = await probeBinanceFuturesAccountEndpoint(BINANCE_DEMO_FAPI, apiKey, apiSecret).catch(
+            () => null,
+          );
+          const legacyProbe = !demoProbe?.ok
+            ? await probeBinanceFuturesAccountEndpoint(BINANCE_LEGACY_TESTNET_FAPI, apiKey, apiSecret).catch(() => null)
+            : null;
+          if (demoProbe?.ok || legacyProbe?.ok) {
+            diagnostic =
+              "API Key này thuộc Binance DEMO / TESTNET, nhưng bạn đang chọn chế độ REAL / LIVE. Hãy chuyển nút sang DEMO / TESTNET để kết nối.";
+          } else if (await probeBinanceSpotAccount(apiKey, apiSecret)) {
+            diagnostic =
+              "API Key Binance Mainnet hợp lệ ở Spot nhưng CHƯA BẬT quyền 'Enable Futures' (hoặc chưa mở tài khoản USDⓈ-M Futures) trên Binance API Management.";
+          }
+        }
+      }
+
       return {
         verified: false,
         platform: "BINANCE_FUTURES",
@@ -733,13 +929,19 @@ export async function verifyBinanceFuturesAccount(
         availableMarginUsd: null,
         canTrade: false,
         latencyMs,
-        rawMessage: String(json.msg ?? `Binance HTTP ${res.status}`),
+        rawMessage: diagnostic,
       };
     }
 
+    const json = lastProbe.json;
     const totalWallet = Number(json.totalWalletBalance ?? json.totalMarginBalance ?? 0);
     const available = Number(json.availableBalance ?? 0);
     const canTrade = Boolean(json.canTrade);
+    const envLabel = !creds.isTestnet
+      ? "Mainnet"
+      : matchedBaseUrl === BINANCE_DEMO_FAPI
+        ? "Demo Trading"
+        : "Testnet";
 
     return {
       verified: true,
@@ -748,10 +950,11 @@ export async function verifyBinanceFuturesAccount(
       balanceUsd: Number.isFinite(totalWallet) ? totalWallet : 0,
       availableMarginUsd: Number.isFinite(available) ? available : 0,
       canTrade,
+      resolvedEndpoint: matchedBaseUrl,
       latencyMs,
       rawMessage: canTrade
-        ? `Binance ${creds.isTestnet ? "Testnet" : "Mainnet"} Futures sẵn sàng giao dịch`
-        : "Kết nối thành công nhưng API Key chưa bật quyền Enable Futures Trading",
+        ? `Binance ${envLabel} Futures sẵn sàng giao dịch`
+        : `Kết nối Binance ${envLabel} thành công nhưng API Key chưa bật quyền Enable Futures Trading`,
     };
   } catch (err) {
     return {
@@ -781,7 +984,12 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
       message: `Binance order rejected before dispatch: ${geom.reason}`,
     };
   }
-  const baseUrl = getBinanceBaseUrl(req.credentials.isTestnet);
+  const apiKey = cleanBinanceCred(req.credentials.apiKey);
+  const apiSecret = cleanBinanceCred(req.credentials.apiSecret);
+  if (req.credentials.isTestnet && !BINANCE_TESTNET_ENDPOINT_CACHE.has(binanceKeyFingerprint(apiKey))) {
+    await verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: true });
+  }
+  const baseUrl = getBinanceBaseUrl(req.credentials.isTestnet, apiKey);
   const symbol = toBinanceFuturesSymbol(req.symbol);
   const filters = (await getBinanceSymbolFilters(baseUrl, symbol)) ?? {
     stepSize: "0.001",
@@ -823,29 +1031,31 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
   const rawLev = Number.isFinite(req.leverage) && req.leverage > 0 ? Math.round(req.leverage) : 1;
   const lev = Math.max(1, Math.min(20, rawLev));
   try {
-    const levQs = `symbol=${symbol}&leverage=${lev}&timestamp=${Date.now()}&recvWindow=5000`;
-    await fetch(`${baseUrl}/fapi/v1/leverage?${levQs}&signature=${signBinanceQuery(levQs, req.credentials.apiSecret)}`, {
+    const levTs = await getBinanceSyncedTimestamp(baseUrl);
+    const levQs = `symbol=${symbol}&leverage=${lev}&timestamp=${levTs}&recvWindow=${BINANCE_RECV_WINDOW}`;
+    await fetch(`${baseUrl}/fapi/v1/leverage?${levQs}&signature=${signBinanceQuery(levQs, apiSecret)}`, {
       method: "POST",
-      headers: { "X-MBX-APIKEY": req.credentials.apiKey },
+      headers: { "X-MBX-APIKEY": apiKey },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     const clientOrderId = sanitizeClientOrderId(req.idempotencyKey, 32);
+    const entryTs = await getBinanceSyncedTimestamp(baseUrl);
     const entryParams = new URLSearchParams({
       symbol,
       side: req.direction,
       type: "MARKET",
       quantity: String(qty),
       newClientOrderId: clientOrderId,
-      timestamp: String(Date.now()),
-      recvWindow: "5000",
+      timestamp: String(entryTs),
+      recvWindow: String(BINANCE_RECV_WINDOW),
     });
     const entryQs = entryParams.toString();
     const entryRes = await fetch(
-      `${baseUrl}/fapi/v1/order?${entryQs}&signature=${signBinanceQuery(entryQs, req.credentials.apiSecret)}`,
+      `${baseUrl}/fapi/v1/order?${entryQs}&signature=${signBinanceQuery(entryQs, apiSecret)}`,
       {
         method: "POST",
-        headers: { "X-MBX-APIKEY": req.credentials.apiKey },
+        headers: { "X-MBX-APIKEY": apiKey },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     );
@@ -884,6 +1094,7 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
 
     const placeBinanceSl = async (stopPrice: number) => {
       if (stopPrice <= 0) return { id: null, err: "Giá SL không hợp lệ" };
+      const slTs = await getBinanceSyncedTimestamp(baseUrl);
       const p = new URLSearchParams({
         symbol,
         side: exitSide,
@@ -891,15 +1102,15 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
         stopPrice: String(stopPrice),
         closePosition: "true",
         workingType: "MARK_PRICE",
-        timestamp: String(Date.now()),
-        recvWindow: "5000",
+        timestamp: String(slTs),
+        recvWindow: String(BINANCE_RECV_WINDOW),
       });
       const q = p.toString();
       const r = await fetch(
-        `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, req.credentials.apiSecret)}`,
+        `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, apiSecret)}`,
         {
           method: "POST",
-          headers: { "X-MBX-APIKEY": req.credentials.apiKey },
+          headers: { "X-MBX-APIKEY": apiKey },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         },
       );
@@ -911,14 +1122,15 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
     };
 
     const placeBinanceTpChunk = async (chunk: TpAllocationChunk) => {
+      const tpTs = await getBinanceSyncedTimestamp(baseUrl);
       const p = new URLSearchParams({
         symbol,
         side: exitSide,
         type: "TAKE_PROFIT_MARKET",
         stopPrice: String(chunk.price),
         workingType: "MARK_PRICE",
-        timestamp: String(Date.now()),
-        recvWindow: "5000",
+        timestamp: String(tpTs),
+        recvWindow: String(BINANCE_RECV_WINDOW),
       });
       if (chunk.closePosition) {
         p.set("closePosition", "true");
@@ -928,10 +1140,10 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
       }
       const q = p.toString();
       const r = await fetch(
-        `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, req.credentials.apiSecret)}`,
+        `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, apiSecret)}`,
         {
           method: "POST",
-          headers: { "X-MBX-APIKEY": req.credentials.apiKey },
+          headers: { "X-MBX-APIKEY": apiKey },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         },
       );
@@ -991,7 +1203,12 @@ export async function updateBinanceFuturesStopLoss(params: {
   previousSlOrderId?: string | null;
   newStopLossPrice: number;
 }): Promise<{ ok: boolean; newSlOrderId: string | null; message: string }> {
-  const baseUrl = getBinanceBaseUrl(params.credentials.isTestnet);
+  const apiKey = cleanBinanceCred(params.credentials.apiKey);
+  const apiSecret = cleanBinanceCred(params.credentials.apiSecret);
+  if (params.credentials.isTestnet && !BINANCE_TESTNET_ENDPOINT_CACHE.has(binanceKeyFingerprint(apiKey))) {
+    await verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: true });
+  }
+  const baseUrl = getBinanceBaseUrl(params.credentials.isTestnet, apiKey);
   const symbol = toBinanceFuturesSymbol(params.symbol);
   const filters = (await getBinanceSymbolFilters(baseUrl, symbol)) ?? {
     stepSize: "0.001",
@@ -1006,18 +1223,20 @@ export async function updateBinanceFuturesStopLoss(params: {
 
   try {
     if (params.previousSlOrderId && /^\d+$/.test(params.previousSlOrderId)) {
-      const cancelQs = `symbol=${symbol}&orderId=${params.previousSlOrderId}&timestamp=${Date.now()}&recvWindow=5000`;
+      const cancelTs = await getBinanceSyncedTimestamp(baseUrl);
+      const cancelQs = `symbol=${symbol}&orderId=${params.previousSlOrderId}&timestamp=${cancelTs}&recvWindow=${BINANCE_RECV_WINDOW}`;
       await fetch(
-        `${baseUrl}/fapi/v1/order?${cancelQs}&signature=${signBinanceQuery(cancelQs, params.credentials.apiSecret)}`,
+        `${baseUrl}/fapi/v1/order?${cancelQs}&signature=${signBinanceQuery(cancelQs, apiSecret)}`,
         {
           method: "DELETE",
-          headers: { "X-MBX-APIKEY": params.credentials.apiKey },
+          headers: { "X-MBX-APIKEY": apiKey },
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         },
       ).catch(() => null);
     }
 
     const exitSide = params.direction === "BUY" ? "SELL" : "BUY";
+    const slTs = await getBinanceSyncedTimestamp(baseUrl);
     const p = new URLSearchParams({
       symbol,
       side: exitSide,
@@ -1025,15 +1244,15 @@ export async function updateBinanceFuturesStopLoss(params: {
       stopPrice: String(nextSl),
       closePosition: "true",
       workingType: "MARK_PRICE",
-      timestamp: String(Date.now()),
-      recvWindow: "5000",
+      timestamp: String(slTs),
+      recvWindow: String(BINANCE_RECV_WINDOW),
     });
     const q = p.toString();
     const res = await fetch(
-      `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, params.credentials.apiSecret)}`,
+      `${baseUrl}/fapi/v1/order?${q}&signature=${signBinanceQuery(q, apiSecret)}`,
       {
         method: "POST",
-        headers: { "X-MBX-APIKEY": params.credentials.apiKey },
+        headers: { "X-MBX-APIKEY": apiKey },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     );

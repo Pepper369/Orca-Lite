@@ -50,7 +50,8 @@ export function hashPassword(password: string): string {
   return `${salt}:${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export function verifyPassword(password: string, stored: string | null | undefined): boolean {
+  if (!stored || typeof stored !== "string") return false;
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;
   const candidate = crypto.scryptSync(password, salt, 64);
@@ -58,9 +59,38 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === known.length && crypto.timingSafeEqual(candidate, known);
 }
 
-async function requestMeta(): Promise<{ userAgent: string | null; ip: string | null }> {
+export function buildSessionCookieHeader(token: string): string {
+  const parts = [
+    `${COOKIE}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${SESSION_DAYS * 86_400}`,
+  ];
+  if (env.nodeEnv === "production") {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
+}
+
+export function buildClearSessionCookieHeader(): string {
+  const parts = [
+    `${COOKIE}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+  ];
+  if (env.nodeEnv === "production") {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
+}
+
+async function requestMeta(req?: Request): Promise<{ userAgent: string | null; ip: string | null }> {
   try {
-    const h = await headers();
+    const h = req ? req.headers : await headers();
     return {
       userAgent: h.get("user-agent"),
       // Cloudflare edge IP is authoritative; x-forwarded-for is spoofable.
@@ -76,21 +106,25 @@ async function requestMeta(): Promise<{ userAgent: string | null; ip: string | n
   }
 }
 
-export async function createSessionCookie(userId: string) {
+export async function createSessionCookie(userId: string, req?: Request) {
   const token = await new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DAYS}d`)
     .sign(getKey());
-  const jar = await cookies();
-  jar.set(COOKIE, token, {
-    httpOnly: true,
-    secure: env.nodeEnv === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_DAYS * 86_400,
-  });
-  const { userAgent, ip } = await requestMeta();
+  try {
+    const jar = await cookies();
+    jar.set(COOKIE, token, {
+      httpOnly: true,
+      secure: env.nodeEnv === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: SESSION_DAYS * 86_400,
+    });
+  } catch {
+    // Hono server sets cookie via explicit Set-Cookie response header
+  }
+  const { userAgent, ip } = await requestMeta(req);
   await db
     .insert(sessions)
     .values({
@@ -104,13 +138,20 @@ export async function createSessionCookie(userId: string) {
   return token;
 }
 
-export async function clearSessionCookie() {
-  const jar = await cookies();
-  const token = jar.get(COOKIE)?.value;
+export async function clearSessionCookie(req?: Request) {
+  let token = extractCookieFromRequest(req, COOKIE);
+  try {
+    const jar = await cookies();
+    if (!token) {
+      token = jar.get(COOKIE)?.value ?? null;
+    }
+    jar.delete(COOKIE);
+  } catch {
+    // Hono server clears cookie via explicit Set-Cookie response header
+  }
   if (token) {
     await db.delete(sessions).where(eq(sessions.tokenHash, sha256(token))).catch(() => {});
   }
-  jar.delete(COOKIE);
 }
 
 export interface SessionUser {
