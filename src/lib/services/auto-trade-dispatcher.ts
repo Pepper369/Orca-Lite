@@ -10,7 +10,7 @@ import {
   runMultiScenarioPortfolioStressTest,
   type PortfolioStressPosition,
 } from "@/lib/engines/unified-cross-asset-quant";
-import { getAssetPipSize } from "@/lib/engines/asset-precision";
+import { getAssetPipSize, roundPrice } from "@/lib/engines/asset-precision";
 import {
   calculateProportionalCopySize,
   verifySlippageGuard,
@@ -283,6 +283,25 @@ export async function executePlatformOrder(
 ): Promise<CopyExecutionOrder> {
   const orderId = `ord_${randomUUID().slice(0, 12)}`;
   const now = Date.now();
+  const isBuy = signal.direction === "BUY";
+  const adverseDrift =
+    Number.isFinite(marketPrice) &&
+    marketPrice > 0 &&
+    Number.isFinite(signal.entryPrice) &&
+    signal.entryPrice > 0
+      ? isBuy
+        ? Math.max(0, marketPrice - signal.entryPrice)
+        : Math.max(0, signal.entryPrice - marketPrice)
+      : 0;
+  const shiftTp = (tp: number | undefined | null): number | null => {
+    if (tp == null || !Number.isFinite(tp) || tp <= 0) return null;
+    if (adverseDrift <= 0) return tp;
+    return roundPrice(isBuy ? tp + adverseDrift : tp - adverseDrift, signal.symbol, signal.assetType);
+  };
+  const adjustedTp1 = shiftTp(signal.takeProfit1) ?? signal.takeProfit1;
+  const adjustedTp2 = shiftTp(signal.takeProfit2);
+  const adjustedTp3 = shiftTp(signal.takeProfit3);
+
   const baseOrder: Omit<CopyExecutionOrder, "status" | "message"> = {
     orderId,
     followerId: acct.id,
@@ -296,9 +315,9 @@ export async function executePlatformOrder(
     executionPrice: marketPrice,
     slippagePips,
     stopLossPrice: signal.stopLossPrice,
-    takeProfit1: signal.takeProfit1,
-    takeProfit2: signal.takeProfit2 ?? null,
-    takeProfit3: signal.takeProfit3 ?? null,
+    takeProfit1: adjustedTp1,
+    takeProfit2: adjustedTp2,
+    takeProfit3: adjustedTp3,
     positionStage: "INITIAL",
     realizedPnlUsd: 0,
     timestamp: now,

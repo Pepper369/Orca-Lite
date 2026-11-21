@@ -183,25 +183,28 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           const spreadOpts =
             sig.filter.spreadPips != null ? { currentSpreadPips: sig.filter.spreadPips } : undefined;
           const flow = generateDeepFlowSignal(pair, detailSeries, spreadOpts);
-          if (fii == null) fii = flow.flowIntensityIndex;
-          if (absorption == null) absorption = flow.absorption.type;
-          if (vpoc == null) vpoc = flow.volumeProfile.vpocPrice;
-          if (vwap == null) vwap = flow.vwap.vwap;
-          if (cvdDiv == null) cvdDiv = flow.cvdDivergence;
           if (flow.spreadSafety && !flow.spreadSafety.isSafe && flow.spreadSafety.lockoutReason) {
             spreadLockoutReason = flow.spreadSafety.lockoutReason;
             riskNotes.unshift(spreadLockoutReason);
           }
 
-          const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
-          if (!cmeTicker) cmeTicker = dom.cmeContract?.cmeTicker;
-          if (domImbalance == null) domImbalance = dom.orderBookImbalanceRatio;
+          if (!m5Flow) {
+            if (fii == null) fii = flow.flowIntensityIndex;
+            if (absorption == null) absorption = flow.absorption.type;
+            if (vpoc == null) vpoc = flow.volumeProfile.vpocPrice;
+            if (vwap == null) vwap = flow.vwap.vwap;
+            if (cvdDiv == null) cvdDiv = flow.cvdDivergence;
 
-          if (flow.absorption.detected) {
-            if (flow.absorption.type === "BULLISH_ABSORPTION" && sig.direction === "watch-long") {
-              evidence.push("🚨 Hấp thụ mua (Bullish Absorption) xác nhận đáy");
-            } else if (flow.absorption.type === "BEARISH_ABSORPTION" && sig.direction === "watch-short") {
-              evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
+            const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
+            if (!cmeTicker) cmeTicker = dom.cmeContract?.cmeTicker;
+            if (domImbalance == null) domImbalance = dom.orderBookImbalanceRatio;
+
+            if (flow.absorption.detected) {
+              if (flow.absorption.type === "BULLISH_ABSORPTION" && sig.direction === "watch-long") {
+                evidence.push("🚨 Hấp thụ mua (Bullish Absorption) xác nhận đáy");
+              } else if (flow.absorption.type === "BEARISH_ABSORPTION" && sig.direction === "watch-short") {
+                evidence.push("🚨 Hấp thụ bán (Bearish Absorption) chặn đỉnh");
+              }
             }
           }
         }

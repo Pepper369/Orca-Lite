@@ -408,11 +408,26 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const htfBias = htf.length >= 10 ? inferEmaBias(htf, 7, 16) : execBias;
   const macroBias = macro.length >= 10 ? inferEmaBias(macro, 5, 13) : htfBias;
 
+  let minWickRatioSum5 = 0;
+  const startW5 = Math.max(0, n - 5);
+  for (let i = startW5; i < n; i++) {
+    const b = barsExecution[i]!;
+    const rng = Math.max(pip, b.high - b.low);
+    const uw = Math.max(0, b.high - Math.max(b.open, b.close));
+    const dw = Math.max(0, Math.min(b.open, b.close) - b.low);
+    minWickRatioSum5 += Math.min(uw, dw) / rng;
+  }
+  const avgMinWickRatio5 = minWickRatioSum5 / Math.max(1, n - startW5);
+  const isBidirectionalWickChop = avgMinWickRatio5 >= 0.27 && whipsawFlips >= 2;
+
   const isExtremeSpike =
     (atrRatio >= 2.2 && whipsawFlips >= 2) ||
     (atrRatio >= 2.35 && lastRange > atr14 * 2.2) ||
     lastRange > Math.max(atr14, medianRange) * 3.4;
-  const isDeadChop = (adxVal < 19 && erVal < 0.25) || (whipsawFlips >= 4 && erVal < 0.30);
+  const isDeadChop =
+    isBidirectionalWickChop ||
+    (adxVal < 19 && erVal < 0.25) ||
+    (whipsawFlips >= 4 && erVal < 0.30);
 
   let regimeState: PrecisionTradeSetup["regime"]["state"] = "RANGING";
   if (isExtremeSpike) {
@@ -668,9 +683,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push(`Gate 1: HTF (${htfBias}) chưa đồng thuận`);
   }
 
-  if (regimeState === "CHOPPY" && !(hasSweep && hasMss)) {
+  if (regimeState === "CHOPPY" && (!(hasSweep && hasMss) || isBidirectionalWickChop)) {
     vetoReasons.push(`Thị trường Sideway nhiễu (ADX ${adxVal.toFixed(1)}, ER ${(erVal * 100).toFixed(0)}%, flips ${whipsawFlips}) — đứng ngoài`);
-    gatesFailed.push("Gate 1b (Chop Veto): Nhiễu whipsaw cao không có Sweep+MSS xác nhận");
+    gatesFailed.push("Gate 1b (Chop Veto): Nhiễu whipsaw cao không có Sweep+MSS một chiều xác nhận");
   } else if (!isDeadChop && (adxVal >= 18 || erVal >= 0.28)) {
     precisionScore += 6;
     gatesPassed.push(`Gate 1b: Xu hướng sạch (ADX ${adxVal.toFixed(1)}, ER ${(erVal * 100).toFixed(0)}%)`);

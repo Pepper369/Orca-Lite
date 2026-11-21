@@ -28,7 +28,11 @@ import {
   triggerGlobalKillSwitch,
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
-import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
+import {
+  dispatchSignalWithVault,
+  executePlatformOrder,
+  type DispatchableSignalInput,
+} from "@/lib/services/auto-trade-dispatcher";
 import {
   aggregateTierSummary,
   assignPoolNavShares,
@@ -42,6 +46,7 @@ import {
 import {
   buildBotLiveTelemetrySnapshot,
   closeTrackedBotPosition,
+  evaluateRealtimePositionExits,
   getLivePriceReference,
   updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
@@ -835,4 +840,88 @@ test("Direct Quant Engine -> API-Key Bot Bridge: Background Worker dispatches A+
   for (const c of allUserConns) {
     await deleteBrokerConnection(c.id, userId);
   }
+});
+
+test("Winrate Bottleneck Shields: TP Drift Preservation, Pre-TP1 Profit Shield, 5-Min Reversal Guard & TP1 Winrate Persistence", async () => {
+  const userId = `usr_wr_shield_${Date.now()}`;
+  const { connection: demoConn } = await createBrokerConnection({
+    userId,
+    name: "Paper Shield Bot",
+    platform: "BINANCE_FUTURES",
+    balanceUsd: 10_000,
+    riskMultiplier: 1.0,
+    isTestnet: true,
+  });
+
+  // 1) Adverse entry drift shifts TP1/TP2 outward so actual fill never compresses R:R
+  const driftedOrder = await executePlatformOrder(
+    demoConn,
+    {
+      ...SAMPLE_CRYPTO_SIGNAL,
+      id: `sig_drift_${Date.now()}`,
+      symbol: "ETHUSDT",
+      entryPrice: 3000,
+      stopLossPrice: 2940,
+      takeProfit1: 3060,
+      takeProfit2: 3120,
+    },
+    1.0,
+    3,
+    3005, // filled $5 higher than intended entryPrice
+    0.16,
+    `idem_drift_${Date.now()}`,
+  );
+  assert.equal(driftedOrder.executionPrice, 3005);
+  assert.equal(driftedOrder.takeProfit1, 3065, "TP1 must shift +$5 to preserve full $60 TP1 reward distance");
+  assert.equal(driftedOrder.takeProfit2, 3125, "TP2 must shift +$5 to preserve full $120 TP2 reward distance");
+
+  // 2) Dispatch a live paper order on ETHUSDT and verify premature 30-second reversal does NOT kill it
+  const [liveOrd] = await dispatchSignalWithVault({
+    signal: {
+      ...SAMPLE_CRYPTO_SIGNAL,
+      id: `sig_live_shield_${Date.now()}`,
+      symbol: "ETHUSDT",
+      direction: "BUY",
+      entryPrice: 3000,
+      stopLossPrice: 2940,
+      takeProfit1: 3060,
+      takeProfit2: 3120,
+      takeProfit3: 3180,
+    },
+    currentMarketPrice: 3000,
+    manualOverride: true,
+    userId,
+    targetFollowerIds: [demoConn.id],
+  });
+  assert.ok(liveOrd);
+
+  // Move price +65% toward TP1 (3039) and pass an opposing SELL reversal on a fresh order (< 5m old)
+  const revMap = new Map<string, "BUY" | "SELL">([["ETHUSDT", "SELL"]]);
+  const step1 = await evaluateRealtimePositionExits({
+    reversals: revMap,
+    overrideMarkPrices: new Map([["ETHUSDT", 3039]]),
+    forceEvaluate: true,
+  });
+  assert.equal(step1.closedCount, 0, "Fresh order (< 5m old) must NOT be killed by premature reversal flicker");
+  assert.ok(step1.trailedCount >= 1, "At +65% of TP1 distance, Pre-TP1 Profit Shield must ratchet SL above entry");
+
+  const ordersAfterTrail = await listBotExecutionOrders(10, userId);
+  const trailedOrd = ordersAfterTrail.find((o) => o.orderId === liveOrd!.orderId)!;
+  assert.ok(trailedOrd.stopLossPrice > 3000, `Expected SL locked in profit > 3000, got ${trailedOrd.stopLossPrice}`);
+
+  // 3) Advance price to TP1 (3062) -> partial 50% close + TP1_BE stage + account winratePct updated to 100%
+  const step2 = await evaluateRealtimePositionExits({
+    reversals: revMap,
+    overrideMarkPrices: new Map([["ETHUSDT", 3062]]),
+    forceEvaluate: true,
+  });
+  assert.ok((step2.partialClosedCount ?? 0) >= 1, "Reaching TP1 must bank 50% partial profit and transition to TP1_BE");
+
+  const snapAfterTp1 = await buildBotLiveTelemetrySnapshot(userId);
+  const acctSnap = snapAfterTp1.accounts.find((a) => a.accountId === demoConn.id)!;
+  assert.equal(acctSnap.winratePct, 100, "TP1_BE profit-banked trade must count as a 100% win in live winratePct");
+
+  // Clean up
+  await closeTrackedBotPosition({ orderId: liveOrd!.orderId, userId, overrideClosePrice: 3065 });
+  await deleteBrokerConnection(demoConn.id, userId);
 });

@@ -584,7 +584,12 @@ export async function runAutoTradeTick(): Promise<{
     if (fxRes.status === "fulfilled" && fxRes.value) {
       for (const s of fxRes.value.data.signals) {
         if (s.lastPrice > 0) updateLivePriceReference(s.pair, s.lastPrice);
-        if ((s.setupGrade === "A+" || s.setupGrade === "A") && (s.direction === "BUY" || s.direction === "SELL")) {
+        if (
+          s.status === "ACTIVE" &&
+          s.setupGrade === "A+" &&
+          (s.winrateScore ?? s.probability) >= 82 &&
+          (s.direction === "BUY" || s.direction === "SELL")
+        ) {
           reversals.set(s.pair.toUpperCase(), s.direction);
         }
       }
@@ -616,29 +621,36 @@ export async function runAutoTradeTick(): Promise<{
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
         const lots = Math.max(0.01, s.recommendedLots || 0.2);
+        const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
+        const pullbackTriggered =
+          s.entryMode !== "LIMIT_PULLBACK" ||
+          riskDist <= 0 ||
+          Math.abs(marketPrice - (s.entryPrice ?? marketPrice)) <= riskDist * 0.35;
 
-        signalsToDispatch.push({
-          signal: {
-            id: sigId,
-            symbol: s.pair,
-            assetType: "FOREX",
-            direction: s.direction as "BUY" | "SELL",
-            entryPrice: s.entryPrice ?? marketPrice,
-            stopLossPrice: s.stopLossPrice!,
-            takeProfit1: s.tp1!,
-            takeProfit2: s.tp2 ?? undefined,
-            takeProfit3: s.tp3 ?? undefined,
-            masterLotsOrQty: lots,
-            masterCapitalUsd: 10_000,
-            winrateScore: wrScore,
-            setupGrade: grade,
-            entryMode: s.entryMode,
-            expectancyR: s.expectancyR,
-            spreadPipsOrPct: spreadPips,
-            timestamp: s.updatedAt,
-          },
-          marketPrice,
-        });
+        if (s.status === "ACTIVE" && pullbackTriggered) {
+          signalsToDispatch.push({
+            signal: {
+              id: sigId,
+              symbol: s.pair,
+              assetType: "FOREX",
+              direction: s.direction as "BUY" | "SELL",
+              entryPrice: s.entryPrice ?? marketPrice,
+              stopLossPrice: s.stopLossPrice!,
+              takeProfit1: s.tp1!,
+              takeProfit2: s.tp2 ?? undefined,
+              takeProfit3: s.tp3 ?? undefined,
+              masterLotsOrQty: lots,
+              masterCapitalUsd: 10_000,
+              winrateScore: wrScore,
+              setupGrade: grade,
+              entryMode: s.entryMode,
+              expectancyR: s.expectancyR,
+              spreadPipsOrPct: spreadPips,
+              timestamp: s.updatedAt,
+            },
+            marketPrice,
+          });
+        }
 
         quantFeedItems.push({
           id: sigId,
@@ -669,7 +681,12 @@ export async function runAutoTradeTick(): Promise<{
     if (crRes.status === "fulfilled" && crRes.value) {
       for (const s of crRes.value.data.signals) {
         if (s.lastPrice > 0) updateLivePriceReference(s.pair, s.lastPrice);
-        if ((s.setupGrade === "A+" || s.setupGrade === "A") && (s.direction === "BUY" || s.direction === "SELL")) {
+        if (
+          s.status === "ACTIVE" &&
+          s.setupGrade === "A+" &&
+          (s.winrateScore ?? s.probability) >= 82 &&
+          (s.direction === "BUY" || s.direction === "SELL")
+        ) {
           reversals.set(s.pair.toUpperCase(), s.direction);
         }
       }
@@ -702,29 +719,36 @@ export async function runAutoTradeTick(): Promise<{
         const sigId = `cr_${s.pair}_${s.direction}_${bucket5m}`;
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
+        const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
+        const pullbackTriggered =
+          s.entryMode !== "LIMIT_PULLBACK" ||
+          riskDist <= 0 ||
+          Math.abs(marketPrice - (s.entryPrice ?? marketPrice)) <= riskDist * 0.35;
 
-        signalsToDispatch.push({
-          signal: {
-            id: sigId,
-            symbol: s.pair,
-            assetType: "CRYPTO",
-            direction: s.direction as "BUY" | "SELL",
-            entryPrice: s.entryPrice ?? marketPrice,
-            stopLossPrice: s.stopLossPrice!,
-            takeProfit1: s.tp1!,
-            takeProfit2: s.tp2 ?? undefined,
-            takeProfit3: s.tp3 ?? undefined,
-            masterLotsOrQty: Number(baseQty.toFixed(4)),
-            masterCapitalUsd: 10_000,
-            winrateScore: wrScore,
-            setupGrade: grade,
-            recommendedLeverage: s.recommendedLeverage,
-            entryMode: s.entryMode,
-            expectancyR: s.expectancyR,
-            timestamp: s.updatedAt,
-          },
-          marketPrice,
-        });
+        if (s.status === "ACTIVE" && pullbackTriggered) {
+          signalsToDispatch.push({
+            signal: {
+              id: sigId,
+              symbol: s.pair,
+              assetType: "CRYPTO",
+              direction: s.direction as "BUY" | "SELL",
+              entryPrice: s.entryPrice ?? marketPrice,
+              stopLossPrice: s.stopLossPrice!,
+              takeProfit1: s.tp1!,
+              takeProfit2: s.tp2 ?? undefined,
+              takeProfit3: s.tp3 ?? undefined,
+              masterLotsOrQty: Number(baseQty.toFixed(4)),
+              masterCapitalUsd: 10_000,
+              winrateScore: wrScore,
+              setupGrade: grade,
+              recommendedLeverage: s.recommendedLeverage,
+              entryMode: s.entryMode,
+              expectancyR: s.expectancyR,
+              timestamp: s.updatedAt,
+            },
+            marketPrice,
+          });
+        }
 
         quantFeedItems.push({
           id: sigId,

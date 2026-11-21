@@ -365,6 +365,40 @@ export function evaluateHighWinrateGate(params: {
   const rsi14 = rsiArr[rsiArr.length - 1];
   const atr14 = atr(series, 14) ?? avgRange;
 
+  if (params.ictResult) {
+    const htfPoiMatches =
+      (isBuy && params.ictResult.htfPoiContext?.alignedSide === "BUY") ||
+      (!isBuy && params.ictResult.htfPoiContext?.alignedSide === "SELL");
+    const ifvgOrBprMatches =
+      params.ictResult.activeFvgList.some(
+        (f) => f.isInversion && ((isBuy && f.direction === "BEARISH_FVG") || (!isBuy && f.direction === "BULLISH_FVG")),
+      ) ||
+      Boolean(
+        params.ictResult.bprZones?.some(
+          (b) => (isBuy && b.direction === "BULLISH_BPR") || (!isBuy && b.direction === "BEARISH_BPR"),
+        ),
+      );
+    if (htfPoiMatches || ifvgOrBprMatches) {
+      score += 4;
+      passedGates.push("Gate 2b (ICT Multi-TF): Hội tụ HTF POI / IFVG / BPR");
+    }
+  }
+
+  const lastBarRange = Math.max(0, lastBar.high - lastBar.low);
+  const lastUpperWick = Math.max(0, lastBar.high - Math.max(lastBar.open, lastBar.close));
+  const lastLowerWick = Math.max(0, Math.min(lastBar.open, lastBar.close) - lastBar.low);
+  if (!liquiditySweepDetected && lastBarRange >= atr14 * 0.85) {
+    if (isBuy && lastUpperWick >= lastBarRange * 0.62 && lastBar.close <= lastBar.open + lastBarRange * 0.25) {
+      score -= 12;
+      failedGates.push("Gate 6 (Bull-Trap Wick): Râu nến trên từ chối giá > 62% biên độ");
+      vetoReasons.push("Nến râu trên từ chối giá mạnh (Bull-Trap Rejection)");
+    } else if (!isBuy && lastLowerWick >= lastBarRange * 0.62 && lastBar.close >= lastBar.open - lastBarRange * 0.25) {
+      score -= 12;
+      failedGates.push("Gate 6 (Bear-Trap Wick): Râu nến dưới rút chân > 62% biên độ");
+      vetoReasons.push("Nến râu dưới rút chân mạnh (Bear-Trap Rejection)");
+    }
+  }
+
   if (rsi14 != null) {
     if (isBuy && rsi14 >= 75 && !liquiditySweepDetected) {
       score -= 14;

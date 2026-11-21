@@ -324,6 +324,40 @@ function buildLocalOpenPositions(
   return out;
 }
 
+function computeAccountWinrateStats(
+  acctOrders: CopyExecutionOrder[],
+  fallbackWinratePct = 0,
+  fallbackTotalTrades = 0,
+): { closedTradesCount: number; wins: number; winratePct: number | null } {
+  const resolvedOrders = acctOrders.filter(
+    (o) =>
+      o.message.startsWith("[ĐÃ ĐÓNG]") ||
+      ((o.positionStage === "TP1_BE" || o.positionStage === "TP2_TRAIL") &&
+        o.realizedPnlUsd != null &&
+        o.realizedPnlUsd > 0),
+  );
+  let wins = 0;
+  for (const co of resolvedOrders) {
+    if (co.realizedPnlUsd != null && Number.isFinite(co.realizedPnlUsd)) {
+      if (co.realizedPnlUsd > 0) wins++;
+      continue;
+    }
+    const m = co.message.match(/PnL\s*([+-]?\$?\d+(?:\.\d+)?)/);
+    if (m) {
+      const val = Number(m[1].replace("$", ""));
+      if (val > 0) wins++;
+    }
+  }
+  const closedTradesCount = resolvedOrders.length;
+  const winratePct =
+    closedTradesCount > 0
+      ? Number(((wins / closedTradesCount) * 100).toFixed(1))
+      : fallbackWinratePct > 0 && fallbackTotalTrades > 0
+        ? Number(fallbackWinratePct.toFixed(1))
+        : null;
+  return { closedTradesCount, wins, winratePct };
+}
+
 export async function closeTrackedBotPosition(params: {
   orderId: string;
   userId?: string | null;
@@ -409,11 +443,14 @@ export async function closeTrackedBotPosition(params: {
   const nextTotalPnl = Number((acct.totalPnlUsd + chunkRealizedPnlUsd).toFixed(2));
   const nextDailyPnl = Number(((acct.dailyRealizedPnlUsd ?? 0) + chunkRealizedPnlUsd).toFixed(2));
   const nextBalance = Number(Math.max(0, acct.balanceUsd + chunkRealizedPnlUsd).toFixed(2));
+  const acctOrdersNow = (await listBotExecutionOrders(150)).filter((o) => o.followerId === acct.id);
+  const wrStats = computeAccountWinrateStats(acctOrdersNow, acct.winratePct, acct.totalCopiedTrades);
   await updateBrokerConnectionState(acct.id, {
     balanceUsd: nextBalance,
     totalPnlUsd: nextTotalPnl,
     dailyRealizedPnlUsd: nextDailyPnl,
     dailyPnlDate: new Date().toISOString().slice(0, 10),
+    ...(wrStats.winratePct != null ? { winratePct: wrStats.winratePct } : {}),
   });
 
   const chunkSign = chunkRealizedPnlUsd >= 0 ? "+" : "";
@@ -499,11 +536,14 @@ async function advancePartialTakeProfitStage(params: {
     message: `[${stageLabel}] Chốt ${closeQty} @ ${execClosePrice} (${pnlSign}$${partialPnlUsd.toFixed(2)}) · SL -> ${nextSlPrice} · Còn ${remainQty}`,
   });
 
+  const acctOrdersNow = (await listBotExecutionOrders(150)).filter((o) => o.followerId === acct.id);
+  const wrStats = computeAccountWinrateStats(acctOrdersNow, acct.winratePct, acct.totalCopiedTrades);
   await updateBrokerConnectionState(acct.id, {
     balanceUsd: Number(Math.max(0, acct.balanceUsd + partialPnlUsd).toFixed(2)),
     totalPnlUsd: Number((acct.totalPnlUsd + partialPnlUsd).toFixed(2)),
     dailyRealizedPnlUsd: Number(((acct.dailyRealizedPnlUsd ?? 0) + partialPnlUsd).toFixed(2)),
     dailyPnlDate: new Date().toISOString().slice(0, 10),
+    ...(wrStats.winratePct != null ? { winratePct: wrStats.winratePct } : {}),
   });
 
   recordBotActivity({
@@ -693,9 +733,14 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 3) Opposite High-Conviction Quant Signal Reversal Exit
+    // 3) Opposite High-Conviction Quant Signal Reversal Exit (only on INITIAL unbanked positions after >= 5m M5 bar confirmation)
     const reversalDir = options?.reversals?.get(cleanSym);
-    if (reversalDir && reversalDir !== o.direction && Date.now() - o.timestamp >= 30_000) {
+    if (
+      stage === "INITIAL" &&
+      reversalDir &&
+      reversalDir !== o.direction &&
+      Date.now() - o.timestamp >= 300_000
+    ) {
       const res = await closeTrackedBotPosition({
         orderId: o.orderId,
         reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
@@ -705,7 +750,7 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 4) Dynamic Breakeven & Trailing Stop Ratchet (asset-accurate pip/tick sizing)
+    // 4) Dynamic Breakeven & Pre-TP1 Profit Shield Ratchet (asset-accurate pip/tick sizing)
     const activeTarget =
       stage === "TP2_TRAIL" && tp3 > 0
         ? tp3
@@ -715,11 +760,13 @@ export async function evaluateRealtimePositionExits(options?: {
     if (activeTarget > 0 && sl > 0) {
       const targetDist = Math.abs(activeTarget - entry);
       const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
-      if (targetDist > pip * 3 && favorableMove >= targetDist * 0.45) {
+      if (targetDist > pip * 3 && favorableMove >= targetDist * 0.40) {
         const lockDist =
-          favorableMove >= targetDist * 0.7
-            ? favorableMove * 0.55
-            : targetDist * 0.08;
+          favorableMove >= targetDist * 0.72
+            ? favorableMove * 0.58
+            : favorableMove >= targetDist * 0.58
+              ? favorableMove * 0.32
+              : Math.max(pip * 2, targetDist * 0.10);
         const candidateSl = roundPrice(
           isBuy ? entry + lockDist : entry - lockDist,
           o.symbol,
@@ -811,20 +858,12 @@ export async function buildBotLiveTelemetrySnapshot(
     const acctOrders = ordersByAccount.get(acct.id) ?? [];
     const { accountTier: tier, environment, demoSubtype } = classifyAccountEnvironment(acct);
 
-    // Closed PnL stats from tracked history (truth-in-data: null winrate if 0 closed trades)
-    const closedOrders = acctOrders.filter((o) => o.message.startsWith("[ĐÃ ĐÓNG]"));
-    let wins = 0;
-    for (const co of closedOrders) {
-      if (co.realizedPnlUsd != null && Number.isFinite(co.realizedPnlUsd)) {
-        if (co.realizedPnlUsd > 0) wins++;
-        continue;
-      }
-      const m = co.message.match(/PnL\s*([+-]?\$?\d+(?:\.\d+)?)/);
-      if (m) {
-        const val = Number(m[1].replace("$", ""));
-        if (val > 0) wins++;
-      }
-    }
+    // Closed & TP1/TP2 profit-locked stats from tracked history (truth-in-data: null winrate if 0 resolved trades)
+    const { closedTradesCount, wins, winratePct } = computeAccountWinrateStats(
+      acctOrders,
+      acct.winratePct,
+      acct.totalCopiedTrades,
+    );
 
     let walletBalanceUsd = acct.balanceUsd;
     let equityUsd = acct.balanceUsd;
@@ -898,14 +937,6 @@ export async function buildBotLiveTelemetrySnapshot(
     const maxDailyLossUsd = Math.max(10, acct.maxDailyLossUsd ?? 500);
     const dailyLossAmount = Math.max(0, -(dailyRealizedPnlUsd + Math.min(0, unrealizedPnlUsd)));
     const dailyLossUsedPct = Number(Math.min(100, (dailyLossAmount / maxDailyLossUsd) * 100).toFixed(1));
-
-    const closedTradesCount = closedOrders.length;
-    const winratePct =
-      closedTradesCount > 0
-        ? Number(((wins / closedTradesCount) * 100).toFixed(1))
-        : acct.winratePct > 0 && acct.totalCopiedTrades > 0
-          ? Number(acct.winratePct.toFixed(1))
-          : null;
 
     accountTelemetries.push({
       accountId: acct.id,
