@@ -1,7 +1,6 @@
 import type { OhlcvBar } from "../types";
-import { adx, atr, ema, macd, rsi, sma, supportResistance } from "../technical";
+import { ema, sma, supportResistance } from "../technical";
 import {
-  computeEfficiencyRatio,
   estimateClvOrderFlowImbalance,
   getAssetPipSize,
   resampleOhlcvBars,
@@ -372,8 +371,6 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const pip = getAssetPipSize(symbol, assetType, currentPrice);
   const execCtx = sharedCtx && sharedCtx.bars === barsExecution ? sharedCtx : buildSharedBarContext(barsExecution);
   const closes = execCtx.closes;
-  const highs = execCtx.highs;
-  const lows = execCtx.lows;
 
   // ------------------------------------------------------------------
   // 1. CAUSAL MULTI-TIMEFRAME RESAMPLING & REGIME DIAGNOSIS
