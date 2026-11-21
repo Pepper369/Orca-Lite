@@ -833,8 +833,19 @@ async function getBinanceSymbolFilters(baseUrl: string, symbol: string): Promise
   return symbolsMap.get(symbol) ?? null;
 }
 
+export interface DualEnvironmentVerificationResult {
+  platform: "BINANCE_FUTURES" | "OKX_FUTURES";
+  real: BrokerVerificationResult;
+  demo: BrokerVerificationResult;
+  connectedEnvironments: Array<"REAL" | "DEMO">;
+  anyVerified: boolean;
+  primary: BrokerVerificationResult;
+  summaryMessage: string;
+}
+
 export async function verifyBinanceFuturesAccount(
   creds: BrokerCredentialsInput,
+  options?: { skipCrossEnvProbe?: boolean },
 ): Promise<BrokerVerificationResult> {
   const started = Date.now();
   const apiKey = cleanBinanceCred(creds.apiKey);
@@ -895,7 +906,7 @@ export async function verifyBinanceFuturesAccount(
       let diagnostic = formatBinanceAuthErrorVi(code, rawMsg, creds.isTestnet);
 
       // Cross-check opposite environment / Spot-only permission to give exact actionable feedback (still verified=false!)
-      if (code === -2015) {
+      if (code === -2015 && !options?.skipCrossEnvProbe) {
         if (creds.isTestnet) {
           const mainnetProbe = await probeBinanceFuturesAccountEndpoint(BINANCE_MAINNET_FAPI, apiKey, apiSecret).catch(
             () => null,
@@ -968,6 +979,65 @@ export async function verifyBinanceFuturesAccount(
       rawMessage: err instanceof Error ? err.message : "Lỗi kết nối Binance Futures API",
     };
   }
+}
+
+/**
+ * Probes BOTH REAL (Mainnet) and DEMO (Testnet/Demo Trading) simultaneously using a single API Key + Secret.
+ * Allows applying 1 credential pair per platform to automatically connect both Real and Demo accounts when supported,
+ * or auto-detect the exact authorized environment without manual toggle mismatch errors.
+ */
+export async function verifyBrokerDualEnvironment(params: {
+  platform: "BINANCE_FUTURES" | "OKX_FUTURES";
+  apiKey: string;
+  apiSecret: string;
+  passphrase?: string | null;
+}): Promise<DualEnvironmentVerificationResult> {
+  const apiKey = cleanBinanceCred(params.apiKey);
+  const apiSecret = cleanBinanceCred(params.apiSecret);
+  const passphrase = params.passphrase?.trim() || null;
+
+  const [real, demo] =
+    params.platform === "BINANCE_FUTURES"
+      ? await Promise.all([
+          verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: false }, { skipCrossEnvProbe: true }),
+          verifyBinanceFuturesAccount({ apiKey, apiSecret, isTestnet: true }, { skipCrossEnvProbe: true }),
+        ])
+      : await Promise.all([
+          verifyOkxAccount({ apiKey, apiSecret, passphrase, isTestnet: false }),
+          verifyOkxAccount({ apiKey, apiSecret, passphrase, isTestnet: true }),
+        ]);
+
+  const connectedEnvironments: Array<"REAL" | "DEMO"> = [];
+  if (real.verified) connectedEnvironments.push("REAL");
+  if (demo.verified) connectedEnvironments.push("DEMO");
+
+  const anyVerified = connectedEnvironments.length > 0;
+  let primary: BrokerVerificationResult = real;
+  let summaryMessage: string;
+
+  if (real.verified && demo.verified) {
+    primary = real;
+    summaryMessage = `Đã xác thực CẢ 2 tài khoản REAL ($${(real.balanceUsd ?? 0).toLocaleString()}) & DEMO ($${(demo.balanceUsd ?? 0).toLocaleString()})`;
+  } else if (real.verified) {
+    primary = real;
+    summaryMessage = `Đã xác thực tài khoản REAL ($${(real.balanceUsd ?? 0).toLocaleString()}) · Môi trường DEMO không cấp quyền trên API Key này`;
+  } else if (demo.verified) {
+    primary = demo;
+    summaryMessage = `Đã xác thực tài khoản DEMO ($${(demo.balanceUsd ?? 0).toLocaleString()}) · Môi trường REAL không cấp quyền trên API Key này`;
+  } else {
+    primary = real;
+    summaryMessage = `Không thể xác thực API Key trên cả REAL lẫn DEMO · REAL: ${real.rawMessage}`;
+  }
+
+  return {
+    platform: params.platform,
+    real,
+    demo,
+    connectedEnvironments,
+    anyVerified,
+    primary,
+    summaryMessage,
+  };
 }
 
 export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {

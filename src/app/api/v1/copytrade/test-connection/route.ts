@@ -2,6 +2,7 @@ import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import {
   verifyBinanceFuturesAccount,
+  verifyBrokerDualEnvironment,
   verifyMetaApiMt5Account,
   verifyOkxAccount,
   type BrokerVerificationResult,
@@ -124,29 +125,28 @@ export async function POST(req: Request) {
       return badRequest("Cần cung cấp platform, API Key và API Secret để kiểm tra kết nối");
     }
 
-    const verification =
-      body.platform === "BINANCE_FUTURES"
-        ? await verifyBinanceFuturesAccount({
-            apiKey: body.apiKey.trim(),
-            apiSecret: body.apiSecret.trim(),
-            isTestnet: body.isTestnet !== false,
-          })
-        : body.platform === "OKX_FUTURES"
-          ? await verifyOkxAccount({
-              apiKey: body.apiKey.trim(),
-              apiSecret: body.apiSecret.trim(),
-              passphrase: body.passphrase?.trim() ?? "",
-              isTestnet: body.isTestnet !== false,
-            })
-          : await verifyMetaApiMt5Account(
-              {
-                apiKey: body.apiKey.trim(),
-                apiSecret: body.apiSecret.trim(),
-                passphrase: body.passphrase?.trim() || null,
-                isTestnet: body.isTestnet !== false,
-              },
-              body.platform,
-            );
+    if (body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES") {
+      const dualVerification = await verifyBrokerDualEnvironment({
+        platform: body.platform,
+        apiKey: body.apiKey.trim(),
+        apiSecret: body.apiSecret.trim(),
+        passphrase: body.passphrase?.trim() || null,
+      });
+      return ok({
+        verification: dualVerification.primary,
+        dualVerification,
+      });
+    }
+
+    const verification = await verifyMetaApiMt5Account(
+      {
+        apiKey: body.apiKey.trim(),
+        apiSecret: body.apiSecret.trim(),
+        passphrase: body.passphrase?.trim() || null,
+        isTestnet: body.isTestnet !== false,
+      },
+      body.platform,
+    );
 
     return ok({ verification });
   } catch (err) {

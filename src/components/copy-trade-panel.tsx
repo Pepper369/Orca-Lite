@@ -97,8 +97,19 @@ interface TestConnectionResult {
   availableMarginUsd: number | null;
   canTrade: boolean;
   positionMode?: string;
+  resolvedEndpoint?: string;
   latencyMs: number;
   rawMessage: string;
+}
+
+interface DualTestConnectionResult {
+  platform: string;
+  real: TestConnectionResult;
+  demo: TestConnectionResult;
+  connectedEnvironments: Array<"REAL" | "DEMO">;
+  anyVerified: boolean;
+  primary: TestConnectionResult;
+  summaryMessage: string;
 }
 
 const PLATFORM_LABELS: Record<BrokerPlatform, string> = {
@@ -252,6 +263,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const [modalSaving, setModalSaving] = useState(false);
   const [modalTesting, setModalTesting] = useState(false);
   const [modalTestRes, setModalTestRes] = useState<TestConnectionResult | null>(null);
+  const [modalDualTestRes, setModalDualTestRes] = useState<DualTestConnectionResult | null>(null);
 
   // One-time MT5 EA Token modal
   const [eaTokenModal, setEaTokenModal] = useState<{ name: string; platform: string; token: string } | null>(null);
@@ -297,6 +309,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
     setFormApiSecret("");
     setFormPassphrase("");
     setModalTestRes(null);
+    setModalDualTestRes(null);
   };
 
   const handleTogglePatch = async (
@@ -495,6 +508,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
     }
     setModalTesting(true);
     setModalTestRes(null);
+    setModalDualTestRes(null);
     try {
       const res = await fetch("/api/v1/copytrade/test-connection", {
         method: "POST",
@@ -509,9 +523,12 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
       });
       const json = (await res.json()) as {
         success?: boolean;
-        data?: { verification?: TestConnectionResult };
+        data?: { verification?: TestConnectionResult; dualVerification?: DualTestConnectionResult };
         error?: { message?: string };
       };
+      if (json.data?.dualVerification) {
+        setModalDualTestRes(json.data.dualVerification);
+      }
       if (json.data?.verification) {
         setModalTestRes(json.data.verification);
         if (json.data.verification.verified && json.data.verification.balanceUsd) {
@@ -576,7 +593,9 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
         success?: boolean;
         data?: {
           account: FollowerAccount;
+          accounts?: FollowerAccount[];
           verification?: TestConnectionResult | null;
+          dualVerification?: DualTestConnectionResult | null;
           oneTimeEaToken?: string | null;
         };
         error?: { message?: string };
@@ -587,7 +606,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
         return;
       }
 
-      const { account, verification, oneTimeEaToken } = json.data;
+      const { account, accounts: createdList, verification, dualVerification, oneTimeEaToken } = json.data;
       setShowAddModal(false);
       resetModalForm();
 
@@ -596,7 +615,16 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
         setEaTokenModal({ name: account.name, platform: account.platform, token: oneTimeEaToken });
       }
 
-      if (verification) {
+      if (dualVerification) {
+        const count = createdList?.length ?? 1;
+        setBanner({
+          tone: dualVerification.anyVerified ? "ok" : "warn",
+          text:
+            count > 1
+              ? `Đã đồng bộ ${count} tài khoản (REAL + DEMO) vào Vault AES-256-GCM · ${dualVerification.summaryMessage}`
+              : `Đã lưu "${account.name}" vào Vault AES-256-GCM · ${dualVerification.summaryMessage}`,
+        });
+      } else if (verification) {
         setBanner({
           tone: verification.verified && verification.canTrade ? "ok" : "warn",
           text: `Đã lưu "${account.name}" vào Vault AES-256-GCM · ${verification.rawMessage}`,
@@ -1402,7 +1430,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                   <div className="flex items-start gap-2 text-[11px] text-warn">
                     <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                     <span>
-                      <strong>Khuyến cáo an toàn:</strong> Chỉ bật quyền <strong>Read + Enable Futures / Trade</strong>, tuyệt đối <strong>TẮT Withdraw (Rút tiền)</strong> và bật whitelist IP khi dùng Mainnet. API Key được mã hóa AES-256-GCM.
+                      <strong>Đồng bộ Dual-Mode (REAL + DEMO):</strong> Chỉ cần nhập 1 bộ API Key &amp; Secret, hệ thống sẽ tự động kiểm tra và kết nối <strong>cả tài khoản REAL lẫn DEMO</strong> nếu API Key hỗ trợ (hoặc tự nhận đúng môi trường khả dụng). Chỉ bật quyền <strong>Read + Enable Futures / Trade</strong>, tuyệt đối <strong>TẮT Withdraw</strong>.
                     </span>
                   </div>
 
@@ -1448,24 +1476,49 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={modalTesting || !formApiKey.trim() || !formApiSecret.trim()}
-                      onClick={handleModalDryTest}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 disabled:opacity-40"
-                    >
-                      <KeyRound className="h-3.5 w-3.5" />
-                      {modalTesting ? "Đang ping sàn..." : "Kiểm tra kết nối API"}
-                    </button>
-                    {modalTestRes && (
-                      <span
-                        className={`text-[11px] font-semibold ${
-                          modalTestRes.verified && modalTestRes.canTrade ? "text-positive" : "text-down"
-                        }`}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        disabled={modalTesting || !formApiKey.trim() || !formApiSecret.trim()}
+                        onClick={handleModalDryTest}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 disabled:opacity-40"
                       >
-                        {modalTestRes.verified ? `OK ($${modalTestRes.balanceUsd ?? 0}, ${modalTestRes.latencyMs}ms)` : modalTestRes.rawMessage}
-                      </span>
+                        <KeyRound className="h-3.5 w-3.5" />
+                        {modalTesting ? "Đang ping REAL & DEMO..." : "Kiểm tra REAL & DEMO"}
+                      </button>
+                      {!modalDualTestRes && modalTestRes && (
+                        <span
+                          className={`text-[11px] font-semibold ${
+                            modalTestRes.verified && modalTestRes.canTrade ? "text-positive" : "text-down"
+                          }`}
+                        >
+                          {modalTestRes.verified ? `OK ($${modalTestRes.balanceUsd ?? 0}, ${modalTestRes.latencyMs}ms)` : modalTestRes.rawMessage}
+                        </span>
+                      )}
+                    </div>
+                    {modalDualTestRes && (
+                      <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-line bg-surface-elevated/80 p-2 text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-amber-300">REAL / LIVE:</span>
+                          <span className={modalDualTestRes.real.verified ? "font-semibold text-positive" : "text-ink-3"}>
+                            {modalDualTestRes.real.verified
+                              ? `OK ($${(modalDualTestRes.real.balanceUsd ?? 0).toLocaleString()}, ${modalDualTestRes.real.latencyMs}ms)`
+                              : "Không cấp quyền / Lỗi"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-cyan-300">DEMO / TESTNET:</span>
+                          <span className={modalDualTestRes.demo.verified ? "font-semibold text-positive" : "text-ink-3"}>
+                            {modalDualTestRes.demo.verified
+                              ? `OK ($${(modalDualTestRes.demo.balanceUsd ?? 0).toLocaleString()}, ${modalDualTestRes.demo.latencyMs}ms)`
+                              : "Không cấp quyền / Lỗi"}
+                          </span>
+                        </div>
+                        <div className={`pt-1 border-t border-line/60 text-[10.5px] ${modalDualTestRes.anyVerified ? "text-positive" : "text-down"}`}>
+                          {modalDualTestRes.summaryMessage}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

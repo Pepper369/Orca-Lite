@@ -7,9 +7,11 @@ import {
 import { classifyAccountEnvironment } from "@/lib/engines/bot-telemetry-types";
 import {
   verifyBinanceFuturesAccount,
+  verifyBrokerDualEnvironment,
   verifyMetaApiMt5Account,
   verifyOkxAccount,
   type BrokerVerificationResult,
+  type DualEnvironmentVerificationResult,
 } from "@/lib/engines/exchange-execution-client";
 import {
   createBrokerConnection,
@@ -118,6 +120,99 @@ export async function POST(req: Request) {
       return badRequest("OKX v5 API yêu cầu bắt buộc phải có Passphrase");
     }
 
+    const isRestExchange = body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES";
+    const isMt5Platform =
+      body.platform === "MT5_EXNESS" || body.platform === "MT5_XM" || body.platform === "MT5_EA";
+
+    // Unified Dual-Environment onboarding for REST exchanges (Binance / OKX):
+    // 1 API Key + Secret automatically probes BOTH REAL and DEMO and creates verified connections for every authorized environment.
+    if (hasApiCreds && isRestExchange) {
+      const dualVerification: DualEnvironmentVerificationResult = await verifyBrokerDualEnvironment({
+        platform: body.platform as "BINANCE_FUTURES" | "OKX_FUTURES",
+        apiKey: body.apiKey!.trim(),
+        apiSecret: body.apiSecret!.trim(),
+        passphrase: body.passphrase?.trim() || null,
+      });
+
+      const baseName = nameCheck.value ?? "";
+      const targets: Array<{
+        isTestnet: boolean;
+        label: string;
+        v: BrokerVerificationResult;
+      }> = [];
+
+      if (dualVerification.real.verified && dualVerification.demo.verified) {
+        targets.push(
+          { isTestnet: false, label: `${baseName} (REAL)`, v: dualVerification.real },
+          { isTestnet: true, label: `${baseName} (DEMO)`, v: dualVerification.demo },
+        );
+      } else if (dualVerification.real.verified) {
+        targets.push({ isTestnet: false, label: baseName, v: dualVerification.real });
+      } else if (dualVerification.demo.verified) {
+        targets.push({ isTestnet: true, label: baseName, v: dualVerification.demo });
+      } else {
+        const fallbackIsTestnet = body.isTestnet !== false;
+        targets.push({
+          isTestnet: fallbackIsTestnet,
+          label: baseName,
+          v: fallbackIsTestnet ? dualVerification.demo : dualVerification.real,
+        });
+      }
+
+      const createdAccounts = [];
+      for (const t of targets) {
+        const { connection } = await createBrokerConnection({
+          userId: session?.id ?? null,
+          name: t.label,
+          platform: body.platform,
+          accountNumber: cleanAccountNumber,
+          balanceUsd:
+            t.v.verified && t.v.balanceUsd !== null && t.v.balanceUsd > 0
+              ? Number(t.v.balanceUsd.toFixed(2))
+              : Number.isFinite(Number(body.balanceUsd)) && Number(body.balanceUsd) > 0
+                ? Number(body.balanceUsd)
+                : 1000,
+          riskMultiplier: Number.isFinite(Number(body.riskMultiplier)) ? Number(body.riskMultiplier) : 1.0,
+          maxAllowedSlippagePips: Number.isFinite(Number(body.maxAllowedSlippagePips))
+            ? Number(body.maxAllowedSlippagePips)
+            : 2.0,
+          leverageCap: Number.isFinite(Number(body.leverageCap)) ? Number(body.leverageCap) : 5,
+          isTestnet: t.isTestnet,
+          autoExecuteEnabled: Boolean(body.autoExecuteEnabled),
+          maxDailyLossUsd: Number.isFinite(Number(body.maxDailyLossUsd)) ? Number(body.maxDailyLossUsd) : 500,
+          maxOpenPositions: Number.isFinite(Number(body.maxOpenPositions)) ? Number(body.maxOpenPositions) : 3,
+          apiKey: body.apiKey,
+          apiSecret: body.apiSecret,
+          passphrase: body.passphrase,
+        });
+
+        const updated = await updateBrokerConnectionState(connection.id, {
+          connectionStatus:
+            t.v.verified && t.v.canTrade
+              ? "CONNECTED_VERIFIED"
+              : t.v.verified
+                ? "UNVERIFIED"
+                : "ERROR",
+          balanceUsd:
+            t.v.verified && t.v.balanceUsd !== null && t.v.balanceUsd > 0
+              ? Number(t.v.balanceUsd.toFixed(2))
+              : connection.balanceUsd,
+          lastVerifiedAt: t.v.verified ? Date.now() : null,
+          lastError: t.v.verified && t.v.canTrade ? null : t.v.rawMessage,
+        });
+        createdAccounts.push(updated ?? connection);
+      }
+
+      notifyBotTelemetryChanged("account_created");
+      return ok({
+        account: createdAccounts[0],
+        accounts: createdAccounts,
+        verification: dualVerification.primary,
+        dualVerification,
+        oneTimeEaToken: null,
+      });
+    }
+
     const { connection, oneTimeEaToken } = await createBrokerConnection({
       userId: session?.id ?? null,
       name: nameCheck.value ?? "",
@@ -139,36 +234,16 @@ export async function POST(req: Request) {
     let verification: BrokerVerificationResult | null = null;
     let finalAccount = connection;
 
-    const isMt5Platform =
-      body.platform === "MT5_EXNESS" || body.platform === "MT5_XM" || body.platform === "MT5_EA";
-
-    if (
-      hasApiCreds &&
-      (body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES" || isMt5Platform)
-    ) {
-      verification =
-        body.platform === "BINANCE_FUTURES"
-          ? await verifyBinanceFuturesAccount({
-              apiKey: body.apiKey!.trim(),
-              apiSecret: body.apiSecret!.trim(),
-              isTestnet: body.isTestnet !== false,
-            })
-          : body.platform === "OKX_FUTURES"
-            ? await verifyOkxAccount({
-                apiKey: body.apiKey!.trim(),
-                apiSecret: body.apiSecret!.trim(),
-                passphrase: body.passphrase!.trim(),
-                isTestnet: body.isTestnet !== false,
-              })
-            : await verifyMetaApiMt5Account(
-                {
-                  apiKey: body.apiKey!.trim(),
-                  apiSecret: body.apiSecret!.trim(),
-                  passphrase: body.passphrase?.trim() || null,
-                  isTestnet: body.isTestnet !== false,
-                },
-                body.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
-              );
+    if (hasApiCreds && isMt5Platform) {
+      verification = await verifyMetaApiMt5Account(
+        {
+          apiKey: body.apiKey!.trim(),
+          apiSecret: body.apiSecret!.trim(),
+          passphrase: body.passphrase?.trim() || null,
+          isTestnet: body.isTestnet !== false,
+        },
+        body.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
+      );
 
       const updated = await updateBrokerConnectionState(connection.id, {
         connectionStatus:
@@ -190,6 +265,7 @@ export async function POST(req: Request) {
     notifyBotTelemetryChanged("account_created");
     return ok({
       account: finalAccount,
+      accounts: [finalAccount],
       verification,
       oneTimeEaToken,
     });
