@@ -3,6 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   getMasterTraderPerformance,
   type BrokerPlatform,
+  type FollowerAccount,
 } from "@/lib/engines/copy-trade-engine";
 import {
   classifyAccountEnvironment,
@@ -165,7 +166,7 @@ export async function POST(req: Request) {
         });
       }
 
-      const createdAccounts = [];
+      const createdAccounts: FollowerAccount[] = [];
       for (const t of targets) {
         const { connection } = await createBrokerConnection({
           userId: session?.id ?? null,
