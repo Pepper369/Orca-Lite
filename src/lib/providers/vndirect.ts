@@ -405,6 +405,8 @@ export type VndForeignFlowSummary = {
   stockCount: number;
   topNetBuy: VndForeignFlowRow[];
   topNetSell: VndForeignFlowRow[];
+  /** Net foreign value in VND keyed by uppercase stock symbol */
+  bySymbol?: Record<string, number>;
   sourceTs: number | null;
 };
 
@@ -443,6 +445,10 @@ export async function getVndForeignFlow(sessionDate?: string): Promise<VndForeig
   rows.sort((a, b) => b.netVal - a.netVal);
   const topNetBuy = rows.filter((r) => r.netVal > 0).slice(0, 8);
   const topNetSell = [...rows].filter((r) => r.netVal < 0).sort((a, b) => a.netVal - b.netVal).slice(0, 8);
+  const bySymbol: Record<string, number> = {};
+  for (const r of rows) {
+    bySymbol[r.symbol] = r.netVal;
+  }
   const ts = Date.parse(`${date}T15:00:00+07:00`);
   return {
     sessionDate: date,
@@ -452,6 +458,7 @@ export async function getVndForeignFlow(sessionDate?: string): Promise<VndForeig
     stockCount,
     topNetBuy,
     topNetSell,
+    bySymbol,
     sourceTs: Number.isFinite(ts) ? ts : null,
   };
 }

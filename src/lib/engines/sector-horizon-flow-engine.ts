@@ -48,15 +48,20 @@ export interface HorizonStockPick {
   riskReward?: number | null;
 }
 
+export type SectorSortHorizon = InvestmentHorizon | "CURRENT_1D" | "COMPOSITE";
+
 export interface SectorHorizonMetrics {
-  short1_2w: number;      // 1 - 99
-  medium3w_2m: number;    // 1 - 99
-  medLong2_6m: number;    // 1 - 99
-  long6mPlus: number;     // 1 - 99
+  current1d: number;      // 1 - 99 (Hiện tại / Phiên nay)
+  short1_2w: number;      // 1 - 99 (Ngắn hạn 1-2 tuần)
+  medium3w_2m: number;    // 1 - 99 (Trung hạn 3 tuần - 2 tháng)
+  medLong2_6m: number;    // 1 - 99 (Trung - Dài hạn 2-6 tháng)
+  long6mPlus: number;     // 1 - 99 (Dài hạn > 6 tháng)
   compositeFlowScore: number; // 1 - 99
 }
 
 export interface SectorHorizonSignals {
+  current1d: HorizonFlowSignal;
+  current1dVi: string;
   short1_2w: HorizonFlowSignal;
   short1_2wVi: string;
   medium3w_2m: HorizonFlowSignal;
@@ -192,6 +197,10 @@ export interface SectorHorizonFlowResult {
   /** Short-term vs Medium-Long term flow velocity delta (short1_2w - medLong2_6m) */
   flowVelocityDelta: number;
   flowVelocitySignalVi: string;
+  /** Immediate inflow acceleration (Current 1D vs Short vs Medium) for early wave ignition detection */
+  inflowAcceleration: number;
+  /** % of the 5 horizons simultaneously in ACCUMULATION / STRONG_INFLOW (>= 60) */
+  multiHorizonConvergencePct: number;
   quadrant: "Leading" | "Improving" | "Weakening" | "Lagging";
   quadrantVi: string;
   rsRatio: number;
@@ -602,11 +611,11 @@ export function evaluateStockHorizonScores(item: SectorHorizonFlowInputItem): {
  */
 export function evaluateMultiHorizonSectorFlow(
   items: SectorHorizonFlowInputItem[],
-  horizonSort: InvestmentHorizon | "COMPOSITE" = "COMPOSITE",
+  horizonSort: SectorSortHorizon = "COMPOSITE",
 ): {
   sectors: SectorHorizonFlowResult[];
   totalMarketTurnoverBillion: number;
-  horizonLeaders: Record<InvestmentHorizon, string[]>;
+  horizonLeaders: Record<InvestmentHorizon | "CURRENT_1D", string[]>;
   stockRankMap: Map<string, IntraSectorStockRank>;
 } {
   let totalMarketTurnoverBillion = 0;
@@ -775,35 +784,70 @@ export function evaluateMultiHorizonSectorFlow(
 
     // Combine 55% liquidity-weighted score + 45% equal-weighted breadth score + turnover/surge bonus
     const shareBonus = Math.min(8, sharePct * 0.45);
-    const breadthBonus = ((breadthRatioPct - 50) / 50) * 6;
+    const breadthBonus = ((breadthRatioPct - 50) / 50) * 6.5;
     const volIgnitionBonus =
-      weightedVolRatio20 >= 1.25 && vwapChange >= 0.5
-        ? Math.min(6, (weightedVolRatio20 - 1.0) * 8)
-        : 0;
-    const smartMoneyBonus = ((smartMoneyBreadthPct - 40) / 60) * 5;
+      weightedVolRatio20 >= 1.2 && vwapChange >= 0.35
+        ? Math.min(9, (weightedVolRatio20 - 1.0) * 11)
+        : weightedVolRatio20 >= 1.25 && vwapChange <= -0.6
+          ? -Math.min(8, (weightedVolRatio20 - 1.0) * 9)
+          : 0;
+    const foreignImpulseBonus =
+      secForeignNet >= 10
+        ? Math.min(9, Math.log10(1 + secForeignNet) * 4.5)
+        : secForeignNet <= -10
+          ? -Math.min(9, Math.log10(1 + Math.abs(secForeignNet)) * 4.5)
+          : 0;
+    const smartMoneyBonus = ((smartMoneyBreadthPct - 40) / 60) * 6;
+    const buyTriggerDensityBonus = Math.min(6, (buyTriggerCount / Math.max(1, n)) * 18);
+
+    // 0. CURRENT_1D (Hiện tại / Phiên nay): High-sensitivity intraday thrust, volume ignition & live foreign flow
+    const current1d = clampScore(
+      50 +
+        Math.max(-24, Math.min(26, vwapChange * 9.5)) +
+        ((breadthRatioPct - 50) / 50) * 14 +
+        volIgnitionBonus * 1.15 +
+        foreignImpulseBonus +
+        shareBonus * 0.55 +
+        buyTriggerDensityBonus,
+    );
 
     const short1_2w = clampScore(
       (weightTotal > 0 ? (wShort / weightTotal) * 0.55 + (sumShort / n) * 0.45 : sumShort / n) +
         shareBonus +
         breadthBonus +
-        volIgnitionBonus,
+        volIgnitionBonus +
+        foreignImpulseBonus * 0.55,
     );
     const medium3w_2m = clampScore(
       (weightTotal > 0 ? (wMed / weightTotal) * 0.55 + (sumMed / n) * 0.45 : sumMed / n) +
         shareBonus * 0.6 +
         breadthBonus * 0.5 +
-        smartMoneyBonus,
+        smartMoneyBonus +
+        foreignImpulseBonus * 0.35,
     );
     const medLong2_6m = clampScore(
-      weightTotal > 0 ? (wMedLong / weightTotal) * 0.55 + (sumMedLong / n) * 0.45 : sumMedLong / n,
+      (weightTotal > 0 ? (wMedLong / weightTotal) * 0.55 + (sumMedLong / n) * 0.45 : sumMedLong / n) +
+        (rrgCount > 0 ? Math.max(-6, Math.min(6, (rsRatioSum / rrgCount - 100) * 1.4)) : 0) +
+        foreignImpulseBonus * 0.25,
     );
     const long6mPlus = clampScore(
       weightTotal > 0 ? (wLong / weightTotal) * 0.55 + (sumLong / n) * 0.45 : sumLong / n,
     );
 
     const compositeFlowScore = clampScore(
-      short1_2w * 0.28 + medium3w_2m * 0.28 + medLong2_6m * 0.24 + long6mPlus * 0.20,
+      current1d * 0.22 +
+        short1_2w * 0.24 +
+        medium3w_2m * 0.22 +
+        medLong2_6m * 0.18 +
+        long6mPlus * 0.14,
     );
+
+    const inflowAcceleration = Number(
+      ((current1d - short1_2w) * 0.6 + (short1_2w - medium3w_2m) * 0.4).toFixed(1),
+    );
+    const allFiveScores = [current1d, short1_2w, medium3w_2m, medLong2_6m, long6mPlus];
+    const alignedBullishHorizons = allFiveScores.filter((sc) => sc >= 60).length;
+    const multiHorizonConvergencePct = Math.round((alignedBullishHorizons / 5) * 100);
 
     // Institutional Sector Money-Flow Regime Classification
     let institutionalRegime: SectorInstitutionalRegime = "NEUTRAL_ROTATION";
@@ -867,6 +911,7 @@ export function evaluateMultiHorizonSectorFlow(
       quadrantVi = "Suy yếu (Weakening)";
     }
 
+    const sigCurrent = classifyHorizonFlowSignal(current1d);
     const sigShort = classifyHorizonFlowSignal(short1_2w);
     const sigMed = classifyHorizonFlowSignal(medium3w_2m);
     const sigMedLong = classifyHorizonFlowSignal(medLong2_6m);
@@ -937,7 +982,7 @@ export function evaluateMultiHorizonSectorFlow(
     };
 
     const activeTopStock =
-      (horizonSort !== "COMPOSITE"
+      (horizonSort !== "COMPOSITE" && horizonSort !== "CURRENT_1D"
         ? topPicksByHorizon[horizonSort][0]
         : topPicksByHorizon[bestHorizon][0]) ??
       topPicksByHorizon.SHORT_1_2W[0] ??
@@ -1026,11 +1071,14 @@ export function evaluateMultiHorizonSectorFlow(
       institutionalRegimeVi,
       flowVelocityDelta,
       flowVelocitySignalVi,
+      inflowAcceleration,
+      multiHorizonConvergencePct,
       quadrant,
       quadrantVi,
       rsRatio,
       rsMomentum,
       horizonScores: {
+        current1d,
         short1_2w,
         medium3w_2m,
         medLong2_6m,
@@ -1038,6 +1086,8 @@ export function evaluateMultiHorizonSectorFlow(
         compositeFlowScore,
       },
       horizonSignals: {
+        current1d: sigCurrent.signal,
+        current1dVi: sigCurrent.labelVi,
         short1_2w: sigShort.signal,
         short1_2wVi: sigShort.labelVi,
         medium3w_2m: sigMed.signal,
@@ -1062,6 +1112,7 @@ export function evaluateMultiHorizonSectorFlow(
   }
 
   results.sort((a, b) => {
+    if (horizonSort === "CURRENT_1D") return b.horizonScores.current1d - a.horizonScores.current1d;
     if (horizonSort === "SHORT_1_2W") return b.horizonScores.short1_2w - a.horizonScores.short1_2w;
     if (horizonSort === "MEDIUM_3W_2M") return b.horizonScores.medium3w_2m - a.horizonScores.medium3w_2m;
     if (horizonSort === "MED_LONG_2_6M") return b.horizonScores.medLong2_6m - a.horizonScores.medLong2_6m;
@@ -1069,25 +1120,29 @@ export function evaluateMultiHorizonSectorFlow(
     return b.horizonScores.compositeFlowScore - a.horizonScores.compositeFlowScore;
   });
 
-  const topSectorsFor = (h: InvestmentHorizon) =>
+  const topSectorsFor = (h: InvestmentHorizon | "CURRENT_1D") =>
     [...results]
       .sort((a, b) => {
         const sA =
-          h === "SHORT_1_2W"
-            ? a.horizonScores.short1_2w
-            : h === "MEDIUM_3W_2M"
-              ? a.horizonScores.medium3w_2m
-              : h === "MED_LONG_2_6M"
-                ? a.horizonScores.medLong2_6m
-                : a.horizonScores.long6mPlus;
+          h === "CURRENT_1D"
+            ? a.horizonScores.current1d
+            : h === "SHORT_1_2W"
+              ? a.horizonScores.short1_2w
+              : h === "MEDIUM_3W_2M"
+                ? a.horizonScores.medium3w_2m
+                : h === "MED_LONG_2_6M"
+                  ? a.horizonScores.medLong2_6m
+                  : a.horizonScores.long6mPlus;
         const sB =
-          h === "SHORT_1_2W"
-            ? b.horizonScores.short1_2w
-            : h === "MEDIUM_3W_2M"
-              ? b.horizonScores.medium3w_2m
-              : h === "MED_LONG_2_6M"
-                ? b.horizonScores.medLong2_6m
-                : b.horizonScores.long6mPlus;
+          h === "CURRENT_1D"
+            ? b.horizonScores.current1d
+            : h === "SHORT_1_2W"
+              ? b.horizonScores.short1_2w
+              : h === "MEDIUM_3W_2M"
+                ? b.horizonScores.medium3w_2m
+                : h === "MED_LONG_2_6M"
+                  ? b.horizonScores.medLong2_6m
+                  : b.horizonScores.long6mPlus;
         return sB - sA;
       })
       .slice(0, 4)
@@ -1097,6 +1152,7 @@ export function evaluateMultiHorizonSectorFlow(
     sectors: results,
     totalMarketTurnoverBillion: Number(totalMarketTurnoverBillion.toFixed(2)),
     horizonLeaders: {
+      CURRENT_1D: topSectorsFor("CURRENT_1D"),
       SHORT_1_2W: topSectorsFor("SHORT_1_2W"),
       MEDIUM_3W_2M: topSectorsFor("MEDIUM_3W_2M"),
       MED_LONG_2_6M: topSectorsFor("MED_LONG_2_6M"),

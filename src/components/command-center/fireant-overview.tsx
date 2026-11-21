@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -57,10 +57,10 @@ function fmtSigned(v: number | null | undefined, digits = 2): string {
 }
 
 function colorForChange(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "text-[#9ca3af]";
-  if (v > 0.01) return "text-[#22c55e]";
-  if (v < -0.01) return "text-[#ef4444]";
-  return "text-[#eab308]";
+  if (v == null || !Number.isFinite(v)) return "text-text-muted";
+  if (v > 0.01) return "text-up";
+  if (v < -0.01) return "text-down";
+  return "text-warn";
 }
 
 function heatmapTileBg(changePct: number): string {
@@ -159,25 +159,30 @@ function FireAntIndexChart({
       const lw = await import("lightweight-charts");
       if (cancelled || !hostRef.current) return;
 
+      const cs = getComputedStyle(document.documentElement);
+      const surfaceBg = cs.getPropertyValue("--color-surface-primary").trim() || "#0d1528";
+      const textMuted = cs.getPropertyValue("--color-text-secondary").trim() || "#9aadc8";
+      const borderSubtle = cs.getPropertyValue("--color-border-subtle").trim() || "#1a2744";
+
       chart = lw.createChart(hostRef.current, {
         width: hostRef.current.clientWidth || 560,
         height: 256,
         layout: {
-          background: { type: lw.ColorType.Solid, color: "#1f242c" },
-          textColor: "#94a3b8",
+          background: { type: lw.ColorType.Solid, color: surfaceBg },
+          textColor: textMuted,
           fontFamily: "Inter, system-ui, sans-serif",
           fontSize: 11,
         },
         grid: {
-          vertLines: { color: "rgba(148, 163, 184, 0.08)" },
-          horzLines: { color: "rgba(148, 163, 184, 0.08)" },
+          vertLines: { color: "rgba(148, 163, 184, 0.1)" },
+          horzLines: { color: "rgba(148, 163, 184, 0.1)" },
         },
         rightPriceScale: {
-          borderColor: "rgba(148, 163, 184, 0.14)",
+          borderColor: borderSubtle,
           scaleMargins: { top: 0.1, bottom: 0.22 },
         },
         timeScale: {
-          borderColor: "rgba(148, 163, 184, 0.14)",
+          borderColor: borderSubtle,
           timeVisible: tf === "1D" || tf === "1W",
         },
         crosshair: {
@@ -266,26 +271,26 @@ function FireAntIndexChart({
   }, [data, lineColor, topColor, bottomColor, quote?.change, quote?.value, tf]);
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-[#1f242c] flex flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
+    <section className="rounded-lg border border-border-subtle bg-surface-primary flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
         <div className="flex flex-wrap items-baseline gap-2">
           <Link
             href={`/market/index/${encodeURIComponent(symbol)}`}
-            className="text-[13px] font-bold text-[#f6f7f9] hover:text-accent-primary"
+            className="text-[13px] font-bold text-text-primary hover:text-accent-primary"
           >
             {label}
           </Link>
           <span className={`font-mono text-[12px] font-semibold ${colorForChange(quote?.changePercent)}`}>
             {fmtSigned(quote?.change, 2)} ({fmtPct(quote?.changePercent, 2)})
           </span>
-          <span className="text-[10.5px] text-[#94a3b8]">so với tham chiếu</span>
-          <span className="inline-flex items-center gap-1 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-[#cbd5e1]">
+          <span className="text-[10.5px] text-text-muted">so với tham chiếu</span>
+          <span className="inline-flex items-center gap-1 rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] text-text-secondary">
             <span className="size-1.5 rounded-full bg-amber-400" />
             {sessionLabel}
           </span>
         </div>
 
-        <div className="inline-flex items-center gap-0.5 rounded bg-[#161a20] p-0.5">
+        <div className="inline-flex items-center gap-0.5 rounded bg-background-secondary p-0.5">
           {(Object.keys(TF_CONFIG) as ChartTf[]).map((k) => (
             <button
               key={k}
@@ -293,8 +298,8 @@ function FireAntIndexChart({
               onClick={() => setTf(k)}
               className={`rounded px-2 py-0.5 text-[10.5px] font-semibold transition-colors ${
                 tf === k
-                  ? "bg-[#2e3643] text-white"
-                  : "text-[#94a3b8] hover:text-white"
+                  ? "bg-accent-primary text-white"
+                  : "text-text-muted hover:text-text-primary"
               }`}
             >
               {k}
@@ -306,7 +311,7 @@ function FireAntIndexChart({
       <div className="relative h-[256px] w-full">
         <div ref={hostRef} className="h-full w-full" />
         {isLoading && !data?.candles?.length && (
-          <div className="absolute inset-0 flex items-center justify-center text-[11.5px] text-[#94a3b8]">
+          <div className="absolute inset-0 flex items-center justify-center text-[11.5px] text-text-muted">
             Đang tải dữ liệu biểu đồ {label}...
           </div>
         )}
@@ -361,11 +366,11 @@ function SessionStatsCard({
   const pulseScore = Math.round(intel.condition?.score ?? 50);
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-[#1f242c] flex flex-col justify-between">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+    <section className="rounded-lg border border-border-subtle bg-surface-primary flex flex-col justify-between">
+      <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-[12.5px] font-bold text-[#f6f7f9]">Thống kê phiên</h3>
-          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-[#94a3b8]">
+          <h3 className="text-[12.5px] font-bold text-text-primary">Thống kê phiên</h3>
+          <span className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">
             HSX
           </span>
         </div>
@@ -378,41 +383,41 @@ function SessionStatsCard({
         </Link>
       </div>
 
-      <div className="divide-y divide-white/[0.06] px-3 text-[11.5px]">
+      <div className="divide-y divide-border-subtle px-3 text-[11.5px]">
         {/* 1. Độ rộng */}
         <div className="py-2.5 space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-[#94a3b8]">Độ rộng</span>
+            <span className="text-text-muted">Độ rộng</span>
             <span className="font-mono text-[10.5px]">
               <span className="text-[#c084fc] font-semibold">{ceilCount} trần</span>
-              <span className="mx-1 text-[#64748b]">·</span>
+              <span className="mx-1 text-text-muted">·</span>
               <span className="text-[#22d3ee] font-semibold">{floorCount} sàn</span>
             </span>
           </div>
-          <div className="flex h-2 w-full overflow-hidden rounded-full bg-[#161a20]">
-            <div style={{ width: `${upPct}%` }} className="bg-[#22c55e]" />
-            <div style={{ width: `${flatPct}%` }} className="bg-[#eab308]" />
-            <div style={{ width: `${downPct}%` }} className="bg-[#ef4444]" />
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-background-secondary">
+            <div style={{ width: `${upPct}%` }} className="bg-up" />
+            <div style={{ width: `${flatPct}%` }} className="bg-warn" />
+            <div style={{ width: `${downPct}%` }} className="bg-down" />
           </div>
           <div className="flex items-center gap-3 font-mono text-[11px]">
-            <span className="text-[#22c55e] font-semibold">{b.advancers ?? 0} tăng</span>
-            <span className="text-[#eab308] font-semibold">{b.unchanged ?? 0} đứng giá</span>
-            <span className="text-[#ef4444] font-semibold">{b.decliners ?? 0} giảm</span>
+            <span className="text-up font-semibold">{b.advancers ?? 0} tăng</span>
+            <span className="text-warn font-semibold">{b.unchanged ?? 0} đứng giá</span>
+            <span className="text-down font-semibold">{b.decliners ?? 0} giảm</span>
           </div>
         </div>
 
         {/* 2. Thanh khoản khớp lệnh */}
         <div className="py-2.5 space-y-1.5">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[#94a3b8]">Thanh khoản khớp lệnh</span>
+            <span className="text-text-muted">Thanh khoản khớp lệnh</span>
             <span className="font-mono text-[13px] font-bold text-white">
               {formatBillionVndUnsigned(liqVal)}
             </span>
           </div>
-          <div className="relative h-2 w-full rounded-full bg-[#161a20]">
+          <div className="relative h-2 w-full rounded-full bg-background-secondary">
             <div
               style={{ width: `${liqProgressPct}%` }}
-              className="h-full rounded-full bg-[#3b82f6]"
+              className="h-full rounded-full bg-accent-primary"
             />
             <div
               className="absolute top-[-2px] bottom-[-2px] w-[2px] bg-white/80"
@@ -420,11 +425,11 @@ function SessionStatsCard({
               title="Mốc TB20 phiên"
             />
           </div>
-          <div className="flex items-center justify-between font-mono text-[10.5px] text-[#94a3b8]">
+          <div className="flex items-center justify-between font-mono text-[10.5px] text-text-muted">
             <span>
               Cả phiên{" "}
               {liqRatioPct != null && (
-                <strong className={liqRatioPct >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}>
+                <strong className={liqRatioPct >= 0 ? "text-up" : "text-down"}>
                   ({liqRatioPct > 0 ? "+" : ""}{liqRatioPct}% so TB20)
                 </strong>
               )}
@@ -436,8 +441,8 @@ function SessionStatsCard({
         {/* 3. Khối ngoại ròng */}
         <div className="py-2.5 flex items-center justify-between gap-2">
           <div>
-            <div className="text-[#94a3b8]">Khối ngoại ròng</div>
-            <div className="text-[10px] text-[#64748b]">{intel.flow.source || "Dữ liệu phiên"}</div>
+            <div className="text-text-muted">Khối ngoại ròng</div>
+            <div className="text-[10px] text-text-muted">{intel.flow.source || "Dữ liệu phiên"}</div>
           </div>
           <div className="flex items-center gap-2.5">
             <span
@@ -451,7 +456,7 @@ function SessionStatsCard({
                   <span
                     key={idx}
                     style={{ height: `${bar.h}%` }}
-                    className={`w-[3px] rounded-t-sm ${bar.pos ? "bg-[#22c55e]/80" : "bg-[#ef4444]/80"}`}
+                    className={`w-[3px] rounded-t-sm ${bar.pos ? "bg-up/80" : "bg-down/80"}`}
                   />
                 ))}
               </div>
@@ -462,8 +467,8 @@ function SessionStatsCard({
         {/* 4. Tự doanh ròng */}
         <div className="py-2.5 flex items-center justify-between gap-2">
           <div>
-            <div className="text-[#94a3b8]">Tự doanh &amp; ETF ròng</div>
-            <div className="text-[10px] text-[#64748b]">Cập nhật cuối phiên</div>
+            <div className="text-text-muted">Tự doanh &amp; ETF ròng</div>
+            <div className="text-[10px] text-text-muted">Cập nhật cuối phiên</div>
           </div>
           <div className="text-right font-mono">
             <span className={`text-[13px] font-bold ${colorForChange(intel.flow.propNet)}`}>
@@ -475,20 +480,20 @@ function SessionStatsCard({
         {/* 5. Market Pulse / Xu hướng kỹ thuật */}
         <div className="py-2.5 flex items-center justify-between gap-2">
           <div>
-            <div className="text-[#94a3b8]">Xung lực Market Pulse</div>
-            <div className="text-[10px] text-[#64748b] truncate max-w-[170px]">
+            <div className="text-text-muted">Xung lực Market Pulse</div>
+            <div className="text-[10px] text-text-muted truncate max-w-[170px]">
               {intel.condition?.drivers?.[0] ?? "Đo lường độ rộng & dòng tiền"}
             </div>
           </div>
           <div className="flex items-center gap-2 font-mono text-[11px]">
-            <span className="text-[#94a3b8]">Điểm</span>
+            <span className="text-text-muted">Điểm</span>
             <span
               className={`rounded px-1.5 py-0.5 font-bold ${
                 pulseScore >= 57
-                  ? "bg-[#22c55e]/15 text-[#22c55e]"
+                  ? "bg-up/15 text-up"
                   : pulseScore <= 43
-                    ? "bg-[#ef4444]/15 text-[#ef4444]"
-                    : "bg-[#eab308]/15 text-[#eab308]"
+                    ? "bg-down/15 text-down"
+                    : "bg-warn/15 text-warn"
               }`}
             >
               {pulseScore}/100
@@ -539,11 +544,11 @@ function FireAntHeatmapSection({ quotes }: { quotes: Quote[] }) {
   }, [quotes, weightMode]);
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-[#1f242c]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
+    <section className="rounded-lg border border-border-subtle bg-surface-primary">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-[12.5px] font-bold text-[#f6f7f9]">Bản đồ nhiệt</h3>
-          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-[#94a3b8]">
+          <h3 className="text-[12.5px] font-bold text-text-primary">Bản đồ nhiệt</h3>
+          <span className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">
             HSX / VN30
           </span>
           <Link href="/heatmap" className="ml-1 text-[10.5px] text-accent-primary hover:underline">
@@ -551,7 +556,7 @@ function FireAntHeatmapSection({ quotes }: { quotes: Quote[] }) {
           </Link>
         </div>
 
-        <div className="inline-flex items-center gap-0.5 rounded bg-[#161a20] p-0.5 text-[10.5px]">
+        <div className="inline-flex items-center gap-0.5 rounded bg-background-secondary p-0.5 text-[10.5px]">
           {(
             [
               { id: "cap", label: "Vốn hóa" },
@@ -564,7 +569,7 @@ function FireAntHeatmapSection({ quotes }: { quotes: Quote[] }) {
               type="button"
               onClick={() => setWeightMode(m.id)}
               className={`rounded px-2 py-0.5 font-semibold transition-colors ${
-                weightMode === m.id ? "bg-[#2e3643] text-white" : "text-[#94a3b8] hover:text-white"
+                weightMode === m.id ? "bg-accent-primary text-white" : "text-text-muted hover:text-text-primary"
               }`}
             >
               {m.label}
@@ -575,15 +580,15 @@ function FireAntHeatmapSection({ quotes }: { quotes: Quote[] }) {
 
       <div className="p-2.5">
         {sectorGroups.length === 0 ? (
-          <div className="py-10 text-center text-[12px] text-[#94a3b8]">
+          <div className="py-10 text-center text-[12px] text-text-muted">
             Đang nạp dữ liệu Bản đồ nhiệt thị trường...
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {sectorGroups.map((grp) => (
-              <div key={grp.sector} className="rounded border border-white/[0.06] bg-[#161a20] p-1.5">
+              <div key={grp.sector} className="rounded border border-border-subtle bg-background-secondary p-1.5">
                 <div className="mb-1 flex items-center justify-between px-0.5 text-[10.5px]">
-                  <span className="font-semibold text-[#cbd5e1] truncate">{grp.sector}</span>
+                  <span className="font-semibold text-text-secondary truncate">{grp.sector}</span>
                   <span className={`font-mono font-bold ${colorForChange(grp.avgChg)}`}>
                     {fmtPct(grp.avgChg, 2)}
                   </span>
@@ -616,7 +621,7 @@ function FireAntHeatmapSection({ quotes }: { quotes: Quote[] }) {
         )}
 
         {/* Color Legend matching FireAnt */}
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-[#94a3b8]">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted">
           <div className="flex items-center gap-1.5">
             <span>−5%</span>
             <span className="inline-block h-2 w-3 rounded-[2px] bg-[#b91c1c]" />
@@ -685,11 +690,11 @@ function IndexImpactChart({ intel, quotes }: { intel: MarketIntel; quotes: Quote
   const maxAbs = Math.max(0.1, ...allItems.map((x) => Math.abs(x.val)));
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-[#1f242c]">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+    <section className="rounded-lg border border-border-subtle bg-surface-primary">
+      <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-[12.5px] font-bold text-[#f6f7f9]">Tác động</h3>
-          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-[#94a3b8]">
+          <h3 className="text-[12.5px] font-bold text-text-primary">Tác động</h3>
+          <span className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-semibold text-text-muted">
             VN-Index
           </span>
         </div>
@@ -700,7 +705,7 @@ function IndexImpactChart({ intel, quotes }: { intel: MarketIntel; quotes: Quote
 
       <div className="p-3">
         {allItems.length === 0 ? (
-          <div className="py-8 text-center text-[11.5px] text-[#94a3b8]">
+          <div className="py-8 text-center text-[11.5px] text-text-muted">
             Chưa có dữ liệu tác động chỉ số trong phiên.
           </div>
         ) : (
@@ -717,7 +722,7 @@ function IndexImpactChart({ intel, quotes }: { intel: MarketIntel; quotes: Quote
                   <div className="flex h-[96px] flex-col items-center justify-end w-full">
                     <span
                       className={`mb-0.5 font-mono text-[9.5px] font-semibold ${
-                        isPos ? "text-[#22c55e]" : "text-[#ef4444]"
+                        isPos ? "text-up" : "text-down"
                       }`}
                     >
                       {fmtSigned(item.val, 2)}
@@ -725,12 +730,12 @@ function IndexImpactChart({ intel, quotes }: { intel: MarketIntel; quotes: Quote
                     <div
                       style={{ height: `${barH}px` }}
                       className={`w-full max-w-[22px] rounded-t-[3px] transition-opacity group-hover:opacity-85 ${
-                        isPos ? "bg-[#22c55e]" : "bg-[#ef4444]"
+                        isPos ? "bg-up" : "bg-down"
                       }`}
                     />
                   </div>
-                  <div className="w-full border-t border-white/[0.1] pt-1 text-center">
-                    <div className="text-[10px] font-bold text-[#e2e8f0] group-hover:text-accent-primary">
+                  <div className="w-full border-t border-border-subtle pt-1 text-center">
+                    <div className="text-[10px] font-bold text-text-primary group-hover:text-accent-primary">
                       {item.symbol}
                     </div>
                     <div className={`font-mono text-[9px] ${colorForChange(item.pct)}`}>
@@ -795,73 +800,73 @@ function WorldMarketsSection({
   }, [crossAsset, globalCrypto]);
 
   return (
-    <section className="rounded-lg border border-white/[0.08] bg-[#1f242c]">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-        <h3 className="text-[12.5px] font-bold text-[#f6f7f9]">Thế giới &amp; Liên thị trường</h3>
-        <span className="font-mono text-[10.5px] text-[#94a3b8]">Giờ VN {vnTimeStr}</span>
+    <section className="rounded-lg border border-border-subtle bg-surface-primary">
+      <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
+        <h3 className="text-[12.5px] font-bold text-text-primary">Thế giới &amp; Liên thị trường</h3>
+        <span className="font-mono text-[10.5px] text-text-muted">Giờ VN {vnTimeStr}</span>
       </div>
 
-      <div className="grid grid-cols-1 divide-y divide-white/[0.06] md:grid-cols-3 md:divide-x md:divide-y-0">
+      <div className="grid grid-cols-1 divide-y divide-border-subtle md:grid-cols-3 md:divide-x md:divide-y-0">
         {/* Mỹ */}
         <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-[11.5px] font-bold text-[#e2e8f0]">Mỹ</h4>
-            <span className="text-[10px] text-[#64748b]">US Equities</span>
+            <h4 className="text-[11.5px] font-bold text-text-primary">Mỹ</h4>
+            <span className="text-[10px] text-text-muted">US Equities</span>
           </div>
           <div className="space-y-1.5">
             {globalUs.slice(0, 4).map((r) => (
               <div key={r.symbol} className="flex items-center justify-between text-[11.5px]">
-                <span className="text-[#cbd5e1] font-medium">{r.symbol}</span>
+                <span className="text-text-secondary font-medium">{r.symbol}</span>
                 <div className="flex items-center gap-3 font-mono">
-                  <span className="text-[#f6f7f9]">{fmtNum(r.price, 2)}</span>
+                  <span className="text-text-primary">{fmtNum(r.price, 2)}</span>
                   <span className={`w-14 text-right font-semibold ${colorForChange(r.changePercent)}`}>
                     {fmtPct(r.changePercent, 2)}
                   </span>
                 </div>
               </div>
             ))}
-            {globalUs.length === 0 && <div className="text-[11px] text-[#64748b]">Đang đồng bộ...</div>}
+            {globalUs.length === 0 && <div className="text-[11px] text-text-muted">Đang đồng bộ...</div>}
           </div>
         </div>
 
         {/* Châu Á */}
         <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-[11.5px] font-bold text-[#e2e8f0]">Châu Á</h4>
-            <span className="text-[10px] text-[#64748b]">Asia-Pacific</span>
+            <h4 className="text-[11.5px] font-bold text-text-primary">Châu Á</h4>
+            <span className="text-[10px] text-text-muted">Asia-Pacific</span>
           </div>
           <div className="space-y-1.5">
             {globalAsia.slice(0, 4).map((r) => (
               <div key={r.symbol} className="flex items-center justify-between text-[11.5px]">
-                <span className="text-[#cbd5e1] font-medium">{r.label || r.symbol}</span>
+                <span className="text-text-secondary font-medium">{r.label || r.symbol}</span>
                 <div className="flex items-center gap-3 font-mono">
-                  <span className="text-[#f6f7f9]">{fmtNum(r.price, 2)}</span>
+                  <span className="text-text-primary">{fmtNum(r.price, 2)}</span>
                   <span className={`w-14 text-right font-semibold ${colorForChange(r.changePercent)}`}>
                     {fmtPct(r.changePercent, 2)}
                   </span>
                 </div>
               </div>
             ))}
-            {globalAsia.length === 0 && <div className="text-[11px] text-[#64748b]">Đang đồng bộ...</div>}
+            {globalAsia.length === 0 && <div className="text-[11px] text-text-muted">Đang đồng bộ...</div>}
           </div>
         </div>
 
         {/* Ngoại hối / Hàng hóa / Crypto */}
         <div className="p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-[11.5px] font-bold text-[#e2e8f0]">Vàng · FX · Crypto</h4>
-            <span className="text-[10px] text-[#64748b]">24/7 Live</span>
+            <h4 className="text-[11.5px] font-bold text-text-primary">Vàng · FX · Crypto</h4>
+            <span className="text-[10px] text-text-muted">24/7 Live</span>
           </div>
           <div className="space-y-1.5">
             {thirdColumnRows.map((r) => (
               <Link
                 key={r.label}
                 href={r.href}
-                className="flex items-center justify-between text-[11.5px] hover:bg-white/[0.03] rounded px-1 -mx-1"
+                className="flex items-center justify-between text-[11.5px] hover:bg-surface-elevated rounded px-1 -mx-1"
               >
-                <span className="text-[#cbd5e1] font-medium">{r.label}</span>
+                <span className="text-text-secondary font-medium">{r.label}</span>
                 <div className="flex items-center gap-3 font-mono">
-                  <span className="text-[#f6f7f9]">
+                  <span className="text-text-primary">
                     {r.value != null ? fmtNum(r.value, r.label === "USDVND" ? 0 : 2) : "—"}
                   </span>
                   <span className={`w-14 text-right font-semibold ${colorForChange(r.chg)}`}>
@@ -870,7 +875,7 @@ function WorldMarketsSection({
                 </div>
               </Link>
             ))}
-            {thirdColumnRows.length === 0 && <div className="text-[11px] text-[#64748b]">Đang đồng bộ...</div>}
+            {thirdColumnRows.length === 0 && <div className="text-[11px] text-text-muted">Đang đồng bộ...</div>}
           </div>
         </div>
       </div>
@@ -946,17 +951,17 @@ export function FireAntOverview({
   }, [intel.news, newsQuery]);
 
   return (
-    <div className="space-y-2.5 text-[#f6f7f9]">
+    <div className="space-y-2.5 text-text-primary">
       {/* Top Workbench Sub-Tab Bar (FireAnt style) */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-[#1c2127] px-2.5 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface-primary px-2.5 py-1.5">
         <div className="flex flex-wrap items-center gap-1 text-[12px]">
           <button
             type="button"
             onClick={() => setSubTab("market")}
             className={`rounded-md px-2.5 py-1 font-semibold transition-colors ${
               subTab === "market"
-                ? "bg-[#252a31] text-white border-b-2 border-accent-primary"
-                : "text-[#94a3b8] hover:text-white"
+                ? "bg-surface-elevated text-white border-b-2 border-accent-primary"
+                : "text-text-muted hover:text-text-primary"
             }`}
           >
             Tổng quan thị trường
@@ -966,27 +971,27 @@ export function FireAntOverview({
             onClick={() => setSubTab("bot")}
             className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-semibold transition-colors ${
               subTab === "bot"
-                ? "bg-[#252a31] text-white border-b-2 border-accent-primary"
-                : "text-[#94a3b8] hover:text-white"
+                ? "bg-surface-elevated text-white border-b-2 border-accent-primary"
+                : "text-text-muted hover:text-text-primary"
             }`}
           >
             <Bot className="size-3.5 text-accent-primary" />
             Bot Auto-Trade
           </button>
-          <span className="mx-1 h-4 w-px bg-white/[0.08]" />
-          <Link href="/stocks/sectors" className="rounded-md px-2 py-1 text-[#94a3b8] hover:bg-white/[0.04] hover:text-white">
+          <span className="mx-1 h-4 w-px bg-border-subtle" />
+          <Link href="/stocks/sectors" className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-elevated hover:text-text-primary">
             Ngành nghề
           </Link>
-          <Link href="/stocks" className="rounded-md px-2 py-1 text-[#94a3b8] hover:bg-white/[0.04] hover:text-white">
+          <Link href="/stocks" className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-elevated hover:text-text-primary">
             Cổ phiếu
           </Link>
-          <Link href="/derivatives" className="rounded-md px-2 py-1 text-[#94a3b8] hover:bg-white/[0.04] hover:text-white">
+          <Link href="/derivatives" className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-elevated hover:text-text-primary">
             Phái sinh
           </Link>
-          <Link href="/forex" className="rounded-md px-2 py-1 text-[#94a3b8] hover:bg-white/[0.04] hover:text-white">
+          <Link href="/forex" className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-elevated hover:text-text-primary">
             Forex &amp; Vàng
           </Link>
-          <Link href="/crypto" className="rounded-md px-2 py-1 text-[#94a3b8] hover:bg-white/[0.04] hover:text-white">
+          <Link href="/crypto" className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-elevated hover:text-text-primary">
             Tiền số
           </Link>
         </div>
@@ -997,7 +1002,7 @@ export function FireAntOverview({
             <button
               type="button"
               onClick={() => setShowNewsRail((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-[#252a31] px-2 py-1 text-[11px] font-medium text-[#cbd5e1] hover:text-white"
+              className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-surface-elevated px-2 py-1 text-[11px] font-medium text-text-secondary hover:text-text-primary"
               title={showNewsRail ? "Ẩn cột Bài viết" : "Hiện cột Bài viết"}
             >
               {showNewsRail ? <PanelRightClose className="size-3.5" /> : <PanelRightOpen className="size-3.5" />}
@@ -1029,13 +1034,13 @@ export function FireAntOverview({
                     onClick={() => setSelectedIndexCode(card.code)}
                     className={`rounded-lg border p-2.5 text-left transition-colors ${
                       isSelected
-                        ? "border-[#3b82f6] bg-[#222936]"
-                        : "border-white/[0.08] bg-[#1f242c] hover:border-white/[0.16]"
+                        ? "border-accent-primary bg-accent-primary/10"
+                        : "border-border-subtle bg-surface-primary hover:border-border-default"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-1">
                       <div className="min-w-0">
-                        <div className="truncate text-[11px] font-semibold text-[#cbd5e1]">
+                        <div className="truncate text-[11px] font-semibold text-text-secondary">
                           {card.label}
                         </div>
                         <div className={`mt-0.5 font-mono text-[14px] font-extrabold ${colorForChange(q?.changePercent)}`}>
@@ -1049,7 +1054,7 @@ export function FireAntOverview({
                         {fmtSigned(q?.change, 2)} {fmtPct(q?.changePercent, 2)}
                       </span>
                       {card.basis != null && (
-                        <span className="text-[#94a3b8]">Basis {fmtSigned(card.basis, 1)}</span>
+                        <span className="text-text-muted">Basis {fmtSigned(card.basis, 1)}</span>
                       )}
                     </div>
                   </button>
@@ -1089,34 +1094,34 @@ export function FireAntOverview({
 
           {/* RIGHT STICKY NEWS RAIL (~27%) */}
           {showNewsRail && (
-            <aside className="rounded-lg border border-white/[0.08] bg-[#1f242c] flex flex-col xl:sticky xl:top-3 xl:max-h-[calc(100vh-5rem)]">
-              <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+            <aside className="rounded-lg border border-border-subtle bg-surface-primary flex flex-col xl:sticky xl:top-3 xl:max-h-[calc(100vh-5rem)]">
+              <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
                 <div className="flex items-center gap-1.5">
                   <Newspaper className="size-3.5 text-accent-primary" />
-                  <h3 className="text-[12.5px] font-bold text-[#f6f7f9]">Bài viết</h3>
-                  <span className="text-[10px] text-[#94a3b8]">Theo {activeCard.label}</span>
+                  <h3 className="text-[12.5px] font-bold text-text-primary">Bài viết</h3>
+                  <span className="text-[10px] text-text-muted">Theo {activeCard.label}</span>
                 </div>
                 <Link href="/news" className="text-[10.5px] text-accent-primary hover:underline">
                   Tất cả →
                 </Link>
               </div>
 
-              <div className="border-b border-white/[0.06] p-2">
+              <div className="border-b border-border-subtle p-2">
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[#64748b]" />
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-text-muted" />
                   <input
                     type="text"
                     value={newsQuery}
                     onChange={(e) => setNewsQuery(e.target.value)}
                     placeholder="Tìm tin tức, mã cổ phiếu..."
-                    className="w-full rounded-md border border-white/[0.08] bg-[#161a20] py-1.5 pl-8 pr-2.5 text-[11.5px] text-white placeholder:text-[#64748b] focus:border-accent-primary focus:outline-none"
+                    className="w-full rounded-md border border-border-subtle bg-background-secondary py-1.5 pl-8 pr-2.5 text-[11.5px] text-white placeholder:text-text-muted focus:border-accent-primary focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="flex-1 divide-y divide-white/[0.06] overflow-y-auto px-3">
+              <div className="flex-1 divide-y divide-border-subtle overflow-y-auto px-3">
                 {filteredNews.length === 0 ? (
-                  <div className="py-8 text-center text-[11.5px] text-[#94a3b8]">
+                  <div className="py-8 text-center text-[11.5px] text-text-muted">
                     Chưa có bài viết phù hợp.
                   </div>
                 ) : (
@@ -1128,10 +1133,10 @@ export function FireAntOverview({
                       rel="noreferrer"
                       className="block py-2.5 group"
                     >
-                      <div className="text-[12px] font-medium leading-snug text-[#e2e8f0] group-hover:text-accent-primary line-clamp-3">
+                      <div className="text-[12px] font-medium leading-snug text-text-primary group-hover:text-accent-primary line-clamp-3">
                         {item.title}
                       </div>
-                      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[#64748b]">
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-text-muted">
                         <span className="truncate">{item.source || "Thị trường"}</span>
                         <span className="shrink-0">{timeAgoVi(item.publishedAt)}</span>
                       </div>

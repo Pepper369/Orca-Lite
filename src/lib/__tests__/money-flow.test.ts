@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { OhlcvBar } from "../types";
 import { analyzeMoneyFlow } from "../engines/money-flow";
+import { evaluateMultiHorizonSectorFlow } from "../engines/sector-horizon-flow-engine";
 
 function series(values: number[], volume = 100): OhlcvBar[] {
   return values.map((close, i) => ({
@@ -186,4 +187,81 @@ test("order blocks include status and optional confluence flags", () => {
     assert.ok(typeof ob.hadLiquiditySweep === "boolean");
     assert.ok(typeof ob.hasDisplacementFvg === "boolean");
   }
+});
+
+test("5-Horizon Sector Money-Flow Engine captures CURRENT_1D ignition, acceleration & convergence across all 5 stages", () => {
+  const res = evaluateMultiHorizonSectorFlow(
+    [
+      {
+        symbol: "TCB",
+        sector: "Ngân hàng",
+        price: 25_500,
+        changePercent: 3.6,
+        volume: 28_000_000,
+        turnoverBillion: 714,
+        foreignNetValBillion: 65,
+        volRatio20: 1.95,
+        upDownVolRatio: 1.48,
+        rsRating: 88,
+        rsRating20: 91,
+        smartMoneyScore: 84,
+        isBuyTriggerNow: true,
+        sectorRsRatio: 103.4,
+        sectorRsMomentum: 102.1,
+        roe: 18.5,
+        roic: 15.2,
+      },
+      {
+        symbol: "MBB",
+        sector: "Ngân hàng",
+        price: 26_100,
+        changePercent: 2.9,
+        volume: 22_000_000,
+        turnoverBillion: 574,
+        foreignNetValBillion: 42,
+        volRatio20: 1.72,
+        upDownVolRatio: 1.35,
+        rsRating: 84,
+        rsRating20: 87,
+        smartMoneyScore: 79,
+        isBuyTriggerNow: true,
+        sectorRsRatio: 103.4,
+        sectorRsMomentum: 102.1,
+        roe: 21.0,
+      },
+      {
+        symbol: "NVL",
+        sector: "Bất động sản",
+        price: 10_200,
+        changePercent: -2.8,
+        volume: 14_000_000,
+        turnoverBillion: 142,
+        foreignNetValBillion: -38,
+        volRatio20: 1.45,
+        upDownVolRatio: 0.62,
+        rsRating: 22,
+        rsRating20: 19,
+        smartMoneyScore: 28,
+        sectorRsRatio: 95.2,
+        sectorRsMomentum: 96.4,
+        isBrokenSupport: true,
+      },
+    ],
+    "CURRENT_1D",
+  );
+
+  assert.ok(res.sectors.length >= 2);
+  const bank = res.sectors.find((s) => s.sectorCode === "BANK");
+  const realEstate = res.sectors.find((s) => s.sectorCode === "REAL");
+  assert.ok(bank && realEstate);
+
+  assert.ok(bank.horizonScores.current1d >= 76, `Expected strong CURRENT_1D inflow for Bank, got ${bank.horizonScores.current1d}`);
+  assert.ok(bank.horizonScores.current1d > realEstate.horizonScores.current1d);
+  assert.ok(bank.horizonScores.short1_2w > realEstate.horizonScores.short1_2w);
+  assert.ok(bank.horizonScores.medium3w_2m > realEstate.horizonScores.medium3w_2m);
+  assert.ok(bank.horizonScores.medLong2_6m > realEstate.horizonScores.medLong2_6m);
+  assert.ok(bank.horizonScores.long6mPlus > realEstate.horizonScores.long6mPlus);
+  assert.ok(bank.multiHorizonConvergencePct >= 80, `Expected high 5-horizon convergence, got ${bank.multiHorizonConvergencePct}%`);
+  assert.equal(res.horizonLeaders.CURRENT_1D[0], bank.sector);
+  assert.equal(bank.quadrant, "Leading");
 });
