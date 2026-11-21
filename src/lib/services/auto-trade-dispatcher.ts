@@ -87,14 +87,92 @@ function isForexSupportedPlatform(platform: FollowerAccount["platform"]): boolea
   );
 }
 
+export function validateDispatchableSignalGeometry(
+  signal: DispatchableSignalInput,
+  marketPrice?: number,
+): { valid: boolean; reason?: string } {
+  if (!signal || (signal.direction !== "BUY" && signal.direction !== "SELL")) {
+    return { valid: false, reason: "Hướng lệnh (direction) không hợp lệ" };
+  }
+  if (!Number.isFinite(signal.entryPrice) || signal.entryPrice <= 0) {
+    return { valid: false, reason: "Giá vào lệnh (entryPrice) không hợp lệ hoặc không hữu hạn" };
+  }
+  if (!Number.isFinite(signal.stopLossPrice) || signal.stopLossPrice <= 0) {
+    return { valid: false, reason: "Giá cắt lỗ (stopLossPrice) không hợp lệ hoặc không hữu hạn" };
+  }
+  if (!Number.isFinite(signal.takeProfit1) || signal.takeProfit1 <= 0) {
+    return { valid: false, reason: "Giá chốt lời (takeProfit1) không hợp lệ hoặc không hữu hạn" };
+  }
+  if (marketPrice !== undefined && (!Number.isFinite(marketPrice) || marketPrice <= 0)) {
+    return { valid: false, reason: "Giá thị trường (currentMarketPrice) không hợp lệ hoặc không hữu hạn" };
+  }
+  if (signal.direction === "BUY") {
+    if (signal.stopLossPrice >= signal.entryPrice) {
+      return {
+        valid: false,
+        reason: `Cấu trúc SL đảo ngược cho lệnh BUY: stopLossPrice (${signal.stopLossPrice}) >= entryPrice (${signal.entryPrice})`,
+      };
+    }
+    if (signal.takeProfit1 <= signal.entryPrice) {
+      return {
+        valid: false,
+        reason: `Cấu trúc TP1 đảo ngược cho lệnh BUY: takeProfit1 (${signal.takeProfit1}) <= entryPrice (${signal.entryPrice})`,
+      };
+    }
+    if (signal.takeProfit2 != null && (!Number.isFinite(signal.takeProfit2) || signal.takeProfit2 <= signal.entryPrice)) {
+      return { valid: false, reason: "Giá takeProfit2 không hợp lệ cho lệnh BUY" };
+    }
+    if (signal.takeProfit3 != null && (!Number.isFinite(signal.takeProfit3) || signal.takeProfit3 <= signal.entryPrice)) {
+      return { valid: false, reason: "Giá takeProfit3 không hợp lệ cho lệnh BUY" };
+    }
+  } else {
+    if (signal.stopLossPrice <= signal.entryPrice) {
+      return {
+        valid: false,
+        reason: `Cấu trúc SL đảo ngược cho lệnh SELL: stopLossPrice (${signal.stopLossPrice}) <= entryPrice (${signal.entryPrice})`,
+      };
+    }
+    if (signal.takeProfit1 >= signal.entryPrice) {
+      return {
+        valid: false,
+        reason: `Cấu trúc TP1 đảo ngược cho lệnh SELL: takeProfit1 (${signal.takeProfit1}) >= entryPrice (${signal.entryPrice})`,
+      };
+    }
+    if (
+      signal.takeProfit2 != null &&
+      (!Number.isFinite(signal.takeProfit2) || signal.takeProfit2 <= 0 || signal.takeProfit2 >= signal.entryPrice)
+    ) {
+      return { valid: false, reason: "Giá takeProfit2 không hợp lệ cho lệnh SELL" };
+    }
+    if (
+      signal.takeProfit3 != null &&
+      (!Number.isFinite(signal.takeProfit3) || signal.takeProfit3 <= 0 || signal.takeProfit3 >= signal.entryPrice)
+    ) {
+      return { valid: false, reason: "Giá takeProfit3 không hợp lệ cho lệnh SELL" };
+    }
+  }
+  return { valid: true };
+}
+
 function checkSlippage(
   signal: DispatchableSignalInput,
   marketPrice: number,
   maxAllowedSlippagePips: number,
 ): { passed: boolean; slippagePips: number } {
+  if (
+    !Number.isFinite(marketPrice) ||
+    marketPrice <= 0 ||
+    !Number.isFinite(signal.entryPrice) ||
+    signal.entryPrice <= 0
+  ) {
+    return { passed: false, slippagePips: 9999 };
+  }
+  const safeMaxSlippage =
+    Number.isFinite(maxAllowedSlippagePips) && maxAllowedSlippagePips >= 0 ? maxAllowedSlippagePips : 0;
+
   if (signal.assetType === "CRYPTO") {
     const pctDiff = Math.abs(marketPrice - signal.entryPrice) / Math.max(1e-9, signal.entryPrice);
-    const maxPct = Math.max(0.0025, maxAllowedSlippagePips * 0.001); // 2 pips -> 0.25% min buffer cho Crypto
+    const maxPct = Math.max(0.0025, safeMaxSlippage * 0.001); // 2 pips -> 0.25% min buffer cho Crypto
     return {
       passed: pctDiff <= maxPct,
       slippagePips: Number((pctDiff * 100).toFixed(3)),
@@ -103,7 +181,7 @@ function checkSlippage(
   const guard = verifySlippageGuard({
     masterEntry: signal.entryPrice,
     currentPrice: marketPrice,
-    maxSlippagePips: maxAllowedSlippagePips,
+    maxSlippagePips: safeMaxSlippage,
     pipSize: getAssetPipSize(signal.symbol, signal.assetType, marketPrice),
   });
   return { passed: guard.allowed, slippagePips: guard.slippagePips };
@@ -114,49 +192,77 @@ function computeOrderSize(
   acct: FollowerAccount,
   factorSizeMultiplier = 1.0,
 ): { qtyOrLots: number; leverage: number } {
-  const levCap = Math.max(1, Math.min(20, acct.leverageCap ?? 5));
-  const leverage = Math.max(1, Math.min(levCap, Math.round(signal.recommendedLeverage ?? 3)));
+  const rawLevCap =
+    Number.isFinite(acct.leverageCap) && (acct.leverageCap ?? 0) > 0 ? Math.round(acct.leverageCap!) : 5;
+  const levCap = Math.max(1, Math.min(20, rawLevCap));
+  const rawRecLev =
+    Number.isFinite(signal.recommendedLeverage) && (signal.recommendedLeverage ?? 0) > 0
+      ? Math.round(signal.recommendedLeverage!)
+      : 3;
+  const leverage = Math.max(1, Math.min(levCap, rawRecLev));
+
+  if (
+    !Number.isFinite(acct.balanceUsd) ||
+    acct.balanceUsd <= 0 ||
+    !Number.isFinite(acct.riskMultiplier) ||
+    acct.riskMultiplier <= 0 ||
+    !validateDispatchableSignalGeometry(signal).valid
+  ) {
+    return { qtyOrLots: 0, leverage };
+  }
+
+  const safeBalanceUsd = acct.balanceUsd;
+  const safeRiskMultiplier = Math.min(5.0, acct.riskMultiplier);
+  const safeFactorMult =
+    Number.isFinite(factorSizeMultiplier) && factorSizeMultiplier > 0 ? factorSizeMultiplier : 1.0;
+  const safeMasterLots =
+    Number.isFinite(signal.masterLotsOrQty) && signal.masterLotsOrQty > 0 ? signal.masterLotsOrQty : 0.01;
+  const safeMasterCapital =
+    Number.isFinite(signal.masterCapitalUsd) && signal.masterCapitalUsd > 0 ? signal.masterCapitalUsd : 10_000;
 
   // Phase 3: Continuous Drawdown De-leveraging Governor
   const ddGovernor = evaluateContinuousDrawdownGovernor({
-    currentBalanceUsd: acct.balanceUsd,
-    dailyRealizedPnlUsd: acct.dailyRealizedPnlUsd ?? 0,
-    maxDailyLossUsd: acct.maxDailyLossUsd ?? 500,
+    currentBalanceUsd: safeBalanceUsd,
+    dailyRealizedPnlUsd: Number.isFinite(acct.dailyRealizedPnlUsd) ? acct.dailyRealizedPnlUsd! : 0,
+    maxDailyLossUsd:
+      Number.isFinite(acct.maxDailyLossUsd) && (acct.maxDailyLossUsd ?? 0) > 0 ? acct.maxDailyLossUsd! : 500,
   });
-  const combinedScale = Math.max(0.2, Math.min(1.25, ddGovernor.recommendedSizeScale * factorSizeMultiplier));
+  const govScale = Number.isFinite(ddGovernor.recommendedSizeScale) ? ddGovernor.recommendedSizeScale : 1.0;
+  const combinedScale = Math.max(0.2, Math.min(1.25, govScale * safeFactorMult));
 
   if (signal.assetType === "CRYPTO") {
-    const riskPct = Math.max(0.20, Math.min(3.0, 1.0 * acct.riskMultiplier * combinedScale));
+    const riskPct = Math.max(0.20, Math.min(3.0, 1.0 * safeRiskMultiplier * combinedScale));
     const sizing = calculateCryptoPositionSize({
-      accountBalance: acct.balanceUsd,
+      accountBalance: safeBalanceUsd,
       riskPercent: riskPct,
       entryPrice: signal.entryPrice,
       stopLossPrice: signal.stopLossPrice,
       leverage,
       direction: signal.direction,
     });
-    const qty = sizing.positionQty > 0
-      ? sizing.positionQty
-      : Number(
-          Math.max(
-            0.001,
-            signal.masterLotsOrQty *
-              (acct.balanceUsd / Math.max(100, signal.masterCapitalUsd)) *
-              acct.riskMultiplier *
-              combinedScale,
-          ).toFixed(4),
-        );
-    return { qtyOrLots: qty, leverage };
+    const qty =
+      Number.isFinite(sizing.positionQty) && sizing.positionQty > 0
+        ? sizing.positionQty
+        : Number(
+            Math.max(
+              0.001,
+              safeMasterLots *
+                (safeBalanceUsd / Math.max(100, safeMasterCapital)) *
+                safeRiskMultiplier *
+                combinedScale,
+            ).toFixed(4),
+          );
+    return { qtyOrLots: Number.isFinite(qty) && qty > 0 ? qty : 0, leverage };
   }
 
   const lots = calculateProportionalCopySize({
-    masterLotsOrQty: signal.masterLotsOrQty,
-    masterCapitalUsd: signal.masterCapitalUsd,
-    followerBalanceUsd: acct.balanceUsd,
-    riskMultiplier: acct.riskMultiplier * combinedScale,
+    masterLotsOrQty: safeMasterLots,
+    masterCapitalUsd: safeMasterCapital,
+    followerBalanceUsd: safeBalanceUsd,
+    riskMultiplier: safeRiskMultiplier * combinedScale,
     assetType: "FOREX",
   });
-  return { qtyOrLots: lots, leverage: 1 };
+  return { qtyOrLots: Number.isFinite(lots) && lots > 0 ? lots : 0, leverage: 1 };
 }
 
 export async function executePlatformOrder(
@@ -194,6 +300,19 @@ export async function executePlatformOrder(
     isTestnet: acct.isTestnet ?? true,
   };
 
+  const geom = validateDispatchableSignalGeometry(signal, marketPrice);
+  if (!geom.valid || !Number.isFinite(qtyOrLots) || qtyOrLots <= 0) {
+    return {
+      ...baseOrder,
+      copiedLotsOrQty: 0,
+      initialLotsOrQty: 0,
+      status: "REJECTED_EXCHANGE",
+      message: geom.reason ?? "Khối lượng đặt lệnh không hợp lệ (<= 0 hoặc NaN/Infinity)",
+    };
+  }
+  const safeLeverage =
+    Number.isFinite(leverage) && leverage > 0 ? Math.max(1, Math.min(20, Math.round(leverage))) : 1;
+
   if (acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA") {
     if (acct.hasApiKey) {
       const secrets = await getBrokerConnectionSecrets(acct.id);
@@ -215,7 +334,7 @@ export async function executePlatformOrder(
           takeProfit1: signal.takeProfit1,
           takeProfit2: signal.takeProfit2 ?? null,
           takeProfit3: signal.takeProfit3 ?? null,
-          leverage,
+          leverage: safeLeverage,
           idempotencyKey,
         },
         acct.platform,
@@ -271,7 +390,7 @@ export async function executePlatformOrder(
             takeProfit1: signal.takeProfit1,
             takeProfit2: signal.takeProfit2 ?? null,
             takeProfit3: signal.takeProfit3 ?? null,
-            leverage,
+            leverage: safeLeverage,
             idempotencyKey,
           })
         : await placeOkxSwapOrder({
@@ -284,7 +403,7 @@ export async function executePlatformOrder(
             takeProfit1: signal.takeProfit1,
             takeProfit2: signal.takeProfit2 ?? null,
             takeProfit3: signal.takeProfit3 ?? null,
-            leverage,
+            leverage: safeLeverage,
             idempotencyKey,
           });
 
@@ -474,8 +593,11 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     }
 
     // 4) Daily Loss Circuit Breaker
-    const maxDailyLoss = Math.max(10, acct.maxDailyLossUsd ?? 500);
-    const dailyPnl = acct.dailyRealizedPnlUsd ?? 0;
+    const maxDailyLoss =
+      Number.isFinite(acct.maxDailyLossUsd) && (acct.maxDailyLossUsd ?? 0) > 0
+        ? Math.max(10, acct.maxDailyLossUsd!)
+        : 500;
+    const dailyPnl = Number.isFinite(acct.dailyRealizedPnlUsd) ? acct.dailyRealizedPnlUsd! : 0;
     if (dailyPnl <= -maxDailyLoss) {
       results.push({
         orderId,
@@ -495,6 +617,59 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         signalId: signal.id,
         idempotencyKey,
         message: `Ngắt mạch bảo vệ vốn: Lỗ trong ngày $${Math.abs(dailyPnl).toFixed(2)} >= giới hạn $${maxDailyLoss}`,
+      });
+      continue;
+    }
+
+    // 4b) Signal Price & SL/TP Geometry + Account Capital Boundary Guard
+    const geomCheck = validateDispatchableSignalGeometry(signal, marketPrice);
+    if (!geomCheck.valid) {
+      results.push({
+        orderId,
+        followerId: acct.id,
+        followerName: acct.name,
+        platform: acct.platform,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        copiedLotsOrQty: 0,
+        entryPrice: signal.entryPrice,
+        executionPrice: marketPrice,
+        slippagePips: 0,
+        status: "REJECTED_EXCHANGE",
+        stopLossPrice: signal.stopLossPrice,
+        takeProfit1: signal.takeProfit1,
+        timestamp: now,
+        signalId: signal.id,
+        idempotencyKey,
+        message: `Từ chối tín hiệu: ${geomCheck.reason}`,
+      });
+      continue;
+    }
+
+    if (
+      !Number.isFinite(acct.balanceUsd) ||
+      acct.balanceUsd <= 0 ||
+      !Number.isFinite(acct.riskMultiplier) ||
+      acct.riskMultiplier <= 0
+    ) {
+      results.push({
+        orderId,
+        followerId: acct.id,
+        followerName: acct.name,
+        platform: acct.platform,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        copiedLotsOrQty: 0,
+        entryPrice: signal.entryPrice,
+        executionPrice: marketPrice,
+        slippagePips: 0,
+        status: "REJECTED_EXCHANGE",
+        stopLossPrice: signal.stopLossPrice,
+        takeProfit1: signal.takeProfit1,
+        timestamp: now,
+        signalId: signal.id,
+        idempotencyKey,
+        message: "Từ chối thực thi: Số dư tài khoản (balanceUsd) hoặc hệ số rủi ro (riskMultiplier) không hợp lệ",
       });
       continue;
     }

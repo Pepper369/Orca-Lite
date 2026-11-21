@@ -57,6 +57,48 @@ export interface TpAllocationChunk {
   closePosition: boolean;
 }
 
+export function validateExchangeOrderGeometry(req: {
+  direction: "BUY" | "SELL";
+  baseQty: number;
+  entryPrice: number;
+  stopLossPrice: number;
+  takeProfit1: number;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
+}): { valid: boolean; reason?: string } {
+  if (req.direction !== "BUY" && req.direction !== "SELL") {
+    return { valid: false, reason: "Invalid order direction" };
+  }
+  if (!Number.isFinite(req.baseQty) || req.baseQty <= 0) {
+    return { valid: false, reason: "Invalid or non-positive order quantity (baseQty)" };
+  }
+  if (!Number.isFinite(req.entryPrice) || req.entryPrice <= 0) {
+    return { valid: false, reason: "Invalid or non-positive entryPrice" };
+  }
+  if (!Number.isFinite(req.stopLossPrice) || req.stopLossPrice <= 0) {
+    return { valid: false, reason: "Invalid or non-positive stopLossPrice" };
+  }
+  if (!Number.isFinite(req.takeProfit1) || req.takeProfit1 <= 0) {
+    return { valid: false, reason: "Invalid or non-positive takeProfit1" };
+  }
+  if (req.direction === "BUY") {
+    if (req.stopLossPrice >= req.entryPrice) {
+      return { valid: false, reason: "Inverted BUY geometry: stopLossPrice >= entryPrice" };
+    }
+    if (req.takeProfit1 <= req.entryPrice) {
+      return { valid: false, reason: "Inverted BUY geometry: takeProfit1 <= entryPrice" };
+    }
+  } else {
+    if (req.stopLossPrice <= req.entryPrice) {
+      return { valid: false, reason: "Inverted SELL geometry: stopLossPrice <= entryPrice" };
+    }
+    if (req.takeProfit1 >= req.entryPrice) {
+      return { valid: false, reason: "Inverted SELL geometry: takeProfit1 >= entryPrice" };
+    }
+  }
+  return { valid: true };
+}
+
 /**
  * Splits executed quantity into institutional 50% (TP1) / 30% (TP2) / 20% (TP3) scale-out chunks,
  * gracefully collapsing to 2 tiers or 1 full-close trigger when total qty is too small for exchange minQty/minNotional.
@@ -70,16 +112,57 @@ export function computeMultiTierTpChunks(params: {
   tp1: number;
   tp2?: number | null;
   tp3?: number | null;
+  entryPrice?: number;
+  direction?: "BUY" | "SELL";
 }): TpAllocationChunk[] {
-  const { totalQty, stepSize, minQty, minNotional, tickSize } = params;
-  const p1 = roundTickSize(params.tp1, tickSize);
-  const p2 = params.tp2 && params.tp2 > 0 ? roundTickSize(params.tp2, tickSize) : 0;
-  const p3 = params.tp3 && params.tp3 > 0 ? roundTickSize(params.tp3, tickSize) : 0;
+  const { totalQty, stepSize, minQty, minNotional, tickSize, entryPrice, direction } = params;
+  if (!Number.isFinite(totalQty) || totalQty <= 0 || !Number.isFinite(params.tp1) || params.tp1 <= 0) {
+    return [];
+  }
+  if (entryPrice !== undefined && (!Number.isFinite(entryPrice) || entryPrice <= 0)) {
+    return [];
+  }
 
-  if (p1 <= 0 || totalQty <= 0) return [];
+  const p1 = roundTickSize(params.tp1, tickSize);
+  if (!Number.isFinite(p1) || p1 <= 0) return [];
+
+  if (entryPrice !== undefined && direction) {
+    if (direction === "BUY" && p1 <= entryPrice) return [];
+    if (direction === "SELL" && p1 >= entryPrice) return [];
+  }
+
+  let p2 =
+    params.tp2 != null && Number.isFinite(params.tp2) && params.tp2 > 0
+      ? roundTickSize(params.tp2, tickSize)
+      : 0;
+  let p3 =
+    params.tp3 != null && Number.isFinite(params.tp3) && params.tp3 > 0
+      ? roundTickSize(params.tp3, tickSize)
+      : 0;
+
+  // Enforce directional & ladder monotonicity across TP1 -> TP2 -> TP3
+  if (p2 > 0) {
+    if (direction === "BUY" && p2 <= p1) p2 = 0;
+    if (direction === "SELL" && p2 >= p1) p2 = 0;
+  }
+  if (p3 > 0) {
+    if (p2 <= 0) {
+      p3 = 0;
+    } else if ((p2 > p1 && p3 <= p2) || (p2 < p1 && p3 >= p2)) {
+      p3 = 0;
+    }
+  }
+
+  const safeMinQty = Number.isFinite(minQty) && minQty > 0 ? minQty : 0;
+  const safeMinNotional = Number.isFinite(minNotional) && minNotional > 0 ? minNotional : 0;
 
   const isViable = (qty: number, px: number) =>
-    qty >= minQty && (minNotional <= 0 || qty * px >= minNotional);
+    Number.isFinite(qty) &&
+    Number.isFinite(px) &&
+    qty > 0 &&
+    px > 0 &&
+    qty >= safeMinQty &&
+    (safeMinNotional <= 0 || qty * px >= safeMinNotional);
 
   if (p2 > 0 && p2 !== p1 && p3 > 0 && p3 !== p2) {
     const q1 = roundStepSize(totalQty * 0.5, stepSize);
@@ -170,15 +253,60 @@ export function planSmartOrderExecution(params: {
     stepSize = "0.001",
   } = params;
 
-  const tick = Number(tickSize) > 0 ? Number(tickSize) : entryPrice * 0.0001;
-  const bid = bestBid && bestBid > 0 ? bestBid : entryPrice - tick;
-  const ask = bestAsk && bestAsk > 0 ? bestAsk : entryPrice + tick;
+  const cleanSymbol = String(symbol ?? "").toUpperCase().replace(/[^A-Z0-9_-]/g, "") || "UNKNOWN";
+  const safeDirection: "BUY" | "SELL" = direction === "SELL" ? "SELL" : "BUY";
+
+  if (
+    !Number.isFinite(totalQty) ||
+    totalQty <= 0 ||
+    !Number.isFinite(entryPrice) ||
+    entryPrice <= 0 ||
+    (direction !== "BUY" && direction !== "SELL")
+  ) {
+    return {
+      symbol: cleanSymbol,
+      direction: safeDirection,
+      executionMode: "IMMEDIATE_MARKET",
+      totalQty: 0,
+      orderNotionalUsd: 0,
+      depthParticipationRatio: 0,
+      peggedLimitPrice: 0,
+      pegWindowMs: 0,
+      binanceTimeInForce: "IOC",
+      okxOrderType: "market",
+      fallbackToMarketOnTimeout: false,
+      expectedFeeSavingsUsd: 0,
+      slices: [],
+      rationaleVi: "Từ chối lập kế hoạch khớp lệnh: Khối lượng hoặc giá vào lệnh không hợp lệ (<= 0 hoặc NaN/Infinity).",
+    };
+  }
+
+  const parsedTick = Number(tickSize);
+  const tick = Number.isFinite(parsedTick) && parsedTick > 0 ? parsedTick : Math.max(1e-8, entryPrice * 0.0001);
+  const safeTickSize = Number.isFinite(parsedTick) && parsedTick > 0 ? tickSize : tick;
+  const parsedStep = Number(stepSize);
+  const safeStepSize = Number.isFinite(parsedStep) && parsedStep > 0 ? stepSize : "0.001";
+  const safeVolPct =
+    Number.isFinite(dailyVolatilityPct) && dailyVolatilityPct > 0
+      ? Math.min(100, Math.max(0.05, dailyVolatilityPct))
+      : 2.2;
+
+  let bid = bestBid != null && Number.isFinite(bestBid) && bestBid > 0 ? bestBid : Math.max(tick, entryPrice - tick);
+  let ask = bestAsk != null && Number.isFinite(bestAsk) && bestAsk > 0 ? bestAsk : entryPrice + tick;
+  if (bid >= ask) {
+    bid = Math.max(tick, entryPrice - tick);
+    ask = entryPrice + tick;
+  }
+
   const orderNotionalUsd = Number((totalQty * entryPrice).toFixed(2));
-  const effDepthUsd = top5BookDepthUsd && top5BookDepthUsd > 0 ? top5BookDepthUsd : Math.max(50_000, orderNotionalUsd * 10);
-  const depthParticipationRatio = Number((orderNotionalUsd / effDepthUsd).toFixed(4));
+  const effDepthUsd =
+    top5BookDepthUsd != null && Number.isFinite(top5BookDepthUsd) && top5BookDepthUsd > 0
+      ? top5BookDepthUsd
+      : Math.max(50_000, orderNotionalUsd * 10);
+  const depthParticipationRatio = Number((orderNotionalUsd / Math.max(1e-9, effDepthUsd)).toFixed(4));
 
   const makerGuide = generateMakerPeggingGuide({
-    symbol,
+    symbol: cleanSymbol,
     currentPrice: entryPrice,
     direction,
     favoriteProbability: 0.96,
@@ -186,12 +314,14 @@ export function planSmartOrderExecution(params: {
     pipSize: tick,
     assetType: "CRYPTO",
   });
+  const guidePeg =
+    Number.isFinite(makerGuide.peggedPrice) && makerGuide.peggedPrice > 0 ? makerGuide.peggedPrice : entryPrice;
   // Ensure post-only limit price never crosses the opposite top-of-book (GTX / post_only invariant)
   const rawPegPrice =
     direction === "BUY"
-      ? Math.min(makerGuide.peggedPrice, ask - tick, bid)
-      : Math.max(makerGuide.peggedPrice, bid + tick, ask);
-  const peggedLimitPrice = roundTickSize(rawPegPrice, tickSize);
+      ? Math.max(tick, Math.min(guidePeg, ask - tick, bid))
+      : Math.max(guidePeg, bid + tick, ask);
+  const peggedLimitPrice = Math.max(tick, roundTickSize(rawPegPrice, safeTickSize));
   // Taker (0.04%) vs Maker (0.015% or rebate) saves ~2.5 bps (0.00025) of orderNotionalUsd
   const expectedFeeSavingsUsd = Number((orderNotionalUsd * 0.00025).toFixed(2));
 
@@ -203,7 +333,7 @@ export function planSmartOrderExecution(params: {
       totalTimeHours: 0.25, // 15-minute execution window
       intervalsCount: slicesCount,
       riskAversion: urgency === "IMMEDIATE_TAKER" ? 0.001 : 0.00015,
-      dailyVolatilityPct,
+      dailyVolatilityPct: safeVolPct,
       tempImpactFactor: 2e-6,
       currentPrice: entryPrice,
     });
@@ -216,7 +346,7 @@ export function planSmartOrderExecution(params: {
       const rawSliceQty = isLast
         ? Math.max(0, totalQty - allocatedQty)
         : (totalQty * s.sharesToTrade) / 10_000;
-      const sliceQty = roundStepSize(rawSliceQty, stepSize);
+      const sliceQty = roundStepSize(rawSliceQty, safeStepSize);
       if (sliceQty <= 0) continue;
       allocatedQty += sliceQty;
       slices.push({
@@ -229,7 +359,7 @@ export function planSmartOrderExecution(params: {
     }
 
     return {
-      symbol,
+      symbol: cleanSymbol,
       direction,
       executionMode: "ALMGREN_CHRISS_SLICED",
       totalQty,
@@ -251,27 +381,28 @@ export function planSmartOrderExecution(params: {
 
   // Case 2: Immediate Taker urgency
   if (urgency === "IMMEDIATE_TAKER") {
+    const mktLimitPx = Math.max(tick, roundTickSize(entryPrice, safeTickSize));
     return {
-      symbol,
+      symbol: cleanSymbol,
       direction,
       executionMode: "IMMEDIATE_MARKET",
       totalQty,
       orderNotionalUsd,
       depthParticipationRatio,
-      peggedLimitPrice: roundTickSize(entryPrice, tickSize),
+      peggedLimitPrice: mktLimitPx,
       pegWindowMs: 0,
       binanceTimeInForce: "IOC",
       okxOrderType: "market",
       fallbackToMarketOnTimeout: true,
       expectedFeeSavingsUsd: 0,
-      slices: [{ sliceIndex: 1, qty: totalQty, limitPrice: roundTickSize(entryPrice, tickSize), delayMs: 0, pctOfTotal: 100 }],
+      slices: [{ sliceIndex: 1, qty: totalQty, limitPrice: mktLimitPx, delayMs: 0, pctOfTotal: 100 }],
       rationaleVi: `Khớp Market/IOC tức thời cho tín hiệu xung lực khẩn cấp.`,
     };
   }
 
   // Case 3: Standard order -> Post-Only Maker Pegging with 8s timeout fallback
   return {
-    symbol,
+    symbol: cleanSymbol,
     direction,
     executionMode: "POST_ONLY_MAKER_PEG",
     totalQty,
@@ -334,11 +465,24 @@ export function recordExecutionSlippageTelemetry(params: {
     timestamp = Date.now(),
   } = params;
 
+  const cleanSym = typeof symbol === "string" ? symbol.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
   if (
+    !cleanSym ||
+    (direction !== "BUY" && direction !== "SELL") ||
     !Number.isFinite(intendedEntryPrice) ||
     !Number.isFinite(executedFillPrice) ||
+    !Number.isFinite(stopLossPrice) ||
     intendedEntryPrice <= 0 ||
-    executedFillPrice <= 0
+    executedFillPrice <= 0 ||
+    stopLossPrice <= 0
+  ) {
+    return null;
+  }
+
+  // Reject inverted SL geometry (e.g. BUY with stopLossPrice >= intendedEntryPrice, or SELL with stopLossPrice <= intendedEntryPrice)
+  if (
+    (direction === "BUY" && stopLossPrice >= intendedEntryPrice) ||
+    (direction === "SELL" && stopLossPrice <= intendedEntryPrice)
   ) {
     return null;
   }
@@ -354,8 +498,12 @@ export function recordExecutionSlippageTelemetry(params: {
     (Math.max(0, adverseDelta + feeBaselinePrice) / riskDist).toFixed(4),
   );
 
+  if (!Number.isFinite(realizedSlippageBps) || !Number.isFinite(realizedFrictionR)) {
+    return null;
+  }
+
   const sample: ExecutionSlippageSample = {
-    symbol: symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""),
+    symbol: cleanSym,
     assetType,
     direction,
     intendedEntryPrice,
@@ -363,7 +511,7 @@ export function recordExecutionSlippageTelemetry(params: {
     stopLossPrice,
     realizedSlippageBps,
     realizedFrictionR,
-    timestamp,
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
   };
 
   SLIPPAGE_TELEMETRY_BUFFER.push(sample);
@@ -620,6 +768,19 @@ export async function verifyBinanceFuturesAccount(
 }
 
 export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `Binance order rejected before dispatch: ${geom.reason}`,
+    };
+  }
   const baseUrl = getBinanceBaseUrl(req.credentials.isTestnet);
   const symbol = toBinanceFuturesSymbol(req.symbol);
   const filters = (await getBinanceSymbolFilters(baseUrl, symbol)) ?? {
@@ -659,7 +820,8 @@ export async function placeBinanceFuturesOrder(req: ExchangeOrderRequest): Promi
     qty = adjusted;
   }
 
-  const lev = Math.max(1, Math.min(20, Math.round(req.leverage)));
+  const rawLev = Number.isFinite(req.leverage) && req.leverage > 0 ? Math.round(req.leverage) : 1;
+  const lev = Math.max(1, Math.min(20, rawLev));
   try {
     const levQs = `symbol=${symbol}&leverage=${lev}&timestamp=${Date.now()}&recvWindow=5000`;
     await fetch(`${baseUrl}/fapi/v1/leverage?${levQs}&signature=${signBinanceQuery(levQs, req.credentials.apiSecret)}`, {
@@ -1056,6 +1218,19 @@ export async function verifyOkxAccount(creds: BrokerCredentialsInput): Promise<B
 }
 
 export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `OKX order rejected before dispatch: ${geom.reason}`,
+    };
+  }
   if (!req.credentials.passphrase?.trim()) {
     return {
       ok: false,
@@ -1105,7 +1280,8 @@ export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<Exch
       : null;
     const posMode = cfgJson?.data?.[0]?.posMode ?? "net_mode";
 
-    const lev = Math.max(1, Math.min(20, Math.round(req.leverage)));
+    const rawLev = Number.isFinite(req.leverage) && req.leverage > 0 ? Math.round(req.leverage) : 1;
+    const lev = Math.max(1, Math.min(20, rawLev));
     const levPath = "/api/v5/account/set-leverage";
     const levPayload: Record<string, string> = {
       instId,
@@ -1358,6 +1534,19 @@ export async function placeMetaApiMt5Order(
   req: ExchangeOrderRequest,
   platform: "MT5_EXNESS" | "MT5_XM" | "MT5_EA" = "MT5_EXNESS",
 ): Promise<ExchangeOrderResult> {
+  const geom = validateExchangeOrderGeometry(req);
+  if (!geom.valid) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: Number.isFinite(req.entryPrice) && req.entryPrice > 0 ? req.entryPrice : 0,
+      message: `${platform} order rejected before dispatch: ${geom.reason}`,
+    };
+  }
   const authToken = req.credentials.apiKey.trim();
   const accountId = req.credentials.apiSecret.trim();
   const symbol = toMt5BrokerSymbol(req.symbol, req.credentials.passphrase);
