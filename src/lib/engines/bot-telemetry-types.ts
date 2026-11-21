@@ -6,6 +6,12 @@ import type { BrokerPlatform, ConnectionStatus } from "@/lib/engines/copy-trade-
 
 export type AccountTier = "LIVE_REAL" | "TESTNET_DEMO" | "PAPER_SANDBOX";
 
+/** Môi trường NAV cấp cao: tách biệt tuyệt đối tiền thật (REAL) và tiền mô phỏng/testnet (DEMO). */
+export type AccountEnvironment = "REAL" | "DEMO";
+
+/** Phân loại chi tiết nguồn NAV cho nhóm DEMO. */
+export type DemoAccountSubtype = "EXCHANGE_TESTNET" | "MT5_DEMO" | "PAPER_SANDBOX";
+
 export type PnlDataSource =
   | "EXCHANGE_API_LIVE"
   | "METAAPI_CLOUD_LIVE"
@@ -19,6 +25,7 @@ export interface LiveOpenPosition {
   accountName: string;
   platform: BrokerPlatform;
   accountTier: AccountTier;
+  environment: AccountEnvironment;
   symbol: string;
   assetType: "CRYPTO" | "FOREX";
   direction: "BUY" | "SELL";
@@ -42,16 +49,38 @@ export interface AccountPnlTelemetry {
   platform: BrokerPlatform;
   accountNumberMasked: string;
   accountTier: AccountTier;
+  /** Phân nhóm môi trường NAV cấp 1: REAL (tiền thật) hoặc DEMO (testnet / MT5 demo / paper). */
+  environment: AccountEnvironment;
+  /** Phân loại chi tiết nếu là tài khoản DEMO; null nếu là tài khoản REAL. */
+  demoSubtype: DemoAccountSubtype | null;
   isTestnet: boolean;
   isActive: boolean;
   autoExecuteEnabled: boolean;
   killSwitched: boolean;
   connectionStatus: ConnectionStatus;
   pnlSource: PnlDataSource;
+  /** Vốn NAV gốc ban đầu của tài khoản. */
+  initialNavUsd: number;
+  /** Alias tương thích ngược cho initialNavUsd. */
   startingCapitalUsd: number;
   walletBalanceUsd: number;
+  /** NAV hiện tại của tài khoản (= walletBalanceUsd + unrealizedPnlUsd). */
+  navUsd: number;
+  /** NAV tiền thật của tài khoản (= navUsd nếu environment === "REAL", ngược lại = 0). */
+  realNavUsd: number;
+  /** NAV demo của tài khoản (= navUsd nếu environment === "DEMO", ngược lại = 0). */
+  demoNavUsd: number;
+  /** Biến động NAV ròng (= realizedPnlUsd + unrealizedPnlUsd). */
+  navChangeUsd: number;
+  /** % tăng trưởng NAV so với NAV gốc. */
+  navChangePct: number;
+  /** % tỷ trọng NAV của tài khoản trong đúng nhóm của nó (REAL pool hoặc DEMO pool). */
+  navShareInPoolPct: number;
+  /** Alias tương thích ngược cho navUsd. */
   equityUsd: number;
   availableMarginUsd: number;
+  marginUsedUsd: number;
+  marginUtilizationPct: number;
   unrealizedPnlUsd: number;
   realizedPnlUsd: number;
   dailyRealizedPnlUsd: number;
@@ -70,14 +99,23 @@ export interface AccountPnlTelemetry {
 }
 
 export interface TierPnlAggregate {
+  environment?: AccountEnvironment;
   accountCount: number;
   activeAutoCount: number;
+  /** Tổng NAV gốc của nhóm. */
+  initialNavUsd: number;
   startingCapitalUsd: number;
   walletBalanceUsd: number;
+  /** Tổng NAV hiện tại của nhóm (không bao giờ trộn REAL với DEMO). */
+  totalNavUsd: number;
   equityUsd: number;
+  availableMarginUsd: number;
+  marginUsedUsd: number;
   unrealizedPnlUsd: number;
   realizedPnlUsd: number;
+  navChangeUsd: number;
   totalNetPnlUsd: number;
+  navChangePct: number;
   totalRoiPct: number;
   dailyRealizedPnlUsd: number;
   openPositionsCount: number;
@@ -108,9 +146,20 @@ export interface BotWorkerTelemetry {
 export interface BotLiveTelemetrySnapshot {
   generatedAt: number;
   streamIntervalMs: number;
+  /** Tổng hợp kỹ thuật (chỉ giữ để tương thích ngược; UI bắt buộc hiển thị tách bạch realNav & demoNav). */
   summary: TierPnlAggregate;
+  /** Nhóm NAV Tiền Thật (REAL) — tách biệt hoàn toàn khỏi Demo/Testnet/Paper. */
+  realNav: TierPnlAggregate;
+  /** Nhóm NAV Demo (Testnet · MT5 Demo · Paper Sandbox). */
+  demoNav: TierPnlAggregate;
+  /** Alias tương thích ngược cho realNav. */
   liveRealSummary: TierPnlAggregate;
+  /** Alias tương thích ngược cho demoNav. */
   demoSummary: TierPnlAggregate;
+  /** Danh sách tài khoản REAL (chỉ tiền thật). */
+  realAccounts: AccountPnlTelemetry[];
+  /** Danh sách tài khoản DEMO (Testnet / MT5 Demo / Paper). */
+  demoAccounts: AccountPnlTelemetry[];
   accounts: AccountPnlTelemetry[];
   openPositions: LiveOpenPosition[];
   recentEvents: BotActivityEvent[];
@@ -130,6 +179,60 @@ export function classifyAccountTier(params: {
     return "PAPER_SANDBOX";
   }
   return params.isTestnet === false ? "LIVE_REAL" : "TESTNET_DEMO";
+}
+
+/**
+ * SSOT phân loại tài khoản sang 2 luồng NAV tách biệt tuyệt đối: REAL vs DEMO.
+ */
+export function classifyAccountEnvironment(params: {
+  isTestnet?: boolean;
+  hasApiKey?: boolean;
+  hasEaToken?: boolean;
+  connectionStatus?: ConnectionStatus;
+  platform?: BrokerPlatform;
+}): {
+  environment: AccountEnvironment;
+  accountTier: AccountTier;
+  demoSubtype: DemoAccountSubtype | null;
+} {
+  const accountTier = classifyAccountTier(params);
+  if (accountTier === "LIVE_REAL") {
+    return { environment: "REAL", accountTier, demoSubtype: null };
+  }
+  if (accountTier === "PAPER_SANDBOX") {
+    return { environment: "DEMO", accountTier, demoSubtype: "PAPER_SANDBOX" };
+  }
+  const isMt5 =
+    params.platform === "MT5_EXNESS" ||
+    params.platform === "MT5_XM" ||
+    params.platform === "MT5_EA";
+  return {
+    environment: "DEMO",
+    accountTier,
+    demoSubtype: isMt5 ? "MT5_DEMO" : "EXCHANGE_TESTNET",
+  };
+}
+
+/**
+ * Tính % tỷ trọng NAV cho từng tài khoản trong ĐÚNG nhóm của nó (REAL pool hoặc DEMO pool).
+ * Đảm bảo REAL NAV không bao giờ chia trên mẫu số có dính tiền DEMO và ngược lại.
+ */
+export function assignPoolNavShares(accounts: AccountPnlTelemetry[]): AccountPnlTelemetry[] {
+  const realTotalNav = accounts
+    .filter((a) => a.environment === "REAL")
+    .reduce((sum, a) => sum + Math.max(0, a.navUsd), 0);
+  const demoTotalNav = accounts
+    .filter((a) => a.environment === "DEMO")
+    .reduce((sum, a) => sum + Math.max(0, a.navUsd), 0);
+
+  return accounts.map((a) => {
+    const poolTotal = a.environment === "REAL" ? realTotalNav : demoTotalNav;
+    const share = poolTotal > 0 ? Number(((Math.max(0, a.navUsd) / poolTotal) * 100).toFixed(1)) : 0;
+    return {
+      ...a,
+      navShareInPoolPct: share,
+    };
+  });
 }
 
 export function getForexContractUnits(symbol: string): number {
@@ -223,11 +326,16 @@ export function calculateAccountRoiPct(totalNetPnlUsd: number, baseCapitalUsd: n
   return Number(((totalNetPnlUsd / baseCapitalUsd) * 100).toFixed(2));
 }
 
-export function aggregateTierSummary(accounts: AccountPnlTelemetry[]): TierPnlAggregate {
+export function aggregateTierSummary(
+  accounts: AccountPnlTelemetry[],
+  environment?: AccountEnvironment,
+): TierPnlAggregate {
   let activeAutoCount = 0;
   let startingCapitalUsd = 0;
   let walletBalanceUsd = 0;
   let equityUsd = 0;
+  let availableMarginUsd = 0;
+  let marginUsedUsd = 0;
   let unrealizedPnlUsd = 0;
   let realizedPnlUsd = 0;
   let dailyRealizedPnlUsd = 0;
@@ -235,9 +343,11 @@ export function aggregateTierSummary(accounts: AccountPnlTelemetry[]): TierPnlAg
 
   for (const a of accounts) {
     if (a.isActive && a.autoExecuteEnabled && !a.killSwitched) activeAutoCount++;
-    startingCapitalUsd += a.startingCapitalUsd;
+    startingCapitalUsd += a.initialNavUsd ?? a.startingCapitalUsd;
     walletBalanceUsd += a.walletBalanceUsd;
-    equityUsd += a.equityUsd;
+    equityUsd += a.navUsd ?? a.equityUsd;
+    availableMarginUsd += a.availableMarginUsd;
+    marginUsedUsd += a.marginUsedUsd ?? Math.max(0, (a.navUsd ?? a.equityUsd) - a.availableMarginUsd);
     unrealizedPnlUsd += a.unrealizedPnlUsd;
     realizedPnlUsd += a.realizedPnlUsd;
     dailyRealizedPnlUsd += a.dailyRealizedPnlUsd;
@@ -245,16 +355,30 @@ export function aggregateTierSummary(accounts: AccountPnlTelemetry[]): TierPnlAg
   }
 
   const totalNetPnlUsd = Number((realizedPnlUsd + unrealizedPnlUsd).toFixed(2));
+  const totalNavUsd = Number(equityUsd.toFixed(2));
+  const initialNavUsd = Number(startingCapitalUsd.toFixed(2));
+  const totalRoiPct = calculateAccountRoiPct(
+    totalNetPnlUsd,
+    initialNavUsd > 0 ? initialNavUsd : walletBalanceUsd,
+  );
+
   return {
+    ...(environment ? { environment } : {}),
     accountCount: accounts.length,
     activeAutoCount,
-    startingCapitalUsd: Number(startingCapitalUsd.toFixed(2)),
+    initialNavUsd,
+    startingCapitalUsd: initialNavUsd,
     walletBalanceUsd: Number(walletBalanceUsd.toFixed(2)),
-    equityUsd: Number(equityUsd.toFixed(2)),
+    totalNavUsd,
+    equityUsd: totalNavUsd,
+    availableMarginUsd: Number(availableMarginUsd.toFixed(2)),
+    marginUsedUsd: Number(marginUsedUsd.toFixed(2)),
     unrealizedPnlUsd: Number(unrealizedPnlUsd.toFixed(2)),
     realizedPnlUsd: Number(realizedPnlUsd.toFixed(2)),
+    navChangeUsd: totalNetPnlUsd,
     totalNetPnlUsd,
-    totalRoiPct: calculateAccountRoiPct(totalNetPnlUsd, startingCapitalUsd > 0 ? startingCapitalUsd : walletBalanceUsd),
+    navChangePct: totalRoiPct,
+    totalRoiPct,
     dailyRealizedPnlUsd: Number(dailyRealizedPnlUsd.toFixed(2)),
     openPositionsCount,
   };

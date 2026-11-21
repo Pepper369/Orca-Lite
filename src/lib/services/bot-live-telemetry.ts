@@ -16,10 +16,11 @@ import {
 } from "@/lib/engines/exchange-execution-client";
 import {
   aggregateTierSummary,
+  assignPoolNavShares,
   calculateAccountRoiPct,
   calculateMarkToMarketPnlUsd,
   calculatePositionRoePct,
-  classifyAccountTier,
+  classifyAccountEnvironment,
   type AccountPnlTelemetry,
   type BotActivityEvent,
   type BotLiveTelemetrySnapshot,
@@ -84,6 +85,8 @@ function isCryptoOrderSymbol(symbol: string, platform: BrokerPlatform): boolean 
 
 const IS_TEST_RUNNER =
   process.argv.includes("--test") ||
+  process.execArgv.some((arg) => arg.includes("test")) ||
+  Boolean(process.env.NODE_TEST_CONTEXT) ||
   process.env.NODE_ENV === "test" ||
   process.env.ORCA_DISABLE_REALTIME_WS === "1";
 
@@ -160,7 +163,7 @@ function buildLocalOpenPositions(
   acct: FollowerAccount,
   accountOrders: CopyExecutionOrder[],
 ): LiveOpenPosition[] {
-  const tier = classifyAccountTier(acct);
+  const { accountTier: tier, environment } = classifyAccountEnvironment(acct);
   const openOrders = accountOrders.filter(
     (o) =>
       (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
@@ -207,6 +210,7 @@ function buildLocalOpenPositions(
       accountName: acct.name,
       platform: acct.platform,
       accountTier: tier,
+      environment,
       symbol: o.symbol,
       assetType,
       direction: o.direction,
@@ -342,7 +346,7 @@ export async function buildBotLiveTelemetrySnapshot(
     const acct = accounts[i]!;
     const live = liveTelemetryList[i];
     const acctOrders = ordersByAccount.get(acct.id) ?? [];
-    const tier = classifyAccountTier(acct);
+    const { accountTier: tier, environment, demoSubtype } = classifyAccountEnvironment(acct);
 
     // Closed PnL stats from tracked history (truth-in-data: null winrate if 0 closed trades)
     const closedOrders = acctOrders.filter((o) => o.message.startsWith("[ĐÃ ĐÓNG]"));
@@ -381,6 +385,7 @@ export async function buildBotLiveTelemetrySnapshot(
         accountName: acct.name,
         platform: acct.platform,
         accountTier: tier,
+        environment,
         source: pnlSource === "METAAPI_CLOUD_LIVE" ? "METAAPI_CLOUD" : "EXCHANGE_LIVE",
         canCloseInApp: false,
       }));
@@ -393,7 +398,10 @@ export async function buildBotLiveTelemetrySnapshot(
         acctPositions.reduce((sum, p) => sum + p.unrealizedPnlUsd, 0).toFixed(2),
       );
       equityUsd = Number((walletBalanceUsd + unrealizedPnlUsd).toFixed(2));
-      availableMarginUsd = Math.max(0, Number((equityUsd * 0.9).toFixed(2)));
+      availableMarginUsd =
+        acctPositions.length === 0
+          ? equityUsd
+          : Math.max(0, Number((equityUsd * 0.9).toFixed(2)));
       if (
         (acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA") &&
         acct.hasEaToken &&
@@ -410,6 +418,11 @@ export async function buildBotLiveTelemetrySnapshot(
       1,
       Number((walletBalanceUsd - realizedPnlUsd > 0 ? walletBalanceUsd - realizedPnlUsd : walletBalanceUsd).toFixed(2)),
     );
+    const navUsd = Number(equityUsd.toFixed(2));
+    const availableMarginRounded = Number(Math.max(0, availableMarginUsd).toFixed(2));
+    const marginUsedUsd = Number(Math.max(0, navUsd - availableMarginRounded).toFixed(2));
+    const marginUtilizationPct =
+      navUsd > 0 ? Number(Math.min(100, (marginUsedUsd / navUsd) * 100).toFixed(1)) : 0;
     const totalRoiPct = calculateAccountRoiPct(totalNetPnlUsd, startingCapitalUsd);
     const dailyRoiPct = calculateAccountRoiPct(
       dailyRealizedPnlUsd + unrealizedPnlUsd,
@@ -433,16 +446,27 @@ export async function buildBotLiveTelemetrySnapshot(
       platform: acct.platform,
       accountNumberMasked: acct.accountNumberMasked,
       accountTier: tier,
+      environment,
+      demoSubtype,
       isTestnet: acct.isTestnet !== false,
       isActive: acct.isActive,
       autoExecuteEnabled: Boolean(acct.autoExecuteEnabled),
       killSwitched: Boolean(acct.killSwitched),
       connectionStatus: acct.connectionStatus ?? "PAPER_SIMULATED",
       pnlSource,
+      initialNavUsd: startingCapitalUsd,
       startingCapitalUsd,
       walletBalanceUsd: Number(walletBalanceUsd.toFixed(2)),
-      equityUsd: Number(equityUsd.toFixed(2)),
-      availableMarginUsd: Number(availableMarginUsd.toFixed(2)),
+      navUsd,
+      realNavUsd: environment === "REAL" ? navUsd : 0,
+      demoNavUsd: environment === "DEMO" ? navUsd : 0,
+      navChangeUsd: totalNetPnlUsd,
+      navChangePct: totalRoiPct,
+      navShareInPoolPct: 0,
+      equityUsd: navUsd,
+      availableMarginUsd: availableMarginRounded,
+      marginUsedUsd,
+      marginUtilizationPct,
       unrealizedPnlUsd: Number(unrealizedPnlUsd.toFixed(2)),
       realizedPnlUsd,
       dailyRealizedPnlUsd,
@@ -463,17 +487,24 @@ export async function buildBotLiveTelemetrySnapshot(
     allOpenPositions.push(...acctPositions);
   }
 
-  const liveRealAccounts = accountTelemetries.filter((a) => a.accountTier === "LIVE_REAL");
-  const demoAccounts = accountTelemetries.filter((a) => a.accountTier !== "LIVE_REAL");
+  const withShares = assignPoolNavShares(accountTelemetries);
+  const realAccounts = withShares.filter((a) => a.environment === "REAL");
+  const demoAccounts = withShares.filter((a) => a.environment === "DEMO");
+  const realNav = aggregateTierSummary(realAccounts, "REAL");
+  const demoNav = aggregateTierSummary(demoAccounts, "DEMO");
   const w = getAutoTradeWorkerStatus();
 
   return {
     generatedAt: now,
     streamIntervalMs: 2_500,
-    summary: aggregateTierSummary(accountTelemetries),
-    liveRealSummary: aggregateTierSummary(liveRealAccounts),
-    demoSummary: aggregateTierSummary(demoAccounts),
-    accounts: accountTelemetries,
+    summary: aggregateTierSummary(withShares),
+    realNav,
+    demoNav,
+    liveRealSummary: realNav,
+    demoSummary: demoNav,
+    realAccounts,
+    demoAccounts,
+    accounts: withShares,
     openPositions: allOpenPositions.sort((a, b) => b.openedAt - a.openedAt),
     recentEvents: ACTIVITY_RING.slice(0, 25),
     worker: {

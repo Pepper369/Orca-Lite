@@ -4,6 +4,7 @@ import {
   getMasterTraderPerformance,
   type BrokerPlatform,
 } from "@/lib/engines/copy-trade-engine";
+import { classifyAccountEnvironment } from "@/lib/engines/bot-telemetry-types";
 import {
   verifyBinanceFuturesAccount,
   verifyMetaApiMt5Account,
@@ -37,6 +38,11 @@ const ALLOWED_PLATFORMS: BrokerPlatform[] = [
 export async function GET(req: Request) {
   const session = await getSessionUser(req);
   const accounts = await listBrokerConnections(session?.id ?? null);
+  const realAccounts = accounts.filter((a) => classifyAccountEnvironment(a).environment === "REAL");
+  const demoAccounts = accounts.filter((a) => classifyAccountEnvironment(a).environment === "DEMO");
+
+  const realNavUsd = Number(realAccounts.reduce((sum, a) => sum + a.balanceUsd, 0).toFixed(2));
+  const demoNavUsd = Number(demoAccounts.reduce((sum, a) => sum + a.balanceUsd, 0).toFixed(2));
   const totalManagedCapitalUsd = accounts
     .filter((a) => a.isActive)
     .reduce((sum, a) => sum + a.balanceUsd, 0);
@@ -46,6 +52,12 @@ export async function GET(req: Request) {
       accounts,
       performance: getMasterTraderPerformance(),
       workerStatus: getAutoTradeWorkerStatus(),
+      realNavUsd,
+      demoNavUsd,
+      realAccountCount: realAccounts.length,
+      demoAccountCount: demoAccounts.length,
+      activeRealCount: realAccounts.filter((a) => a.isActive && !a.killSwitched).length,
+      activeDemoCount: demoAccounts.filter((a) => a.isActive && !a.killSwitched).length,
       totalManagedCapitalUsd: Math.round(totalManagedCapitalUsd),
       activeCount: accounts.filter((a) => a.isActive).length,
       verifiedLiveCount: accounts.filter((a) => a.connectionStatus === "CONNECTED_VERIFIED").length,

@@ -5,24 +5,35 @@ import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
 import type {
+  AccountEnvironment,
   AccountPnlTelemetry,
-  AccountTier,
   BotLiveTelemetrySnapshot,
+  DemoAccountSubtype,
   LiveOpenPosition,
+  TierPnlAggregate,
 } from "@/lib/engines/bot-telemetry-types";
 import {
   Activity,
   Bot,
   Cpu,
   ExternalLink,
+  FlaskConical,
+  KeyRound,
   Radio,
-  ShieldAlert,
+  ShieldCheck,
   TrendingDown,
   TrendingUp,
-  Wallet,
   XCircle,
   Zap,
 } from "lucide-react";
+
+function fmtUsd(v: number): string {
+  if (!Number.isFinite(v)) return "$0.00";
+  return `$${v.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 function fmtSignedUsd(v: number): string {
   if (!Number.isFinite(v)) return "$0.00";
@@ -45,10 +56,16 @@ function pnlTextClass(v: number): string {
   return "text-text-secondary";
 }
 
-function tierBadge(tier: AccountTier): { label: string; tone: "warn" | "accent" | "neutral" } {
-  if (tier === "LIVE_REAL") return { label: "TÀI KHOẢN THỰC", tone: "warn" };
-  if (tier === "TESTNET_DEMO") return { label: "DEMO / TESTNET", tone: "accent" };
-  return { label: "PAPER SANDBOX", tone: "neutral" };
+function demoSubtypeLabel(subtype: DemoAccountSubtype | null): string {
+  switch (subtype) {
+    case "EXCHANGE_TESTNET":
+      return "DEMO · TESTNET";
+    case "MT5_DEMO":
+      return "DEMO · MT5";
+    case "PAPER_SANDBOX":
+    default:
+      return "DEMO · PAPER";
+  }
 }
 
 function pnlSourceLabel(src: AccountPnlTelemetry["pnlSource"]): string {
@@ -77,6 +94,389 @@ function fmtClock(ts: number | null | undefined): string {
   }
 }
 
+const REAL_BAR_COLORS = [
+  "bg-amber-400",
+  "bg-orange-400",
+  "bg-emerald-400",
+  "bg-yellow-400",
+  "bg-rose-400",
+];
+
+const DEMO_BAR_COLORS = [
+  "bg-cyan-400",
+  "bg-sky-400",
+  "bg-indigo-400",
+  "bg-teal-400",
+  "bg-violet-400",
+];
+
+function NavPoolHeroCard({
+  environment,
+  pool,
+  accounts,
+  compact,
+}: {
+  environment: AccountEnvironment;
+  pool: TierPnlAggregate;
+  accounts: AccountPnlTelemetry[];
+  compact: boolean;
+}) {
+  const isReal = environment === "REAL";
+  const barPalette = isReal ? REAL_BAR_COLORS : DEMO_BAR_COLORS;
+
+  return (
+    <div
+      className={`rounded-xl border p-3.5 flex flex-col justify-between gap-3 ${
+        isReal
+          ? "border-amber-500/45 bg-amber-500/[0.04]"
+          : "border-cyan-500/40 bg-cyan-500/[0.04]"
+      }`}
+    >
+      {/* Top Row: Environment Identity + NAV Value */}
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`flex size-7 items-center justify-center rounded-lg ${
+                isReal ? "bg-amber-500/20 text-amber-400" : "bg-cyan-500/20 text-cyan-400"
+              }`}
+            >
+              {isReal ? <ShieldCheck className="size-4" /> : <FlaskConical className="size-4" />}
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span
+                  className={`text-[12px] font-extrabold uppercase tracking-wide ${
+                    isReal ? "text-amber-400" : "text-cyan-400"
+                  }`}
+                >
+                  {isReal ? "REAL NAV · Tiền Thật" : "DEMO NAV · Testnet & Paper"}
+                </span>
+                <Badge tone={isReal ? "warn" : "accent"}>
+                  {pool.accountCount} TK · {pool.activeAutoCount} Auto
+                </Badge>
+              </div>
+              <p className="text-[10.5px] text-text-muted">
+                {isReal
+                  ? "Tài khoản Live API thật — tách biệt hoàn toàn với Demo"
+                  : "Tài khoản Testnet, MT5 Demo & Paper Sandbox"}
+              </p>
+            </div>
+          </div>
+
+          <span className="rounded-md border border-border-subtle/80 bg-surface-primary/80 px-2 py-0.5 text-[10px] font-mono text-text-muted">
+            {pool.openPositionsCount} vị thế mở
+          </span>
+        </div>
+
+        {/* Big NAV Figure & ROI */}
+        <div className="mt-2.5 flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="num text-2xl font-extrabold tracking-tight text-text-primary">
+              {fmtUsd(pool.totalNavUsd)}
+            </span>
+            <span
+              className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-mono text-[11.5px] font-bold ${
+                pool.navChangePct > 0
+                  ? "bg-positive/15 text-positive"
+                  : pool.navChangePct < 0
+                    ? "bg-negative/15 text-negative"
+                    : "bg-surface-elevated text-text-secondary"
+              }`}
+            >
+              {pool.navChangePct > 0 ? (
+                <TrendingUp className="size-3" />
+              ) : pool.navChangePct < 0 ? (
+                <TrendingDown className="size-3" />
+              ) : null}
+              {fmtSignedPct(pool.navChangePct)}
+            </span>
+          </div>
+          <span className={`font-mono text-[12px] font-bold ${pnlTextClass(pool.navChangeUsd)}`}>
+            Net {fmtSignedUsd(pool.navChangeUsd)}
+          </span>
+        </div>
+
+        {/* 3 Micro Metrics */}
+        <div className="mt-2.5 grid grid-cols-3 gap-2 rounded-lg border border-line/50 bg-surface-primary/65 px-2.5 py-1.5 font-mono text-[10.5px]">
+          <div>
+            <div className="text-[9.5px] uppercase text-text-muted">NAV Gốc</div>
+            <div className="font-semibold text-text-primary">{fmtUsd(pool.initialNavUsd)}</div>
+          </div>
+          <div>
+            <div className="text-[9.5px] uppercase text-text-muted">Thả Nổi</div>
+            <div className={`font-semibold ${pnlTextClass(pool.unrealizedPnlUsd)}`}>
+              {fmtSignedUsd(pool.unrealizedPnlUsd)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[9.5px] uppercase text-text-muted">Đã Chốt</div>
+            <div className={`font-semibold ${pnlTextClass(pool.realizedPnlUsd)}`}>
+              {fmtSignedUsd(pool.realizedPnlUsd)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Per-Account NAV Allocation Bar inside this pool */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-[10px] font-semibold text-text-muted">
+          <span>Phân bổ {isReal ? "REAL NAV" : "DEMO NAV"} theo từng tài khoản</span>
+          <span className="font-mono">{accounts.length > 0 ? "100% nội nhóm" : "0 TK"}</span>
+        </div>
+
+        {accounts.length === 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-line/70 bg-surface-primary/50 px-2.5 py-2 text-[11px] text-text-muted">
+            <span>
+              {isReal
+                ? "Chưa có tài khoản Live REAL. Tiền thật luôn được tách riêng tại đây."
+                : "Chưa có tài khoản DEMO / Testnet nào."}
+            </span>
+            {isReal && !compact && (
+              <Link
+                href="/copytrade"
+                className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-400 hover:underline"
+              >
+                <KeyRound className="size-3" />
+                Gắn API Real
+              </Link>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-elevated">
+              {accounts.map((acc, idx) => (
+                <div
+                  key={acc.accountId}
+                  style={{ width: `${Math.max(4, acc.navShareInPoolPct)}%` }}
+                  className={`${barPalette[idx % barPalette.length]} transition-all`}
+                  title={`${acc.name}: ${fmtUsd(acc.navUsd)} (${acc.navShareInPoolPct}%)`}
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {accounts.map((acc, idx) => (
+                <div
+                  key={acc.accountId}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-line/60 bg-surface-primary/80 px-2 py-0.5 text-[10.5px]"
+                >
+                  <span
+                    className={`size-2 shrink-0 rounded-full ${barPalette[idx % barPalette.length]}`}
+                  />
+                  <span className="max-w-[130px] truncate font-medium text-text-primary">
+                    {acc.name}
+                  </span>
+                  <span className="font-mono font-bold text-text-primary">{fmtUsd(acc.navUsd)}</span>
+                  <span className="font-mono text-[10px] text-text-muted">
+                    ({acc.navShareInPoolPct}%)
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccountNavGroupTable({
+  environment,
+  pool,
+  accounts,
+}: {
+  environment: AccountEnvironment;
+  pool: TierPnlAggregate;
+  accounts: AccountPnlTelemetry[];
+}) {
+  const isReal = environment === "REAL";
+
+  return (
+    <div
+      className={`overflow-hidden rounded-xl border ${
+        isReal ? "border-amber-500/40" : "border-cyan-500/35"
+      }`}
+    >
+      {/* Group Banner Header */}
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 border-b ${
+          isReal
+            ? "border-amber-500/25 bg-amber-500/10"
+            : "border-cyan-500/25 bg-cyan-500/10"
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {isReal ? (
+            <ShieldCheck className="size-4 text-amber-400" />
+          ) : (
+            <FlaskConical className="size-4 text-cyan-400" />
+          )}
+          <span
+            className={`text-[12px] font-extrabold uppercase tracking-wide ${
+              isReal ? "text-amber-400" : "text-cyan-400"
+            }`}
+          >
+            {isReal
+              ? `Nhóm Tài Khoản REAL — NAV Tiền Thật (${accounts.length})`
+              : `Nhóm Tài Khoản DEMO — NAV Testnet & Paper (${accounts.length})`}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+          <span className="text-text-secondary">
+            Tổng {isReal ? "REAL NAV" : "DEMO NAV"}:{" "}
+            <strong className="text-text-primary">{fmtUsd(pool.totalNavUsd)}</strong>
+          </span>
+          <span className={`font-bold ${pnlTextClass(pool.navChangePct)}`}>
+            {fmtSignedUsd(pool.navChangeUsd)} ({fmtSignedPct(pool.navChangePct)})
+          </span>
+        </div>
+      </div>
+
+      {/* Table Body */}
+      <div className="overflow-x-auto bg-surface-primary/40">
+        <table className="w-full text-left text-[11.5px]">
+          <thead className="bg-surface-elevated/60 text-[10px] uppercase text-text-muted">
+            <tr>
+              <th className="px-3 py-2">Tài Khoản &amp; Môi Trường</th>
+              <th className="px-3 py-2 text-right">
+                {isReal ? "REAL NAV & Tỷ Trọng" : "DEMO NAV & Tỷ Trọng"}
+              </th>
+              <th className="px-3 py-2 text-right">NAV Gốc / Số Dư Ví</th>
+              <th className="px-3 py-2 text-right">Thả Nổi (Unrealized)</th>
+              <th className="px-3 py-2 text-right">Đã Chốt / Hôm Nay</th>
+              <th className="px-3 py-2 text-right">Biến Động NAV (ROI)</th>
+              <th className="px-3 py-2 text-right">Lệnh / WR / Rủi Ro</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line/30">
+            {accounts.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-5 text-center text-text-muted">
+                  {isReal
+                    ? "Chưa có tài khoản REAL (Live API) nào được kết nối. Hãy gắn API Key chế độ REAL / LIVE ở phần Broker Vault bên dưới."
+                    : "Chưa có tài khoản DEMO (Testnet / MT5 Demo / Paper) nào trong danh sách."}
+                </td>
+              </tr>
+            ) : (
+              accounts.map((acc) => (
+                <tr key={acc.accountId} className="hover:bg-surface-elevated/40 transition-colors">
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-text-primary">{acc.name}</span>
+                      <Badge tone={isReal ? "warn" : "accent"}>
+                        {isReal ? "REAL" : demoSubtypeLabel(acc.demoSubtype)}
+                      </Badge>
+                      {acc.autoExecuteEnabled && !acc.killSwitched && (
+                        <Badge tone="up">AUTO ON</Badge>
+                      )}
+                      {acc.killSwitched && <Badge tone="down">KILL-SWITCH</Badge>}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] font-mono text-text-muted">
+                      <span>{acc.platform}</span>
+                      <span>·</span>
+                      <span>{pnlSourceLabel(acc.pnlSource)}</span>
+                      <span>·</span>
+                      <span>ID: {acc.accountNumberMasked}</span>
+                    </div>
+                    {acc.syncError && (
+                      <div
+                        className="mt-0.5 max-w-[260px] truncate text-[10px] text-negative"
+                        title={acc.syncError}
+                      >
+                        {acc.syncError}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <div className="text-[12.5px] font-extrabold text-text-primary">
+                      {fmtUsd(acc.navUsd)}
+                    </div>
+                    <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-text-muted">
+                      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-panel-3">
+                        <div
+                          className={`h-full ${isReal ? "bg-amber-400" : "bg-cyan-400"}`}
+                          style={{ width: `${Math.max(4, acc.navShareInPoolPct)}%` }}
+                        />
+                      </div>
+                      <span>{acc.navShareInPoolPct}% pool</span>
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <div className="text-text-secondary">Gốc: {fmtUsd(acc.initialNavUsd)}</div>
+                    <div className="text-[10.5px] text-text-muted">
+                      Ví: {fmtUsd(acc.walletBalanceUsd)}
+                      {acc.marginUtilizationPct > 0 ? ` · Margin ${acc.marginUtilizationPct}%` : ""}
+                    </div>
+                  </td>
+
+                  <td
+                    className={`px-3 py-2.5 text-right font-mono font-bold ${pnlTextClass(acc.unrealizedPnlUsd)}`}
+                  >
+                    <div>{fmtSignedUsd(acc.unrealizedPnlUsd)}</div>
+                    <div className="text-[10px] font-normal text-text-muted">
+                      {acc.openPositionsCount} vị thế mở
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <div className={`font-semibold ${pnlTextClass(acc.realizedPnlUsd)}`}>
+                      {fmtSignedUsd(acc.realizedPnlUsd)}
+                    </div>
+                    <div className={`text-[10px] ${pnlTextClass(acc.dailyRealizedPnlUsd)}`}>
+                      Hôm nay: {fmtSignedUsd(acc.dailyRealizedPnlUsd)}
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <div
+                      className={`inline-flex items-center gap-1 text-[12.5px] font-extrabold ${pnlTextClass(acc.navChangePct)}`}
+                    >
+                      {acc.navChangePct > 0 ? (
+                        <TrendingUp className="size-3.5" />
+                      ) : acc.navChangePct < 0 ? (
+                        <TrendingDown className="size-3.5" />
+                      ) : null}
+                      {fmtSignedPct(acc.navChangePct)}
+                    </div>
+                    <div className={`text-[10px] ${pnlTextClass(acc.dailyRoiPct)}`}>
+                      Ngày: {fmtSignedPct(acc.dailyRoiPct)}
+                    </div>
+                  </td>
+
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <div className="text-text-primary">
+                      {acc.totalTrades} lệnh · WR{" "}
+                      <strong>{acc.winratePct != null ? `${acc.winratePct}%` : "—"}</strong>
+                    </div>
+                    <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-text-muted">
+                      <span>Cap ${acc.maxDailyLossUsd}</span>
+                      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-panel-3">
+                        <div
+                          className={`h-full ${
+                            acc.dailyLossUsedPct >= 75
+                              ? "bg-negative"
+                              : acc.dailyLossUsedPct >= 40
+                                ? "bg-warn"
+                                : "bg-positive"
+                          }`}
+                          style={{ width: `${Math.max(4, acc.dailyLossUsedPct)}%` }}
+                        />
+                      </div>
+                      <span>{acc.dailyLossUsedPct}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function LiveBotCockpit({
   variant = "full",
   onAfterAction,
@@ -91,7 +491,7 @@ export function LiveBotCockpit({
 
   const [liveSnap, setLiveSnap] = useState<BotLiveTelemetrySnapshot | null>(null);
   const [sseState, setSseState] = useState<"connecting" | "live" | "polling">("connecting");
-  const [tierFilter, setTierFilter] = useState<"ALL" | "LIVE_REAL" | "DEMO">("ALL");
+  const [envFilter, setEnvFilter] = useState<"SPLIT" | "REAL" | "DEMO">("SPLIT");
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -138,19 +538,23 @@ export function LiveBotCockpit({
 
   const snap = liveSnap ?? initialData ?? null;
 
-  const filteredAccounts = useMemo(() => {
-    const all = snap?.accounts ?? [];
-    if (tierFilter === "LIVE_REAL") return all.filter((a) => a.accountTier === "LIVE_REAL");
-    if (tierFilter === "DEMO") return all.filter((a) => a.accountTier !== "LIVE_REAL");
-    return all;
-  }, [snap, tierFilter]);
+  const realAccounts = useMemo(
+    () => snap?.realAccounts ?? snap?.accounts.filter((a) => a.accountTier === "LIVE_REAL") ?? [],
+    [snap],
+  );
+  const demoAccounts = useMemo(
+    () => snap?.demoAccounts ?? snap?.accounts.filter((a) => a.accountTier !== "LIVE_REAL") ?? [],
+    [snap],
+  );
+  const realNav = snap?.realNav ?? snap?.liveRealSummary;
+  const demoNav = snap?.demoNav ?? snap?.demoSummary;
 
   const openPositions = useMemo(() => {
     const all = snap?.openPositions ?? [];
-    if (tierFilter === "LIVE_REAL") return all.filter((p) => p.accountTier === "LIVE_REAL");
-    if (tierFilter === "DEMO") return all.filter((p) => p.accountTier !== "LIVE_REAL");
+    if (envFilter === "REAL") return all.filter((p) => (p.environment ?? (p.accountTier === "LIVE_REAL" ? "REAL" : "DEMO")) === "REAL");
+    if (envFilter === "DEMO") return all.filter((p) => (p.environment ?? (p.accountTier === "LIVE_REAL" ? "REAL" : "DEMO")) === "DEMO");
     return all;
-  }, [snap, tierFilter]);
+  }, [snap, envFilter]);
 
   const handleScanNow = useCallback(async () => {
     setScanBusy(true);
@@ -170,7 +574,7 @@ export function LiveBotCockpit({
           ok: true,
           text:
             t && t.activeAutoAccounts === 0
-              ? "Đã quét Engine lõi (chưa có tài khoản bật AUTO ON — hãy bật nút AUTO ON bên dưới)."
+              ? "Đã quét Engine lõi (chưa có tài khoản bật AUTO ON — hãy bật nút AUTO ON ở bảng kết nối)."
               : `Đã quét xong trên ${t?.activeAutoAccounts ?? 0} bot: đẩy ${t?.dispatched ?? 0} lệnh mới.`,
         });
       }
@@ -215,12 +619,12 @@ export function LiveBotCockpit({
     [closingOrderId, mutateRest, onAfterAction],
   );
 
-  if (!snap) {
+  if (!snap || !realNav || !demoNav) {
     return (
       <div className="rounded-xl border border-line/70 bg-surface-primary p-4">
         <div className="flex items-center gap-2 text-xs text-text-muted">
           <Radio className="size-4 animate-pulse text-accent-primary" />
-          Đang kết nối luồng Bot Trading &amp; PnL thời gian thực...
+          Đang kết nối luồng NAV (Real &amp; Demo) &amp; Bot Trading thời gian thực...
         </div>
       </div>
     );
@@ -228,9 +632,9 @@ export function LiveBotCockpit({
 
   return (
     <div className="space-y-3.5">
-      {/* 1. Real-Time Engine Heartbeat Header + Split Live/Demo PnL Summary */}
-      <div className="rounded-xl border border-accent-primary/35 bg-surface-primary p-3.5 sm:p-4 shadow-sm space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* 1. Real-Time Engine Header + Strictly Split REAL NAV vs DEMO NAV Hero Panels */}
+      <div className="rounded-xl border border-accent-primary/35 bg-surface-primary p-3.5 sm:p-4 shadow-sm space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex size-8 items-center justify-center rounded-lg bg-accent-primary/15 text-accent-primary">
               <Bot className="size-4" />
@@ -238,7 +642,7 @@ export function LiveBotCockpit({
             <div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <h2 className="text-[13.5px] font-bold text-text-primary">
-                  Giám Sát Bot Trading &amp; Lãi/Lỗ Thời Gian Thực (Real &amp; Demo)
+                  Giám Sát NAV Thực / Demo &amp; Bot Trading Thời Gian Thực
                 </h2>
                 <Badge tone={sseState === "live" ? "up" : "accent"}>
                   <span
@@ -249,9 +653,18 @@ export function LiveBotCockpit({
                   {sseState === "live" ? "SSE LIVE 2.5s" : "SYNC"}
                 </Badge>
               </div>
-              <p className="text-[11px] text-text-muted">
-                {snap.worker.lastScanStatus} · Cập nhật lúc{" "}
-                <span className="font-mono text-text-secondary">{fmtClock(snap.generatedAt)}</span>
+              <p className="text-[11px] text-text-muted flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="inline-flex items-center gap-1">
+                  <Cpu className="size-3 text-positive" />
+                  Auto: <strong className="text-amber-400">{realNav.activeAutoCount} Real</strong> ·{" "}
+                  <strong className="text-cyan-400">{demoNav.activeAutoCount} Demo</strong>
+                </span>
+                <span>·</span>
+                <span>{snap.worker.lastScanStatus}</span>
+                <span>·</span>
+                <span className="font-mono text-text-secondary">
+                  Cập nhật {fmtClock(snap.generatedAt)}
+                </span>
               </p>
             </div>
           </div>
@@ -278,93 +691,20 @@ export function LiveBotCockpit({
           </div>
         </div>
 
-        {/* 4 Summary Cards: Total / Live Real / Demo-Testnet / Engine Status */}
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-          {/* Card 1: Total Portfolio */}
-          <div className="rounded-xl border border-border-subtle bg-surface-elevated/50 p-3">
-            <div className="flex items-center justify-between text-[11px] text-text-muted">
-              <span>Tổng Tài Sản Bot (Equity)</span>
-              <Wallet className="size-3.5 text-accent-primary" />
-            </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-2">
-              <span className="num text-lg font-extrabold text-text-primary">
-                ${snap.summary.equityUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-              <span className={`num text-xs font-bold ${pnlTextClass(snap.summary.totalRoiPct)}`}>
-                {fmtSignedPct(snap.summary.totalRoiPct)}
-              </span>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-1 text-[10.5px] text-text-muted font-mono">
-              <span>Thả nổi: <strong className={pnlTextClass(snap.summary.unrealizedPnlUsd)}>{fmtSignedUsd(snap.summary.unrealizedPnlUsd)}</strong></span>
-              <span>Đã chốt: <strong className={pnlTextClass(snap.summary.realizedPnlUsd)}>{fmtSignedUsd(snap.summary.realizedPnlUsd)}</strong></span>
-            </div>
-          </div>
-
-          {/* Card 2: LIVE REAL Accounts Only */}
-          <div className="rounded-xl border border-warn/35 bg-warn/5 p-3">
-            <div className="flex items-center justify-between text-[11px] text-warn">
-              <span className="font-semibold">Tài Khoản Thực (LIVE REAL)</span>
-              <Badge tone="warn">{snap.liveRealSummary.accountCount} TK</Badge>
-            </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-2">
-              <span className="num text-lg font-extrabold text-text-primary">
-                ${snap.liveRealSummary.equityUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-              <span className={`num text-xs font-bold ${pnlTextClass(snap.liveRealSummary.totalRoiPct)}`}>
-                {fmtSignedPct(snap.liveRealSummary.totalRoiPct)}
-              </span>
-            </div>
-            <div className="mt-1 text-[10.5px] text-text-muted font-mono">
-              Net PnL:{" "}
-              <strong className={pnlTextClass(snap.liveRealSummary.totalNetPnlUsd)}>
-                {fmtSignedUsd(snap.liveRealSummary.totalNetPnlUsd)}
-              </strong>{" "}
-              · {snap.liveRealSummary.openPositionsCount} vị thế mở
-            </div>
-          </div>
-
-          {/* Card 3: DEMO / TESTNET / PAPER Accounts */}
-          <div className="rounded-xl border border-accent-primary/35 bg-accent-primary/5 p-3">
-            <div className="flex items-center justify-between text-[11px] text-accent-2">
-              <span className="font-semibold">Tài Khoản Demo / Testnet</span>
-              <Badge tone="accent">{snap.demoSummary.accountCount} TK</Badge>
-            </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-2">
-              <span className="num text-lg font-extrabold text-text-primary">
-                ${snap.demoSummary.equityUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-              <span className={`num text-xs font-bold ${pnlTextClass(snap.demoSummary.totalRoiPct)}`}>
-                {fmtSignedPct(snap.demoSummary.totalRoiPct)}
-              </span>
-            </div>
-            <div className="mt-1 text-[10.5px] text-text-muted font-mono">
-              Net PnL:{" "}
-              <strong className={pnlTextClass(snap.demoSummary.totalNetPnlUsd)}>
-                {fmtSignedUsd(snap.demoSummary.totalNetPnlUsd)}
-              </strong>{" "}
-              · {snap.demoSummary.openPositionsCount} vị thế mở
-            </div>
-          </div>
-
-          {/* Card 4: Core Worker & Open Positions */}
-          <div className="rounded-xl border border-border-subtle bg-surface-elevated/50 p-3">
-            <div className="flex items-center justify-between text-[11px] text-text-muted">
-              <span>Trạng Thái Engine Lõi</span>
-              <Cpu className="size-3.5 text-positive" />
-            </div>
-            <div className="mt-1 flex flex-wrap items-baseline gap-2">
-              <span className="num text-lg font-extrabold text-text-primary">
-                {snap.summary.activeAutoCount}/{snap.summary.accountCount}
-              </span>
-              <Badge tone={snap.summary.activeAutoCount > 0 ? "up" : "neutral"}>
-                {snap.summary.activeAutoCount > 0 ? "AUTO RUNNING" : "MANUAL / IDLE"}
-              </Badge>
-            </div>
-            <div className="mt-1 text-[10.5px] text-text-muted font-mono">
-              Đang mở: <strong className="text-text-primary">{snap.summary.openPositionsCount}</strong> · Chu kỳ{" "}
-              {Math.round(snap.worker.pollIntervalMs / 1000)}s · Quét gần nhất {fmtClock(snap.worker.lastTickAt)}
-            </div>
-          </div>
+        {/* Strictly Split REAL NAV vs DEMO NAV Panels — NEVER blended into one misleading capital sum */}
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <NavPoolHeroCard
+            environment="REAL"
+            pool={realNav}
+            accounts={realAccounts}
+            compact={variant === "compact"}
+          />
+          <NavPoolHeroCard
+            environment="DEMO"
+            pool={demoNav}
+            accounts={demoAccounts}
+            compact={variant === "compact"}
+          />
         </div>
 
         {actionMsg && (
@@ -380,33 +720,37 @@ export function LiveBotCockpit({
         )}
       </div>
 
-      {/* 2. Per-Account Real-Time PnL & ROI Table (Real + Demo) */}
-      <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5 sm:p-4 shadow-sm">
+      {/* 2. Per-Account NAV & PnL Breakdown — Split strictly into REAL Group vs DEMO Group */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5 sm:p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-[13px] font-bold text-text-primary flex items-center gap-1.5">
               <Activity className="size-4 text-positive" />
-              Bảng Lãi / Lỗ &amp; Tỷ Suất ROI Theo Từng Tài Khoản
+              Chi Tiết NAV, Lãi/Lỗ &amp; Tỷ Suất ROI Theo Từng Tài Khoản
             </h3>
             <p className="text-[11px] text-text-muted">
-              Đồng bộ trực tiếp từ API sàn (Binance, OKX, MetaApi Exness/XM) và giá Mark-to-Market WebSocket cho Demo/Paper.
+              Mỗi tài khoản được tách bạch tuyệt đối giữa nhóm REAL (tiền thật) và DEMO (Testnet / MT5 Demo / Paper), tỷ trọng NAV tính riêng trong nội bộ từng nhóm.
             </p>
           </div>
-          <div className="inline-flex rounded-lg border border-border-subtle bg-surface-elevated/70 p-0.5 text-[11px]">
+          <div className="inline-flex flex-wrap rounded-lg border border-border-subtle bg-surface-elevated/70 p-0.5 text-[11px]">
             {(
               [
-                { id: "ALL", label: `Tất cả (${snap.accounts.length})` },
-                { id: "LIVE_REAL", label: `Thực (${snap.liveRealSummary.accountCount})` },
-                { id: "DEMO", label: `Demo/Testnet (${snap.demoSummary.accountCount})` },
+                { id: "SPLIT", label: `Tách 2 Nhóm (${snap.accounts.length})` },
+                { id: "REAL", label: `REAL NAV (${realAccounts.length})` },
+                { id: "DEMO", label: `DEMO NAV (${demoAccounts.length})` },
               ] as const
             ).map((opt) => (
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setTierFilter(opt.id)}
+                onClick={() => setEnvFilter(opt.id)}
                 className={`rounded-md px-2.5 py-1 font-semibold transition-colors ${
-                  tierFilter === opt.id
-                    ? "bg-accent-primary text-white"
+                  envFilter === opt.id
+                    ? opt.id === "REAL"
+                      ? "bg-amber-500 text-slate-950"
+                      : opt.id === "DEMO"
+                        ? "bg-cyan-500 text-slate-950"
+                        : "bg-accent-primary text-white"
                     : "text-text-muted hover:text-text-primary"
                 }`}
               >
@@ -416,130 +760,32 @@ export function LiveBotCockpit({
           </div>
         </div>
 
-        <div className="mt-3 overflow-x-auto rounded-lg border border-line/50">
-          <table className="w-full text-left text-[11.5px]">
-            <thead className="bg-surface-elevated/60 text-[10px] uppercase text-text-muted">
-              <tr>
-                <th className="px-3 py-2">Tài Khoản &amp; Loại</th>
-                <th className="px-3 py-2 text-right">Balance / Equity</th>
-                <th className="px-3 py-2 text-right">Thả Nổi (Unrealized)</th>
-                <th className="px-3 py-2 text-right">Đã Chốt / Hôm Nay</th>
-                <th className="px-3 py-2 text-right">Tỷ Lệ Lãi/Lỗ (ROI)</th>
-                <th className="px-3 py-2 text-right">Lệnh / Winrate / Rủi Ro Ngày</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/30 bg-surface-primary/40">
-              {filteredAccounts.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-5 text-center text-text-muted">
-                    Chưa có tài khoản nào trong nhóm lọc này. Hãy gắn API Key Binance, OKX, Exness hoặc XM để theo dõi trực tiếp.
-                  </td>
-                </tr>
-              ) : (
-                filteredAccounts.map((acc) => {
-                  const tb = tierBadge(acc.accountTier);
-                  return (
-                    <tr key={acc.accountId} className="hover:bg-surface-elevated/40 transition-colors">
-                      <td className="px-3 py-2.5">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-semibold text-text-primary">{acc.name}</span>
-                          <Badge tone={tb.tone}>{tb.label}</Badge>
-                          {acc.autoExecuteEnabled && !acc.killSwitched && (
-                            <Badge tone="up">AUTO ON</Badge>
-                          )}
-                          {acc.killSwitched && <Badge tone="down">KILL-SWITCH</Badge>}
-                        </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10.5px] font-mono text-text-muted">
-                          <span>{acc.platform}</span>
-                          <span>·</span>
-                          <span>{pnlSourceLabel(acc.pnlSource)}</span>
-                          <span>·</span>
-                          <span>ID: {acc.accountNumberMasked}</span>
-                        </div>
-                        {acc.syncError && (
-                          <div className="mt-0.5 text-[10px] text-negative truncate max-w-[280px]" title={acc.syncError}>
-                            {acc.syncError}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        <div className="font-bold text-text-primary">
-                          ${acc.equityUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div className="text-[10.5px] text-text-muted">
-                          Bal: ${acc.walletBalanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                      </td>
-                      <td className={`px-3 py-2.5 text-right font-mono font-bold ${pnlTextClass(acc.unrealizedPnlUsd)}`}>
-                        <div>{fmtSignedUsd(acc.unrealizedPnlUsd)}</div>
-                        <div className="text-[10px] font-normal text-text-muted">
-                          {acc.openPositionsCount} vị thế mở
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        <div className={`font-semibold ${pnlTextClass(acc.realizedPnlUsd)}`}>
-                          {fmtSignedUsd(acc.realizedPnlUsd)}
-                        </div>
-                        <div className={`text-[10px] ${pnlTextClass(acc.dailyRealizedPnlUsd)}`}>
-                          Hôm nay: {fmtSignedUsd(acc.dailyRealizedPnlUsd)}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        <div className={`inline-flex items-center gap-1 text-[13px] font-extrabold ${pnlTextClass(acc.totalRoiPct)}`}>
-                          {acc.totalRoiPct > 0 ? (
-                            <TrendingUp className="size-3.5" />
-                          ) : acc.totalRoiPct < 0 ? (
-                            <TrendingDown className="size-3.5" />
-                          ) : null}
-                          {fmtSignedPct(acc.totalRoiPct)}
-                        </div>
-                        <div className={`text-[10px] ${pnlTextClass(acc.dailyRoiPct)}`}>
-                          Ngày: {fmtSignedPct(acc.dailyRoiPct)}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono">
-                        <div className="text-text-primary">
-                          {acc.totalTrades} lệnh · WR{" "}
-                          <strong>{acc.winratePct != null ? `${acc.winratePct}%` : "—"}</strong>
-                        </div>
-                        <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-text-muted">
-                          <span>Cap ${acc.maxDailyLossUsd}</span>
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-panel-3">
-                            <div
-                              className={`h-full ${
-                                acc.dailyLossUsedPct >= 75
-                                  ? "bg-negative"
-                                  : acc.dailyLossUsedPct >= 40
-                                    ? "bg-warn"
-                                    : "bg-positive"
-                              }`}
-                              style={{ width: `${Math.max(4, acc.dailyLossUsedPct)}%` }}
-                            />
-                          </div>
-                          <span>{acc.dailyLossUsedPct}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {(envFilter === "SPLIT" || envFilter === "REAL") && (
+            <AccountNavGroupTable environment="REAL" pool={realNav} accounts={realAccounts} />
+          )}
+          {(envFilter === "SPLIT" || envFilter === "DEMO") && (
+            <AccountNavGroupTable environment="DEMO" pool={demoNav} accounts={demoAccounts} />
+          )}
         </div>
       </div>
 
-      {/* 3. Live Open Positions Table & Real-Time Activity Feed (full mode or when positions exist) */}
+      {/* 3. Live Open Positions Table & Real-Time Activity Feed */}
       {(variant === "full" || openPositions.length > 0) && (
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-12">
-          {/* Open Positions */}
           <div className="lg:col-span-8 rounded-xl border border-line/70 bg-surface-primary p-3.5 sm:p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-[13px] font-bold text-text-primary">
                 Vị Thế Bot Đang Mở (Mark-to-Market Thời Gian Thực)
               </h3>
-              <Badge tone={openPositions.length > 0 ? "up" : "neutral"}>
-                {openPositions.length} Vị Thế Mở
-              </Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge tone="warn">
+                  REAL: {realNav.openPositionsCount}
+                </Badge>
+                <Badge tone="accent">
+                  DEMO: {demoNav.openPositionsCount}
+                </Badge>
+              </div>
             </div>
 
             <div className="mt-3 overflow-x-auto rounded-lg border border-line/50">
@@ -547,7 +793,7 @@ export function LiveBotCockpit({
                 <thead className="bg-surface-elevated/60 text-[10px] uppercase text-text-muted">
                   <tr>
                     <th className="px-2.5 py-2">Mã / Chiều</th>
-                    <th className="px-2.5 py-2">Tài Khoản</th>
+                    <th className="px-2.5 py-2">Tài Khoản &amp; Môi Trường</th>
                     <th className="px-2.5 py-2 text-right">Entry → Mark Live</th>
                     <th className="px-2.5 py-2 text-right">SL / TP1</th>
                     <th className="px-2.5 py-2 text-right">Lãi/Lỗ &amp; ROE%</th>
@@ -558,14 +804,20 @@ export function LiveBotCockpit({
                   {openPositions.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-3 py-5 text-center text-text-muted">
-                        Hiện chưa có vị thế nào đang mở. Nhấn &quot;Đẩy Lệnh (Copy Now)&quot; hoặc bật &quot;AUTO ON&quot; để bot vào lệnh và theo dõi PnL nhảy trực tiếp tại đây.
+                        Hiện chưa có vị thế nào đang mở trong nhóm lọc này. Nhấn &quot;Đẩy Lệnh (Copy Now)&quot; hoặc bật &quot;AUTO ON&quot; để bot vào lệnh và theo dõi NAV nhảy trực tiếp.
                       </td>
                     </tr>
                   ) : (
                     openPositions.map((pos) => {
-                      const tb = tierBadge(pos.accountTier);
+                      const isRealPos =
+                        (pos.environment ?? (pos.accountTier === "LIVE_REAL" ? "REAL" : "DEMO")) === "REAL";
                       return (
-                        <tr key={pos.positionId} className="hover:bg-surface-elevated/40">
+                        <tr
+                          key={pos.positionId}
+                          className={`hover:bg-surface-elevated/40 border-l-2 ${
+                            isRealPos ? "border-l-amber-400" : "border-l-cyan-400"
+                          }`}
+                        >
                           <td className="px-2.5 py-2">
                             <div className="flex items-center gap-1.5 font-semibold">
                               <span className="text-text-primary">{pos.symbol}</span>
@@ -581,8 +833,8 @@ export function LiveBotCockpit({
                             <div className="text-text-primary font-medium truncate max-w-[140px]">
                               {pos.accountName}
                             </div>
-                            <Badge tone={tb.tone} className="mt-0.5 text-[9.5px]">
-                              {tb.label}
+                            <Badge tone={isRealPos ? "warn" : "accent"} className="mt-0.5 text-[9.5px]">
+                              {isRealPos ? "REAL" : "DEMO"}
                             </Badge>
                           </td>
                           <td className="px-2.5 py-2 text-right font-mono">
@@ -593,7 +845,9 @@ export function LiveBotCockpit({
                             <div className="text-negative">{pos.stopLossPrice ?? "—"}</div>
                             <div className="text-positive">{pos.takeProfit1 ?? "—"}</div>
                           </td>
-                          <td className={`px-2.5 py-2 text-right font-mono font-bold ${pnlTextClass(pos.unrealizedPnlUsd)}`}>
+                          <td
+                            className={`px-2.5 py-2 text-right font-mono font-bold ${pnlTextClass(pos.unrealizedPnlUsd)}`}
+                          >
                             <div>{fmtSignedUsd(pos.unrealizedPnlUsd)}</div>
                             <div className="text-[10px]">{fmtSignedPct(pos.roePct)}</div>
                           </td>
@@ -636,7 +890,7 @@ export function LiveBotCockpit({
             <div className="mt-2.5 max-h-64 space-y-1.5 overflow-y-auto pr-1 text-[11px]">
               {snap.recentEvents.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-line/60 bg-surface-elevated/30 p-3 text-center text-text-muted">
-                  Engine đang lắng nghe thị trường. Khi có tín hiệu khớp lệnh, chốt vị thế hoặc cảnh báo guardrail sẽ hiện tức thì tại đây.
+                  Engine đang lắng nghe thị trường. Khi có tín hiệu khớp lệnh REAL/DEMO, chốt vị thế hoặc cảnh báo guardrail sẽ hiện tức thì tại đây.
                 </div>
               ) : (
                 snap.recentEvents.map((ev) => (

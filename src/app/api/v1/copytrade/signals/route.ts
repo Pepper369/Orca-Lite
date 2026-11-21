@@ -138,11 +138,17 @@ export async function POST(req: Request) {
       currentMarketPrice?: number;
       manualOverride?: boolean;
       targetFollowerIds?: string[];
+      targetEnvironment?: "REAL" | "DEMO" | "ALL";
     };
 
     if (!body.signal || !body.signal.symbol || !body.signal.entryPrice || !body.signal.stopLossPrice || !body.signal.takeProfit1) {
       return badRequest("Dữ liệu tín hiệu Master thiếu entryPrice, stopLossPrice hoặc takeProfit1");
     }
+
+    const targetEnvironment =
+      body.targetEnvironment === "REAL" || body.targetEnvironment === "DEMO" || body.targetEnvironment === "ALL"
+        ? body.targetEnvironment
+        : "ALL";
 
     const orders = await dispatchSignalWithVault({
       signal: body.signal,
@@ -150,6 +156,7 @@ export async function POST(req: Request) {
       manualOverride: body.manualOverride ?? true,
       userId: session?.id ?? null,
       targetFollowerIds: body.targetFollowerIds,
+      targetEnvironment,
     });
 
     const recentLogs = await listBotExecutionOrders(50);

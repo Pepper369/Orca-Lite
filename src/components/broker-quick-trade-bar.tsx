@@ -4,12 +4,18 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
+import {
+  classifyAccountEnvironment,
+  type AccountEnvironment,
+} from "@/lib/engines/bot-telemetry-types";
 import type { FollowerAccount } from "@/lib/engines/copy-trade-engine";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import { CheckCircle2, KeyRound, ShieldAlert, Zap } from "lucide-react";
 
 interface AccountsSummary {
   accounts: FollowerAccount[];
+  realNavUsd?: number;
+  demoNavUsd?: number;
   verifiedLiveCount: number;
   killSwitchedCount: number;
 }
@@ -41,6 +47,7 @@ export function BrokerQuickTradeBar({
     keepPreviousData: true,
   });
 
+  const [targetEnv, setTargetEnv] = useState<AccountEnvironment>("DEMO");
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -62,15 +69,20 @@ export function BrokerQuickTradeBar({
     );
   }, [data, assetType]);
 
-  const activeRealAccounts = useMemo(
-    () => relevantAccounts.filter((a) => a.isActive && !a.killSwitched && (a.hasApiKey || a.hasEaToken)),
-    [relevantAccounts],
-  );
-
-  const autoEnabledCount = useMemo(
-    () => relevantAccounts.filter((a) => a.isActive && a.autoExecuteEnabled && !a.killSwitched).length,
-    [relevantAccounts],
-  );
+  const { realAccounts, demoAccounts, realNavUsd, demoNavUsd } = useMemo(() => {
+    const real = relevantAccounts.filter(
+      (a) => a.isActive && !a.killSwitched && classifyAccountEnvironment(a).environment === "REAL",
+    );
+    const demo = relevantAccounts.filter(
+      (a) => a.isActive && !a.killSwitched && classifyAccountEnvironment(a).environment === "DEMO",
+    );
+    return {
+      realAccounts: real,
+      demoAccounts: demo,
+      realNavUsd: real.reduce((sum, a) => sum + a.balanceUsd, 0),
+      demoNavUsd: demo.reduce((sum, a) => sum + a.balanceUsd, 0),
+    };
+  }, [relevantAccounts]);
 
   const brokerLabel = assetType === "CRYPTO" ? "Binance / OKX" : "Exness / XM";
 
@@ -100,6 +112,7 @@ export function BrokerQuickTradeBar({
           },
           currentMarketPrice: order.entryPrice,
           manualOverride: true,
+          targetEnvironment: targetEnv,
         }),
       });
       const json = (await res.json()) as {
@@ -109,10 +122,19 @@ export function BrokerQuickTradeBar({
       };
       if (!res.ok || json.success === false || !json.data) {
         setFeedback({ ok: false, text: json.error?.message || "Gửi lệnh thất bại" });
+      } else if (
+        json.data.filledCount === 0 &&
+        json.data.pendingEaCount === 0 &&
+        json.data.rejectedCount === 0
+      ) {
+        setFeedback({
+          ok: false,
+          text: `Chưa có tài khoản ${targetEnv} đang bật cho ${brokerLabel}. Hãy gắn API hoặc chuyển môi trường.`,
+        });
       } else {
         setFeedback({
           ok: json.data.filledCount > 0 || json.data.pendingEaCount > 0,
-          text: `${order.direction} ${order.symbol}: ${json.data.filledCount} khớp/paper · ${json.data.pendingEaCount} chờ MT5 EA · ${json.data.rejectedCount} bị chặn`,
+          text: `[${targetEnv}] ${order.direction} ${order.symbol}: ${json.data.filledCount} khớp/paper · ${json.data.pendingEaCount} chờ MT5 EA · ${json.data.rejectedCount} bị chặn`,
         });
       }
     } catch {
@@ -131,31 +153,62 @@ export function BrokerQuickTradeBar({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
           <KeyRound className="size-3.5 shrink-0 text-accent-primary" />
-          <span className="font-semibold text-text-primary">Kết nối {brokerLabel}:</span>
-          {activeRealAccounts.length > 0 ? (
-            <Badge tone="up">
-              {activeRealAccounts.length} TK sẵn sàng{autoEnabledCount > 0 ? ` · ${autoEnabledCount} Auto` : ""}
-            </Badge>
-          ) : (
-            <Badge tone="warn">Chưa gắn API thật (Paper Sandbox)</Badge>
-          )}
+          <span className="font-semibold text-text-primary">{brokerLabel}:</span>
+          <Badge tone={realAccounts.length > 0 ? "warn" : "neutral"}>
+            REAL: {realAccounts.length} TK
+            {realAccounts.length > 0 ? ` ($${Math.round(realNavUsd).toLocaleString()})` : ""}
+          </Badge>
+          <Badge tone="accent">
+            DEMO: {demoAccounts.length} TK
+            {demoAccounts.length > 0 ? ` ($${Math.round(demoNavUsd).toLocaleString()})` : ""}
+          </Badge>
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
           {order && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleDispatch()}
-              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 ${
-                order.direction === "BUY" ? "bg-positive" : "bg-negative"
-              }`}
-            >
-              <Zap className="size-3" />
-              {busy
-                ? "Đang gửi..."
-                : `Trade ${order.direction} ${order.symbol}`}
-            </button>
+            <>
+              <div className="inline-flex rounded-md border border-border-subtle bg-surface-primary p-0.5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setTargetEnv("DEMO")}
+                  className={`rounded px-1.5 py-0.5 font-bold transition-colors ${
+                    targetEnv === "DEMO"
+                      ? "bg-cyan-500 text-slate-950"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  DEMO
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetEnv("REAL")}
+                  className={`rounded px-1.5 py-0.5 font-bold transition-colors ${
+                    targetEnv === "REAL"
+                      ? "bg-amber-500 text-slate-950"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  REAL
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleDispatch()}
+                className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 ${
+                  targetEnv === "REAL"
+                    ? "bg-amber-500 text-slate-950"
+                    : order.direction === "BUY"
+                      ? "bg-positive text-white"
+                      : "bg-negative text-white"
+                }`}
+              >
+                <Zap className="size-3" />
+                {busy
+                  ? "Đang gửi..."
+                  : `Trade ${targetEnv} ${order.direction} ${order.symbol}`}
+              </button>
+            </>
           )}
           <Link
             href="/copytrade"

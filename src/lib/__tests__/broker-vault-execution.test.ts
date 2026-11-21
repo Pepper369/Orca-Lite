@@ -30,9 +30,11 @@ import {
 import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
 import {
   aggregateTierSummary,
+  assignPoolNavShares,
   calculateAccountRoiPct,
   calculateMarkToMarketPnlUsd,
   calculatePositionRoePct,
+  classifyAccountEnvironment,
   classifyAccountTier,
 } from "@/lib/engines/bot-telemetry-types";
 import {
@@ -455,4 +457,146 @@ test("Real-Time Bot Telemetry Math: Crypto, FX, Gold Mark-to-Market PnL, ROI% & 
   const closed = await closeTrackedBotPosition({ orderId: paperOrders[0]!.orderId });
   assert.equal(closed.ok, true);
   assert.equal(closed.symbol, "BTCUSDT");
+});
+
+test("Real vs Demo NAV Separation: Per-account NAV isolation, pool shares & targetEnvironment dispatch guard", async () => {
+  // 1) Environment & Demo Subtype classification SSOT
+  assert.deepEqual(
+    classifyAccountEnvironment({
+      isTestnet: false,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      platform: "BINANCE_FUTURES",
+    }),
+    { environment: "REAL", accountTier: "LIVE_REAL", demoSubtype: null },
+  );
+  assert.deepEqual(
+    classifyAccountEnvironment({
+      isTestnet: true,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      platform: "BINANCE_FUTURES",
+    }),
+    { environment: "DEMO", accountTier: "TESTNET_DEMO", demoSubtype: "EXCHANGE_TESTNET" },
+  );
+  assert.deepEqual(
+    classifyAccountEnvironment({
+      isTestnet: true,
+      hasApiKey: true,
+      connectionStatus: "CONNECTED_VERIFIED",
+      platform: "MT5_EXNESS",
+    }),
+    { environment: "DEMO", accountTier: "TESTNET_DEMO", demoSubtype: "MT5_DEMO" },
+  );
+  assert.deepEqual(
+    classifyAccountEnvironment({
+      isTestnet: false,
+      hasApiKey: false,
+      connectionStatus: "PAPER_SIMULATED",
+      platform: "OKX_FUTURES",
+    }),
+    { environment: "DEMO", accountTier: "PAPER_SANDBOX", demoSubtype: "PAPER_SANDBOX" },
+  );
+
+  // 2) Per-account Real vs Demo NAV isolation + intra-pool share calculation
+  const snap = await buildBotLiveTelemetrySnapshot();
+  assert.equal(snap.realAccounts.length, snap.realNav.accountCount);
+  assert.equal(snap.demoAccounts.length, snap.demoNav.accountCount);
+  assert.equal(snap.realNav.totalNavUsd, snap.liveRealSummary.totalNavUsd);
+  assert.equal(snap.demoNav.totalNavUsd, snap.demoSummary.totalNavUsd);
+
+  for (const acc of snap.realAccounts) {
+    assert.equal(acc.environment, "REAL");
+    assert.equal(acc.realNavUsd, acc.navUsd);
+    assert.equal(acc.demoNavUsd, 0);
+  }
+  for (const acc of snap.demoAccounts) {
+    assert.equal(acc.environment, "DEMO");
+    assert.equal(acc.demoNavUsd, acc.navUsd);
+    assert.equal(acc.realNavUsd, 0);
+  }
+  if (snap.demoAccounts.length > 0) {
+    const demoShareSum = snap.demoAccounts.reduce((s, a) => s + a.navShareInPoolPct, 0);
+    assert.ok(
+      Math.abs(demoShareSum - 100) <= 0.5,
+      `Demo pool navShareInPoolPct should sum to ~100%, got ${demoShareSum}`,
+    );
+  }
+
+  // Synthetic mixed Real + Demo pool check: Real pool shares MUST NOT be diluted by Demo NAV
+  const baseDemo = snap.demoAccounts[0]!;
+  const mixed = assignPoolNavShares([
+    { ...baseDemo, accountId: "r1", environment: "REAL", navUsd: 3000, realNavUsd: 3000, demoNavUsd: 0 },
+    { ...baseDemo, accountId: "r2", environment: "REAL", navUsd: 1000, realNavUsd: 1000, demoNavUsd: 0 },
+    { ...baseDemo, accountId: "d1", environment: "DEMO", navUsd: 50000, realNavUsd: 0, demoNavUsd: 50000 },
+  ]);
+  assert.equal(mixed.find((x) => x.accountId === "r1")?.navShareInPoolPct, 75);
+  assert.equal(mixed.find((x) => x.accountId === "r2")?.navShareInPoolPct, 25);
+  assert.equal(mixed.find((x) => x.accountId === "d1")?.navShareInPoolPct, 100);
+
+  // 3) targetEnvironment dispatcher guardrail: DEMO orders never touch REAL accounts & vice versa
+  const realAcct = makeTestAccount({
+    id: `env-real-${Date.now()}`,
+    name: "Binance Real Live",
+    isTestnet: false,
+    hasApiKey: true,
+    connectionStatus: "CONNECTED_VERIFIED",
+  });
+  const demoAcct = makeTestAccount({
+    id: `env-demo-${Date.now()}`,
+    name: "Binance Testnet Demo",
+    isTestnet: true,
+    hasApiKey: true,
+    connectionStatus: "CONNECTED_VERIFIED",
+  });
+  const touchedIds: string[] = [];
+  const stubExec = async (
+    acct: FollowerAccount,
+    signal: DispatchableSignalInput,
+    qtyOrLots: number,
+    _lev: number,
+    marketPrice: number,
+    slippagePips: number,
+    idempotencyKey: string,
+  ) => {
+    touchedIds.push(acct.id);
+    return {
+      orderId: `ord_env_${touchedIds.length}`,
+      followerId: acct.id,
+      followerName: acct.name,
+      platform: acct.platform,
+      symbol: signal.symbol,
+      direction: signal.direction,
+      copiedLotsOrQty: qtyOrLots,
+      entryPrice: signal.entryPrice,
+      executionPrice: marketPrice,
+      slippagePips,
+      status: "FILLED" as const,
+      stopLossPrice: signal.stopLossPrice,
+      takeProfit1: signal.takeProfit1,
+      timestamp: Date.now(),
+      signalId: signal.id,
+      idempotencyKey,
+      message: "Stub env order",
+    };
+  };
+
+  await dispatchSignalWithVault({
+    signal: { ...SAMPLE_CRYPTO_SIGNAL, id: `sig_env_demo_${Date.now()}` },
+    manualOverride: true,
+    targetEnvironment: "DEMO",
+    overrideAccounts: [realAcct, demoAcct],
+    orderExecutor: stubExec,
+  });
+  assert.deepEqual(touchedIds, [demoAcct.id], "targetEnvironment=DEMO phải chặn tuyệt đối tài khoản REAL");
+
+  touchedIds.length = 0;
+  await dispatchSignalWithVault({
+    signal: { ...SAMPLE_CRYPTO_SIGNAL, id: `sig_env_real_${Date.now()}` },
+    manualOverride: true,
+    targetEnvironment: "REAL",
+    overrideAccounts: [realAcct, demoAcct],
+    orderExecutor: stubExec,
+  });
+  assert.deepEqual(touchedIds, [realAcct.id], "targetEnvironment=REAL phải chỉ định riêng tài khoản REAL");
 });

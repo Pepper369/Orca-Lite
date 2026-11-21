@@ -22,6 +22,10 @@ import {
   saveBotExecutionOrder,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
+import {
+  classifyAccountEnvironment,
+  type AccountEnvironment,
+} from "@/lib/engines/bot-telemetry-types";
 import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
 
 export interface DispatchableSignalInput {
@@ -48,6 +52,8 @@ export interface VaultDispatchOptions {
   manualOverride?: boolean;
   userId?: string | null;
   targetFollowerIds?: string[];
+  /** Tách luồng đẩy lệnh theo môi trường NAV: chỉ đẩy vào tài khoản REAL, chỉ DEMO, hoặc ALL. */
+  targetEnvironment?: AccountEnvironment | "ALL";
   /** Inject accounts in tests without touching global store if desired. */
   overrideAccounts?: FollowerAccount[];
   /** Override real exchange network execution in unit tests. */
@@ -270,7 +276,7 @@ export async function executePlatformOrder(
  * 5) Slippage Guard
  */
 export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promise<CopyExecutionOrder[]> {
-  const { signal, manualOverride = false, userId = null, targetFollowerIds } = opts;
+  const { signal, manualOverride = false, userId = null, targetFollowerIds, targetEnvironment = "ALL" } = opts;
   const marketPrice = opts.currentMarketPrice ?? signal.entryPrice;
   const executor = opts.orderExecutor ?? executePlatformOrder;
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
@@ -279,6 +285,8 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   for (const acct of accounts) {
     if (!acct.isActive) continue;
     if (targetFollowerIds?.length && !targetFollowerIds.includes(acct.id)) continue;
+    const acctEnv = classifyAccountEnvironment(acct).environment;
+    if (targetEnvironment !== "ALL" && acctEnv !== targetEnvironment) continue;
     if (!manualOverride && !acct.autoExecuteEnabled) continue;
 
     const idempotencyKey = `${acct.id}_${signal.id}_${signal.symbol}_${signal.direction}`;
@@ -497,6 +505,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     await recordVaultAuditLog(userId, "BOT_ORDER_DISPATCH", {
       orderId: executed.orderId,
       connectionId: acct.id,
+      environment: acctEnv,
       platform: acct.platform,
       symbol: signal.symbol,
       direction: signal.direction,
@@ -520,7 +529,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       symbol: signal.symbol,
       accountName: acct.name,
       platform: acct.platform,
-      message: executed.message,
+      message: `[${acctEnv}] ${executed.message}`,
     });
 
     results.push(executed);

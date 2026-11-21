@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
 import { LiveBotCockpit } from "@/components/live-bot-cockpit";
+import {
+  classifyAccountEnvironment,
+  type AccountEnvironment,
+  type DemoAccountSubtype,
+} from "@/lib/engines/bot-telemetry-types";
 import type {
   BrokerPlatform,
   CopyExecutionOrder,
@@ -13,12 +18,12 @@ import type {
 } from "@/lib/engines/copy-trade-engine";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
   Copy,
   Cpu,
   Download,
+  FlaskConical,
   KeyRound,
   Lock,
   PauseCircle,
@@ -30,7 +35,6 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
-  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -47,6 +51,12 @@ interface CopyTradeAccountsPayload {
   accounts: FollowerAccount[];
   performance: MasterTraderPerformance;
   workerStatus?: WorkerStatus;
+  realNavUsd?: number;
+  demoNavUsd?: number;
+  realAccountCount?: number;
+  demoAccountCount?: number;
+  activeRealCount?: number;
+  activeDemoCount?: number;
   totalManagedCapitalUsd: number;
   activeCount: number;
   verifiedLiveCount: number;
@@ -196,6 +206,12 @@ const QUICK_CONNECT_BROKERS: Array<{
   },
 ];
 
+function demoSubtypeBadgeLabel(sub: DemoAccountSubtype | null): string {
+  if (sub === "EXCHANGE_TESTNET") return "DEMO · TESTNET";
+  if (sub === "MT5_DEMO") return "DEMO · MT5";
+  return "DEMO · PAPER";
+}
+
 export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const { data: accountsData, mutate: mutateAccounts } = useApi<CopyTradeAccountsPayload>(
     "/api/v1/copytrade/accounts",
@@ -210,6 +226,8 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const [banner, setBanner] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  const [dispatchTargetEnv, setDispatchTargetEnv] = useState<AccountEnvironment | "ALL">("DEMO");
+  const [vaultEnvFilter, setVaultEnvFilter] = useState<"ALL" | AccountEnvironment>("ALL");
   const [testingConnId, setTestingConnId] = useState<string | null>(null);
   const [deletingConnId, setDeletingConnId] = useState<string | null>(null);
   const [rotatingConnId, setRotatingConnId] = useState<string | null>(null);
@@ -240,12 +258,24 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const [copiedEaToken, setCopiedEaToken] = useState(false);
 
   const accounts = accountsData?.accounts ?? [];
-  const masterStats = accountsData?.performance ?? signalsData?.performance;
   const workerStatus = accountsData?.workerStatus;
   const availableSignals = signalsData?.signals ?? [];
   const executionLogs = signalsData?.executionLogs ?? [];
   const anyKillSwitched = (accountsData?.killSwitchedCount ?? 0) > 0;
   const autoBotActiveCount = accounts.filter((a) => a.isActive && a.autoExecuteEnabled && !a.killSwitched).length;
+
+  const realAccountsList = accounts.filter((a) => classifyAccountEnvironment(a).environment === "REAL");
+  const demoAccountsList = accounts.filter((a) => classifyAccountEnvironment(a).environment === "DEMO");
+  const realNavUsd =
+    accountsData?.realNavUsd ?? realAccountsList.reduce((sum, a) => sum + a.balanceUsd, 0);
+  const demoNavUsd =
+    accountsData?.demoNavUsd ?? demoAccountsList.reduce((sum, a) => sum + a.balanceUsd, 0);
+  const filteredVaultAccounts =
+    vaultEnvFilter === "REAL"
+      ? realAccountsList
+      : vaultEnvFilter === "DEMO"
+        ? demoAccountsList
+        : accounts;
 
   const isRestExchange = formPlatform === "BINANCE_FUTURES" || formPlatform === "OKX_FUTURES";
   const isMt5Bridge = formPlatform === "MT5_EXNESS" || formPlatform === "MT5_XM" || formPlatform === "MT5_EA";
@@ -612,6 +642,7 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
           },
           currentMarketPrice: sig.entryPrice,
           manualOverride: true,
+          targetEnvironment: dispatchTargetEnv,
         }),
       });
       const json = (await res.json()) as {
@@ -622,9 +653,10 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
       if (!res.ok || json.success === false || !json.data) {
         setBanner({ tone: "err", text: json.error?.message || "Đẩy lệnh thất bại" });
       } else {
+        const envText = dispatchTargetEnv === "ALL" ? "REAL + DEMO" : dispatchTargetEnv;
         setBanner({
           tone: json.data.rejectedCount > 0 && json.data.filledCount === 0 ? "warn" : "ok",
-          text: `Đẩy lệnh ${sig.symbol} ${sig.direction}: ${json.data.filledCount} khớp/paper, ${json.data.pendingEaCount} chờ MT5 EA, ${json.data.rejectedCount} bị chặn bởi guardrail.`,
+          text: `Đẩy lệnh [${envText}] ${sig.symbol} ${sig.direction}: ${json.data.filledCount} khớp/paper, ${json.data.pendingEaCount} chờ MT5 EA, ${json.data.rejectedCount} bị chặn bởi guardrail.`,
         });
       }
       await Promise.all([mutateSignals(), mutateAccounts()]);
@@ -648,91 +680,118 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
         />
       )}
 
-      {/* Top KPI & Emergency Kill-Switch Control Strip */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
-            <span>Hiệu Suất Master Quant</span>
-            <Activity className="h-3.5 w-3.5 text-positive" />
+      {/* Split NAV Vault Summary & Emergency Kill-Switch Control Strip */}
+      {mode === "vault" ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.04] p-3.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-amber-400">
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                REAL NAV (Tiền Thật)
+              </span>
+              <Badge tone="warn">{realAccountsList.length} TK</Badge>
+            </div>
+            <div className="mt-1.5 text-xl font-extrabold text-ink num">
+              ${realNavUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <p className="mt-1 text-[11px] text-ink-3">
+              {accountsData?.verifiedLiveCount ?? 0} kết nối đã xác minh API sàn
+            </p>
           </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-xl font-bold text-ink num">
-              {masterStats ? `${masterStats.winratePct.toFixed(1)}%` : "—"}
-            </span>
-            <Badge tone="up">PF {masterStats?.profitFactor?.toFixed(2) ?? "2.15"}</Badge>
-          </div>
-          <p className="mt-1 text-[11px] text-ink-3">
-            Max DD {masterStats?.maxDrawdownPct?.toFixed(1) ?? "4.8"}% · Chuẩn lọc A+/A
-          </p>
-        </div>
 
-        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
-            <span>Vốn Quản Lý & Kết Nối</span>
-            <Users className="h-3.5 w-3.5 text-accent-primary" />
+          <div className="rounded-xl border border-cyan-500/35 bg-cyan-500/[0.04] p-3.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-cyan-400">
+              <span className="inline-flex items-center gap-1.5">
+                <FlaskConical className="h-3.5 w-3.5" />
+                DEMO NAV (Testnet &amp; Paper)
+              </span>
+              <Badge tone="accent">{demoAccountsList.length} TK</Badge>
+            </div>
+            <div className="mt-1.5 text-xl font-extrabold text-ink num">
+              ${demoNavUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <p className="mt-1 text-[11px] text-ink-3">
+              Tách biệt hoàn toàn khỏi tài sản tiền thật
+            </p>
           </div>
-          <div className="mt-1.5 flex items-baseline gap-2">
-            <span className="text-xl font-bold text-ink num">
-              ${(accountsData?.totalManagedCapitalUsd ?? 0).toLocaleString()}
-            </span>
-            <Badge tone={(accountsData?.verifiedLiveCount ?? 0) > 0 ? "up" : "accent"}>
-              {accountsData?.verifiedLiveCount ?? 0} Verified
-            </Badge>
-          </div>
-          <p className="mt-1 text-[11px] text-ink-3">
-            {accountsData?.activeCount ?? 0}/{accounts.length} tài khoản đang hoạt động
-          </p>
-        </div>
 
-        <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
-            <span>Broker Vault & Guardrails</span>
-            <Lock className="h-3.5 w-3.5 text-positive" />
+          <div
+            className={`rounded-xl border p-3.5 flex flex-col justify-between ${
+              anyKillSwitched
+                ? "border-down/60 bg-down/10"
+                : "border-line/70 bg-surface-primary"
+            }`}
+          >
+            <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
+              <span>Broker Vault &amp; Kill-Switch</span>
+              <ShieldAlert className={`h-4 w-4 ${anyKillSwitched ? "text-down animate-pulse" : "text-warn"}`} />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              {anyKillSwitched ? (
+                <button
+                  type="button"
+                  disabled={killSwitchBusy}
+                  onClick={() => handleKillSwitch(false)}
+                  className="w-full rounded-lg bg-positive px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-positive/90 transition-colors disabled:opacity-50"
+                >
+                  {killSwitchBusy ? "Đang xử lý..." : "Mở Khóa An Toàn (Release)"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={killSwitchBusy}
+                  onClick={() => handleKillSwitch(true)}
+                  className="w-full rounded-lg bg-down px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-down/90 transition-colors disabled:opacity-50"
+                >
+                  {killSwitchBusy ? "Đang khóa..." : "KILL-SWITCH: DỪNG TOÀN BỘ BOT"}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <Badge tone="up">AES-256-GCM</Badge>
-            <Badge tone="accent">Idempotency</Badge>
-            <Badge tone="warn">Daily Loss Cap</Badge>
-          </div>
-          <p className="mt-1.5 text-[11px] text-ink-3">
-            Hỗ trợ Binance Futures, OKX Swap v5 &amp; Exness/XM MT5 EA
-          </p>
         </div>
-
+      ) : (
         <div
-          className={`rounded-xl border p-3.5 flex flex-col justify-between ${
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 ${
             anyKillSwitched
               ? "border-down/60 bg-down/10"
               : "border-line/70 bg-surface-primary"
           }`}
         >
-          <div className="flex items-center justify-between text-[11px] font-medium text-ink-3">
-            <span>Công Tắc Khẩn Cấp (Kill-Switch)</span>
-            <ShieldAlert className={`h-4 w-4 ${anyKillSwitched ? "text-down animate-pulse" : "text-warn"}`} />
+          <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
+            <Lock className="h-4 w-4 text-positive shrink-0" />
+            <span className="font-semibold text-ink">Bảo Mật Broker Vault:</span>
+            <Badge tone="up">AES-256-GCM</Badge>
+            <Badge tone="accent">Idempotency Lock</Badge>
+            <Badge tone="warn">Daily Loss Cap</Badge>
+            <span className="text-ink-3 hidden sm:inline">
+              · Tách luồng thực thi REAL / DEMO độc lập
+            </span>
           </div>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             {anyKillSwitched ? (
               <button
                 type="button"
                 disabled={killSwitchBusy}
                 onClick={() => handleKillSwitch(false)}
-                className="w-full rounded-lg bg-positive px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-positive/90 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-positive px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-positive/90 transition-colors disabled:opacity-50"
               >
-                {killSwitchBusy ? "Đang xử lý..." : "Mở Khóa An Toàn (Release)"}
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {killSwitchBusy ? "Đang xử lý..." : "Mở Khóa Bot (Release Kill-Switch)"}
               </button>
             ) : (
               <button
                 type="button"
                 disabled={killSwitchBusy}
                 onClick={() => handleKillSwitch(true)}
-                className="w-full rounded-lg bg-down px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-down/90 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-down px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-down/90 transition-colors disabled:opacity-50"
               >
-                {killSwitchBusy ? "Đang khóa..." : "KILL-SWITCH: DỪNG TOÀN BỘ BOT"}
+                <ShieldAlert className="h-3.5 w-3.5" />
+                {killSwitchBusy ? "Đang khóa..." : "KILL-SWITCH: DỪNG KHẨN CẤP"}
               </button>
             )}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Feedback Banner */}
       {banner && (
@@ -848,7 +907,36 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
               Auto-Bot chỉ tự động vào lệnh với tín hiệu Grade A+/A. Nhấn Copy Now để đẩy thủ công qua Risk Guardrails.
             </p>
           </div>
-          <Badge tone="accent">{availableSignals.length} Kèo Active</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center rounded-lg border border-line bg-surface-elevated p-0.5 text-[10.5px]">
+              <span className="px-2 text-ink-3 font-medium">Đẩy vào:</span>
+              {(
+                [
+                  { id: "DEMO", label: "DEMO (An toàn)" },
+                  { id: "REAL", label: "REAL (Tiền thật)" },
+                  { id: "ALL", label: "Cả 2" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setDispatchTargetEnv(opt.id)}
+                  className={`rounded-md px-2 py-1 font-semibold transition-colors ${
+                    dispatchTargetEnv === opt.id
+                      ? opt.id === "REAL"
+                        ? "bg-amber-500 text-slate-950"
+                        : opt.id === "DEMO"
+                          ? "bg-cyan-500 text-slate-950"
+                          : "bg-accent-primary text-white"
+                      : "text-ink-3 hover:text-ink"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <Badge tone="accent">{availableSignals.length} Kèo Active</Badge>
+          </div>
         </div>
 
         {availableSignals.length === 0 ? (
@@ -906,10 +994,20 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                   type="button"
                   disabled={dispatchingId === sig.id}
                   onClick={() => handleDispatchSignal(sig)}
-                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className={`mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[11.5px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 ${
+                    dispatchTargetEnv === "REAL"
+                      ? "bg-amber-500 text-slate-950"
+                      : "bg-accent-primary text-white"
+                  }`}
                 >
                   <Zap className="h-3.5 w-3.5" />
-                  {dispatchingId === sig.id ? "Đang gửi lệnh..." : "Đẩy Lệnh (Copy Now)"}
+                  {dispatchingId === sig.id
+                    ? "Đang gửi lệnh..."
+                    : dispatchTargetEnv === "REAL"
+                      ? "Đẩy Lệnh Vào REAL (Tiền Thật)"
+                      : dispatchTargetEnv === "DEMO"
+                        ? "Đẩy Lệnh Vào DEMO"
+                        : "Đẩy Lệnh (REAL + DEMO)"}
                 </button>
               </div>
             ))}
@@ -930,6 +1028,32 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-line bg-surface-elevated p-0.5 text-[11px]">
+              {(
+                [
+                  { id: "ALL", label: `Tất cả (${accounts.length})` },
+                  { id: "REAL", label: `REAL (${realAccountsList.length})` },
+                  { id: "DEMO", label: `DEMO (${demoAccountsList.length})` },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setVaultEnvFilter(opt.id)}
+                  className={`rounded-md px-2.5 py-1 font-semibold transition-colors ${
+                    vaultEnvFilter === opt.id
+                      ? opt.id === "REAL"
+                        ? "bg-amber-500 text-slate-950"
+                        : opt.id === "DEMO"
+                          ? "bg-cyan-500 text-slate-950"
+                          : "bg-accent-primary text-white"
+                      : "text-ink-3 hover:text-ink"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <a
               href="/ea/OrcaCopyTradeSlave.mq5"
               download
@@ -953,24 +1077,39 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
           <table className="w-full text-left text-[11.5px]">
             <thead className="bg-surface-elevated/60 text-[10px] uppercase text-ink-3">
               <tr>
-                <th className="px-3 py-2">Tài Khoản &amp; Sàn</th>
+                <th className="px-3 py-2">Tài Khoản &amp; Môi Trường NAV</th>
                 <th className="px-3 py-2">Trạng Thái Vault</th>
-                <th className="px-3 py-2">Vốn / Risk / Giới Hạn Lỗ</th>
+                <th className="px-3 py-2">NAV Tài Khoản / Risk / Cap</th>
                 <th className="px-3 py-2">Auto-Bot (A+/A)</th>
                 <th className="px-3 py-2 text-right">Hành Động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/30 bg-surface-primary/40">
-              {accounts.map((acc) => (
-                <tr key={acc.id} className="hover:bg-surface-elevated/40 transition-colors">
+              {filteredVaultAccounts.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-5 text-center text-ink-3">
+                    Chưa có kết nối nào thuộc nhóm {vaultEnvFilter}. Nhấn &quot;Kết Nối Sàn / API Key&quot; để thêm tài khoản mới.
+                  </td>
+                </tr>
+              ) : (
+                filteredVaultAccounts.map((acc) => {
+                  const envInfo = classifyAccountEnvironment(acc);
+                  const isRealAcc = envInfo.environment === "REAL";
+                  return (
+                <tr
+                  key={acc.id}
+                  className={`hover:bg-surface-elevated/40 transition-colors border-l-2 ${
+                    isRealAcc ? "border-l-amber-400" : "border-l-cyan-400"
+                  }`}
+                >
                   <td className="px-3 py-2.5">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-semibold text-ink">{acc.name}</span>
                       <span className="rounded bg-panel-3 px-1.5 py-0.5 text-[10px] font-semibold text-ink-2">
                         {acc.platform}
                       </span>
-                      <Badge tone={acc.isTestnet ? "accent" : "warn"}>
-                        {acc.isTestnet ? "TESTNET/DEMO" : "LIVE REAL"}
+                      <Badge tone={isRealAcc ? "warn" : "accent"}>
+                        {isRealAcc ? "REAL NAV" : demoSubtypeBadgeLabel(envInfo.demoSubtype)}
                       </Badge>
                     </div>
                     <div className="mt-0.5 text-[10.5px] font-mono text-ink-3">
@@ -988,7 +1127,18 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                     )}
                   </td>
                   <td className="px-3 py-2.5 font-mono">
-                    <div className="font-semibold text-ink">${acc.balanceUsd.toLocaleString()}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-ink">
+                        ${acc.balanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <span
+                        className={`text-[9.5px] font-bold uppercase ${
+                          isRealAcc ? "text-amber-400" : "text-cyan-400"
+                        }`}
+                      >
+                        {isRealAcc ? "REAL" : "DEMO"}
+                      </span>
+                    </div>
                     <div className="text-[10.5px] text-ink-3">
                       {acc.riskMultiplier}x · Lev ≤{acc.leverageCap ?? 5}x · MaxLoss ${acc.maxDailyLossUsd ?? 500}/d
                     </div>
@@ -1075,7 +1225,9 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                     </div>
                   </td>
                 </tr>
-              ))}
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -1179,12 +1331,68 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
               </div>
 
               <div>
+                <label className="block text-[11px] font-semibold text-ink-2">
+                  Phân loại môi trường NAV (Bắt buộc chọn rõ REAL hoặc DEMO)
+                </label>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormIsTestnet(true);
+                      setModalTestRes(null);
+                    }}
+                    className={`rounded-xl border p-2.5 text-left transition-all ${
+                      formIsTestnet
+                        ? "border-cyan-400 bg-cyan-500/15 text-ink shadow-xs"
+                        : "border-line bg-surface-elevated/60 text-ink-3 hover:text-ink"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-[12px] font-bold">
+                      <FlaskConical className="h-3.5 w-3.5 text-cyan-400" />
+                      DEMO / TESTNET
+                    </div>
+                    <div className="mt-0.5 text-[10.5px] text-ink-3">
+                      Hạch toán vào nhóm DEMO NAV (Testnet, MT5 Demo, Paper).
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormIsTestnet(false);
+                      setModalTestRes(null);
+                    }}
+                    className={`rounded-xl border p-2.5 text-left transition-all ${
+                      !formIsTestnet
+                        ? "border-amber-400 bg-amber-500/15 text-ink shadow-xs"
+                        : "border-line bg-surface-elevated/60 text-ink-3 hover:text-ink"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 text-[12px] font-bold">
+                      <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
+                      REAL / LIVE (Tiền Thật)
+                    </div>
+                    <div className="mt-0.5 text-[10.5px] text-ink-3">
+                      Hạch toán vào nhóm REAL NAV · khớp lệnh tiền thật trên sàn.
+                    </div>
+                  </button>
+                </div>
+                {!formIsTestnet && (
+                  <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-500/45 bg-amber-500/10 px-2.5 py-1.5 text-[10.5px] text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Đang chọn <strong>REAL / LIVE</strong>: Bắt buộc gắn API Key / EA Token thật và kiểm tra giới hạn cắt lỗ ngày trước khi bật Auto-Trade.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-[11px] font-semibold text-ink-2">Tên gợi nhớ kết nối</label>
                 <input
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  placeholder={`Ví dụ: ${PLATFORM_LABELS[formPlatform]} #1`}
+                  placeholder={`Ví dụ: ${PLATFORM_LABELS[formPlatform]} (${formIsTestnet ? "Demo" : "Real"})`}
                   className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-2 text-[12.5px] text-ink"
                 />
               </div>
@@ -1197,16 +1405,6 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                       <strong>Khuyến cáo an toàn:</strong> Chỉ bật quyền <strong>Read + Enable Futures / Trade</strong>, tuyệt đối <strong>TẮT Withdraw (Rút tiền)</strong> và bật whitelist IP khi dùng Mainnet. API Key được mã hóa AES-256-GCM.
                     </span>
                   </div>
-
-                  <label className="flex items-center gap-2 text-[12px] font-semibold text-ink cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formIsTestnet}
-                      onChange={(e) => setFormIsTestnet(e.target.checked)}
-                      className="rounded border-line"
-                    />
-                    Chế độ Testnet / Demo Trading (An toàn trước khi đánh Live)
-                  </label>
 
                   <div>
                     <label className="block text-[11px] font-semibold text-ink-2">
@@ -1313,17 +1511,8 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
                     <div className="space-y-2.5">
                       <p className="text-[11px] text-ink-2">
                         Gắn <strong>MetaApi Cloud Token</strong> &amp; <strong>Account ID</strong> liên kết tài khoản{" "}
-                        <strong>Exness / XM MT5</strong> của bạn để Orca đặt lệnh trực tiếp 24/7 trên server (không cần mở máy chạy MT5).
+                        <strong>Exness / XM MT5</strong> ({formIsTestnet ? "DEMO" : "REAL LIVE"}) của bạn để Orca đặt lệnh trực tiếp 24/7 trên server.
                       </p>
-                      <label className="flex items-center gap-2 text-[11.5px] font-semibold text-ink cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={formIsTestnet}
-                          onChange={(e) => setFormIsTestnet(e.target.checked)}
-                          className="rounded border-line"
-                        />
-                        Tài khoản Demo Exness / XM (khuyến nghị test trước khi đánh Live)
-                      </label>
                       <div>
                         <label className="block text-[11px] font-semibold text-ink-2">MetaApi Auth Token</label>
                         <input
