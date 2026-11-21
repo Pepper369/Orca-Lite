@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
+import { LiveBotCockpit } from "@/components/live-bot-cockpit";
 import type {
   BrokerPlatform,
   CopyExecutionOrder,
@@ -636,6 +637,17 @@ export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
 
   return (
     <div className="space-y-4">
+      {/* Real-Time SSE Bot Trading Cockpit & Per-Account PnL (Real & Demo) */}
+      {mode === "full" && (
+        <LiveBotCockpit
+          variant="full"
+          onAfterAction={() => {
+            void mutateAccounts();
+            void mutateSignals();
+          }}
+        />
+      )}
+
       {/* Top KPI & Emergency Kill-Switch Control Strip */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-line/70 bg-surface-primary p-3.5">

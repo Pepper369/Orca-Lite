@@ -19,6 +19,7 @@ import {
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
 import { getAutoTradeWorkerStatus } from "@/lib/services/auto-trade-worker";
+import { notifyBotTelemetryChanged } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -164,6 +165,7 @@ export async function POST(req: Request) {
       if (updated) finalAccount = updated;
     }
 
+    notifyBotTelemetryChanged("account_created");
     return ok({
       account: finalAccount,
       verification,
@@ -245,6 +247,7 @@ export async function PATCH(req: Request) {
     });
 
     if (!updated) return fail("NOT_FOUND", "Không thể cập nhật tài khoản", 404);
+    notifyBotTelemetryChanged("account_updated");
     return ok({ account: updated });
   } catch (err) {
     return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PATCH payload", 400);
@@ -338,6 +341,7 @@ export async function PUT(req: Request) {
       if (updated) finalAccount = updated;
     }
 
+    notifyBotTelemetryChanged("credentials_rotated");
     return ok({ account: finalAccount, verification, oneTimeEaToken });
   } catch (err) {
     return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PUT payload", 400);
@@ -375,6 +379,7 @@ export async function DELETE(req: Request) {
     const removed = await deleteBrokerConnection(id, session?.id ?? null);
     if (!removed) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
 
+    notifyBotTelemetryChanged("account_deleted");
     return ok({ deletedId: id });
   } catch (err) {
     return fail("BAD_REQUEST", err instanceof Error ? err.message : "Không thể xóa kết nối", 400);

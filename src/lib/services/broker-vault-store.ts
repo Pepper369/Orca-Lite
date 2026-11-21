@@ -129,6 +129,18 @@ const DEFAULT_DEV_CONNECTIONS: StoredConnectionInternal[] = [
 const DEV_CONNECTIONS_STORE: StoredConnectionInternal[] = DEFAULT_DEV_CONNECTIONS.map((c) => ({ ...c }));
 const DEV_ORDERS_STORE: CopyExecutionOrder[] = [];
 
+// Circuit-breaker when Postgres broker_connections / bot_execution_orders tables are not migrated or unreachable
+let dbVaultCooldownUntil = 0;
+function shouldUseVaultDb(): boolean {
+  return databaseConfigured() && Date.now() >= dbVaultCooldownUntil;
+}
+function tripVaultDbCooldown(err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  // Missing table (42P01) -> cool down 5 minutes; transient network -> cool down 30s
+  const cooldownMs = /does not exist|42P01|relation/i.test(msg) ? 5 * 60_000 : 30_000;
+  dbVaultCooldownUntil = Date.now() + cooldownMs;
+}
+
 function stripSecrets(row: StoredConnectionInternal): FollowerAccount {
   const today = getTodayUtcDate();
   const dailyPnl = row.dailyPnlDate === today ? row.dailyRealizedPnlUsd ?? 0 : 0;
@@ -203,20 +215,20 @@ export async function recordVaultAuditLog(
   action: string,
   meta: Record<string, unknown>,
 ): Promise<void> {
-  if (!databaseConfigured()) return;
+  if (!shouldUseVaultDb()) return;
   try {
     await db.insert(auditLogs).values({
       userId: userId ?? null,
       action,
       meta,
     });
-  } catch {
-    // Non-fatal audit fallback
+  } catch (err) {
+    tripVaultDbCooldown(err);
   }
 }
 
 export async function listBrokerConnections(userId?: string | null): Promise<FollowerAccount[]> {
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const rows = userId
         ? await db.select().from(brokerConnections).where(eq(brokerConnections.userId, userId)).orderBy(desc(brokerConnections.createdAt))
@@ -229,7 +241,8 @@ export async function listBrokerConnections(userId?: string | null): Promise<Fol
         return DEV_CONNECTIONS_STORE.map(stripSecrets);
       }
       return [];
-    } catch {
+    } catch (err) {
+      tripVaultDbCooldown(err);
       return DEV_CONNECTIONS_STORE.map(stripSecrets);
     }
   }
@@ -240,12 +253,12 @@ export async function listBrokerConnections(userId?: string | null): Promise<Fol
 }
 
 export async function getBrokerConnectionById(id: string): Promise<FollowerAccount | null> {
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const [row] = await db.select().from(brokerConnections).where(eq(brokerConnections.id, id)).limit(1);
       if (row) return stripSecrets(mapDbRowToInternal(row));
-    } catch {
-      // Fallback below
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
   const found = DEV_CONNECTIONS_STORE.find((c) => c.id === id);
@@ -254,12 +267,12 @@ export async function getBrokerConnectionById(id: string): Promise<FollowerAccou
 
 export async function getBrokerConnectionSecrets(id: string): Promise<DecryptedBrokerSecrets | null> {
   let internal: StoredConnectionInternal | undefined;
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const [row] = await db.select().from(brokerConnections).where(eq(brokerConnections.id, id)).limit(1);
       if (row) internal = mapDbRowToInternal(row);
-    } catch {
-      // Fallback
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
   if (!internal) {
@@ -345,7 +358,7 @@ export async function createBrokerConnection(
     eaTokenHash,
   };
 
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       await db.insert(brokerConnections).values({
         id: internal.id,
@@ -379,8 +392,8 @@ export async function createBrokerConnection(
         isMt5,
       });
       return { connection: stripSecrets(internal), oneTimeEaToken };
-    } catch {
-      // Fallback to dev store when Postgres tables haven't been pushed yet
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
 
@@ -577,7 +590,7 @@ export async function saveBotExecutionOrder(order: CopyExecutionOrder): Promise<
 }
 
 export async function listBotExecutionOrders(limit = 50): Promise<CopyExecutionOrder[]> {
-  if (databaseConfigured()) {
+  if (shouldUseVaultDb()) {
     try {
       const conns = await listBrokerConnections();
       const nameById = new Map(conns.map((c) => [c.id, c.name]));
@@ -611,8 +624,8 @@ export async function listBotExecutionOrders(limit = 50): Promise<CopyExecutionO
           isTestnet: r.isTestnet,
         }));
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      tripVaultDbCooldown(err);
     }
   }
   return DEV_ORDERS_STORE.slice(0, limit);

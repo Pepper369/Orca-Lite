@@ -28,6 +28,17 @@ import {
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
 import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
+import {
+  aggregateTierSummary,
+  calculateAccountRoiPct,
+  calculateMarkToMarketPnlUsd,
+  calculatePositionRoePct,
+  classifyAccountTier,
+} from "@/lib/engines/bot-telemetry-types";
+import {
+  buildBotLiveTelemetrySnapshot,
+  closeTrackedBotPosition,
+} from "@/lib/services/bot-live-telemetry";
 import type { FollowerAccount } from "@/lib/engines/copy-trade-engine";
 
 test("Credential Vault: AES-256-GCM encrypt/decrypt round-trip, random IV & tamper rejection", () => {
@@ -330,4 +341,118 @@ test("MetaApi MT5 Cloud (XM/Exness) + Credential Rotation & Delete Lifecycle", a
 
   assert.equal(await deleteBrokerConnection(xmMetaApi.id), true);
   assert.equal(await deleteBrokerConnection(xmMetaApi.id), false);
+});
+
+test("Real-Time Bot Telemetry Math: Crypto, FX, Gold Mark-to-Market PnL, ROI% & Real/Demo Tier Split", async () => {
+  // 1) Crypto BTC long & short exact PnL
+  assert.equal(
+    calculateMarkToMarketPnlUsd({
+      symbol: "BTCUSDT",
+      assetType: "CRYPTO",
+      direction: "BUY",
+      entryPrice: 90000,
+      markPrice: 91000,
+      qtyOrLots: 0.5,
+    }),
+    500,
+  );
+  assert.equal(
+    calculateMarkToMarketPnlUsd({
+      symbol: "ETHUSDT",
+      assetType: "CRYPTO",
+      direction: "SELL",
+      entryPrice: 3000,
+      markPrice: 2950,
+      qtyOrLots: 2,
+    }),
+    100,
+  );
+
+  // 2) Forex EURUSD (100,000 units/lot) & Gold XAUUSD (100 oz/lot) & USDJPY base-USD conversion
+  assert.equal(
+    calculateMarkToMarketPnlUsd({
+      symbol: "EURUSD",
+      assetType: "FOREX",
+      direction: "BUY",
+      entryPrice: 1.08,
+      markPrice: 1.085,
+      qtyOrLots: 0.1,
+    }),
+    50,
+  );
+  assert.equal(
+    calculateMarkToMarketPnlUsd({
+      symbol: "XAUUSD",
+      assetType: "FOREX",
+      direction: "BUY",
+      entryPrice: 2650,
+      markPrice: 2660,
+      qtyOrLots: 0.2,
+    }),
+    200,
+  );
+  const jpyPnl = calculateMarkToMarketPnlUsd({
+    symbol: "USDJPY",
+    assetType: "FOREX",
+    direction: "BUY",
+    entryPrice: 150.0,
+    markPrice: 151.5,
+    qtyOrLots: 0.1,
+  });
+  assert.ok(jpyPnl > 95 && jpyPnl < 105, `Expected USDJPY 0.1 lot +1.5 JPY move ≈ $99, got ${jpyPnl}`);
+
+  // 3) ROE% and Account ROI%
+  assert.equal(
+    calculatePositionRoePct({
+      unrealizedPnlUsd: 500,
+      entryPrice: 90000,
+      qtyOrLots: 0.5,
+      leverage: 5,
+      assetType: "CRYPTO",
+      symbol: "BTCUSDT",
+    }),
+    5.56,
+  );
+  assert.equal(calculateAccountRoiPct(250, 5000), 5);
+  assert.equal(calculateAccountRoiPct(-100, 0), 0);
+
+  // 4) Real vs Testnet/Demo vs Paper Sandbox classification
+  assert.equal(
+    classifyAccountTier({ isTestnet: false, hasApiKey: true, connectionStatus: "CONNECTED_VERIFIED" }),
+    "LIVE_REAL",
+  );
+  assert.equal(
+    classifyAccountTier({ isTestnet: true, hasApiKey: true, connectionStatus: "CONNECTED_VERIFIED" }),
+    "TESTNET_DEMO",
+  );
+  assert.equal(
+    classifyAccountTier({ isTestnet: false, hasApiKey: false, hasEaToken: false, connectionStatus: "PAPER_SIMULATED" }),
+    "PAPER_SANDBOX",
+  );
+
+  // 5) Snapshot & live position open/close lifecycle on Paper Sandbox
+  const paperOrders = await dispatchSignalWithVault({
+    signal: {
+      ...SAMPLE_CRYPTO_SIGNAL,
+      id: `sig_live_telem_${Date.now()}`,
+      entryPrice: 90000,
+    },
+    currentMarketPrice: 90000,
+    manualOverride: true,
+    targetFollowerIds: ["paper-binance-sandbox"],
+  });
+  assert.equal(paperOrders[0]?.status, "FILLED_PAPER");
+
+  const snap = await buildBotLiveTelemetrySnapshot();
+  assert.ok(snap.accounts.length >= 2, "Snapshot should contain broker accounts");
+  assert.equal(snap.liveRealSummary.accountCount + snap.demoSummary.accountCount, snap.summary.accountCount);
+  const aggregated = aggregateTierSummary(snap.accounts);
+  assert.equal(aggregated.equityUsd, snap.summary.equityUsd);
+
+  const openPos = snap.openPositions.find((p) => p.orderId === paperOrders[0]!.orderId);
+  assert.ok(openPos, "Newly filled paper order should appear in real-time openPositions");
+
+  const closed = await closeTrackedBotPosition({ orderId: paperOrders[0]!.orderId });
+  assert.equal(closed.ok, true);
+  assert.equal(closed.symbol, "BTCUSDT");
 });

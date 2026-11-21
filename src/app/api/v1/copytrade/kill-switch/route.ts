@@ -1,6 +1,7 @@
 import { fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import { triggerGlobalKillSwitch } from "@/lib/services/broker-vault-store";
+import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,14 @@ export async function POST(req: Request) {
       engage,
       reason: body.reason || (engage ? "Kích hoạt Kill-Switch khẩn cấp từ Dashboard" : undefined),
       userId: session?.id ?? null,
+    });
+
+    recordBotActivity({
+      level: engage ? "error" : "ok",
+      category: "GUARDRAIL",
+      message: engage
+        ? `KILL-SWITCH kích hoạt: Đã khóa khẩn cấp ${accounts.length} tài khoản bot`
+        : `Đã mở khóa an toàn ${accounts.length} tài khoản bot`,
     });
 
     return ok({

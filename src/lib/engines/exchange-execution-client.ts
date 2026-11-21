@@ -895,3 +895,367 @@ export async function placeMetaApiMt5Order(
     };
   }
 }
+
+/* ------------------ Real-Time Exchange Telemetry Fetchers ------------------ */
+
+export interface LiveExchangePosition {
+  positionId: string;
+  symbol: string;
+  assetType: "CRYPTO" | "FOREX";
+  direction: "BUY" | "SELL";
+  qtyOrLots: number;
+  leverage: number;
+  entryPrice: number;
+  markPrice: number;
+  stopLossPrice: number | null;
+  takeProfit1: number | null;
+  unrealizedPnlUsd: number;
+  roePct: number;
+  liquidationPrice: number | null;
+  openedAt: number;
+}
+
+export interface LiveExchangeTelemetryResult {
+  ok: boolean;
+  walletBalanceUsd: number | null;
+  equityUsd: number | null;
+  availableMarginUsd: number | null;
+  unrealizedPnlUsd: number;
+  openPositions: LiveExchangePosition[];
+  fetchedAt: number;
+  error: string | null;
+}
+
+/** Lấy số dư thực, equity & vị thế đang mở trực tiếp từ Binance USDT-M Futures (Testnet hoặc Mainnet). */
+export async function fetchBinanceFuturesTelemetry(
+  creds: BrokerCredentialsInput,
+): Promise<LiveExchangeTelemetryResult> {
+  const baseUrl = getBinanceBaseUrl(creds.isTestnet);
+  const ts = Date.now();
+  const accQs = `timestamp=${ts}&recvWindow=5000`;
+  const posQs = `timestamp=${ts}&recvWindow=5000`;
+
+  try {
+    const [accRes, posRes] = await Promise.all([
+      fetch(`${baseUrl}/fapi/v2/account?${accQs}&signature=${signBinanceQuery(accQs, creds.apiSecret)}`, {
+        headers: { "X-MBX-APIKEY": creds.apiKey },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      fetch(`${baseUrl}/fapi/v2/positionRisk?${posQs}&signature=${signBinanceQuery(posQs, creds.apiSecret)}`, {
+        headers: { "X-MBX-APIKEY": creds.apiKey },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    ]);
+
+    const accJson = (await accRes.json()) as Record<string, unknown>;
+    if (!accRes.ok || typeof accJson.code === "number") {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: String(accJson.msg ?? `Binance HTTP ${accRes.status}`),
+      };
+    }
+
+    const wallet = Number(accJson.totalWalletBalance ?? 0);
+    const equity = Number(accJson.totalMarginBalance ?? wallet);
+    const available = Number(accJson.availableBalance ?? wallet);
+    const totalUnrealized = Number(accJson.totalUnrealizedProfit ?? 0);
+
+    const openPositions: LiveExchangePosition[] = [];
+    if (posRes.ok) {
+      const posArr = (await posRes.json()) as Array<Record<string, unknown>>;
+      if (Array.isArray(posArr)) {
+        for (const p of posArr) {
+          const amt = Number(p.positionAmt ?? 0);
+          if (!Number.isFinite(amt) || Math.abs(amt) <= 0) continue;
+          const entry = Number(p.entryPrice ?? 0);
+          const mark = Number(p.markPrice ?? entry);
+          const lev = Math.max(1, Number(p.leverage ?? 1));
+          const upnl = Number(p.unRealizedProfit ?? 0);
+          const liq = Number(p.liquidationPrice ?? 0);
+          const absQty = Math.abs(amt);
+          const margin = entry > 0 ? Math.max(1, (absQty * entry) / lev) : 1;
+          const roePct = Number(((upnl / margin) * 100).toFixed(2));
+          openPositions.push({
+            positionId: `bn_${String(p.symbol)}_${amt > 0 ? "LONG" : "SHORT"}`,
+            symbol: String(p.symbol),
+            assetType: "CRYPTO",
+            direction: amt > 0 ? "BUY" : "SELL",
+            qtyOrLots: absQty,
+            leverage: lev,
+            entryPrice: entry,
+            markPrice: mark,
+            stopLossPrice: null,
+            takeProfit1: null,
+            unrealizedPnlUsd: Number(upnl.toFixed(4)),
+            roePct,
+            liquidationPrice: liq > 0 ? liq : null,
+            openedAt: Number(p.updateTime ?? Date.now()),
+          });
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      walletBalanceUsd: Number.isFinite(wallet) ? Number(wallet.toFixed(2)) : null,
+      equityUsd: Number.isFinite(equity) ? Number(equity.toFixed(2)) : null,
+      availableMarginUsd: Number.isFinite(available) ? Number(available.toFixed(2)) : null,
+      unrealizedPnlUsd: Number.isFinite(totalUnrealized) ? Number(totalUnrealized.toFixed(2)) : 0,
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ telemetry Binance Futures",
+    };
+  }
+}
+
+/** Lấy số dư thực, equity & vị thế đang mở trực tiếp từ OKX v5 (Demo hoặc Live). */
+export async function fetchOkxTelemetry(creds: BrokerCredentialsInput): Promise<LiveExchangeTelemetryResult> {
+  if (!creds.passphrase?.trim()) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: "Thiếu OKX Passphrase",
+    };
+  }
+
+  const balPath = "/api/v5/account/balance";
+  const posPath = "/api/v5/account/positions?instType=SWAP";
+
+  try {
+    const [balRes, posRes] = await Promise.all([
+      fetch(`${OKX_BASE_URL}${balPath}`, {
+        headers: buildOkxHeaders(creds, "GET", balPath),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      fetch(`${OKX_BASE_URL}${posPath}`, {
+        headers: buildOkxHeaders(creds, "GET", posPath),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+    ]);
+
+    const balJson = (await balRes.json()) as {
+      code?: string;
+      msg?: string;
+      data?: Array<{
+        totalEq?: string;
+        details?: Array<{ ccy?: string; cashBal?: string; availBal?: string; upl?: string }>;
+      }>;
+    };
+    if (!balRes.ok || balJson.code !== "0") {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: balJson.msg || `OKX HTTP ${balRes.status}`,
+      };
+    }
+
+    const row = balJson.data?.[0];
+    const equity = Number(row?.totalEq ?? 0);
+    const usdt = row?.details?.find((d) => d.ccy === "USDT");
+    const wallet = Number(usdt?.cashBal ?? equity);
+    const available = Number(usdt?.availBal ?? equity);
+    let totalUnrealized = Number(usdt?.upl ?? 0);
+
+    const openPositions: LiveExchangePosition[] = [];
+    if (posRes.ok) {
+      const posJson = (await posRes.json()) as {
+        code?: string;
+        data?: Array<Record<string, string>>;
+      };
+      if (posJson.code === "0" && Array.isArray(posJson.data)) {
+        let posUpnlSum = 0;
+        for (const p of posJson.data) {
+          const posQty = Number(p.pos ?? 0);
+          if (!Number.isFinite(posQty) || Math.abs(posQty) <= 0) continue;
+          const posSide = (p.posSide || "").toLowerCase();
+          const direction: "BUY" | "SELL" =
+            posSide === "short" ? "SELL" : posSide === "long" ? "BUY" : posQty >= 0 ? "BUY" : "SELL";
+          const entry = Number(p.avgPx ?? 0);
+          const mark = Number(p.markPx ?? entry);
+          const upnl = Number(p.upl ?? 0);
+          const roePct = Number((Number(p.uplRatio ?? 0) * 100).toFixed(2));
+          const lev = Math.max(1, Number(p.lever ?? 1));
+          const liq = Number(p.liqPx ?? 0);
+          posUpnlSum += upnl;
+          openPositions.push({
+            positionId: `okx_${p.posId || p.instId}_${direction}`,
+            symbol: (p.instId || "").replace(/-SWAP$/i, "").replace(/-/g, ""),
+            assetType: "CRYPTO",
+            direction,
+            qtyOrLots: Math.abs(posQty),
+            leverage: lev,
+            entryPrice: entry,
+            markPrice: mark,
+            stopLossPrice: null,
+            takeProfit1: null,
+            unrealizedPnlUsd: Number(upnl.toFixed(4)),
+            roePct,
+            liquidationPrice: liq > 0 ? liq : null,
+            openedAt: Number(p.cTime ?? Date.now()),
+          });
+        }
+        if (openPositions.length > 0 && totalUnrealized === 0) {
+          totalUnrealized = posUpnlSum;
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      walletBalanceUsd: Number.isFinite(wallet) ? Number(wallet.toFixed(2)) : null,
+      equityUsd: Number.isFinite(equity) ? Number(equity.toFixed(2)) : null,
+      availableMarginUsd: Number.isFinite(available) ? Number(available.toFixed(2)) : null,
+      unrealizedPnlUsd: Number.isFinite(totalUnrealized) ? Number(totalUnrealized.toFixed(2)) : 0,
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ telemetry OKX v5",
+    };
+  }
+}
+
+/** Lấy số dư thực, equity & vị thế MT5 đang mở trực tiếp từ MetaApi Cloud (Exness / XM Demo & Live). */
+export async function fetchMetaApiMt5Telemetry(
+  creds: BrokerCredentialsInput,
+): Promise<LiveExchangeTelemetryResult> {
+  const authToken = creds.apiKey.trim();
+  const accountId = creds.apiSecret.trim();
+  if (!authToken || !accountId) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: "Thiếu MetaApi Token hoặc Account ID",
+    };
+  }
+
+  try {
+    const base = `${METAAPI_CLIENT_BASE}/users/current/accounts/${encodeURIComponent(accountId)}`;
+    const headers = { "auth-token": authToken, Accept: "application/json" };
+    const [infoRes, posRes] = await Promise.all([
+      fetch(`${base}/account-information`, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
+      fetch(`${base}/positions`, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
+    ]);
+
+    const infoJson = (await infoRes.json()) as Record<string, unknown>;
+    if (!infoRes.ok || infoJson.error) {
+      return {
+        ok: false,
+        walletBalanceUsd: null,
+        equityUsd: null,
+        availableMarginUsd: null,
+        unrealizedPnlUsd: 0,
+        openPositions: [],
+        fetchedAt: Date.now(),
+        error: String(infoJson.message ?? infoJson.error ?? `MetaApi HTTP ${infoRes.status}`),
+      };
+    }
+
+    const balance = Number(infoJson.balance ?? 0);
+    const equity = Number(infoJson.equity ?? balance);
+    const freeMargin = Number(infoJson.freeMargin ?? balance);
+    const levDefault = Math.max(1, Number(infoJson.leverage ?? 100));
+
+    const openPositions: LiveExchangePosition[] = [];
+    let sumProfit = 0;
+    if (posRes.ok) {
+      const posArr = (await posRes.json()) as Array<Record<string, unknown>>;
+      if (Array.isArray(posArr)) {
+        for (const p of posArr) {
+          const volume = Number(p.volume ?? 0);
+          if (!Number.isFinite(volume) || volume <= 0) continue;
+          const profit = Number(p.unrealizedProfit ?? p.profit ?? 0);
+          sumProfit += profit;
+          const entry = Number(p.openPrice ?? 0);
+          const mark = Number(p.currentPrice ?? entry);
+          const typeStr = String(p.type ?? "").toUpperCase();
+          const direction: "BUY" | "SELL" = typeStr.includes("SELL") ? "SELL" : "BUY";
+          const marginEst = Math.max(1, (volume * 100_000 * (entry > 20 ? 1 : entry)) / levDefault);
+          openPositions.push({
+            positionId: `mt5_${String(p.id ?? p.symbol)}`,
+            symbol: String(p.symbol ?? ""),
+            assetType: "FOREX",
+            direction,
+            qtyOrLots: volume,
+            leverage: levDefault,
+            entryPrice: entry,
+            markPrice: mark,
+            stopLossPrice: Number(p.stopLoss ?? 0) > 0 ? Number(p.stopLoss) : null,
+            takeProfit1: Number(p.takeProfit ?? 0) > 0 ? Number(p.takeProfit) : null,
+            unrealizedPnlUsd: Number(profit.toFixed(2)),
+            roePct: Number(((profit / marginEst) * 100).toFixed(2)),
+            liquidationPrice: null,
+            openedAt: p.time ? new Date(String(p.time)).getTime() : Date.now(),
+          });
+        }
+      }
+    }
+
+    const unrealized = Number.isFinite(equity - balance) && Math.abs(equity - balance) > 0.001
+      ? Number((equity - balance).toFixed(2))
+      : Number(sumProfit.toFixed(2));
+
+    return {
+      ok: true,
+      walletBalanceUsd: Number.isFinite(balance) ? Number(balance.toFixed(2)) : null,
+      equityUsd: Number.isFinite(equity) ? Number(equity.toFixed(2)) : null,
+      availableMarginUsd: Number.isFinite(freeMargin) ? Number(freeMargin.toFixed(2)) : null,
+      unrealizedPnlUsd: unrealized,
+      openPositions,
+      fetchedAt: Date.now(),
+      error: null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      walletBalanceUsd: null,
+      equityUsd: null,
+      availableMarginUsd: null,
+      unrealizedPnlUsd: 0,
+      openPositions: [],
+      fetchedAt: Date.now(),
+      error: err instanceof Error ? err.message : "Lỗi đồng bộ telemetry MetaApi MT5",
+    };
+  }
+}

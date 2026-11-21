@@ -8,6 +8,7 @@ import type { IndexQuote, Quote } from "@/lib/types";
 import { Unavailable } from "@/components/ui";
 import { PageSkeleton } from "@/components/page-skeleton";
 import { CommandCenter } from "@/components/command-center/command-center";
+import { LiveBotCockpit } from "@/components/live-bot-cockpit";
 import { getVnSession } from "@/lib/vn/sessions";
 
 export type StocksBoard = {
@@ -279,14 +280,17 @@ export function Dashboard({ initialData }: { initialData?: DashboardInitialData 
   }, [intel, board]);
 
   return (
-    <CommandCenter
-      intel={displayIntel}
-      meta={meta}
-      quotes={board?.quotes ?? []}
-      globalUs={globalMkt?.us ?? []}
-      globalCrypto={globalMkt?.crypto ?? []}
-      globalAsia={globalMkt?.asia ?? []}
-      liquiditySpark={globalMkt?.liquiditySpark ?? null}
-    />
+    <div className="space-y-4">
+      <CommandCenter
+        intel={displayIntel}
+        meta={meta}
+        quotes={board?.quotes ?? []}
+        globalUs={globalMkt?.us ?? []}
+        globalCrypto={globalMkt?.crypto ?? []}
+        globalAsia={globalMkt?.asia ?? []}
+        liquiditySpark={globalMkt?.liquiditySpark ?? null}
+      />
+      <LiveBotCockpit variant="compact" />
+    </div>
   );
 }

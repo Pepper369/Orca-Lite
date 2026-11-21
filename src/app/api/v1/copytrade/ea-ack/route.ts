@@ -6,6 +6,7 @@ import {
   updateBrokerConnectionState,
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
+import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,17 @@ export async function POST(req: Request) {
       ticketId: body.ticketId,
       mt5Ticket: mt5Id,
       status: nextStatus,
+    });
+
+    recordBotActivity({
+      level: isRejected ? "warn" : "ok",
+      category: "EXECUTION",
+      symbol: existing.symbol,
+      accountName: conn.name,
+      platform: conn.platform,
+      message: isRejected
+        ? `${conn.platform} MT5 EA từ chối ticket #${mt5Id ?? "N/A"}`
+        : `${conn.platform} MT5 EA xác nhận khớp ${existing.direction} ${existing.symbol} (#${mt5Id ?? "N/A"})`,
     });
 
     return NextResponse.json({ ok: true, status: nextStatus, mt5Ticket: mt5Id });

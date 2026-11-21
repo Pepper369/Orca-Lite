@@ -3,6 +3,7 @@ import { listBrokerConnections } from "@/lib/services/broker-vault-store";
 import { dispatchSignalWithVault, type DispatchableSignalInput } from "@/lib/services/auto-trade-dispatcher";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
+import { eventBus } from "@/lib/events";
 
 const POLL_INTERVAL_MS = 45_000;
 
@@ -10,6 +11,8 @@ let workerStarted = false;
 let isTickRunning = false;
 let lastTickAt: number | null = null;
 let lastDispatchedCount = 0;
+let lastScannedSignalsCount = 0;
+let lastScanStatus = "Khởi tạo — chờ bật tài khoản AUTO ON";
 
 function isHighGrade(grade?: string, winrateScore?: number): boolean {
   if (grade) return grade === "A+" || grade === "A";
@@ -35,6 +38,9 @@ export async function runAutoTradeTick(): Promise<{
     activeAutoAccounts = autoEnabled.length;
     if (autoEnabled.length === 0) {
       lastTickAt = Date.now();
+      lastScannedSignalsCount = 0;
+      lastScanStatus = "Đang chờ — chưa có tài khoản bật AUTO ON";
+      eventBus.emit("bot:telemetry", { type: "worker_idle", ts: lastTickAt });
       return { dispatched: 0, scannedAt: lastTickAt, activeAutoAccounts: 0 };
     }
 
@@ -132,13 +138,27 @@ export async function runAutoTradeTick(): Promise<{
         currentMarketPrice: item.marketPrice,
         manualOverride: false,
       });
-      dispatched += orders.filter((o) => o.status === "FILLED" || o.status === "PENDING_EA").length;
+      dispatched += orders.filter(
+        (o) => o.status === "FILLED" || o.status === "FILLED_PAPER" || o.status === "PENDING_EA",
+      ).length;
     }
 
     lastTickAt = Date.now();
     lastDispatchedCount = dispatched;
+    lastScannedSignalsCount = signalsToDispatch.length;
+    lastScanStatus =
+      signalsToDispatch.length > 0
+        ? `Quét xong ${signalsToDispatch.length} kèo A+/A · Khớp/Đẩy ${dispatched} lệnh trên ${activeAutoAccounts} bot`
+        : `Đã quét FX & Crypto Hub (${activeAutoAccounts} bot sẵn sàng, chưa có kèo A+/A mới)`;
+    eventBus.emit("bot:telemetry", {
+      type: "worker_tick",
+      ts: lastTickAt,
+      dispatched,
+      scanned: signalsToDispatch.length,
+    });
     return { dispatched, scannedAt: lastTickAt, activeAutoAccounts };
   } catch (err) {
+    lastScanStatus = `Lỗi quét: ${err instanceof Error ? err.message : String(err)}`;
     console.warn("[AutoTradeWorker] Tick error:", err instanceof Error ? err.message : String(err));
     return { dispatched: 0, scannedAt: Date.now(), activeAutoAccounts };
   } finally {
@@ -164,5 +184,7 @@ export function getAutoTradeWorkerStatus() {
     pollIntervalMs: POLL_INTERVAL_MS,
     lastTickAt,
     lastDispatchedCount,
+    lastScannedSignalsCount,
+    lastScanStatus,
   };
 }

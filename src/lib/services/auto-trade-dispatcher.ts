@@ -22,6 +22,7 @@ import {
   saveBotExecutionOrder,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
+import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
 
 export interface DispatchableSignalInput {
   id: string;
@@ -501,6 +502,25 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       direction: signal.direction,
       status: executed.status,
       exchangeOrderId: executed.exchangeOrderId ?? null,
+    });
+
+    recordBotActivity({
+      level:
+        executed.status === "FILLED" || executed.status === "FILLED_PAPER"
+          ? "ok"
+          : executed.status === "PENDING_EA"
+            ? "info"
+            : "warn",
+      category:
+        executed.status === "FILLED" ||
+        executed.status === "FILLED_PAPER" ||
+        executed.status === "PENDING_EA"
+          ? "EXECUTION"
+          : "GUARDRAIL",
+      symbol: signal.symbol,
+      accountName: acct.name,
+      platform: acct.platform,
+      message: executed.message,
     });
 
     results.push(executed);
