@@ -158,7 +158,8 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
     sharedCtx: ctxM5,
     candidateDirection:
-      prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL"
+      (prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL") &&
+      prelimCandidate.strength >= 68
         ? prelimCandidate.direction
         : "AUTO",
     candidateEntry: prelimCandidate?.entry ?? null,

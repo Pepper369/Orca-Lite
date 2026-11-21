@@ -1,5 +1,6 @@
 import "server-only";
 import { eventBus } from "../events";
+import type { OhlcvBar } from "../types";
 import { getBiquotePublicQuotes, type BiquoteTick } from "../providers/forex";
 import { isServerlessRuntime } from "./ws-policy";
 
@@ -58,6 +59,7 @@ const STALE_MS = 45_000;
 const MAX_BATCH = 24;
 
 const ticks = new Map<string, BiquoteLiveTick>();
+const prevPrices = new Map<string, { price: number; ts: number; lastEmitAt: number }>();
 const watchers = new Map<string, number>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let inflight = false;
@@ -97,6 +99,26 @@ async function pollOnce(): Promise<void> {
     const now = Date.now();
     for (const [sym, t] of Object.entries(batch)) {
       const live = toLive(t);
+      const prev = prevPrices.get(sym);
+      if (!prev || now - prev.ts > 12_000) {
+        prevPrices.set(sym, { price: live.price, ts: now, lastEmitAt: prev?.lastEmitAt ?? 0 });
+      } else if (prev.price > 0) {
+        const velPct = ((live.price - prev.price) / prev.price) * 100;
+        const thresholdPct = sym.startsWith("XAU") ? 0.18 : 0.12;
+        if (Math.abs(velPct) >= thresholdPct && now - prev.lastEmitAt >= 12_000) {
+          prev.lastEmitAt = now;
+          prev.price = live.price;
+          prev.ts = now;
+          eventBus.emit("quant:micro-breakout", {
+            symbol: sym,
+            assetType: "FOREX",
+            price: live.price,
+            velocityPct: Number(velPct.toFixed(3)),
+            direction: velPct > 0 ? "BUY" : "SELL",
+            ts: now,
+          });
+        }
+      }
       ticks.set(sym, live);
       for (const [alias, target] of Object.entries(ALIASES)) {
         if (target === sym) ticks.set(alias, { ...live, symbol: alias });
@@ -187,6 +209,47 @@ export function getBiquoteLiveTick(symbol: string, maxAgeMs = STALE_MS): Biquote
 export function getBiquoteLiveTickAny(symbol: string): BiquoteLiveTick | null {
   const sym = canon(symbol);
   return ticks.get(sym) ?? ticks.get(symbol.toUpperCase()) ?? null;
+}
+
+/**
+ * Merges the latest real-time Biquote tick into an OHLCV series so the forming candle
+ * reflects sub-second bid/ask mid price and high/low extremes without 15-45s REST lag.
+ */
+export function mergeBarsWithBiquoteLiveTick(
+  bars: OhlcvBar[],
+  symbol: string,
+  intervalSec = 900,
+): OhlcvBar[] {
+  if (!Array.isArray(bars) || bars.length === 0) return bars;
+  const tick = getBiquoteLiveTick(symbol, STALE_MS);
+  if (!tick || !Number.isFinite(tick.price) || tick.price <= 0) return bars;
+
+  const out = bars.slice();
+  const lastIdx = out.length - 1;
+  const last = out[lastIdx]!;
+  const isMs = last.time > 1e11;
+  const bucketSize = isMs ? intervalSec * 1000 : intervalSec;
+  const tickTimeUnit = isMs ? tick.ts : Math.floor(tick.ts / 1000);
+  const currentBucket = Math.floor(tickTimeUnit / bucketSize) * bucketSize;
+
+  if (currentBucket > last.time && currentBucket - last.time <= bucketSize * 4) {
+    out.push({
+      time: currentBucket,
+      open: last.close,
+      high: Math.max(last.close, tick.price),
+      low: Math.min(last.close, tick.price),
+      close: tick.price,
+      volume: last.volume,
+    });
+  } else {
+    out[lastIdx] = {
+      ...last,
+      high: Math.max(last.high, tick.price),
+      low: Math.min(last.low, tick.price),
+      close: tick.price,
+    };
+  }
+  return out;
 }
 
 export function getBiquoteLiveAll(maxAgeMs = STALE_MS): BiquoteLiveTick[] {

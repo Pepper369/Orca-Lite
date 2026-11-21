@@ -34,6 +34,16 @@ export interface WsMark {
   eventTime: number;
 }
 
+export interface WsMicroFlow {
+  symbol: string;
+  tickImbalancePct: number; // Rolling tick-by-tick CVD imbalance in [-100, +100]
+  velocityPct10s: number; // Short-window percentage velocity
+  markSpotBasisBps: number; // Futures Mark vs Spot basis in bps
+  fundingRate: number;
+  fundingExtremeZ: number;
+  updatedAt: number;
+}
+
 export interface StreamStats {
   state: "open" | "connecting" | "closed" | "blocked" | "disabled" | "retrying";
   connectedAt: number | null;
@@ -131,6 +141,19 @@ class BinanceRealtimeEngine {
   private started = false;
   private tickers = new Map<string, WsTicker>();
   private marks = new Map<string, WsMark>();
+  private microFlowState = new Map<
+    string,
+    {
+      prevPrice: number;
+      prevQuoteVol: number;
+      signedDeltaQuote: number;
+      totalDeltaQuote: number;
+      anchorPrice10s: number;
+      anchorTs10s: number;
+      lastBreakoutEmitAt: number;
+      updatedAt: number;
+    }
+  >();
   private spot: PrivStats = newStats();
   private fut: PrivStats = newStats();
   private kline: PrivStats = newStats();
@@ -465,6 +488,50 @@ class BinanceRealtimeEngine {
         eventTime,
       });
 
+      // Update rolling real-time tick microstructure & detect fast breakout impulses
+      const prevFlow = this.microFlowState.get(symbol);
+      if (!prevFlow) {
+        this.microFlowState.set(symbol, {
+          prevPrice: price,
+          prevQuoteVol: quoteVolume,
+          signedDeltaQuote: 0,
+          totalDeltaQuote: 0,
+          anchorPrice10s: price,
+          anchorTs10s: now,
+          lastBreakoutEmitAt: 0,
+          updatedAt: now,
+        });
+      } else {
+        const dPrice = price - prevFlow.prevPrice;
+        const dQuote = Math.max(0, quoteVolume - prevFlow.prevQuoteVol);
+        const weight = dQuote > 0 ? Math.min(dQuote, price * 500) : Math.abs(dPrice) > 0 ? 1 : 0;
+        const dir = dPrice > 0 ? 1 : dPrice < 0 ? -1 : 0;
+        const decay = 0.88;
+        prevFlow.signedDeltaQuote = prevFlow.signedDeltaQuote * decay + dir * weight;
+        prevFlow.totalDeltaQuote = prevFlow.totalDeltaQuote * decay + weight;
+        prevFlow.prevPrice = price;
+        prevFlow.prevQuoteVol = quoteVolume;
+        prevFlow.updatedAt = now;
+
+        if (now - prevFlow.anchorTs10s > 10_000) {
+          prevFlow.anchorPrice10s = price;
+          prevFlow.anchorTs10s = now;
+        } else if (prevFlow.anchorPrice10s > 0) {
+          const velPct = ((price - prevFlow.anchorPrice10s) / prevFlow.anchorPrice10s) * 100;
+          if (Math.abs(velPct) >= 0.35 && now - prevFlow.lastBreakoutEmitAt >= 12_000) {
+            prevFlow.lastBreakoutEmitAt = now;
+            eventBus.emit("quant:micro-breakout", {
+              symbol,
+              assetType: "CRYPTO",
+              price,
+              velocityPct: Number(velPct.toFixed(3)),
+              direction: velPct > 0 ? "BUY" : "SELL",
+              ts: now,
+            });
+          }
+        }
+      }
+
       if (eventBus.subscriberCount(`tick:${symbol}`) > 0) {
         this.emitOk++;
         eventBus.emit(`tick:${symbol}`, {
@@ -514,6 +581,33 @@ class BinanceRealtimeEngine {
   getMark(symbol: string, maxAgeMs = 120_000): WsMark | null {
     const m = this.marks.get(symbol.toUpperCase());
     return m && Date.now() - m.eventTime <= maxAgeMs ? m : null;
+  }
+
+  getMicroFlow(symbol: string, maxAgeMs = 30_000): WsMicroFlow | null {
+    const clean = symbol.toUpperCase();
+    const st = this.microFlowState.get(clean);
+    const now = Date.now();
+    if (!st || now - st.updatedAt > maxAgeMs) return null;
+    const tickImbalancePct =
+      st.totalDeltaQuote > 0
+        ? Math.round(Math.max(-100, Math.min(100, (st.signedDeltaQuote / st.totalDeltaQuote) * 100)))
+        : 0;
+    const velocityPct10s =
+      st.anchorPrice10s > 0 ? Number((((st.prevPrice - st.anchorPrice10s) / st.anchorPrice10s) * 100).toFixed(3)) : 0;
+    const mark = this.marks.get(clean);
+    const fundingRate = mark ? mark.fundingRate : 0;
+    const markSpotBasisBps =
+      mark && st.prevPrice > 0 ? Number((((mark.markPrice - st.prevPrice) / st.prevPrice) * 10_000).toFixed(2)) : 0;
+    const fundingExtremeZ = Number(Math.min(8, Math.abs(fundingRate) / 0.00025).toFixed(2));
+    return {
+      symbol: clean,
+      tickImbalancePct,
+      velocityPct10s,
+      markSpotBasisBps,
+      fundingRate,
+      fundingExtremeZ,
+      updatedAt: st.updatedAt,
+    };
   }
 
   getStats(): RealtimeStats {

@@ -106,6 +106,11 @@ export interface CopyExecutionOrder {
   slOrderId?: string | null;
   tpOrderId?: string | null;
   isTestnet?: boolean;
+  entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  tp1ClosePct?: number;
+  tp2ClosePct?: number;
+  tp3ClosePct?: number;
+  trailingAtrMult?: number;
 }
 
 export interface MasterTraderPerformance {

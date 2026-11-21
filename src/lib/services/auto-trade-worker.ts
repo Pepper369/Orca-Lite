@@ -24,6 +24,7 @@ import {
   ensureBiquoteCoreWatch,
   getBiquoteLiveAll,
   getBiquoteLiveTick,
+  mergeBarsWithBiquoteLiveTick,
 } from "@/lib/realtime/biquote-poll";
 import {
   dispatchSignalWithVault,
@@ -156,12 +157,17 @@ async function scanLivePrecisionSetups(params: {
           updateLivePriceReference(pair, livePrice);
 
           const dom = evaluateTrueLevel2Dom(book, 5);
+          const wsMicro = binanceWs.getMicroFlow(pair);
+          const blendedImbalance =
+            wsMicro != null
+              ? Math.round(dom.imbalanceRatio * 0.65 + wsMicro.tickImbalancePct * 0.35)
+              : dom.imbalanceRatio;
           const bestBid = book.bids[0]?.price ?? 0;
           const bestAsk = book.asks[0]?.price ?? 0;
           const liveSpreadPct =
             bestBid > 0 && bestAsk >= bestBid ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2) : null;
           const bars1h = resampleOhlcvBars(htfBars, 4);
-          const fundingRate = funding?.fundingRate ?? null;
+          const fundingRate = funding?.fundingRate ?? (wsMicro ? wsMicro.fundingRate : null);
           const oiUsd = oi.openInterest > 0 ? oi.openInterest * livePrice : 0;
           const prelimAtr = calcAtr(execBars, 14) ?? livePrice * 0.012;
           const liqClusters =
@@ -170,7 +176,7 @@ async function scanLivePrecisionSetups(params: {
                   symbol: pair,
                   fundingRate,
                   priceChange24hPct: Number(spot?.priceChangePercent) || null,
-                  orderBookImbalance: dom.imbalanceRatio,
+                  orderBookImbalance: blendedImbalance,
                 })
               : null;
           const { liquidationClusterAligned, externalMagnets } = buildCryptoLiquidityContext(liqClusters);
@@ -193,7 +199,7 @@ async function scanLivePrecisionSetups(params: {
             barsHtf: htfBars !== execBars ? htfBars : null,
             barsMacro: bars1h.length >= 12 ? bars1h : null,
             spreadPipsOrPct: liveSpreadPct,
-            orderBookImbalance: dom.imbalanceRatio,
+            orderBookImbalance: blendedImbalance,
             fundingRate,
             liquidationClusterAligned,
             externalMagnets,
@@ -244,7 +250,7 @@ async function scanLivePrecisionSetups(params: {
               symbol: pair,
               assetType: "CRYPTO" as const,
               direction: precision.direction,
-              entryPrice: roundPrice(livePrice, pair, "CRYPTO"),
+              entryPrice: roundPrice(precision.entry ?? livePrice, pair, "CRYPTO"),
               stopLossPrice: roundPrice(precision.stopLoss, pair, "CRYPTO"),
               takeProfit1: roundPrice(precision.tp1, pair, "CRYPTO"),
               takeProfit2: precision.tp2 != null ? roundPrice(precision.tp2, pair, "CRYPTO") : undefined,
@@ -254,6 +260,14 @@ async function scanLivePrecisionSetups(params: {
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,
               recommendedLeverage,
+              entryMode: precision.entryMode,
+              entryZone: precision.entryZone,
+              expectancyR: precision.expectancyR,
+              tp1ClosePct: precision.breakevenPlan.tp1ClosePct,
+              tp2ClosePct: precision.breakevenPlan.tp2ClosePct,
+              tp3ClosePct: precision.breakevenPlan.tp3ClosePct,
+              trailingAtrMult: precision.breakevenPlan.trailingAtrMult,
+              spreadPipsOrPct: liveSpreadPct,
               timestamp: Date.now(),
             },
             marketPrice: roundPrice(livePrice, pair, "CRYPTO"),
@@ -306,7 +320,8 @@ async function scanLivePrecisionSetups(params: {
             getForexDetail(pair).catch(() => null),
           ]);
           const dailySeries = detail?.detail?.series ?? [];
-          const execBars = intraday15m.length >= 30 ? intraday15m : dailySeries;
+          const rawExecBars = intraday15m.length >= 30 ? intraday15m : dailySeries;
+          const execBars = mergeBarsWithBiquoteLiveTick(rawExecBars, pair, 900);
           const bqTick = getBiquoteLiveTick(pair, 45_000);
           const livePrice =
             bqTick && bqTick.price > 0
@@ -390,7 +405,7 @@ async function scanLivePrecisionSetups(params: {
               symbol: pair,
               assetType: "FOREX" as const,
               direction: precision.direction,
-              entryPrice,
+              entryPrice: roundPrice(precision.entry ?? entryPrice, pair, "FOREX"),
               stopLossPrice,
               takeProfit1: roundPrice(precision.tp1, pair, "FOREX"),
               takeProfit2: precision.tp2 != null ? roundPrice(precision.tp2, pair, "FOREX") : undefined,
@@ -400,6 +415,14 @@ async function scanLivePrecisionSetups(params: {
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,
               recommendedLeverage: 1,
+              entryMode: precision.entryMode,
+              entryZone: precision.entryZone,
+              expectancyR: precision.expectancyR,
+              tp1ClosePct: precision.breakevenPlan.tp1ClosePct,
+              tp2ClosePct: precision.breakevenPlan.tp2ClosePct,
+              tp3ClosePct: precision.breakevenPlan.tp3ClosePct,
+              trailingAtrMult: precision.breakevenPlan.trailingAtrMult,
+              spreadPipsOrPct: liveSpreadPips,
               timestamp: Date.now(),
             },
             marketPrice: entryPrice,
@@ -488,15 +511,21 @@ export async function runAutoTradeTick(): Promise<{
 
       for (const s of fxCandidates) {
         seenForex.add(s.pair);
-        const liveTick = getBiquoteLiveTick(s.pair, 30_000)?.price;
+        const bqLive = getBiquoteLiveTick(s.pair, 30_000);
+        const liveTick = bqLive?.price;
         const marketPrice = liveTick && liveTick > 0 ? liveTick : s.lastPrice || s.entryPrice!;
+        const pipFx = getAssetPipSize(s.pair, "FOREX", marketPrice);
+        const spreadPips =
+          bqLive && bqLive.ask > bqLive.bid && pipFx > 0
+            ? Number(((bqLive.ask - bqLive.bid) / pipFx).toFixed(2))
+            : null;
         signalsToDispatch.push({
           signal: {
             id: `fx_${s.pair}_${s.direction}_${bucket5m}`,
             symbol: s.pair,
             assetType: "FOREX",
             direction: s.direction as "BUY" | "SELL",
-            entryPrice: marketPrice,
+            entryPrice: s.entryPrice ?? marketPrice,
             stopLossPrice: s.stopLossPrice!,
             takeProfit1: s.tp1!,
             takeProfit2: s.tp2 ?? undefined,
@@ -505,6 +534,9 @@ export async function runAutoTradeTick(): Promise<{
             masterCapitalUsd: 10_000,
             winrateScore: s.winrateScore ?? s.probability,
             setupGrade: s.setupGrade,
+            entryMode: s.entryMode,
+            expectancyR: s.expectancyR,
+            spreadPipsOrPct: spreadPips,
             timestamp: s.updatedAt,
           },
           marketPrice,
@@ -551,7 +583,7 @@ export async function runAutoTradeTick(): Promise<{
             symbol: s.pair,
             assetType: "CRYPTO",
             direction: s.direction as "BUY" | "SELL",
-            entryPrice: marketPrice,
+            entryPrice: s.entryPrice ?? marketPrice,
             stopLossPrice: s.stopLossPrice!,
             takeProfit1: s.tp1!,
             takeProfit2: s.tp2 ?? undefined,
@@ -561,6 +593,8 @@ export async function runAutoTradeTick(): Promise<{
             winrateScore: s.winrateScore ?? s.probability,
             setupGrade: s.setupGrade,
             recommendedLeverage: s.recommendedLeverage,
+            entryMode: s.entryMode,
+            expectancyR: s.expectancyR,
             timestamp: s.updatedAt,
           },
           marketPrice,
@@ -658,12 +692,28 @@ export async function runAutoTradeTick(): Promise<{
   }
 }
 
+let microBreakoutDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function triggerImmediateAutoTradeScan(): void {
+  if (IS_TEST_RUNNER || STATE.isTickRunning) return;
+  if (microBreakoutDebounceTimer) return;
+  microBreakoutDebounceTimer = setTimeout(() => {
+    microBreakoutDebounceTimer = null;
+    void runAutoTradeTick();
+  }, 1_500);
+  microBreakoutDebounceTimer.unref?.();
+}
+
 export function initAutoTradeWorker(): void {
   if (IS_TEST_RUNNER) return;
   if (STATE.started && STATE.timer) return;
   STATE.started = true;
   ensureBinanceWsStarted();
   ensureBiquoteCoreWatch();
+
+  eventBus.on("quant:micro-breakout", () => {
+    triggerImmediateAutoTradeScan();
+  });
 
   // Trigger initial real-time quant scan immediately on startup
   const bootTimer = setTimeout(() => {

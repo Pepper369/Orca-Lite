@@ -13,9 +13,14 @@ import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import { evaluatePrecisionTradeSetup } from "../engines/fx-crypto-precision-engine";
 import {
   BENCHMARK_ASSETS,
+  calibrateAndRegisterLiveMetaModels,
   generateRegimeBars,
   runWalkForwardComparison,
 } from "../engines/fx-crypto-backtest-harness";
+import {
+  clearLiveTrainedMetaModels,
+  getLiveTrainedMetaModel,
+} from "../engines/meta-labeling-calibration";
 import type { OhlcvBar } from "../types";
 
 test("Precision FR-001: Asset pipSize & micro-coin 8-decimal rounding (XAUUSD, USDJPY, EURUSD, PEPEUSDT)", () => {
@@ -272,4 +277,27 @@ test("Precision FR-007: Causal Forward Liquidity Pool Flow Forecast & Volume Ann
     assert.ok(fwd!.primaryTarget.etaBars >= 1 && fwd!.primaryTarget.etaBars <= 24);
     assert.ok(fwd!.primaryTarget.pathImpedance >= 0 && fwd!.primaryTarget.pathImpedance <= 0.85);
   }
+});
+
+test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-Labeling Registry", () => {
+  const eurSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "EURUSD")!;
+  const { bars } = generateRegimeBars(eurSpec, "CLEAN_UPTREND_PULLBACK", 101, 100);
+  const ict = analyzeIctSmcLiquidity({
+    symbol: "EURUSD",
+    bars: bars.slice(0, 80),
+    htfBars: bars.slice(0, 40),
+    assetType: "FOREX",
+  });
+  assert.ok(Array.isArray(ict.bprZones), "Expected bprZones array in ICT result");
+  assert.ok("htfPoiContext" in ict, "Expected htfPoiContext property in ICT result");
+
+  // Verify Phase 4 Walk-Forward Purged Meta-Labeling Live Calibration & Registry
+  clearLiveTrainedMetaModels();
+  assert.equal(getLiveTrainedMetaModel("CRYPTO"), null);
+  const calRes = calibrateAndRegisterLiveMetaModels({ assetType: "ALL" });
+  assert.equal(calRes.registered, true);
+  assert.ok(getLiveTrainedMetaModel("CRYPTO") != null);
+  assert.ok(getLiveTrainedMetaModel("FOREX") != null);
+  assert.ok(calRes.report.oosBrierAfter <= calRes.report.oosBrierBefore + 0.01);
+  clearLiveTrainedMetaModels();
 });

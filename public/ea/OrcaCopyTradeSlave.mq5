@@ -166,10 +166,14 @@ void PollSignalFromOrca()
    string ticketId  = JsonGetString(json, "ticketId");
    string rawSymbol = JsonGetString(json, "symbol");
    string direction = JsonGetString(json, "direction");
+   string entryMode = JsonGetString(json, "entryMode");
    double entry     = JsonGetNumber(json, "entry");
    double sl        = JsonGetNumber(json, "stopLoss");
    double tp1       = JsonGetNumber(json, "takeProfit1");
+   double tp2       = JsonGetNumber(json, "takeProfit2");
+   double tp3       = JsonGetNumber(json, "takeProfit3");
    double rawLots   = JsonGetNumber(json, "recommendedLots");
+   double finalTp   = (tp2 > 0) ? tp2 : tp1;
 
    if(ticketId == "" || ticketId == g_lastProcessedTicket) return;
    if(GlobalVariableCheck("ORCA_DONE_" + ticketId)) return;
@@ -213,7 +217,7 @@ void PollSignalFromOrca()
    req.type         = (direction == "BUY") ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    req.price        = NormalizeDouble(price, digits);
    req.sl           = (sl > 0) ? NormalizeDouble(sl, digits) : 0.0;
-   req.tp           = (tp1 > 0) ? NormalizeDouble(tp1, digits) : 0.0;
+   req.tp           = (finalTp > 0) ? NormalizeDouble(finalTp, digits) : 0.0;
    req.deviation    = InpMaxSlippagePoints;
    req.magic        = InpMagicNumber;
    req.comment      = "Orca_" + ticketId;

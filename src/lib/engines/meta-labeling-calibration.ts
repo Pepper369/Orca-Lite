@@ -441,6 +441,32 @@ function featureVectorToArray(f: MetaLabelFeatureVector): number[] {
 const DEFAULT_META_WEIGHTS = [1.35, 0.55, 0.75, 0.40, 0.50, 0.45, 0.42, 0.52, 0.65];
 const DEFAULT_META_BIAS = 0.28;
 
+const LIVE_TRAINED_META_MODELS = new Map<"FOREX" | "CRYPTO" | "ALL", TrainedMetaLabelModel>();
+
+/**
+ * Registers a walk-forward calibrated Purged Meta-Labeling model for live inference.
+ */
+export function registerLiveTrainedMetaModel(
+  assetType: "FOREX" | "CRYPTO" | "ALL",
+  model: TrainedMetaLabelModel,
+): void {
+  if (!model || !Array.isArray(model.weights) || model.weights.length === 0) return;
+  LIVE_TRAINED_META_MODELS.set(assetType, model);
+}
+
+/**
+ * Retrieves the active calibrated Meta-Labeling model for a given asset class (if registered).
+ */
+export function getLiveTrainedMetaModel(
+  assetType: "FOREX" | "CRYPTO",
+): TrainedMetaLabelModel | null {
+  return LIVE_TRAINED_META_MODELS.get(assetType) ?? LIVE_TRAINED_META_MODELS.get("ALL") ?? null;
+}
+
+export function clearLiveTrainedMetaModels(): void {
+  LIVE_TRAINED_META_MODELS.clear();
+}
+
 /**
  * Predicts calibrated Meta-Labeling posterior win probability P(Win | Primary Setup, Regime, Microstructure).
  */

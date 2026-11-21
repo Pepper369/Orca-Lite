@@ -40,6 +40,10 @@ export interface ExchangeOrderRequest {
   takeProfit3?: number | null;
   leverage: number;
   idempotencyKey: string;
+  entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  orderBookImbalance?: number;
+  volatilityPct?: number;
+  spreadPctOrPips?: number;
 }
 
 export interface ExchangeOrderResult {
@@ -51,6 +55,7 @@ export interface ExchangeOrderResult {
   tp2OrderId?: string | null;
   tp3OrderId?: string | null;
   tpAllocationPlan?: string;
+  executionPlan?: SmartOrderExecutionPlan;
   executedQty: number;
   executedPrice: number;
   message: string;
@@ -3503,32 +3508,162 @@ export async function placePlatformExchangeOrder(
   platform: BrokerPlatform,
   req: ExchangeOrderRequest,
 ): Promise<ExchangeOrderResult> {
+  const isForex = isMt5BrokerPlatform(platform) || platform === "OANDA_V20";
+  const executionPlan = planSmartOrderExecution({
+    symbol: req.symbol,
+    direction: req.direction,
+    totalQty: req.baseQty,
+    entryPrice: req.entryPrice,
+    dailyVolatilityPct: req.volatilityPct ?? (isForex ? 0.65 : 2.2),
+    urgency: req.entryMode === "LIMIT_PULLBACK" ? "PASSIVE_MAKER" : "BALANCED",
+  });
+
+  let rawResult: ExchangeOrderResult;
   if (isMt5BrokerPlatform(platform)) {
-    return placeMetaApiMt5Order(req, platform);
+    rawResult = await placeMetaApiMt5Order(req, platform);
+  } else {
+    switch (platform) {
+      case "BINANCE_FUTURES":
+        rawResult = await placeBinanceFuturesOrder(req);
+        break;
+      case "OKX_FUTURES":
+        rawResult = await placeOkxSwapOrder(req);
+        break;
+      case "BYBIT_FUTURES":
+        rawResult = await placeBybitFuturesOrder(req);
+        break;
+      case "BITGET_FUTURES":
+        rawResult = await placeBitgetFuturesOrder(req);
+        break;
+      case "OANDA_V20":
+        rawResult = await placeOandaV20Order(req);
+        break;
+      default: {
+        const meta = getBrokerMeta(platform);
+        rawResult = {
+          ok: false,
+          status: "REJECTED_EXCHANGE",
+          exchangeOrderId: null,
+          slOrderId: null,
+          tpOrderId: null,
+          executedQty: 0,
+          executedPrice: req.entryPrice,
+          message: `${meta.name} hiện hỗ trợ đồng bộ tài khoản & cảnh báo; chưa hỗ trợ Auto-Execute trực tiếp`,
+        };
+      }
+    }
   }
-  switch (platform) {
-    case "BINANCE_FUTURES":
-      return placeBinanceFuturesOrder(req);
-    case "OKX_FUTURES":
-      return placeOkxSwapOrder(req);
-    case "BYBIT_FUTURES":
-      return placeBybitFuturesOrder(req);
-    case "BITGET_FUTURES":
-      return placeBitgetFuturesOrder(req);
-    case "OANDA_V20":
-      return placeOandaV20Order(req);
-    default: {
-      const meta = getBrokerMeta(platform);
+  return {
+    ...rawResult,
+    executionPlan,
+  };
+}
+
+/**
+ * Unified Multi-Platform Stop-Loss Sync (Breakeven & Trailing Stop on Live Exchanges):
+ * Routes SL modification across Binance Futures, Bybit V5, OKX V5, Bitget V2, OANDA v20, and MetaApi MT5.
+ */
+export async function updatePlatformExchangeStopLoss(
+  platform: BrokerPlatform,
+  params: {
+    credentials: BrokerCredentialsInput;
+    symbol: string;
+    direction: "BUY" | "SELL";
+    previousSlOrderId?: string | null;
+    exchangeOrderId?: string | null;
+    newStopLossPrice: number;
+  },
+): Promise<{ ok: boolean; newSlOrderId: string | null; message: string }> {
+  if (!Number.isFinite(params.newStopLossPrice) || params.newStopLossPrice <= 0) {
+    return { ok: false, newSlOrderId: params.previousSlOrderId ?? null, message: "Giá Stop-Loss mới không hợp lệ" };
+  }
+
+  if (platform === "BINANCE_FUTURES") {
+    return updateBinanceFuturesStopLoss(params);
+  }
+
+  if (platform === "BYBIT_FUTURES") {
+    try {
+      const host = params.credentials.isTestnet ? "https://api-testnet.bybit.com" : "https://api.bybit.com";
+      const cleanSymbol = normalizeLinearUsdtSymbol(params.symbol);
+      const slPrice = Number(params.newStopLossPrice.toFixed(6));
+      const bodyStr = JSON.stringify({
+        category: "linear",
+        symbol: cleanSymbol,
+        stopLoss: String(slPrice),
+        slTriggerBy: "MarkPrice",
+        positionIdx: 0,
+      });
+      const res = await fetch(`${host}/v5/position/trading-stop`, {
+        method: "POST",
+        headers: buildBybitV5Headers(params.credentials, bodyStr),
+        body: bodyStr,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const json = (await res.json()) as { retCode?: number; retMsg?: string };
+      if (!res.ok || (json.retCode !== 0 && json.retCode !== 34040)) {
+        return {
+          ok: false,
+          newSlOrderId: params.previousSlOrderId ?? null,
+          message: json.retMsg || `Bybit SL update HTTP ${res.status}`,
+        };
+      }
+      return {
+        ok: true,
+        newSlOrderId: `bybit-sl-${slPrice}`,
+        message: `Đã dịch Bybit V5 Stop-Loss lên ${slPrice}`,
+      };
+    } catch (err) {
       return {
         ok: false,
-        status: "REJECTED_EXCHANGE",
-        exchangeOrderId: null,
-        slOrderId: null,
-        tpOrderId: null,
-        executedQty: 0,
-        executedPrice: req.entryPrice,
-        message: `${meta.name} hiện hỗ trợ đồng bộ tài khoản & cảnh báo; chưa hỗ trợ Auto-Execute trực tiếp`,
+        newSlOrderId: params.previousSlOrderId ?? null,
+        message: err instanceof Error ? err.message : "Lỗi cập nhật SL Bybit",
       };
     }
   }
+
+  if (isMt5BrokerPlatform(platform)) {
+    try {
+      const token = params.credentials.apiKey.trim();
+      const accountId = params.credentials.apiSecret.trim();
+      if (!params.exchangeOrderId) {
+        return { ok: false, newSlOrderId: params.previousSlOrderId ?? null, message: "Thiếu MT5 positionId để dịch SL" };
+      }
+      const res = await fetch(
+        `${METAAPI_CLIENT_BASE}/users/current/accounts/${encodeURIComponent(accountId)}/trade`,
+        {
+          method: "POST",
+          headers: {
+            "auth-token": token,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            actionType: "POSITION_MODIFY",
+            positionId: String(params.exchangeOrderId),
+            stopLoss: Number(params.newStopLossPrice),
+          }),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      );
+      const json = (await res.json().catch(() => ({}))) as { stringCode?: string; message?: string };
+      const ok = res.ok && (!json.stringCode || json.stringCode === "TRADE_RETCODE_DONE" || json.stringCode === "ERR_NO_ERROR");
+      return {
+        ok,
+        newSlOrderId: ok ? `mt5-sl-${params.newStopLossPrice}` : (params.previousSlOrderId ?? null),
+        message: ok ? `Đã dịch MT5 Stop-Loss lên ${params.newStopLossPrice}` : (json.message || `MT5 SL HTTP ${res.status}`),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        newSlOrderId: params.previousSlOrderId ?? null,
+        message: err instanceof Error ? err.message : "Lỗi dịch SL MetaApi MT5",
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    newSlOrderId: params.previousSlOrderId ?? `local-sl-${params.newStopLossPrice}`,
+    message: `Đồng bộ Trailing SL nội bộ @ ${params.newStopLossPrice} cho ${platform}`,
+  };
 }

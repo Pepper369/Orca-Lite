@@ -14,7 +14,7 @@ import {
 import type { BrokerPlatform, CopyExecutionOrder, FollowerAccount } from "@/lib/engines/copy-trade-engine";
 import {
   fetchBrokerLiveTelemetry,
-  updateBinanceFuturesStopLoss,
+  updatePlatformExchangeStopLoss,
   type LiveExchangeTelemetryResult,
 } from "@/lib/engines/exchange-execution-client";
 import { getBrokerMeta } from "@/lib/engines/broker-registry";
@@ -470,14 +470,15 @@ async function advancePartialTakeProfitStage(params: {
   const cumulativePnlUsd = Number(((order.realizedPnlUsd ?? 0) + partialPnlUsd).toFixed(2));
 
   let syncedSlOrderId = order.slOrderId ?? null;
-  if (acct.hasApiKey && acct.platform === "BINANCE_FUTURES" && nextSlPrice > 0) {
+  if (acct.hasApiKey && nextSlPrice > 0) {
     const secrets = await getBrokerConnectionSecrets(acct.id);
     if (secrets) {
-      const slSync = await updateBinanceFuturesStopLoss({
+      const slSync = await updatePlatformExchangeStopLoss(acct.platform, {
         credentials: secrets,
         symbol: order.symbol,
         direction: order.direction,
         previousSlOrderId: order.slOrderId,
+        exchangeOrderId: order.exchangeOrderId,
         newStopLossPrice: nextSlPrice,
       });
       if (slSync.ok && slSync.newSlOrderId) {
@@ -575,10 +576,13 @@ export async function evaluateRealtimePositionExits(options?: {
       o.initialLotsOrQty && o.initialLotsOrQty > 0 ? o.initialLotsOrQty : o.copiedLotsOrQty;
     const minViableQty = assetType === "FOREX" ? 0.01 : Math.max(0.0001, initialQty * 0.08);
 
-    // 1) Multi-Tier Take-Profit State Machine (TP1 50%+BE -> TP2 30%+Lock -> TP3 20%)
+    // 1) Multi-Tier Take-Profit State Machine (Scenario-Conditioned TP1/TP2/TP3 Scaling)
+    const tp1Pct = o.tp1ClosePct && o.tp1ClosePct >= 20 && o.tp1ClosePct <= 80 ? o.tp1ClosePct / 100 : 0.5;
+    const tp2Pct = o.tp2ClosePct && o.tp2ClosePct >= 10 && o.tp2ClosePct <= 60 ? o.tp2ClosePct / 100 : 0.3;
+
     if (stage === "INITIAL" && tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1))) {
       const hasHigherTp = tp2 > 0 && (isBuy ? tp2 > tp1 : tp2 < tp1);
-      const closeQty = roundOrderQuantity(initialQty * 0.5, assetType);
+      const closeQty = roundOrderQuantity(initialQty * tp1Pct, assetType);
       const remainQty = roundOrderQuantity(o.copiedLotsOrQty - closeQty, assetType);
 
       if (hasHigherTp && closeQty > 0 && remainQty >= minViableQty) {
@@ -626,7 +630,7 @@ export async function evaluateRealtimePositionExits(options?: {
       ((isBuy && markPrice >= tp2) || (!isBuy && markPrice <= tp2))
     ) {
       const hasTp3 = tp3 > 0 && (isBuy ? tp3 > tp2 : tp3 < tp2);
-      const closeQty = roundOrderQuantity(initialQty * 0.3, assetType);
+      const closeQty = roundOrderQuantity(initialQty * tp2Pct, assetType);
       const remainQty = roundOrderQuantity(o.copiedLotsOrQty - closeQty, assetType);
 
       if (hasTp3 && closeQty > 0 && remainQty >= minViableQty) {
@@ -727,14 +731,15 @@ export async function evaluateRealtimePositionExits(options?: {
         if (improved) {
           let syncedSlOrderId = o.slOrderId ?? null;
           const acct = await getBrokerConnectionById(o.followerId);
-          if (acct?.hasApiKey && acct.platform === "BINANCE_FUTURES") {
+          if (acct?.hasApiKey) {
             const secrets = await getBrokerConnectionSecrets(acct.id);
             if (secrets) {
-              const slSync = await updateBinanceFuturesStopLoss({
+              const slSync = await updatePlatformExchangeStopLoss(acct.platform, {
                 credentials: secrets,
                 symbol: o.symbol,
                 direction: o.direction,
                 previousSlOrderId: o.slOrderId,
+                exchangeOrderId: o.exchangeOrderId,
                 newStopLossPrice: candidateSl,
               });
               if (slSync.ok && slSync.newSlOrderId) {

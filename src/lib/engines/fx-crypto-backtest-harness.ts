@@ -14,6 +14,7 @@ import {
   calculateCombinatorialPurgedPbo,
   computeBrierScore,
   predictMetaLabelProbability,
+  registerLiveTrainedMetaModel,
   trainPurgedMetaLabelClassifier,
   type MetaLabelFeatureVector,
   type MetaLabelTrainingSample,
@@ -561,8 +562,8 @@ export function runWalkForwardComparison(params: {
   const trapReductionPct =
     legacyBaseline.trapTradesCount > 0
       ? Number(
-          (((legacyBaseline.trapTradesCount - upgradedAAPlus.trapTradesCount) / legacyBaseline.trapTradesCount) * 100).toFixed(1),
-        )
+        (((legacyBaseline.trapTradesCount - upgradedAAPlus.trapTradesCount) / legacyBaseline.trapTradesCount) * 100).toFixed(1),
+      )
       : 100;
 
   return {
@@ -715,10 +716,10 @@ function collectWalkForwardMetaSamples(params: {
           ) {
             const tpWeights: [number, number, number] | undefined = prec.exitPolicy
               ? [
-                  prec.exitPolicy.tp1ClosePct / 100,
-                  prec.exitPolicy.tp2ClosePct / 100,
-                  prec.exitPolicy.tp3ClosePct / 100,
-                ]
+                prec.exitPolicy.tp1ClosePct / 100,
+                prec.exitPolicy.tp2ClosePct / 100,
+                prec.exitPolicy.tp3ClosePct / 100,
+              ]
               : undefined;
             const out = simulateTradeOutcome({
               barsFuture: futureBars,
@@ -1020,5 +1021,38 @@ export function runRealHistoricalWalkForwardBacktest(
     oosBrierAfter,
     pbo,
     scenarioAttribution: buildScenarioAttribution(holdRecords),
+  };
+}
+
+/**
+ * Calibrates the Purged Meta-Labeling & PAVA Isotonic model via Walk-Forward CV
+ * and registers it into the live inference registry if PBO < 0.25 (Anti-Overfitting Gate).
+ */
+export function calibrateAndRegisterLiveMetaModels(params?: {
+  assetType?: "FOREX" | "CRYPTO" | "ALL";
+  minOosWinRatePct?: number;
+  calibrationSeeds?: number[];
+  holdoutSeeds?: number[];
+}): {
+  registered: boolean;
+  report: PurgedMetaLabelWalkForwardReport;
+} {
+  const assetType = params?.assetType ?? "ALL";
+  const minOosWinRatePct = params?.minOosWinRatePct ?? 80;
+  const report = runPurgedMetaLabelWalkForward({
+    calibrationSeeds: params?.calibrationSeeds ?? [101, 202],
+    holdoutSeeds: params?.holdoutSeeds ?? [404, 505],
+    assets: BENCHMARK_ASSETS.slice(0, 3),
+  });
+  const approved =
+    report.oosBrierAfter <= report.oosBrierBefore + 0.01 &&
+    report.metaFilteredMetrics.winRatePct >= minOosWinRatePct &&
+    report.metaFilteredMetrics.expectancyR >= 0.5;
+  if (approved) {
+    registerLiveTrainedMetaModel(assetType, report.model);
+  }
+  return {
+    registered: approved,
+    report,
   };
 }

@@ -6,6 +6,7 @@ import {
   type FactorExposurePosition,
 } from "@/lib/engines/advanced-quant-math";
 import {
+  evaluateForexSpreadSafety,
   runMultiScenarioPortfolioStressTest,
   type PortfolioStressPosition,
 } from "@/lib/engines/unified-cross-asset-quant";
@@ -58,6 +59,14 @@ export interface DispatchableSignalInput {
   winrateScore: number;
   setupGrade?: SetupGrade;
   recommendedLeverage?: number;
+  entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
+  entryZone?: [number, number] | null;
+  expectancyR?: number;
+  tp1ClosePct?: number;
+  tp2ClosePct?: number;
+  tp3ClosePct?: number;
+  trailingAtrMult?: number;
+  spreadPipsOrPct?: number | null;
   timestamp: number;
 }
 
@@ -296,6 +305,11 @@ export async function executePlatformOrder(
     signalId: signal.id,
     idempotencyKey,
     isTestnet: acct.isTestnet ?? true,
+    entryMode: signal.entryMode ?? "MARKET_CONFIRMED",
+    tp1ClosePct: signal.tp1ClosePct,
+    tp2ClosePct: signal.tp2ClosePct,
+    tp3ClosePct: signal.tp3ClosePct,
+    trailingAtrMult: signal.trailingAtrMult,
   };
 
   const geom = validateDispatchableSignalGeometry(signal, marketPrice);
@@ -333,6 +347,8 @@ export async function executePlatformOrder(
         takeProfit3: signal.takeProfit3 ?? null,
         leverage: safeLeverage,
         idempotencyKey,
+        entryMode: signal.entryMode,
+        spreadPctOrPips: signal.spreadPipsOrPct ?? undefined,
       });
       const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
       return {
@@ -386,6 +402,8 @@ export async function executePlatformOrder(
       takeProfit3: signal.takeProfit3 ?? null,
       leverage: safeLeverage,
       idempotencyKey,
+      entryMode: signal.entryMode,
+      spreadPctOrPips: signal.spreadPipsOrPct ?? undefined,
     });
 
     const actualQty = res.executedQty > 0 ? res.executedQty : qtyOrLots;
@@ -740,7 +758,48 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       continue;
     }
 
-    // 6) Slippage Guard
+    // 6) Slippage & Forex Spread Safety Guard
+    if (signal.assetType === "FOREX" && signal.spreadPipsOrPct != null && signal.spreadPipsOrPct > 0) {
+      const cleanPair = signal.symbol.toUpperCase();
+      const fxCategory = cleanPair.startsWith("XAU")
+        ? "GOLD"
+        : cleanPair.startsWith("XAG")
+          ? "SILVER"
+          : cleanPair.includes("USD")
+            ? "FX_MAJOR"
+            : "FX_CROSS";
+      const defaultMedian = fxCategory === "GOLD" ? 2.2 : fxCategory === "SILVER" ? 2.5 : fxCategory === "FX_MAJOR" ? 1.0 : 1.6;
+      const spreadSafety = evaluateForexSpreadSafety(
+        signal.spreadPipsOrPct,
+        [defaultMedian, defaultMedian, defaultMedian, defaultMedian, defaultMedian],
+        fxCategory,
+      );
+      if (!spreadSafety.isSafe) {
+        const rejSpreadOrder: CopyExecutionOrder = {
+          orderId,
+          followerId: acct.id,
+          followerName: acct.name,
+          platform: acct.platform,
+          symbol: signal.symbol,
+          direction: signal.direction,
+          copiedLotsOrQty: 0,
+          entryPrice: signal.entryPrice,
+          executionPrice: marketPrice,
+          slippagePips: signal.spreadPipsOrPct,
+          status: "REJECTED_SLIPPAGE",
+          stopLossPrice: signal.stopLossPrice,
+          takeProfit1: signal.takeProfit1,
+          timestamp: now,
+          signalId: signal.id,
+          idempotencyKey,
+          message: `Hủy lệnh do giãn Spread: ${spreadSafety.lockoutReason ?? `${signal.spreadPipsOrPct} pips`}`,
+        };
+        await saveBotExecutionOrder(rejSpreadOrder, userId);
+        results.push(rejSpreadOrder);
+        continue;
+      }
+    }
+
     const slippage = checkSlippage(signal, marketPrice, acct.maxAllowedSlippagePips);
     if (!slippage.passed) {
       const rejOrder: CopyExecutionOrder = {

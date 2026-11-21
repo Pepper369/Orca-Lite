@@ -24,7 +24,11 @@ import {
   type ScenarioDynamicExitPolicy,
 } from "./advanced-quant-math";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
-import { predictMetaLabelProbability } from "./meta-labeling-calibration";
+import {
+  getLiveTrainedMetaModel,
+  predictMetaLabelProbability,
+  type TrainedMetaLabelModel,
+} from "./meta-labeling-calibration";
 import { calculateRequiredSpeedPace } from "./quant-reversal-pace";
 import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
 
@@ -54,6 +58,7 @@ export interface PrecisionSetupInput {
   timeframeSec?: number;
   secondsRemaining?: number;
   sharedCtx?: SharedBarContext | null;
+  trainedMetaModel?: TrainedMetaLabelModel | null;
 }
 
 export interface PrecisionTradeSetup {
@@ -433,6 +438,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const ict = analyzeIctSmcLiquidity({
     symbol,
     bars: barsExecution,
+    htfBars: htf,
     currentPrice,
     assetType,
     pipSize: pip,
@@ -530,6 +536,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   if (bullMss || ict.optimalTradeSetup.direction === "BUY") bullPts += 14;
   if (bearMss || ict.optimalTradeSetup.direction === "SELL") bearPts += 14;
+
+  const bullIfvgOrBpr =
+    ict.activeFvgList.some((f) => f.isInversion && f.direction === "BEARISH_FVG" && Math.abs(currentPrice - f.top) <= atr14 * 0.8) ||
+    Boolean(ict.bprZones?.some((b) => b.direction === "BULLISH_BPR" && currentPrice >= b.bottom - atr14 * 0.5 && currentPrice <= b.top + atr14 * 0.5));
+  const bearIfvgOrBpr =
+    ict.activeFvgList.some((f) => f.isInversion && f.direction === "BULLISH_FVG" && Math.abs(currentPrice - f.bottom) <= atr14 * 0.8) ||
+    Boolean(ict.bprZones?.some((b) => b.direction === "BEARISH_BPR" && currentPrice >= b.bottom - atr14 * 0.5 && currentPrice <= b.top + atr14 * 0.5));
 
   if (bullDivSignal) bullPts += 11;
   if (bearDivSignal) bearPts += 11;
@@ -686,6 +699,22 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push("Gate 2: Phá vỡ cấu trúc vi mô (MSS)");
   } else {
     gatesFailed.push("Gate 2: Chưa có nhịp quét Sweep/MSS");
+  }
+
+  // Gate 2b: Multi-Timeframe ICT POI + Inversion FVG (IFVG) + Balanced Price Range (BPR) Confluence
+  const htfPoiMatches =
+    (isBuy && ict.htfPoiContext?.alignedSide === "BUY") ||
+    (!isBuy && ict.htfPoiContext?.alignedSide === "SELL");
+  const ifvgOrBprMatches = isBuy ? bullIfvgOrBpr : bearIfvgOrBpr;
+  if (htfPoiMatches && ifvgOrBprMatches) {
+    precisionScore += 6;
+    gatesPassed.push(`Gate 2b (ICT Multi-TF): Hội tụ ${ict.htfPoiContext?.poiType} + IFVG/BPR`);
+  } else if (htfPoiMatches) {
+    precisionScore += 4;
+    gatesPassed.push(`Gate 2b (HTF POI): ${ict.htfPoiContext?.rationaleVi}`);
+  } else if (ifvgOrBprMatches) {
+    precisionScore += 4;
+    gatesPassed.push("Gate 2b (IFVG/BPR): Phản ứng tại vùng Inversion FVG / Balanced Price Range");
   }
 
   // GATE 3: Value Zone (OTE/FVG/Discount-Premium) + Parabolic Anti-Chase & Post-Exhaustion Knife Guard
@@ -954,12 +983,23 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (prev > 0 && cur > 0) tailReturns.push(Math.log(cur / prev));
   }
   const tailNu = estimateTailDegreesOfFreedom(tailReturns);
+  const hasExplicitOrderFlow = orderBookImbalance != null || flowIntensityIndex != null;
+  const opposingFlow = hasExplicitOrderFlow && ((isBuy && realImbalance < -25) || (!isBuy && realImbalance > 25));
+  const estVpinToxicity = hasExplicitOrderFlow
+    ? Math.min(0.85, Math.max(0.22, 0.28 + (opposingFlow ? Math.abs(realImbalance) / 160 : 0)))
+    : undefined;
+  const estFundingExtremeZ =
+    assetType === "CRYPTO" && fundingRate != null && Number.isFinite(fundingRate)
+      ? Math.min(8, Math.abs(fundingRate) / 0.00025)
+      : undefined;
   const scenarioVector = evaluateMarketScenarioVector({
     hmmProbabilities: hmmRegime.probabilities,
     efficiencyRatio: erVal,
     adx14: adxVal,
     harExpansionRatio: harVol.expansionRatio,
     tailDegreesOfFreedom: tailNu,
+    vpinOrToxicity: estVpinToxicity,
+    fundingExtremeZ: estFundingExtremeZ,
     spreadSpikeRatio:
       spreadPipsOrPct != null && spreadPipsOrPct > 0
         ? assetType === "FOREX"
@@ -1026,17 +1066,28 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       : (isBuy && cusumFilter.latestBreak === "BEAR_BREAK") || (!isBuy && cusumFilter.latestBreak === "BULL_BREAK")
         ? -1
         : 0;
-  const metaPred = predictMetaLabelProbability({
-    primaryScoreNorm: precisionScore / 100,
-    hmmTrendProb: hmmRegime.probabilities.trendExpansion,
-    hmmCrisisProb: hmmRegime.probabilities.crisisHighVol,
-    cusumAligned,
-    efficiencyRatio: erVal,
-    harVolExpansionRatio: harVol.expansionRatio,
-    orderFlowAligned: Math.max(-1, Math.min(1, (isBuy ? realImbalance : -realImbalance) / 100)),
-    liquiditySweepConfirmed: hasSweep && hasMss ? 1 : 0,
-    frictionR,
-  });
+  const activeMetaModel = input.trainedMetaModel ?? getLiveTrainedMetaModel(assetType);
+  const metaPred = predictMetaLabelProbability(
+    {
+      primaryScoreNorm: precisionScore / 100,
+      hmmTrendProb: hmmRegime.probabilities.trendExpansion,
+      hmmCrisisProb: hmmRegime.probabilities.crisisHighVol,
+      cusumAligned,
+      efficiencyRatio: erVal,
+      harVolExpansionRatio: harVol.expansionRatio,
+      orderFlowAligned: Math.max(-1, Math.min(1, (isBuy ? realImbalance : -realImbalance) / 100)),
+      liquiditySweepConfirmed: hasSweep && hasMss ? 1 : 0,
+      frictionR,
+    },
+    activeMetaModel,
+  );
+
+  if (activeMetaModel && metaPred.calibratedProbability < 0.44 && !(hasSweep && hasMss)) {
+    vetoReasons.push(
+      `Meta-Labeling Gate: Xác suất hậu nghiệm (${(metaPred.calibratedProbability * 100).toFixed(1)}%) dưới ngưỡng 44%`,
+    );
+    gatesFailed.push("Gate 7b (Meta-Labeling Veto): Không đạt ngưỡng phê duyệt xác suất");
+  }
 
   // Calibrated outcome probabilities & net Expectancy E[R] under scenario-conditioned TP1/TP2/TP3 scaling
   const linearPTp1 = Math.min(0.84, Math.max(0.38, 0.30 + (precisionScore / 100) * 0.56));

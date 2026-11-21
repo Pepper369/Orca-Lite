@@ -135,6 +135,23 @@ export interface ForwardLiquidityForecast {
   summaryVi: string;
 }
 
+export interface IctBprZone {
+  id: string;
+  barIndex: number;
+  direction: "BULLISH_BPR" | "BEARISH_BPR";
+  top: number;
+  bottom: number;
+  midpoint: number;
+}
+
+export interface HtfPoiContext {
+  alignedSide: "BUY" | "SELL" | "NONE";
+  poiType: "HTF_FVG" | "HTF_ORDER_BLOCK" | "HTF_BREAKER" | "HTF_OTE_ZONE" | "NONE";
+  zoneLow: number;
+  zoneHigh: number;
+  rationaleVi: string;
+}
+
 export interface IctSmcAnalysisResult {
   symbol: string;
   bias: "STRONG_BULLISH" | "BULLISH" | "STRONG_BEARISH" | "BEARISH" | "NEUTRAL";
@@ -148,6 +165,8 @@ export interface IctSmcAnalysisResult {
   forwardLiquidityForecast?: ForwardLiquidityForecast;
   recentSweeps: AdvancedSweepEvent[];
   activeFvgList: IctFvgZone[];
+  bprZones?: IctBprZone[];
+  htfPoiContext?: HtfPoiContext | null;
   orderBlocks: IctOrderBlockZone[];
   optimalTradeSetup: OteTradeSetup;
   marketStructure: {
@@ -173,6 +192,7 @@ export interface LiquidityFlowContext {
 export function analyzeIctSmcLiquidity(params: {
   symbol: string;
   bars: OhlcvBar[];
+  htfBars?: OhlcvBar[] | null;
   currentPrice?: number | null;
   assetType?: "FOREX" | "CRYPTO" | "STOCK";
   pipSize?: number;
@@ -187,6 +207,7 @@ export function analyzeIctSmcLiquidity(params: {
   const {
     symbol,
     bars,
+    htfBars,
     currentPrice: inputPrice,
     assetType = "FOREX",
     pipSize: inputPipSize,
@@ -210,11 +231,17 @@ export function analyzeIctSmcLiquidity(params: {
   const nearestBsl = bslAbove.length > 0 ? bslAbove.reduce((a, b) => (b.price < a.price ? b : a)) : null;
   const nearestSsl = sslBelow.length > 0 ? sslBelow.reduce((a, b) => (b.price > a.price ? b : a)) : null;
 
-  // 2. FAIR VALUE GAPS (FVG & BPR)
-  const activeFvgList = detectFairValueGaps(bars, pipSize);
+  // 2. FAIR VALUE GAPS (FVG, IFVG & BPR)
+  const { activeFvgs: activeFvgList, bprZones } = detectFairValueGapsAndBpr(bars, pipSize);
 
   // 3. ORDER BLOCKS & BREAKER BLOCKS
   const orderBlocks = detectOrderBlocksAndBreakers(bars);
+
+  // 3b. MULTI-TIMEFRAME HTF POI CONFLUENCE (strictly causal)
+  const htfPoiContext =
+    htfBars && htfBars.length >= 16
+      ? evaluateHtfPoiConfluence(htfBars, currentPrice, pipSize, assetType, symbol)
+      : null;
 
   // 4. PRECISION LIQUIDITY SWEEPS (Turtle Soup, Judas Swing, Purge & Revert) - strictly causal
   const recentSweeps = detectAdvancedSweeps(bars, allBslPools, allSslPools, pipSize, isForex);
@@ -371,6 +398,8 @@ export function analyzeIctSmcLiquidity(params: {
     forwardLiquidityForecast,
     recentSweeps,
     activeFvgList,
+    bprZones,
+    htfPoiContext,
     orderBlocks,
     optimalTradeSetup,
     marketStructure: {
@@ -731,6 +760,104 @@ function detectLiquidityPools(
     }
   }
 
+  // Extract causal Previous Day High/Low (PDH/PDL) & Asian Session High/Low (00:00-06:00 UTC) from closed sessions (i < n - 3)
+  if (n >= 24) {
+    const lastDayKey = Math.floor(normalizeEpochMs(bars[n - 1]!.time) / 86_400_000);
+    let pdh = -Infinity;
+    let pdhIdx = -1;
+    let pdl = Infinity;
+    let pdlIdx = -1;
+    let asianHigh = -Infinity;
+    let asianHighIdx = -1;
+    let asianLow = Infinity;
+    let asianLowIdx = -1;
+
+    for (let i = 0; i < n - 3; i++) {
+      const b = bars[i]!;
+      const ms = normalizeEpochMs(b.time);
+      if (ms <= 0) continue;
+      const dayKey = Math.floor(ms / 86_400_000);
+      const utcHour = new Date(ms).getUTCHours();
+
+      if (dayKey === lastDayKey - 1) {
+        if (b.high > pdh) {
+          pdh = b.high;
+          pdhIdx = i;
+        }
+        if (b.low < pdl) {
+          pdl = b.low;
+          pdlIdx = i;
+        }
+      }
+      if (dayKey === lastDayKey && utcHour >= 0 && utcHour < 6) {
+        if (b.high > asianHigh) {
+          asianHigh = b.high;
+          asianHighIdx = i;
+        }
+        if (b.low < asianLow) {
+          asianLow = b.low;
+          asianLowIdx = i;
+        }
+      }
+    }
+
+    const lastCurrentHour = new Date(normalizeEpochMs(bars[n - 1]!.time)).getUTCHours();
+    if (pdhIdx >= 0 && Number.isFinite(pdh) && !buySidePools.some((p) => Math.abs(p.price - pdh) <= pipSize * 3)) {
+      buySidePools.push({
+        id: `bsl_pdh_${bars[pdhIdx]!.time}`,
+        type: "BSL",
+        price: pdh,
+        time: bars[pdhIdx]!.time,
+        barIndex: pdhIdx,
+        significance: "HIGH_EXTERNAL",
+        status: "UNTOUCHED",
+      });
+    }
+    if (pdlIdx >= 0 && Number.isFinite(pdl) && !sellSidePools.some((p) => Math.abs(p.price - pdl) <= pipSize * 3)) {
+      sellSidePools.push({
+        id: `ssl_pdl_${bars[pdlIdx]!.time}`,
+        type: "SSL",
+        price: pdl,
+        time: bars[pdlIdx]!.time,
+        barIndex: pdlIdx,
+        significance: "HIGH_EXTERNAL",
+        status: "UNTOUCHED",
+      });
+    }
+    if (
+      lastCurrentHour >= 6 &&
+      asianHighIdx >= 0 &&
+      Number.isFinite(asianHigh) &&
+      !buySidePools.some((p) => Math.abs(p.price - asianHigh) <= pipSize * 3)
+    ) {
+      buySidePools.push({
+        id: `bsl_ash_${bars[asianHighIdx]!.time}`,
+        type: "BSL",
+        price: asianHigh,
+        time: bars[asianHighIdx]!.time,
+        barIndex: asianHighIdx,
+        significance: "HIGH_EXTERNAL",
+        status: "UNTOUCHED",
+      });
+    }
+    if (
+      lastCurrentHour >= 6 &&
+      asianLowIdx >= 0 &&
+      Number.isFinite(asianLow) &&
+      !sellSidePools.some((p) => Math.abs(p.price - asianLow) <= pipSize * 3)
+    ) {
+      sellSidePools.push({
+        id: `ssl_asl_${bars[asianLowIdx]!.time}`,
+        type: "SSL",
+        price: asianLow,
+        time: bars[asianLowIdx]!.time,
+        barIndex: asianLowIdx,
+        significance: "HIGH_EXTERNAL",
+        status: "UNTOUCHED",
+      });
+    }
+  }
+
   // Strictly causal sweep status: only mark SWEPT from bars AFTER the pivot confirmed (j > pool.barIndex + 3)
   let rangeSum = 0;
   const rngStart = Math.max(0, n - 20);
@@ -755,25 +882,33 @@ function detectLiquidityPools(
     pool.volumeNearPool = Math.round(volSum);
   };
 
-  for (const pool of buySidePools) annotatePool(pool, true);
-  for (const pool of sellSidePools) annotatePool(pool, false);
+    for (const pool of buySidePools) annotatePool(pool, true);
+    for (const pool of sellSidePools) annotatePool(pool, false);
 
-  return {
-    allBslPools: buySidePools,
-    allSslPools: sellSidePools,
-    buySidePools: buySidePools.slice(-6),
-    sellSidePools: sellSidePools.slice(-6),
-  };
-}
+    buySidePools.sort((a, b) => a.barIndex - b.barIndex);
+    sellSidePools.sort((a, b) => a.barIndex - b.barIndex);
 
-export const extractCausalLiquidityPools = detectLiquidityPools;
+    return {
+      allBslPools: buySidePools,
+      allSslPools: sellSidePools,
+      buySidePools: buySidePools.slice(-6),
+      sellSidePools: sellSidePools.slice(-6),
+    };
+  }
 
-/**
- * 2. Detects Fair Value Gaps (FVG) and computes Consequent Encroachment (50%)
- */
-function detectFairValueGaps(bars: OhlcvBar[], pipSize: number): IctFvgZone[] {
-  const fvgs: IctFvgZone[] = [];
-  const n = bars.length;
+  export const extractCausalLiquidityPools = detectLiquidityPools;
+
+  /**
+   * 2. Detects Fair Value Gaps (FVG), Inversion FVGs (IFVG), Balanced Price Ranges (BPR)
+   *    and computes Consequent Encroachment (50%)
+   */
+  function detectFairValueGapsAndBpr(
+    bars: OhlcvBar[],
+    pipSize: number,
+  ): { activeFvgs: IctFvgZone[]; bprZones: IctBprZone[] } {
+    const fvgs: IctFvgZone[] = [];
+    const n = bars.length;
+    const minGapPips = 2;
 
   for (let i = 2; i < n; i++) {
     const c0 = bars[i - 2];
@@ -784,19 +919,23 @@ function detectFairValueGaps(bars: OhlcvBar[], pipSize: number): IctFvgZone[] {
     if (c2.low > c0.high) {
       const top = c2.low;
       const bottom = c0.high;
-      const gapPips = (top - bottom) / pipSize;
+      const gapPips = (top - bottom) / Math.max(1e-12, pipSize);
 
-      if (gapPips >= 2.0) {
+      if (gapPips >= minGapPips) {
         let mitigated = false;
+        let isInversion = false;
         let lowestRetrace = top;
         for (let j = i + 1; j < n; j++) {
           if (bars[j].low < lowestRetrace) lowestRetrace = bars[j].low;
           if (bars[j].low <= bottom) {
             mitigated = true;
+          }
+          if (mitigated && bars[j].close < bottom - pipSize * 0.5) {
+            isInversion = true;
             break;
           }
         }
-        const mitigationPct = Math.min(100, Math.max(0, ((top - lowestRetrace) / (top - bottom)) * 100));
+        const mitigationPct = Math.min(100, Math.max(0, ((top - lowestRetrace) / Math.max(1e-12, top - bottom)) * 100));
 
         fvgs.push({
           id: `fvg_bull_${c1.time}`,
@@ -808,7 +947,7 @@ function detectFairValueGaps(bars: OhlcvBar[], pipSize: number): IctFvgZone[] {
           consequentEncroachment: (top + bottom) / 2,
           mitigated,
           mitigationPct: Math.round(mitigationPct),
-          isInversion: false,
+          isInversion,
         });
       }
     }
@@ -817,19 +956,23 @@ function detectFairValueGaps(bars: OhlcvBar[], pipSize: number): IctFvgZone[] {
     if (c2.high < c0.low) {
       const top = c0.low;
       const bottom = c2.high;
-      const gapPips = (top - bottom) / pipSize;
+      const gapPips = (top - bottom) / Math.max(1e-12, pipSize);
 
-      if (gapPips >= 2.0) {
+      if (gapPips >= minGapPips) {
         let mitigated = false;
+        let isInversion = false;
         let highestRetrace = bottom;
         for (let j = i + 1; j < n; j++) {
           if (bars[j].high > highestRetrace) highestRetrace = bars[j].high;
           if (bars[j].high >= top) {
             mitigated = true;
+          }
+          if (mitigated && bars[j].close > top + pipSize * 0.5) {
+            isInversion = true;
             break;
           }
         }
-        const mitigationPct = Math.min(100, Math.max(0, ((highestRetrace - bottom) / (top - bottom)) * 100));
+        const mitigationPct = Math.min(100, Math.max(0, ((highestRetrace - bottom) / Math.max(1e-12, top - bottom)) * 100));
 
         fvgs.push({
           id: `fvg_bear_${c1.time}`,
@@ -841,13 +984,120 @@ function detectFairValueGaps(bars: OhlcvBar[], pipSize: number): IctFvgZone[] {
           consequentEncroachment: (top + bottom) / 2,
           mitigated,
           mitigationPct: Math.round(mitigationPct),
-          isInversion: false,
+          isInversion,
         });
       }
     }
   }
 
-  return fvgs.filter((f) => !f.mitigated || f.mitigationPct < 75).slice(-5);
+  // Detect Balanced Price Ranges (BPR: overlapping Bullish FVG and Bearish FVG)
+  const bprZones: IctBprZone[] = [];
+  const recentFvgs = fvgs.slice(-12);
+  for (let a = 0; a < recentFvgs.length; a++) {
+    for (let b = a + 1; b < recentFvgs.length; b++) {
+      const f1 = recentFvgs[a]!;
+      const f2 = recentFvgs[b]!;
+      if (f1.direction === f2.direction) continue;
+      if (Math.abs(f2.barIndex - f1.barIndex) > 18) continue;
+      const overlapTop = Math.min(f1.top, f2.top);
+      const overlapBottom = Math.max(f1.bottom, f2.bottom);
+      if (overlapTop > overlapBottom + pipSize * 0.5) {
+        bprZones.push({
+          id: `bpr_${f1.barIndex}_${f2.barIndex}`,
+          barIndex: f2.barIndex,
+          direction: f2.direction === "BULLISH_FVG" ? "BULLISH_BPR" : "BEARISH_BPR",
+          top: overlapTop,
+          bottom: overlapBottom,
+          midpoint: (overlapTop + overlapBottom) / 2,
+        });
+      }
+    }
+  }
+
+    const activeFvgs = fvgs.filter((f) => !f.mitigated || f.mitigationPct < 75).slice(-5);
+
+    return { activeFvgs, bprZones: bprZones.slice(-3) };
+  }
+
+/**
+ * Evaluates Higher-Timeframe (HTF) Point of Interest (POI) Confluence causally.
+ */
+function evaluateHtfPoiConfluence(
+  htfBars: OhlcvBar[],
+  currentPrice: number,
+  pipSize: number,
+  assetType: "FOREX" | "CRYPTO" | "STOCK",
+  symbol: string,
+): HtfPoiContext | null {
+  if (!htfBars || htfBars.length < 16) return null;
+  const htfAtr = atr(htfBars, 14) ?? Math.max(pipSize * 15, currentPrice * 0.004);
+  const prox = Math.max(pipSize * 4, htfAtr * 0.35);
+  const fmtP = (p: number) => roundPrice(p, symbol, assetType);
+
+  const { activeFvgs } = detectFairValueGapsAndBpr(htfBars, pipSize);
+  const htfObs = detectOrderBlocksAndBreakers(htfBars);
+
+  for (let i = activeFvgs.length - 1; i >= 0; i--) {
+    const f = activeFvgs[i]!;
+    if (f.isInversion) continue;
+    if (currentPrice >= f.bottom - prox && currentPrice <= f.top + prox) {
+      const side = f.direction === "BULLISH_FVG" ? "BUY" : "SELL";
+      return {
+        alignedSide: side,
+        poiType: "HTF_FVG",
+        zoneLow: fmtP(f.bottom),
+        zoneHigh: fmtP(f.top),
+        rationaleVi: `Giá đang chạm vùng HTF ${f.direction} [${fmtP(f.bottom)} - ${fmtP(f.top)}]`,
+      };
+    }
+  }
+
+  for (let i = htfObs.length - 1; i >= 0; i--) {
+    const ob = htfObs[i]!;
+    if (currentPrice >= ob.low - prox && currentPrice <= ob.high + prox) {
+      const side = ob.direction === "BULLISH" ? "BUY" : "SELL";
+      const poiType = ob.type === "BREAKER_BLOCK" ? "HTF_BREAKER" : "HTF_ORDER_BLOCK";
+      return {
+        alignedSide: side,
+        poiType,
+        zoneLow: fmtP(ob.low),
+        zoneHigh: fmtP(ob.high),
+        rationaleVi: `Giá đang phản ứng tại ${poiType} (${ob.direction}) [${fmtP(ob.low)} - ${fmtP(ob.high)}]`,
+      };
+    }
+  }
+
+  const win = htfBars.slice(-24);
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (const b of win) {
+    if (b.high > hi) hi = b.high;
+    if (b.low < lo) lo = b.low;
+  }
+  const rng = Math.max(1e-12, hi - lo);
+  const bull618 = hi - rng * 0.618;
+  const bull786 = hi - rng * 0.786;
+  const bear618 = lo + rng * 0.618;
+  const bear786 = lo + rng * 0.786;
+  if (currentPrice >= bull786 - prox * 0.5 && currentPrice <= bull618 + prox * 0.5) {
+    return {
+      alignedSide: "BUY",
+      poiType: "HTF_OTE_ZONE",
+      zoneLow: fmtP(bull786),
+      zoneHigh: fmtP(bull618),
+      rationaleVi: `Giá nằm trong vùng chiết khấu HTF OTE Discount [${fmtP(bull786)} - ${fmtP(bull618)}]`,
+    };
+  }
+  if (currentPrice >= bear618 - prox * 0.5 && currentPrice <= bear786 + prox * 0.5) {
+    return {
+      alignedSide: "SELL",
+      poiType: "HTF_OTE_ZONE",
+      zoneLow: fmtP(bear618),
+      zoneHigh: fmtP(bear786),
+      rationaleVi: `Giá nằm trong vùng HTF OTE Premium [${fmtP(bear618)} - ${fmtP(bear786)}]`,
+    };
+  }
+  return null;
 }
 
 /**
@@ -1294,6 +1544,8 @@ function createEmptyResult(symbol: string, price: number): IctSmcAnalysisResult 
     liquidityMap: { buySidePools: [], sellSidePools: [], nearestBsl: null, nearestSsl: null },
     recentSweeps: [],
     activeFvgList: [],
+    bprZones: [],
+    htfPoiContext: null,
     orderBlocks: [],
     optimalTradeSetup: {
       direction: "NEUTRAL",
