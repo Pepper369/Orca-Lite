@@ -1216,3 +1216,438 @@ export function applySymmetricCusumFilter(
     adaptiveThreshold: Number(h.toFixed(6)),
   };
 }
+
+// ============================================================================
+// 9. Phase 3: Nested Clustered Optimization (NCO), Macro Factor Exposure
+//    Budgeting & Continuous Drawdown / Portfolio Volatility Governor
+// ============================================================================
+
+export interface NCOResult {
+  weights: Record<string, number>;
+  clusters: string[][];
+  intraClusterWeights: Record<string, number>;
+  interClusterWeights: number[];
+  effectiveClustersCount: number;
+}
+
+/**
+ * Nested Clustered Optimization (NCO) — Marcos López de Prado (2019)
+ * 1. Partitions N assets into K correlation clusters via Mantegna metric distance.
+ * 2. Solves regularized inverse-variance / minimum-variance weights within each cluster.
+ * 3. Forms the K x K reduced inter-cluster covariance matrix Sigma_reduced.
+ * 4. Allocates inter-cluster risk-parity weights across the K clusters and combines w_i = W_cluster(k) * w_{k,i}.
+ */
+export function calculateNestedClusteredOptimization(
+  symbols: string[],
+  covMatrix: number[][],
+  maxClusters?: number,
+): NCOResult {
+  const n = symbols.length;
+  if (n === 0) {
+    return {
+      weights: {},
+      clusters: [],
+      intraClusterWeights: {},
+      interClusterWeights: [],
+      effectiveClustersCount: 0,
+    };
+  }
+  if (n === 1) {
+    return {
+      weights: { [symbols[0]!]: 1.0 },
+      clusters: [[symbols[0]!]],
+      intraClusterWeights: { [symbols[0]!]: 1.0 },
+      interClusterWeights: [1.0],
+      effectiveClustersCount: 1,
+    };
+  }
+
+  // Derive correlation & Mantegna distance matrix
+  const stds = symbols.map((_, i) => Math.sqrt(Math.max(1e-8, covMatrix[i]?.[i] ?? 0.0006)));
+  const dist: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const c = (covMatrix[i]?.[j] ?? 0) / Math.max(1e-8, stds[i]! * stds[j]!);
+      const corr = Math.max(-0.99, Math.min(0.99, Number.isFinite(c) ? c : 0));
+      const d = Math.sqrt(Math.max(0, 0.5 * (1 - corr)));
+      dist[i]![j] = d;
+      dist[j]![i] = d;
+    }
+  }
+
+  const targetK = Math.max(
+    2,
+    Math.min(maxClusters ?? Math.max(2, Math.floor(Math.sqrt(n))), Math.ceil(n / 2)),
+  );
+
+  // Agglomerative clustering until targetK clusters remain
+  let indexClusters: number[][] = symbols.map((_, i) => [i]);
+  while (indexClusters.length > targetK) {
+    let bestD = Infinity;
+    let bestA = 0;
+    let bestB = 1;
+    for (let a = 0; a < indexClusters.length; a++) {
+      for (let b = a + 1; b < indexClusters.length; b++) {
+        // Average linkage distance between cluster a and cluster b
+        let sumD = 0;
+        let pairs = 0;
+        for (const u of indexClusters[a]!) {
+          for (const v of indexClusters[b]!) {
+            sumD += dist[u]![v]!;
+            pairs++;
+          }
+        }
+        const avgD = pairs > 0 ? sumD / pairs : Infinity;
+        if (avgD < bestD) {
+          bestD = avgD;
+          bestA = a;
+          bestB = b;
+        }
+      }
+    }
+    const merged = [...indexClusters[bestA]!, ...indexClusters[bestB]!];
+    indexClusters = indexClusters.filter((_, idx) => idx !== bestA && idx !== bestB);
+    indexClusters.push(merged);
+  }
+
+  const kCount = indexClusters.length;
+  const intraVecs: number[][] = [];
+  const intraClusterWeights: Record<string, number> = {};
+
+  // Step 2: Intra-cluster allocation (correlation-penalized inverse variance)
+  for (let k = 0; k < kCount; k++) {
+    const members = indexClusters[k]!;
+    const rawW: number[] = [];
+    let sumW = 0;
+    for (const idx of members) {
+      const varI = Math.max(1e-8, covMatrix[idx]?.[idx] ?? 0.0006);
+      // Penalize members with high average correlation inside the cluster
+      let avgIntraCorr = 0;
+      for (const other of members) {
+        if (other !== idx) {
+          const c = (covMatrix[idx]?.[other] ?? 0) / Math.max(1e-8, stds[idx]! * stds[other]!);
+          avgIntraCorr += Math.max(0, c);
+        }
+      }
+      const corrPenalty = members.length > 1 ? 1 + avgIntraCorr / (members.length - 1) : 1;
+      const w = 1 / (varI * corrPenalty);
+      rawW.push(w);
+      sumW += w;
+    }
+    const normW = rawW.map((w) => w / Math.max(1e-12, sumW));
+    intraVecs.push(normW);
+    members.forEach((idx, mPos) => {
+      intraClusterWeights[symbols[idx]!] = Number(normW[mPos]!.toFixed(4));
+    });
+  }
+
+  // Step 3: Reduced inter-cluster covariance matrix Sigma_reduced (K x K)
+  const reducedCov: number[][] = Array.from({ length: kCount }, () => new Array(kCount).fill(0));
+  for (let a = 0; a < kCount; a++) {
+    for (let b = a; b < kCount; b++) {
+      let covAB = 0;
+      const memA = indexClusters[a]!;
+      const memB = indexClusters[b]!;
+      for (let ia = 0; ia < memA.length; ia++) {
+        for (let ib = 0; ib < memB.length; ib++) {
+          const u = memA[ia]!;
+          const v = memB[ib]!;
+          covAB += intraVecs[a]![ia]! * intraVecs[b]![ib]! * (covMatrix[u]?.[v] ?? 0);
+        }
+      }
+      reducedCov[a]![b] = covAB;
+      reducedCov[b]![a] = covAB;
+    }
+  }
+
+  // Step 4: Inter-cluster Equal-Risk-Contribution / Inverse-Cluster-Variance weights
+  const rawInter: number[] = [];
+  let sumInter = 0;
+  for (let a = 0; a < kCount; a++) {
+    const clusterVar = Math.max(1e-8, reducedCov[a]![a]!);
+    const w = 1 / clusterVar;
+    rawInter.push(w);
+    sumInter += w;
+  }
+  const interClusterWeights = rawInter.map((w) => Number((w / Math.max(1e-12, sumInter)).toFixed(4)));
+
+  // Step 5: Combine intra-cluster and inter-cluster weights
+  const finalWeights: Record<string, number> = {};
+  let totalFinal = 0;
+  for (let k = 0; k < kCount; k++) {
+    const members = indexClusters[k]!;
+    const wCluster = rawInter[k]! / Math.max(1e-12, sumInter);
+    for (let mPos = 0; mPos < members.length; mPos++) {
+      const sym = symbols[members[mPos]!]!;
+      const val = wCluster * intraVecs[k]![mPos]!;
+      finalWeights[sym] = val;
+      totalFinal += val;
+    }
+  }
+
+  for (const sym of symbols) {
+    finalWeights[sym] = Number(((finalWeights[sym] ?? 0) / Math.max(1e-12, totalFinal)).toFixed(4));
+  }
+
+  return {
+    weights: finalWeights,
+    clusters: indexClusters.map((c) => c.map((idx) => symbols[idx]!)),
+    intraClusterWeights,
+    interClusterWeights,
+    effectiveClustersCount: kCount,
+  };
+}
+
+export type MacroFactorCluster =
+  | "USD_SHORT_RISK_ON"
+  | "USD_LONG_DEFENSIVE"
+  | "CRYPTO_BETA_LONG"
+  | "CRYPTO_BETA_SHORT"
+  | "CROSS_FX_IDIOSYNCRATIC"
+  | "VN_EQUITY_BETA";
+
+export interface FactorExposurePosition {
+  symbol: string;
+  assetType?: "FOREX" | "CRYPTO" | "VN_EQUITY";
+  direction: "BUY" | "SELL";
+  riskFractionPct?: number; // e.g. 1.0 for 1% account risk
+}
+
+export interface FactorExposureBudgetResult {
+  candidateCluster: MacroFactorCluster;
+  sameClusterOpenCount: number;
+  maxAllowedClusterPositions: number;
+  cumulativeClusterRiskPct: number;
+  maxAllowedClusterRiskPct: number;
+  allowed: boolean;
+  sizeMultiplier: number; // 1.0 (fresh cluster), 0.70 (2nd correlated position), 0 (rejected)
+  rationaleVi: string;
+}
+
+/**
+ * Maps an instrument + trade direction into its underlying Macro Factor Risk Cluster.
+ * Prevents the "Portfolio Blindness" trap where buying EURUSD, GBPUSD, AUDUSD, and XAUUSD
+ * simultaneously stacks 4x correlated Short-USD risk.
+ */
+export function classifyAssetFactorCluster(
+  symbol: string,
+  assetType: "FOREX" | "CRYPTO" | "VN_EQUITY",
+  direction: "BUY" | "SELL",
+): MacroFactorCluster {
+  if (assetType === "VN_EQUITY") return "VN_EQUITY_BETA";
+  const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  if (assetType === "CRYPTO" || clean.endsWith("USDT") || clean.endsWith("USDC")) {
+    return direction === "BUY" ? "CRYPTO_BETA_LONG" : "CRYPTO_BETA_SHORT";
+  }
+
+  const base = clean.slice(0, 3);
+  const quote = clean.slice(3, 6);
+
+  // Quote is USD (EURUSD, GBPUSD, AUDUSD, NZDUSD, XAUUSD, XAGUSD)
+  if (quote === "USD" || clean.startsWith("XAU") || clean.startsWith("XAG")) {
+    return direction === "BUY" ? "USD_SHORT_RISK_ON" : "USD_LONG_DEFENSIVE";
+  }
+  // Base is USD (USDJPY, USDCAD, USDCHF)
+  if (base === "USD") {
+    return direction === "BUY" ? "USD_LONG_DEFENSIVE" : "USD_SHORT_RISK_ON";
+  }
+
+  return "CROSS_FX_IDIOSYNCRATIC";
+}
+
+/**
+ * Evaluates Factor Exposure Budget before admitting a new trade into an active portfolio.
+ */
+export function evaluateFactorExposureBudget(params: {
+  candidateSymbol: string;
+  candidateAssetType: "FOREX" | "CRYPTO" | "VN_EQUITY";
+  candidateDirection: "BUY" | "SELL";
+  candidateRiskPct?: number;
+  openPositions: FactorExposurePosition[];
+  maxSameClusterPositions?: number; // default 2 positions per macro factor cluster
+  maxClusterRiskPct?: number; // default 2.2% cumulative account risk per factor cluster
+}): FactorExposureBudgetResult {
+  const {
+    candidateSymbol,
+    candidateAssetType,
+    candidateDirection,
+    candidateRiskPct = 1.0,
+    openPositions,
+    maxSameClusterPositions = 2,
+    maxClusterRiskPct = 2.2,
+  } = params;
+
+  const candidateCluster = classifyAssetFactorCluster(
+    candidateSymbol,
+    candidateAssetType,
+    candidateDirection,
+  );
+
+  let sameClusterOpenCount = 0;
+  let existingClusterRiskPct = 0;
+
+  for (const pos of openPositions) {
+    const posAssetType =
+      pos.assetType ??
+      (pos.symbol.toUpperCase().endsWith("USDT") ? "CRYPTO" : "FOREX");
+    const c = classifyAssetFactorCluster(pos.symbol, posAssetType, pos.direction);
+    if (c === candidateCluster) {
+      sameClusterOpenCount++;
+      existingClusterRiskPct += pos.riskFractionPct ?? 1.0;
+    }
+  }
+
+  const cumulativeClusterRiskPct = Number((existingClusterRiskPct + candidateRiskPct).toFixed(2));
+
+  if (sameClusterOpenCount >= maxSameClusterPositions) {
+    return {
+      candidateCluster,
+      sameClusterOpenCount,
+      maxAllowedClusterPositions: maxSameClusterPositions,
+      cumulativeClusterRiskPct,
+      maxAllowedClusterRiskPct: maxClusterRiskPct,
+      allowed: false,
+      sizeMultiplier: 0,
+      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Danh mục đã mở ${sameClusterOpenCount}/${maxSameClusterPositions} vị thế cùng cụm rủi ro vĩ mô.`,
+    };
+  }
+
+  if (existingClusterRiskPct >= maxClusterRiskPct) {
+    return {
+      candidateCluster,
+      sameClusterOpenCount,
+      maxAllowedClusterPositions: maxSameClusterPositions,
+      cumulativeClusterRiskPct,
+      maxAllowedClusterRiskPct: maxClusterRiskPct,
+      allowed: false,
+      sizeMultiplier: 0,
+      rationaleVi: `Từ chối cấp vốn nhân tố [${candidateCluster}]: Rủi ro tích lũy của cụm (${existingClusterRiskPct.toFixed(2)}%) đã chạm trần ${maxClusterRiskPct}%.`,
+    };
+  }
+
+  // Dampen position size to 0.70x when adding a 2nd correlated position in the same macro factor cluster
+  const sizeMultiplier = sameClusterOpenCount === 0 ? 1.0 : 0.70;
+  const rationaleVi =
+    sameClusterOpenCount === 0
+      ? `Cụm nhân tố [${candidateCluster}] thông thoáng (0/${maxSameClusterPositions} vị thế) -> Cấp 100% quy mô chuẩn.`
+      : `Cụm nhân tố [${candidateCluster}] đã có ${sameClusterOpenCount} vị thế -> Giảm quy mô lệnh mới xuống ${(sizeMultiplier * 100).toFixed(0)}% để chống tập trung rủi ro.`;
+
+  return {
+    candidateCluster,
+    sameClusterOpenCount,
+    maxAllowedClusterPositions: maxSameClusterPositions,
+    cumulativeClusterRiskPct,
+    maxAllowedClusterRiskPct: maxClusterRiskPct,
+    allowed: true,
+    sizeMultiplier,
+    rationaleVi,
+  };
+}
+
+export interface ContinuousDrawdownGovernorResult {
+  effectiveDrawdownPct: number;
+  dailyLossUtilizationPct: number;
+  drawdownDeleverageScale: number; // [0.25, 1.0] or 0 when locked out
+  volTargetingScale: number; // [0.40, 1.25]
+  recommendedSizeScale: number; // combined product
+  isLockedOut: boolean;
+  rationaleVi: string;
+}
+
+/**
+ * Dynamic Portfolio Volatility Targeting & Continuous Drawdown De-leveraging Curve.
+ * Smoothly scales position size from 1.0x down to 0.25x as drawdown or daily loss utilization rises,
+ * avoiding abrupt cliff-edge risk before the hard daily circuit breaker fires.
+ */
+export function evaluateContinuousDrawdownGovernor(params: {
+  currentBalanceUsd: number;
+  peakBalanceUsd?: number | null;
+  dailyRealizedPnlUsd?: number | null;
+  maxDailyLossUsd?: number | null;
+  portfolioAnnualizedVol?: number | null;
+  targetAnnualizedVol?: number; // default 0.18 (18%)
+  softDrawdownStartPct?: number; // default 1.5%
+  hardDrawdownLimitPct?: number; // default 6.0%
+  minDeleveragedScale?: number; // default 0.25
+}): ContinuousDrawdownGovernorResult {
+  const {
+    currentBalanceUsd,
+    peakBalanceUsd,
+    dailyRealizedPnlUsd = 0,
+    maxDailyLossUsd = 500,
+    portfolioAnnualizedVol,
+    targetAnnualizedVol = 0.18,
+    softDrawdownStartPct = 1.5,
+    hardDrawdownLimitPct = 6.0,
+    minDeleveragedScale = 0.25,
+  } = params;
+
+  const bal = Math.max(100, currentBalanceUsd);
+  const peak = Math.max(bal, peakBalanceUsd ?? bal);
+  const peakDdPct = ((peak - bal) / peak) * 100;
+  const dailyLossUsd = Math.max(0, -(dailyRealizedPnlUsd ?? 0));
+  const dailyDdPct = (dailyLossUsd / bal) * 100;
+  const effectiveDrawdownPct = Number(Math.max(peakDdPct, dailyDdPct).toFixed(2));
+
+  const maxDaily = Math.max(10, maxDailyLossUsd ?? 500);
+  const dailyLossUtilizationPct = Number(((dailyLossUsd / maxDaily) * 100).toFixed(1));
+
+  if (dailyLossUsd >= maxDaily || effectiveDrawdownPct >= hardDrawdownLimitPct) {
+    return {
+      effectiveDrawdownPct,
+      dailyLossUtilizationPct,
+      drawdownDeleverageScale: 0,
+      volTargetingScale: 1.0,
+      recommendedSizeScale: 0,
+      isLockedOut: true,
+      rationaleVi: `Ngắt mạch bảo vệ vốn: Drawdown ${effectiveDrawdownPct}% (Sử dụng ${dailyLossUtilizationPct}% hạn mức lỗ ngày).`,
+    };
+  }
+
+  // Linear de-leveraging curve between softDrawdownStartPct and hardDrawdownLimitPct
+  let ddScale = 1.0;
+  if (effectiveDrawdownPct > softDrawdownStartPct) {
+    const progress =
+      (effectiveDrawdownPct - softDrawdownStartPct) /
+      Math.max(0.5, hardDrawdownLimitPct - softDrawdownStartPct);
+    ddScale = Math.max(minDeleveragedScale, 1.0 - (1.0 - minDeleveragedScale) * Math.min(1, progress));
+  }
+
+  // Also de-leverage smoothly if daily loss utilization exceeds 30% of daily limit
+  let dailyUtilScale = 1.0;
+  if (dailyLossUtilizationPct > 30) {
+    const utilProgress = (dailyLossUtilizationPct - 30) / 70;
+    dailyUtilScale = Math.max(
+      minDeleveragedScale,
+      1.0 - (1.0 - minDeleveragedScale) * Math.min(1, utilProgress),
+    );
+  }
+
+  const drawdownDeleverageScale = Number(Math.min(ddScale, dailyUtilScale).toFixed(3));
+
+  let volTargetingScale = 1.0;
+  if (portfolioAnnualizedVol != null && Number.isFinite(portfolioAnnualizedVol) && portfolioAnnualizedVol > 0) {
+    volTargetingScale = Number(
+      Math.max(0.40, Math.min(1.25, targetAnnualizedVol / Math.max(0.05, portfolioAnnualizedVol))).toFixed(3),
+    );
+  }
+
+  const recommendedSizeScale = Number(
+    Math.max(minDeleveragedScale, Math.min(1.25, drawdownDeleverageScale * volTargetingScale)).toFixed(3),
+  );
+
+  const rationaleVi =
+    `Drawdown Governor: DD=${effectiveDrawdownPct}% (Daily Loss ${dailyLossUtilizationPct}%) -> ` +
+    `Hệ số giảm đòn bẩy=${drawdownDeleverageScale}x × VolTarget=${volTargetingScale}x => Quy mô khuyến nghị=${recommendedSizeScale}x.`;
+
+  return {
+    effectiveDrawdownPct,
+    dailyLossUtilizationPct,
+    drawdownDeleverageScale,
+    volTargetingScale,
+    recommendedSizeScale,
+    isLockedOut: false,
+    rationaleVi,
+  };
+}

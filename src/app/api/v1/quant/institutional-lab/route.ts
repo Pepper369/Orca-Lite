@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   calculateHRP,
+  calculateNestedClusteredOptimization,
   estimateOrnsteinUhlenbeck,
   calculateAlmgrenChrissExecution,
   calculateDeflatedSharpeRatio,
   calculateVaRAndCVaR,
   calculateTripleBarrierLevels,
+  evaluateContinuousDrawdownGovernor,
+  evaluateFactorExposureBudget,
 } from "@/lib/engines/advanced-quant-math";
+import {
+  getEmpiricalFrictionTelemetry,
+  planSmartOrderExecution,
+} from "@/lib/engines/exchange-execution-client";
 import {
   MiQuantEngine,
   resolveEmpiricalCovarianceForSymbols,
@@ -30,6 +37,7 @@ export async function GET(req: NextRequest) {
           const vols = b.target_holdings.map((h) => (h.metrics?.atr_pct || 2.5) / 100);
           const { covMatrix, source } = await resolveEmpiricalCovarianceForSymbols(symbols, vols);
           const hrp = calculateHRP(symbols, covMatrix);
+          const nco = calculateNestedClusteredOptimization(symbols, covMatrix);
 
           return {
             id: b.id,
@@ -37,6 +45,8 @@ export async function GET(req: NextRequest) {
             backtest: b.backtest,
             institutional_metrics: b.institutional_metrics,
             hrp_weights: hrp.weights,
+            nco_weights: nco.weights,
+            nco_clusters: nco.clusters,
             ordered_symbols: hrp.orderedSymbols,
             covariance_source: source,
           };
@@ -47,13 +57,14 @@ export async function GET(req: NextRequest) {
         success: true,
         data: {
           botAnalytics,
+          executionTelemetry: getEmpiricalFrictionTelemetry(),
           frameworks: [
-            "Hierarchical Risk Parity (HRP) - Marcos López de Prado (2016)",
+            "Hierarchical Risk Parity (HRP) & Nested Clustered Optimization (NCO) - Marcos López de Prado",
             "Ornstein-Uhlenbeck (OU) Mean Reversion Half-Life",
-            "Almgren-Chriss (2000) Optimal Execution Trajectory",
-            "Deflated Sharpe Ratio (DSR) - Multiple Testing Adjustment",
-            "Triple-Barrier Method - Dynamic Volatility Horizons",
-            "Value-at-Risk (VaR) & Expected Shortfall (CVaR)",
+            "Almgren-Chriss (2000) Optimal Execution & Post-Only Maker Pegging",
+            "Deflated Sharpe Ratio (DSR) & Combinatorial Purged PBO",
+            "Triple-Barrier Method & Purged Isotonic Meta-Labeling",
+            "Value-at-Risk (VaR), Expected Shortfall (CVaR) & Continuous Drawdown Governor",
           ],
         },
       });
@@ -140,6 +151,51 @@ export async function POST(req: NextRequest) {
         ? body.returns.filter((v): v is number => typeof v === "number" && Number.isFinite(v)).slice(0, 2000)
         : [-0.02, 0.01, -0.015, 0.02, -0.01, 0.005, -0.025, 0.015];
       const result = calculateVaRAndCVaR(returns);
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "nco") {
+      const rawSymbols = Array.isArray(body.symbols) ? body.symbols : ["FPT", "VNM", "SSI", "HPG", "VCB", "MBB"];
+      const symbols: string[] = rawSymbols
+        .filter((s): s is string => isValidTradingSymbol(s))
+        .map((s) => s.trim().toUpperCase())
+        .slice(0, 30);
+      if (symbols.length === 0) {
+        return NextResponse.json({ success: false, error: "Invalid symbols" }, { status: 400 });
+      }
+      const n = symbols.length;
+      let cov: number[][] | undefined = Array.isArray(body.covMatrix) ? (body.covMatrix as number[][]) : undefined;
+      let covSource = "CALLER_SUPPLIED";
+      if (!cov || cov.length !== n || cov.some((row) => !Array.isArray(row) || row.length !== n)) {
+        const emp = await resolveEmpiricalCovarianceForSymbols(symbols, symbols.map(() => 0.025));
+        cov = emp.covMatrix;
+        covSource = emp.source;
+      }
+      const result = calculateNestedClusteredOptimization(symbols, cov);
+      return NextResponse.json({ success: true, data: { ...result, covariance_source: covSource } });
+    }
+
+    if (type === "drawdown_governor") {
+      const result = evaluateContinuousDrawdownGovernor({
+        currentBalanceUsd: Number(body.currentBalanceUsd || 10000),
+        peakBalanceUsd: body.peakBalanceUsd != null ? Number(body.peakBalanceUsd) : undefined,
+        dailyRealizedPnlUsd: Number(body.dailyRealizedPnlUsd || 0),
+        maxDailyLossUsd: Number(body.maxDailyLossUsd || 500),
+        portfolioAnnualizedVol: body.portfolioAnnualizedVol != null ? Number(body.portfolioAnnualizedVol) : undefined,
+      });
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "smart_execution") {
+      const result = planSmartOrderExecution({
+        symbol: typeof body.symbol === "string" ? body.symbol : "BTCUSDT",
+        direction: body.direction === "SELL" ? "SELL" : "BUY",
+        totalQty: Number(body.totalQty || 0.5),
+        entryPrice: Number(body.entryPrice || 91000),
+        bestBid: body.bestBid != null ? Number(body.bestBid) : undefined,
+        bestAsk: body.bestAsk != null ? Number(body.bestAsk) : undefined,
+        top5BookDepthUsd: body.top5BookDepthUsd != null ? Number(body.top5BookDepthUsd) : undefined,
+      });
       return NextResponse.json({ success: true, data: result });
     }
 

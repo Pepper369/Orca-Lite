@@ -1,4 +1,6 @@
 import { createHmac } from "node:crypto";
+import { calculateAlmgrenChrissExecution } from "./advanced-quant-math";
+import { generateMakerPeggingGuide } from "./quant-reversal-pace";
 
 export interface BrokerCredentialsInput {
   apiKey: string;
@@ -104,6 +106,311 @@ export function computeMultiTierTpChunks(params: {
   }
 
   return [{ tier: "TP1", price: p1, qty: totalQty, closePosition: true }];
+}
+
+// ============================================================================
+// Phase 3: Smart Order Execution Router (Almgren-Chriss + Post-Only Maker Peg)
+//          & Closed-Loop Implementation Shortfall / Slippage Calibration
+// ============================================================================
+
+export interface SmartExecutionSlicePlan {
+  sliceIndex: number;
+  qty: number;
+  limitPrice: number;
+  delayMs: number;
+  pctOfTotal: number;
+}
+
+export interface SmartOrderExecutionPlan {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  executionMode: "POST_ONLY_MAKER_PEG" | "ALMGREN_CHRISS_SLICED" | "IMMEDIATE_MARKET";
+  totalQty: number;
+  orderNotionalUsd: number;
+  depthParticipationRatio: number;
+  peggedLimitPrice: number;
+  pegWindowMs: number;
+  binanceTimeInForce: "GTX" | "GTC" | "IOC";
+  okxOrderType: "post_only" | "limit" | "market";
+  fallbackToMarketOnTimeout: boolean;
+  expectedFeeSavingsUsd: number;
+  slices: SmartExecutionSlicePlan[];
+  rationaleVi: string;
+}
+
+/**
+ * Plans adaptive order execution:
+ * - Small/normal orders (<= 15% of top-5 L2 depth): Post-Only Maker Pegging (GTX / post_only) with Market fallback.
+ * - Large institutional orders (> 15% of top-5 L2 depth): Almgren-Chriss multi-slice trajectory to minimize market impact.
+ */
+export function planSmartOrderExecution(params: {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  totalQty: number;
+  entryPrice: number;
+  bestBid?: number | null;
+  bestAsk?: number | null;
+  top5BookDepthUsd?: number | null;
+  dailyVolatilityPct?: number;
+  urgency?: "PASSIVE_MAKER" | "BALANCED" | "IMMEDIATE_TAKER";
+  tickSize?: number | string;
+  stepSize?: number | string;
+}): SmartOrderExecutionPlan {
+  const {
+    symbol,
+    direction,
+    totalQty,
+    entryPrice,
+    bestBid,
+    bestAsk,
+    top5BookDepthUsd,
+    dailyVolatilityPct = 2.2,
+    urgency = "BALANCED",
+    tickSize = "0.01",
+    stepSize = "0.001",
+  } = params;
+
+  const tick = Number(tickSize) > 0 ? Number(tickSize) : entryPrice * 0.0001;
+  const bid = bestBid && bestBid > 0 ? bestBid : entryPrice - tick;
+  const ask = bestAsk && bestAsk > 0 ? bestAsk : entryPrice + tick;
+  const orderNotionalUsd = Number((totalQty * entryPrice).toFixed(2));
+  const effDepthUsd = top5BookDepthUsd && top5BookDepthUsd > 0 ? top5BookDepthUsd : Math.max(50_000, orderNotionalUsd * 10);
+  const depthParticipationRatio = Number((orderNotionalUsd / effDepthUsd).toFixed(4));
+
+  const makerGuide = generateMakerPeggingGuide({
+    symbol,
+    currentPrice: entryPrice,
+    direction,
+    favoriteProbability: 0.96,
+    tailProbability: 0.04,
+    pipSize: tick,
+    assetType: "CRYPTO",
+  });
+  // Ensure post-only limit price never crosses the opposite top-of-book (GTX / post_only invariant)
+  const rawPegPrice =
+    direction === "BUY"
+      ? Math.min(makerGuide.peggedPrice, ask - tick, bid)
+      : Math.max(makerGuide.peggedPrice, bid + tick, ask);
+  const peggedLimitPrice = roundTickSize(rawPegPrice, tickSize);
+  // Taker (0.04%) vs Maker (0.015% or rebate) saves ~2.5 bps (0.00025) of orderNotionalUsd
+  const expectedFeeSavingsUsd = Number((orderNotionalUsd * 0.00025).toFixed(2));
+
+  // Case 1: Large order (> 15% of top-5 L2 depth) -> Almgren-Chriss multi-slice optimal trajectory
+  if (depthParticipationRatio > 0.15 && totalQty > 0) {
+    const slicesCount = Math.min(6, Math.max(3, Math.ceil(depthParticipationRatio / 0.12)));
+    const ac = calculateAlmgrenChrissExecution({
+      totalShares: 10_000, // Normalized basis points of totalQty
+      totalTimeHours: 0.25, // 15-minute execution window
+      intervalsCount: slicesCount,
+      riskAversion: urgency === "IMMEDIATE_TAKER" ? 0.001 : 0.00015,
+      dailyVolatilityPct,
+      tempImpactFactor: 2e-6,
+      currentPrice: entryPrice,
+    });
+
+    let allocatedQty = 0;
+    const slices: SmartExecutionSlicePlan[] = [];
+    for (let i = 0; i < ac.schedule.length; i++) {
+      const s = ac.schedule[i]!;
+      const isLast = i === ac.schedule.length - 1;
+      const rawSliceQty = isLast
+        ? Math.max(0, totalQty - allocatedQty)
+        : (totalQty * s.sharesToTrade) / 10_000;
+      const sliceQty = roundStepSize(rawSliceQty, stepSize);
+      if (sliceQty <= 0) continue;
+      allocatedQty += sliceQty;
+      slices.push({
+        sliceIndex: slices.length + 1,
+        qty: sliceQty,
+        limitPrice: peggedLimitPrice,
+        delayMs: i * 3000,
+        pctOfTotal: Number(((sliceQty / Math.max(1e-12, totalQty)) * 100).toFixed(1)),
+      });
+    }
+
+    return {
+      symbol,
+      direction,
+      executionMode: "ALMGREN_CHRISS_SLICED",
+      totalQty,
+      orderNotionalUsd,
+      depthParticipationRatio,
+      peggedLimitPrice,
+      pegWindowMs: 5000,
+      binanceTimeInForce: "GTX",
+      okxOrderType: "post_only",
+      fallbackToMarketOnTimeout: true,
+      expectedFeeSavingsUsd,
+      slices:
+        slices.length > 0
+          ? slices
+          : [{ sliceIndex: 1, qty: totalQty, limitPrice: peggedLimitPrice, delayMs: 0, pctOfTotal: 100 }],
+      rationaleVi: `Lệnh lớn chiếm ${(depthParticipationRatio * 100).toFixed(1)}% thanh khoản L2 Top-5 -> Cắt ${slices.length} nhịp Almgren-Chriss (${ac.summary.urgencyType}) kết hợp Post-Only Peg @ ${peggedLimitPrice}.`,
+    };
+  }
+
+  // Case 2: Immediate Taker urgency
+  if (urgency === "IMMEDIATE_TAKER") {
+    return {
+      symbol,
+      direction,
+      executionMode: "IMMEDIATE_MARKET",
+      totalQty,
+      orderNotionalUsd,
+      depthParticipationRatio,
+      peggedLimitPrice: roundTickSize(entryPrice, tickSize),
+      pegWindowMs: 0,
+      binanceTimeInForce: "IOC",
+      okxOrderType: "market",
+      fallbackToMarketOnTimeout: true,
+      expectedFeeSavingsUsd: 0,
+      slices: [{ sliceIndex: 1, qty: totalQty, limitPrice: roundTickSize(entryPrice, tickSize), delayMs: 0, pctOfTotal: 100 }],
+      rationaleVi: `Khớp Market/IOC tức thời cho tín hiệu xung lực khẩn cấp.`,
+    };
+  }
+
+  // Case 3: Standard order -> Post-Only Maker Pegging with 8s timeout fallback
+  return {
+    symbol,
+    direction,
+    executionMode: "POST_ONLY_MAKER_PEG",
+    totalQty,
+    orderNotionalUsd,
+    depthParticipationRatio,
+    peggedLimitPrice,
+    pegWindowMs: 8000,
+    binanceTimeInForce: "GTX",
+    okxOrderType: "post_only",
+    fallbackToMarketOnTimeout: true,
+    expectedFeeSavingsUsd,
+    slices: [{ sliceIndex: 1, qty: totalQty, limitPrice: peggedLimitPrice, delayMs: 0, pctOfTotal: 100 }],
+    rationaleVi: `Post-Only Maker Peg (GTX) @ ${peggedLimitPrice} trong 8s (Tiết kiệm ~$${expectedFeeSavingsUsd} phí Taker-Maker, tự động fallback nếu chưa khớp).`,
+  };
+}
+
+export interface ExecutionSlippageSample {
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+  direction: "BUY" | "SELL";
+  intendedEntryPrice: number;
+  executedFillPrice: number;
+  stopLossPrice: number;
+  realizedSlippageBps: number;
+  realizedFrictionR: number;
+  timestamp: number;
+}
+
+export interface EmpiricalFrictionSummary {
+  sampleCount: number;
+  avgSlippageBps: number;
+  p95SlippageBps: number;
+  empiricalFrictionR: number;
+  recommendedFrictionROverride: number | null;
+}
+
+const SLIPPAGE_TELEMETRY_BUFFER: ExecutionSlippageSample[] = [];
+const MAX_SLIPPAGE_TELEMETRY_SAMPLES = 250;
+
+/**
+ * Records realized execution price vs intended signal entry price to close the feedback loop
+ * between live execution and research `frictionR` assumptions.
+ */
+export function recordExecutionSlippageTelemetry(params: {
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+  direction: "BUY" | "SELL";
+  intendedEntryPrice: number;
+  executedFillPrice: number;
+  stopLossPrice: number;
+  timestamp?: number;
+}): ExecutionSlippageSample | null {
+  const {
+    symbol,
+    assetType,
+    direction,
+    intendedEntryPrice,
+    executedFillPrice,
+    stopLossPrice,
+    timestamp = Date.now(),
+  } = params;
+
+  if (
+    !Number.isFinite(intendedEntryPrice) ||
+    !Number.isFinite(executedFillPrice) ||
+    intendedEntryPrice <= 0 ||
+    executedFillPrice <= 0
+  ) {
+    return null;
+  }
+
+  const dirSign = direction === "BUY" ? 1 : -1;
+  // Positive adverseDelta means fill was worse than intended entry
+  const adverseDelta = dirSign * (executedFillPrice - intendedEntryPrice);
+  const realizedSlippageBps = Number(((adverseDelta / intendedEntryPrice) * 10_000).toFixed(3));
+  const riskDist = Math.max(1e-12, Math.abs(intendedEntryPrice - stopLossPrice));
+  const feeBaselinePrice =
+    assetType === "CRYPTO" ? intendedEntryPrice * 0.0006 : riskDist * 0.04;
+  const realizedFrictionR = Number(
+    (Math.max(0, adverseDelta + feeBaselinePrice) / riskDist).toFixed(4),
+  );
+
+  const sample: ExecutionSlippageSample = {
+    symbol: symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""),
+    assetType,
+    direction,
+    intendedEntryPrice,
+    executedFillPrice,
+    stopLossPrice,
+    realizedSlippageBps,
+    realizedFrictionR,
+    timestamp,
+  };
+
+  SLIPPAGE_TELEMETRY_BUFFER.push(sample);
+  if (SLIPPAGE_TELEMETRY_BUFFER.length > MAX_SLIPPAGE_TELEMETRY_SAMPLES) {
+    SLIPPAGE_TELEMETRY_BUFFER.shift();
+  }
+  return sample;
+}
+
+/**
+ * Returns empirical Implementation Shortfall & `frictionR` statistics from recorded executions.
+ */
+export function getEmpiricalFrictionTelemetry(symbol?: string): EmpiricalFrictionSummary {
+  const cleanSym = symbol ? symbol.toUpperCase().replace(/[^A-Z0-9]/g, "") : null;
+  const list = cleanSym
+    ? SLIPPAGE_TELEMETRY_BUFFER.filter((s) => s.symbol === cleanSym)
+    : SLIPPAGE_TELEMETRY_BUFFER;
+
+  const n = list.length;
+  if (n === 0) {
+    return {
+      sampleCount: 0,
+      avgSlippageBps: 0,
+      p95SlippageBps: 0,
+      empiricalFrictionR: 0.06,
+      recommendedFrictionROverride: null,
+    };
+  }
+
+  const avgSlippageBps = Number(
+    (list.reduce((s, x) => s + x.realizedSlippageBps, 0) / n).toFixed(2),
+  );
+  const sortedBps = list.map((x) => x.realizedSlippageBps).sort((a, b) => a - b);
+  const p95SlippageBps = Number(
+    (sortedBps[Math.min(n - 1, Math.floor(n * 0.95))] ?? avgSlippageBps).toFixed(2),
+  );
+  const empiricalFrictionR = Number(
+    (list.reduce((s, x) => s + x.realizedFrictionR, 0) / n).toFixed(4),
+  );
+
+  return {
+    sampleCount: n,
+    avgSlippageBps,
+    p95SlippageBps,
+    empiricalFrictionR,
+    recommendedFrictionROverride: n >= 3 ? empiricalFrictionR : null,
+  };
 }
 
 interface CacheEntry<T> {

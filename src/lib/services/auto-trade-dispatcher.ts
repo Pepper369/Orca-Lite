@@ -1,5 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import {
+  evaluateContinuousDrawdownGovernor,
+  evaluateFactorExposureBudget,
+  type FactorExposurePosition,
+} from "@/lib/engines/advanced-quant-math";
 import { getAssetPipSize } from "@/lib/engines/asset-precision";
 import {
   calculateProportionalCopySize,
@@ -12,6 +17,7 @@ import {
   placeBinanceFuturesOrder,
   placeMetaApiMt5Order,
   placeOkxSwapOrder,
+  recordExecutionSlippageTelemetry,
 } from "@/lib/engines/exchange-execution-client";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import {
@@ -103,12 +109,24 @@ function checkSlippage(
   return { passed: guard.allowed, slippagePips: guard.slippagePips };
 }
 
-function computeOrderSize(signal: DispatchableSignalInput, acct: FollowerAccount): { qtyOrLots: number; leverage: number } {
+function computeOrderSize(
+  signal: DispatchableSignalInput,
+  acct: FollowerAccount,
+  factorSizeMultiplier = 1.0,
+): { qtyOrLots: number; leverage: number } {
   const levCap = Math.max(1, Math.min(20, acct.leverageCap ?? 5));
   const leverage = Math.max(1, Math.min(levCap, Math.round(signal.recommendedLeverage ?? 3)));
 
+  // Phase 3: Continuous Drawdown De-leveraging Governor
+  const ddGovernor = evaluateContinuousDrawdownGovernor({
+    currentBalanceUsd: acct.balanceUsd,
+    dailyRealizedPnlUsd: acct.dailyRealizedPnlUsd ?? 0,
+    maxDailyLossUsd: acct.maxDailyLossUsd ?? 500,
+  });
+  const combinedScale = Math.max(0.2, Math.min(1.25, ddGovernor.recommendedSizeScale * factorSizeMultiplier));
+
   if (signal.assetType === "CRYPTO") {
-    const riskPct = Math.max(0.25, Math.min(3.0, 1.0 * acct.riskMultiplier));
+    const riskPct = Math.max(0.20, Math.min(3.0, 1.0 * acct.riskMultiplier * combinedScale));
     const sizing = calculateCryptoPositionSize({
       accountBalance: acct.balanceUsd,
       riskPercent: riskPct,
@@ -122,7 +140,10 @@ function computeOrderSize(signal: DispatchableSignalInput, acct: FollowerAccount
       : Number(
           Math.max(
             0.001,
-            signal.masterLotsOrQty * (acct.balanceUsd / Math.max(100, signal.masterCapitalUsd)) * acct.riskMultiplier,
+            signal.masterLotsOrQty *
+              (acct.balanceUsd / Math.max(100, signal.masterCapitalUsd)) *
+              acct.riskMultiplier *
+              combinedScale,
           ).toFixed(4),
         );
     return { qtyOrLots: qty, leverage };
@@ -132,7 +153,7 @@ function computeOrderSize(signal: DispatchableSignalInput, acct: FollowerAccount
     masterLotsOrQty: signal.masterLotsOrQty,
     masterCapitalUsd: signal.masterCapitalUsd,
     followerBalanceUsd: acct.balanceUsd,
-    riskMultiplier: acct.riskMultiplier,
+    riskMultiplier: acct.riskMultiplier * combinedScale,
     assetType: "FOREX",
   });
   return { qtyOrLots: lots, leverage: 1 };
@@ -303,9 +324,10 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
   const results: CopyExecutionOrder[] = [];
 
-  // Track currently open positions per account for autonomous portfolio concentration & duplicate-pair guard
+  // Track currently open positions per account for autonomous portfolio concentration, duplicate-pair & Factor Exposure Budgeting
   const openCountByAccount = new Map<string, number>();
   const openSymbolsByAccount = new Map<string, Set<string>>();
+  const openPositionsByAccount = new Map<string, FactorExposurePosition[]>();
   if (!manualOverride && !opts.overrideAccounts) {
     const existingOrders = await listBotExecutionOrders(150);
     for (const o of existingOrders) {
@@ -314,9 +336,19 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         !o.message.startsWith("[ĐÃ ĐÓNG]")
       ) {
         openCountByAccount.set(o.followerId, (openCountByAccount.get(o.followerId) ?? 0) + 1);
+        const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
         const set = openSymbolsByAccount.get(o.followerId) ?? new Set<string>();
-        set.add(o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+        set.add(cleanSym);
         openSymbolsByAccount.set(o.followerId, set);
+
+        const posList = openPositionsByAccount.get(o.followerId) ?? [];
+        posList.push({
+          symbol: cleanSym,
+          assetType: cleanSym.endsWith("USDT") || cleanSym.endsWith("USDC") ? "CRYPTO" : "FOREX",
+          direction: o.direction,
+          riskFractionPct: 1.0,
+        });
+        openPositionsByAccount.set(o.followerId, posList);
       }
     }
   }
@@ -382,7 +414,8 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       continue;
     }
 
-    // 2b) Portfolio Concentration & Active Symbol Guard (autonomous mode)
+    // 2b) Portfolio Concentration, Active Symbol & Macro Factor Exposure Budget Guard (autonomous mode)
+    let factorSizeMultiplier = 1.0;
     if (!manualOverride && !opts.overrideAccounts) {
       const cleanSym = signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
       const activeSyms = openSymbolsByAccount.get(acct.id);
@@ -394,6 +427,19 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       if (currentOpen >= maxOpen) {
         continue;
       }
+
+      const factorBudget = evaluateFactorExposureBudget({
+        candidateSymbol: cleanSym,
+        candidateAssetType: signal.assetType,
+        candidateDirection: signal.direction,
+        candidateRiskPct: Math.max(0.25, Math.min(3.0, 1.0 * acct.riskMultiplier)),
+        openPositions: openPositionsByAccount.get(acct.id) ?? [],
+        maxSameClusterPositions: Math.min(2, maxOpen),
+      });
+      if (!factorBudget.allowed) {
+        continue;
+      }
+      factorSizeMultiplier = factorBudget.sizeMultiplier;
     }
 
     // 3) Asset-Class compatibility check
@@ -532,7 +578,7 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     INFLIGHT_IDEMPOTENCY_LOCKS.add(idempotencyKey);
     let executed: CopyExecutionOrder;
     try {
-      const { qtyOrLots, leverage } = computeOrderSize(signal, acct);
+      const { qtyOrLots, leverage } = computeOrderSize(signal, acct, factorSizeMultiplier);
       executed = await executor(
         acct,
         signal,
@@ -549,9 +595,30 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
 
     if (executed.status === "FILLED" || executed.status === "FILLED_PAPER" || executed.status === "PENDING_EA") {
       openCountByAccount.set(acct.id, (openCountByAccount.get(acct.id) ?? 0) + 1);
+      const cleanSym = signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
       const set = openSymbolsByAccount.get(acct.id) ?? new Set<string>();
-      set.add(signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+      set.add(cleanSym);
       openSymbolsByAccount.set(acct.id, set);
+
+      const posList = openPositionsByAccount.get(acct.id) ?? [];
+      posList.push({
+        symbol: cleanSym,
+        assetType: signal.assetType,
+        direction: signal.direction,
+        riskFractionPct: Math.max(0.25, Math.min(3.0, 1.0 * acct.riskMultiplier * factorSizeMultiplier)),
+      });
+      openPositionsByAccount.set(acct.id, posList);
+
+      // Phase 3: Closed-Loop Slippage & Implementation Shortfall Calibration
+      recordExecutionSlippageTelemetry({
+        symbol: cleanSym,
+        assetType: signal.assetType,
+        direction: signal.direction,
+        intendedEntryPrice: signal.entryPrice,
+        executedFillPrice: executed.executionPrice,
+        stopLossPrice: signal.stopLossPrice,
+        timestamp: executed.timestamp,
+      });
     }
 
     if (executed.status === "FILLED" || executed.status === "FILLED_PAPER") {
