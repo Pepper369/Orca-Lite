@@ -7,8 +7,7 @@ import type { MarketIntel } from "@/lib/services/market-intel";
 import type { IndexQuote, Quote } from "@/lib/types";
 import { Unavailable } from "@/components/ui";
 import { PageSkeleton } from "@/components/page-skeleton";
-import { CommandCenter } from "@/components/command-center/command-center";
-import { LiveBotCockpit } from "@/components/live-bot-cockpit";
+import { FireAntOverview } from "@/components/command-center/fireant-overview";
 import { getVnSession } from "@/lib/vn/sessions";
 
 export type StocksBoard = {
@@ -280,17 +279,14 @@ export function Dashboard({ initialData }: { initialData?: DashboardInitialData 
   }, [intel, board]);
 
   return (
-    <div className="space-y-4">
-      <CommandCenter
-        intel={displayIntel}
-        meta={meta}
-        quotes={board?.quotes ?? []}
-        globalUs={globalMkt?.us ?? []}
-        globalCrypto={globalMkt?.crypto ?? []}
-        globalAsia={globalMkt?.asia ?? []}
-        liquiditySpark={globalMkt?.liquiditySpark ?? null}
-      />
-      <LiveBotCockpit variant="compact" />
-    </div>
+    <FireAntOverview
+      intel={displayIntel}
+      meta={meta}
+      quotes={board?.quotes ?? []}
+      globalUs={globalMkt?.us ?? []}
+      globalCrypto={globalMkt?.crypto ?? []}
+      globalAsia={globalMkt?.asia ?? []}
+      liquiditySpark={globalMkt?.liquiditySpark ?? null}
+    />
   );
 }

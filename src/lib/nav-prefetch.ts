@@ -10,8 +10,6 @@ export function prefetchRouteApis(href: string): void {
   const apis: string[] = [];
   if (path === "/" || path === "") {
     apis.push("/api/v1/stocks?board=vn30", "/api/v1/market/intel", "/api/v1/market/global");
-  } else if (path === "/terminal") {
-    apis.push("/api/v1/stocks?board=vn30", "/api/v1/stocks/HPG", "/api/v1/stocks/HPG/orderbook");
   } else if (path === "/stocks") {
     apis.push("/api/v1/stocks?board=vn30", "/api/v1/stocks?board=full");
   } else if (path.startsWith("/stocks/")) {

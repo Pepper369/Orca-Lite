@@ -6,7 +6,6 @@ import { StockKeepAliveWorkspace, type StockTabKey } from "@/components/stocks/s
 import { Loading } from "@/components/ui";
 
 const DashboardView = lazy(() => import("@/components/dashboard").then((m) => ({ default: m.Dashboard })));
-const ProTerminalPage = lazy(() => import("@/app/terminal/page"));
 const VnMarketCenterPage = lazy(() => import("@/app/stocks/page"));
 const ScreenerPage = lazy(() => import("@/app/screener/page"));
 const WatchlistPage = lazy(() => import("@/app/watchlist/page"));
@@ -61,8 +60,6 @@ export function AppRouter() {
 
   if (pathname === "/" || pathname === "" || root === "") {
     content = <DashboardView />;
-  } else if (root === "terminal") {
-    content = <ProTerminalPage />;
   } else if (root === "stocks") {
     if (segments.length === 1) {
       content = <VnMarketCenterPage />;

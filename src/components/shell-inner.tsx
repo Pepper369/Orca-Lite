@@ -80,7 +80,6 @@ const NAV_SECTIONS: {
     title: "TRUNG TÂM",
     items: [
       { href: "/", label: "Tổng quan", icon: Home, core: true },
-      { href: "/terminal", label: "Pro Terminal (0ms)", icon: Monitor, core: true },
       { href: "/agent", label: "Trợ lý AI", icon: Sparkles, core: true },
     ],
   },
@@ -233,7 +232,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
   const router = useRouter();
   const isPersonalFinanceMode = pathname.startsWith("/personal-finance");
   const isFullViewport = pathname === "/agent";
-  const isLgFullViewport = pathname === "/terminal";
+  const isLgFullViewport = false;
   const activeNavSections = isPersonalFinanceMode ? PERSONAL_FINANCE_NAV : NAV_SECTIONS;
   const [activePersonalTab, setActivePersonalTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
