@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  Cpu,
   Download,
   KeyRound,
   Lock,
@@ -25,6 +26,7 @@ import {
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   TrendingDown,
   TrendingUp,
   Users,
@@ -32,9 +34,18 @@ import {
   Zap,
 } from "lucide-react";
 
+interface WorkerStatus {
+  started: boolean;
+  isTickRunning: boolean;
+  pollIntervalMs: number;
+  lastTickAt: number | null;
+  lastDispatchedCount: number;
+}
+
 interface CopyTradeAccountsPayload {
   accounts: FollowerAccount[];
   performance: MasterTraderPerformance;
+  workerStatus?: WorkerStatus;
   totalManagedCapitalUsd: number;
   activeCount: number;
   verifiedLiveCount: number;
@@ -132,14 +143,66 @@ function orderStatusTone(status: CopyOrderStatus): "up" | "down" | "warn" | "neu
   return "down";
 }
 
-export function CopyTradePanel() {
+const QUICK_CONNECT_BROKERS: Array<{
+  platform: BrokerPlatform;
+  title: string;
+  assetTag: string;
+  methodTag: string;
+  description: string;
+  defaultBalance: number;
+  defaultLeverage: number;
+  accentClass: string;
+}> = [
+  {
+    platform: "BINANCE_FUTURES",
+    title: "Binance Futures",
+    assetTag: "CRYPTO",
+    methodTag: "REST API Key + Secret",
+    description: "Khớp lệnh USDT-M Futures trực tiếp (Testnet / Mainnet) kèm SL/TP tự động.",
+    defaultBalance: 1000,
+    defaultLeverage: 5,
+    accentClass: "border-amber-400/35 bg-amber-400/5",
+  },
+  {
+    platform: "OKX_FUTURES",
+    title: "OKX Swap v5",
+    assetTag: "CRYPTO",
+    methodTag: "API Key + Secret + Passphrase",
+    description: "Hỗ trợ OKX Perpetual Swap v5 (Demo / Live) với attached Algo SL/TP.",
+    defaultBalance: 1000,
+    defaultLeverage: 5,
+    accentClass: "border-cyan-400/35 bg-cyan-400/5",
+  },
+  {
+    platform: "MT5_EXNESS",
+    title: "Exness (Forex & Vàng)",
+    assetTag: "FOREX",
+    methodTag: "MetaApi Cloud hoặc MT5 EA",
+    description: "Gắn MetaApi Cloud API Key (trade 24/7) hoặc chạy EA OrcaCopyTradeSlave.mq5 trên MT5.",
+    defaultBalance: 2000,
+    defaultLeverage: 1,
+    accentClass: "border-emerald-400/35 bg-emerald-400/5",
+  },
+  {
+    platform: "MT5_XM",
+    title: "XM (Forex & Vàng)",
+    assetTag: "FOREX",
+    methodTag: "MetaApi Cloud hoặc MT5 EA",
+    description: "Gắn MetaApi Cloud API Key (trade 24/7) hoặc chạy EA Bearer Token trên XM MT5.",
+    defaultBalance: 2000,
+    defaultLeverage: 1,
+    accentClass: "border-violet-400/35 bg-violet-400/5",
+  },
+];
+
+export function CopyTradePanel({ mode = "full" }: { mode?: "full" | "vault" }) {
   const { data: accountsData, mutate: mutateAccounts } = useApi<CopyTradeAccountsPayload>(
     "/api/v1/copytrade/accounts",
     { refreshInterval: 10_000, keepPreviousData: true },
   );
 
   const { data: signalsData, mutate: mutateSignals } = useApi<CopyTradeSignalsPayload>(
-    "/api/v1/copytrade/signals",
+    mode === "full" ? "/api/v1/copytrade/signals" : null,
     { refreshInterval: 10_000, keepPreviousData: true },
   );
 
@@ -147,11 +210,15 @@ export function CopyTradePanel() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [testingConnId, setTestingConnId] = useState<string | null>(null);
+  const [deletingConnId, setDeletingConnId] = useState<string | null>(null);
+  const [rotatingConnId, setRotatingConnId] = useState<string | null>(null);
+  const [workerRunningNow, setWorkerRunningNow] = useState(false);
   const [killSwitchBusy, setKillSwitchBusy] = useState(false);
 
   // Add broker form state
   const [formName, setFormName] = useState("");
   const [formPlatform, setFormPlatform] = useState<BrokerPlatform>("BINANCE_FUTURES");
+  const [formMt5Mode, setFormMt5Mode] = useState<"ea" | "metaapi">("metaapi");
   const [formAccount, setFormAccount] = useState("");
   const [formBalance, setFormBalance] = useState(1000);
   const [formRiskMult, setFormRiskMult] = useState(1.0);
@@ -173,12 +240,24 @@ export function CopyTradePanel() {
 
   const accounts = accountsData?.accounts ?? [];
   const masterStats = accountsData?.performance ?? signalsData?.performance;
+  const workerStatus = accountsData?.workerStatus;
   const availableSignals = signalsData?.signals ?? [];
   const executionLogs = signalsData?.executionLogs ?? [];
   const anyKillSwitched = (accountsData?.killSwitchedCount ?? 0) > 0;
+  const autoBotActiveCount = accounts.filter((a) => a.isActive && a.autoExecuteEnabled && !a.killSwitched).length;
 
   const isRestExchange = formPlatform === "BINANCE_FUTURES" || formPlatform === "OKX_FUTURES";
   const isMt5Bridge = formPlatform === "MT5_EXNESS" || formPlatform === "MT5_XM" || formPlatform === "MT5_EA";
+  const isMetaApiMode = isMt5Bridge && formMt5Mode === "metaapi";
+
+  const openQuickConnect = (platform: BrokerPlatform, defaultBalance = 1000, defaultLeverage = 5) => {
+    resetModalForm();
+    setFormPlatform(platform);
+    setFormBalance(defaultBalance);
+    setFormLeverageCap(defaultLeverage);
+    setFormMt5Mode("metaapi");
+    setShowAddModal(true);
+  };
 
   const resetModalForm = () => {
     setFormName("");
@@ -293,9 +372,94 @@ export function CopyTradePanel() {
     }
   };
 
+  const handleDeleteAccount = async (acc: FollowerAccount) => {
+    if (!window.confirm(`Xóa kết nối "${acc.name}" (${acc.platform}) và hủy khóa mã hóa trong Broker Vault?`)) {
+      return;
+    }
+    setDeletingConnId(acc.id);
+    try {
+      const res = await fetch(`/api/v1/copytrade/accounts?id=${encodeURIComponent(acc.id)}`, {
+        method: "DELETE",
+      });
+      const json = (await res.json()) as { success?: boolean; error?: { message?: string } };
+      if (!res.ok || json.success === false) {
+        setBanner({ tone: "err", text: json.error?.message || "Không thể xóa kết nối" });
+      } else {
+        setBanner({ tone: "ok", text: `Đã ngắt kết nối và xóa khóa của "${acc.name}" khỏi Vault.` });
+        await mutateAccounts();
+      }
+    } catch {
+      setBanner({ tone: "err", text: "Lỗi mạng khi xóa kết nối" });
+    } finally {
+      setDeletingConnId(null);
+    }
+  };
+
+  const handleRegenerateEaToken = async (acc: FollowerAccount) => {
+    setRotatingConnId(acc.id);
+    try {
+      const res = await fetch("/api/v1/copytrade/accounts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: acc.id, regenerateEaToken: true }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { oneTimeEaToken?: string | null };
+        error?: { message?: string };
+      };
+      if (!res.ok || json.success === false) {
+        setBanner({ tone: "err", text: json.error?.message || "Không thể tạo lại EA Token" });
+      } else if (json.data?.oneTimeEaToken) {
+        setCopiedEaToken(false);
+        setEaTokenModal({ name: acc.name, platform: acc.platform, token: json.data.oneTimeEaToken });
+        await mutateAccounts();
+      }
+    } catch {
+      setBanner({ tone: "err", text: "Lỗi kết nối khi tạo lại EA Token" });
+    } finally {
+      setRotatingConnId(null);
+    }
+  };
+
+  const handleTriggerWorkerNow = async () => {
+    setWorkerRunningNow(true);
+    try {
+      const res = await fetch("/api/v1/copytrade/worker", { method: "POST" });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { tick?: { dispatched: number; activeAutoAccounts: number } };
+        error?: { message?: string };
+      };
+      if (!res.ok || json.success === false) {
+        setBanner({ tone: "err", text: json.error?.message || "Không thể kích hoạt Auto-Trade Engine" });
+      } else {
+        const t = json.data?.tick;
+        setBanner({
+          tone: t && t.activeAutoAccounts === 0 ? "warn" : "ok",
+          text:
+            t && t.activeAutoAccounts === 0
+              ? "Auto-Trade Engine đã quét nhưng chưa có tài khoản nào bật AUTO ON. Hãy bật nút AUTO ON ở bảng tài khoản bên dưới."
+              : `Auto-Trade Engine đã quét xong trên ${t?.activeAutoAccounts ?? 0} bot: đẩy thành công ${t?.dispatched ?? 0} lệnh mới.`,
+        });
+        await Promise.all([mutateAccounts(), mode === "full" ? mutateSignals() : Promise.resolve()]);
+      }
+    } catch {
+      setBanner({ tone: "err", text: "Lỗi khi gọi Auto-Trade Engine Worker" });
+    } finally {
+      setWorkerRunningNow(false);
+    }
+  };
+
   const handleModalDryTest = async () => {
-    if (!isRestExchange || !formApiKey.trim() || !formApiSecret.trim()) {
-      setBanner({ tone: "warn", text: "Vui lòng nhập đầy đủ API Key & API Secret trước khi kiểm tra" });
+    const canTest = isRestExchange || isMetaApiMode;
+    if (!canTest || !formApiKey.trim() || !formApiSecret.trim()) {
+      setBanner({
+        tone: "warn",
+        text: isMetaApiMode
+          ? "Vui lòng nhập đầy đủ MetaApi Token và MetaApi Account ID trước khi kiểm tra"
+          : "Vui lòng nhập đầy đủ API Key & API Secret trước khi kiểm tra",
+      });
       return;
     }
     setModalTesting(true);
@@ -368,9 +532,12 @@ export function CopyTradePanel() {
           maxDailyLossUsd: formMaxDailyLoss,
           isTestnet: formIsTestnet,
           autoExecuteEnabled: formAutoExecute,
-          apiKey: isRestExchange && formApiKey.trim() ? formApiKey.trim() : undefined,
-          apiSecret: isRestExchange && formApiSecret.trim() ? formApiSecret.trim() : undefined,
-          passphrase: formPlatform === "OKX_FUTURES" && formPassphrase.trim() ? formPassphrase.trim() : undefined,
+          apiKey: (isRestExchange || isMetaApiMode) && formApiKey.trim() ? formApiKey.trim() : undefined,
+          apiSecret: (isRestExchange || isMetaApiMode) && formApiSecret.trim() ? formApiSecret.trim() : undefined,
+          passphrase:
+            (formPlatform === "OKX_FUTURES" || isMetaApiMode) && formPassphrase.trim()
+              ? formPassphrase.trim()
+              : undefined,
         }),
       });
 
@@ -585,7 +752,80 @@ export function CopyTradePanel() {
         </div>
       )}
 
+      {/* Quick-Connect Broker Cards (Binance · OKX · Exness · XM) */}
+      <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-[13.5px] font-bold text-ink flex items-center gap-1.5">
+              <KeyRound className="h-4 w-4 text-accent-primary" />
+              Gắn API Key Sàn Giao Dịch (Crypto &amp; Forex Auto-Trade)
+            </h2>
+            <p className="mt-0.5 text-[11.5px] text-ink-3">
+              Chọn sàn bên dưới để gắn API Key mã hóa AES-256-GCM và kết nối trực tiếp vào Orca Quant Auto-Trade Engine.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-line/70 bg-surface-elevated/70 px-2.5 py-1 text-[11px] text-ink-2">
+              <Cpu className="h-3.5 w-3.5 text-positive" />
+              <span>
+                Auto-Bot Engine:{" "}
+                <strong className={autoBotActiveCount > 0 ? "text-positive" : "text-ink"}>
+                  {autoBotActiveCount > 0 ? `${autoBotActiveCount} Bot Đang Chạy` : "Đang Chờ Bật AUTO"}
+                </strong>
+                {workerStatus ? ` · Quét ${Math.round(workerStatus.pollIntervalMs / 1000)}s/lần` : ""}
+              </span>
+            </span>
+            <button
+              type="button"
+              disabled={workerRunningNow}
+              onClick={() => void handleTriggerWorkerNow()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-accent-primary/40 bg-accent-primary/15 px-2.5 py-1 text-[11px] font-semibold text-accent-primary hover:bg-accent-primary hover:text-white transition-colors disabled:opacity-50"
+            >
+              <Zap className={`h-3.5 w-3.5 ${workerRunningNow ? "animate-pulse" : ""}`} />
+              {workerRunningNow ? "Đang quét..." : "Quét & Trade Ngay"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+          {QUICK_CONNECT_BROKERS.map((broker) => {
+            const matched = accounts.filter((a) => a.platform === broker.platform);
+            const verifiedCount = matched.filter(
+              (a) => a.connectionStatus === "CONNECTED_VERIFIED" || a.hasApiKey || a.hasEaToken,
+            ).length;
+            return (
+              <div
+                key={broker.platform}
+                className={`flex flex-col justify-between rounded-xl border p-3 transition-colors ${broker.accentClass}`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-bold text-ink">{broker.title}</span>
+                    <Badge tone={verifiedCount > 0 ? "up" : "neutral"}>
+                      {verifiedCount > 0 ? `${verifiedCount} đã gắn` : broker.assetTag}
+                    </Badge>
+                  </div>
+                  <div className="mt-1 text-[10.5px] font-mono text-accent-2">{broker.methodTag}</div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3">{broker.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    openQuickConnect(broker.platform, broker.defaultBalance, broker.defaultLeverage)
+                  }
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  {verifiedCount > 0 ? `Thêm tài khoản ${broker.title.split(" ")[0]}` : `Gắn API ${broker.title.split(" ")[0]}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* High-Winrate Copyable Signals */}
+      {mode === "full" && (
       <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -664,6 +904,7 @@ export function CopyTradePanel() {
           </div>
         )}
       </div>
+      )}
 
       {/* Connected Broker & Follower Accounts */}
       <div className="rounded-xl border border-line/70 bg-surface-primary p-4 shadow-sm">
@@ -758,9 +999,13 @@ export function CopyTradePanel() {
                     </button>
                   </td>
                   <td className="px-3 py-2.5 text-right">
-                    <div className="inline-flex items-center gap-1.5">
+                    <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
                       {acc.hasApiKey &&
-                        (acc.platform === "BINANCE_FUTURES" || acc.platform === "OKX_FUTURES") && (
+                        (acc.platform === "BINANCE_FUTURES" ||
+                          acc.platform === "OKX_FUTURES" ||
+                          acc.platform === "MT5_EXNESS" ||
+                          acc.platform === "MT5_XM" ||
+                          acc.platform === "MT5_EA") && (
                           <button
                             type="button"
                             disabled={testingConnId === acc.id}
@@ -769,6 +1014,21 @@ export function CopyTradePanel() {
                           >
                             <RefreshCw className={`h-3 w-3 ${testingConnId === acc.id ? "animate-spin" : ""}`} />
                             Test API
+                          </button>
+                        )}
+                      {!acc.hasApiKey &&
+                        (acc.platform === "MT5_EXNESS" ||
+                          acc.platform === "MT5_XM" ||
+                          acc.platform === "MT5_EA") && (
+                          <button
+                            type="button"
+                            disabled={rotatingConnId === acc.id}
+                            onClick={() => void handleRegenerateEaToken(acc)}
+                            className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-elevated px-2 py-1 text-[10.5px] font-semibold text-ink hover:bg-panel-3 transition-colors disabled:opacity-50"
+                            title="Cấp lại Bearer Token 1 lần cho OrcaCopyTradeSlave.mq5"
+                          >
+                            <KeyRound className="h-3 w-3 text-warn" />
+                            {rotatingConnId === acc.id ? "..." : "EA Token"}
                           </button>
                         )}
                       <button
@@ -789,6 +1049,16 @@ export function CopyTradePanel() {
                             <PauseCircle className="h-3 w-3" /> Tạm dừng
                           </>
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingConnId === acc.id}
+                        onClick={() => void handleDeleteAccount(acc)}
+                        aria-label={`Xóa kết nối ${acc.name}`}
+                        title="Ngắt kết nối & xóa khóa khỏi Vault"
+                        className="inline-flex items-center justify-center rounded-md border border-down/30 bg-down/10 p-1.5 text-down hover:bg-down hover:text-white transition-colors disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3 w-3" />
                       </button>
                     </div>
                   </td>
@@ -992,23 +1262,133 @@ export function CopyTradePanel() {
               )}
 
               {isMt5Bridge && (
-                <div className="space-y-2 rounded-xl border border-accent-primary/35 bg-accent-primary/10 p-3 text-[11.5px] text-ink-2">
-                  <div className="font-semibold text-ink">Hướng dẫn Exness / XM MT5 Bridge</div>
-                  <p>
-                    Sàn Forex Exness &amp; XM không cung cấp REST Trading API Key công khai. Sau khi bấm lưu, hệ thống sẽ cấp{" "}
-                    <strong>MT5 EA Bearer Token (1 lần duy nhất)</strong> để dán vào file{" "}
-                    <code className="font-mono text-ink">OrcaCopyTradeSlave.mq5</code> trên MetaTrader 5.
-                  </p>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-ink-2">Số tài khoản MT5 (tùy chọn)</label>
-                    <input
-                      type="text"
-                      value={formAccount}
-                      onChange={(e) => setFormAccount(e.target.value)}
-                      placeholder="VD: 204958102"
-                      className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
-                    />
+                <div className="space-y-3 rounded-xl border border-accent-primary/35 bg-accent-primary/10 p-3 text-[11.5px] text-ink-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold text-ink">Phương thức kết nối {PLATFORM_LABELS[formPlatform]}</div>
+                    <div className="inline-flex rounded-lg border border-line bg-surface-primary p-0.5 text-[10.5px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormMt5Mode("metaapi");
+                          setModalTestRes(null);
+                        }}
+                        className={`rounded-md px-2 py-1 font-semibold transition-colors ${
+                          formMt5Mode === "metaapi"
+                            ? "bg-accent-primary text-white"
+                            : "text-ink-3 hover:text-ink"
+                        }`}
+                      >
+                        MetaApi Cloud API (24/7)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormMt5Mode("ea");
+                          setModalTestRes(null);
+                        }}
+                        className={`rounded-md px-2 py-1 font-semibold transition-colors ${
+                          formMt5Mode === "ea"
+                            ? "bg-accent-primary text-white"
+                            : "text-ink-3 hover:text-ink"
+                        }`}
+                      >
+                        MT5 EA Bridge (.mq5)
+                      </button>
+                    </div>
                   </div>
+
+                  {formMt5Mode === "metaapi" ? (
+                    <div className="space-y-2.5">
+                      <p className="text-[11px] text-ink-2">
+                        Gắn <strong>MetaApi Cloud Token</strong> &amp; <strong>Account ID</strong> liên kết tài khoản{" "}
+                        <strong>Exness / XM MT5</strong> của bạn để Orca đặt lệnh trực tiếp 24/7 trên server (không cần mở máy chạy MT5).
+                      </p>
+                      <label className="flex items-center gap-2 text-[11.5px] font-semibold text-ink cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formIsTestnet}
+                          onChange={(e) => setFormIsTestnet(e.target.checked)}
+                          className="rounded border-line"
+                        />
+                        Tài khoản Demo Exness / XM (khuyến nghị test trước khi đánh Live)
+                      </label>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-ink-2">MetaApi Auth Token</label>
+                        <input
+                          type="password"
+                          value={formApiKey}
+                          onChange={(e) => setFormApiKey(e.target.value)}
+                          placeholder="Dán MetaApi API Token (JWT)..."
+                          autoComplete="new-password"
+                          className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-ink-2">MetaApi Account ID</label>
+                        <input
+                          type="text"
+                          value={formApiSecret}
+                          onChange={(e) => setFormApiSecret(e.target.value)}
+                          placeholder="VD: 1a2b3c4d-5e6f-7890-abcd-ef1234567890"
+                          autoComplete="off"
+                          className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-ink-2">
+                          Hậu tố mã sàn (tùy chọn — VD: <code className="font-mono">m</code> cho Exness,{" "}
+                          <code className="font-mono">#</code> cho XM)
+                        </label>
+                        <input
+                          type="text"
+                          value={formPassphrase}
+                          onChange={(e) => setFormPassphrase(e.target.value)}
+                          placeholder="Để trống nếu mã chuẩn XAUUSD / EURUSD"
+                          className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={modalTesting || !formApiKey.trim() || !formApiSecret.trim()}
+                          onClick={handleModalDryTest}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-elevated px-3 py-1.5 text-[11.5px] font-semibold text-ink hover:bg-panel-3 disabled:opacity-40"
+                        >
+                          <KeyRound className="h-3.5 w-3.5" />
+                          {modalTesting ? "Đang ping MetaApi..." : "Kiểm tra kết nối Exness/XM"}
+                        </button>
+                        {modalTestRes && (
+                          <span
+                            className={`text-[11px] font-semibold ${
+                              modalTestRes.verified && modalTestRes.canTrade ? "text-positive" : "text-down"
+                            }`}
+                          >
+                            {modalTestRes.verified
+                              ? `OK ($${modalTestRes.balanceUsd ?? 0}, ${modalTestRes.latencyMs}ms)`
+                              : modalTestRes.rawMessage}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p>
+                        Không cần dịch vụ trung gian: Sau khi bấm lưu, hệ thống cấp{" "}
+                        <strong>MT5 EA Bearer Token (1 lần duy nhất)</strong> để dán vào file{" "}
+                        <code className="font-mono text-ink">OrcaCopyTradeSlave.mq5</code> trên MetaTrader 5 (Exness / XM).
+                      </p>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-ink-2">Số tài khoản MT5 (tùy chọn)</label>
+                        <input
+                          type="text"
+                          value={formAccount}
+                          onChange={(e) => setFormAccount(e.target.value)}
+                          placeholder="VD: 204958102"
+                          className="mt-1 w-full rounded-lg border border-line bg-surface-elevated px-3 py-1.5 font-mono text-[12px] text-ink"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

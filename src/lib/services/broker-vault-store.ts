@@ -290,13 +290,13 @@ export async function createBrokerConnection(
 
   let oneTimeEaToken: string | null = null;
   let eaTokenHash: string | null = null;
-  if (isMt5) {
+  if (isMt5 && !hasApiCreds) {
     oneTimeEaToken = generateEaToken();
     eaTokenHash = hashEaToken(oneTimeEaToken);
   }
 
   let initialStatus: ConnectionStatus = "PAPER_SIMULATED";
-  if (hasApiCreds && isRestExchange) {
+  if (hasApiCreds && (isRestExchange || isMt5)) {
     initialStatus = "UNVERIFIED";
   } else if (isMt5) {
     initialStatus = "AWAITING_EA";
@@ -621,4 +621,114 @@ export async function listBotExecutionOrders(limit = 50): Promise<CopyExecutionO
 export async function listPendingEaOrdersForConnection(connectionId: string): Promise<CopyExecutionOrder[]> {
   const orders = await listBotExecutionOrders(100);
   return orders.filter((o) => o.followerId === connectionId && o.status === "PENDING_EA");
+}
+
+export async function deleteBrokerConnection(id: string, userId?: string | null): Promise<boolean> {
+  let deleted = false;
+  if (databaseConfigured()) {
+    try {
+      const rows = await db
+        .delete(brokerConnections)
+        .where(eq(brokerConnections.id, id))
+        .returning({ id: brokerConnections.id });
+      if (rows.length > 0) deleted = true;
+    } catch {
+      // Fallback below
+    }
+  }
+  const idx = DEV_CONNECTIONS_STORE.findIndex((c) => c.id === id);
+  if (idx >= 0) {
+    DEV_CONNECTIONS_STORE.splice(idx, 1);
+    deleted = true;
+  }
+  if (deleted) {
+    await recordVaultAuditLog(userId, "BROKER_CONNECTION_DELETED", { connectionId: id });
+  }
+  return deleted;
+}
+
+export async function rotateBrokerCredentials(
+  id: string,
+  input: {
+    apiKey?: string;
+    apiSecret?: string;
+    passphrase?: string;
+    isTestnet?: boolean;
+    regenerateEaToken?: boolean;
+    userId?: string | null;
+  },
+): Promise<{ connection: FollowerAccount | null; oneTimeEaToken: string | null }> {
+  const hasApiCreds = Boolean(input.apiKey?.trim() && input.apiSecret?.trim());
+  const apiKeyEnc = hasApiCreds ? encryptSecret(input.apiKey!) : undefined;
+  const apiSecretEnc = hasApiCreds ? encryptSecret(input.apiSecret!) : undefined;
+  const passphraseEnc =
+    input.passphrase !== undefined
+      ? input.passphrase.trim()
+        ? encryptSecret(input.passphrase)
+        : null
+      : undefined;
+
+  let oneTimeEaToken: string | null = null;
+  let eaTokenHash: string | undefined;
+  if (input.regenerateEaToken) {
+    oneTimeEaToken = generateEaToken();
+    eaTokenHash = hashEaToken(oneTimeEaToken);
+  }
+
+  const nextMasked = hasApiCreds ? maskSecret(input.apiKey) : undefined;
+  const nextStatus: ConnectionStatus | undefined = hasApiCreds
+    ? "UNVERIFIED"
+    : input.regenerateEaToken
+      ? "AWAITING_EA"
+      : undefined;
+
+  if (databaseConfigured()) {
+    try {
+      const dbPatch: Record<string, unknown> = { updatedAt: new Date() };
+      if (apiKeyEnc !== undefined) dbPatch.apiKeyEnc = apiKeyEnc;
+      if (apiSecretEnc !== undefined) dbPatch.apiSecretEnc = apiSecretEnc;
+      if (passphraseEnc !== undefined) dbPatch.passphraseEnc = passphraseEnc;
+      if (eaTokenHash !== undefined) dbPatch.eaTokenHash = eaTokenHash;
+      if (nextMasked !== undefined) dbPatch.accountNumberMasked = nextMasked;
+      if (nextStatus !== undefined) dbPatch.connectionStatus = nextStatus;
+      if (input.isTestnet !== undefined) dbPatch.isTestnet = input.isTestnet;
+
+      const [updated] = await db
+        .update(brokerConnections)
+        .set(dbPatch)
+        .where(eq(brokerConnections.id, id))
+        .returning();
+      if (updated) {
+        await recordVaultAuditLog(input.userId, "BROKER_CREDENTIALS_ROTATED", {
+          connectionId: id,
+          rotatedApiKey: hasApiCreds,
+          regeneratedEaToken: Boolean(oneTimeEaToken),
+        });
+        return { connection: stripSecrets(mapDbRowToInternal(updated)), oneTimeEaToken };
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  const target = DEV_CONNECTIONS_STORE.find((c) => c.id === id);
+  if (!target) return { connection: null, oneTimeEaToken: null };
+  if (apiKeyEnc !== undefined) {
+    target.apiKeyEnc = apiKeyEnc;
+    target.hasApiKey = true;
+  }
+  if (apiSecretEnc !== undefined) target.apiSecretEnc = apiSecretEnc;
+  if (passphraseEnc !== undefined) {
+    target.passphraseEnc = passphraseEnc;
+    target.hasPassphrase = Boolean(passphraseEnc);
+  }
+  if (eaTokenHash !== undefined) {
+    target.eaTokenHash = eaTokenHash;
+    target.hasEaToken = true;
+  }
+  if (nextMasked !== undefined) target.accountNumberMasked = nextMasked;
+  if (nextStatus !== undefined) target.connectionStatus = nextStatus;
+  if (input.isTestnet !== undefined) target.isTestnet = input.isTestnet;
+
+  return { connection: stripSecrets(target), oneTimeEaToken };
 }

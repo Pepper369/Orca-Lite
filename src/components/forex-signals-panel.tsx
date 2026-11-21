@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge, Panel } from "@/components/ui";
+import { BrokerQuickTradeBar } from "@/components/broker-quick-trade-bar";
 import {
   calculateForexPositionSize,
   type PositionSizerResult,
@@ -148,6 +149,9 @@ export function ForexSignalsPanel() {
 
   return (
     <div className="space-y-4">
+      {/* 0. BROKER API CONNECTION BAR (EXNESS / XM) */}
+      <BrokerQuickTradeBar assetType="FOREX" />
+
       {/* 1. CURRENCY STRENGTH METER (CSM) & DXY BAR */}
       {csmData && (
         <div className="rounded-xl border border-line/70 bg-surface-1 p-3.5 shadow-sm">

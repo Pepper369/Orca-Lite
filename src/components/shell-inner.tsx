@@ -33,6 +33,7 @@ import {
   Globe2,
   Grid2x2,
   Home,
+  KeyRound,
   Landmark,
   Layers,
   LayoutDashboard,
@@ -99,7 +100,7 @@ const NAV_SECTIONS: {
       { href: "/stocks/sectors", label: "Dòng tiền ngành", icon: Layers, core: true },
       { href: "/heatmap", label: "Bản đồ nhiệt", icon: Grid2x2 },
       { href: "/quant", label: "AI Quant & Bot", icon: Cpu, core: true },
-      { href: "/copytrade", label: "Copy Trading & EA", icon: Users },
+      { href: "/copytrade", label: "Auto-Trade & API Sàn", icon: KeyRound, core: true },
     ],
   },
   {
@@ -230,7 +231,8 @@ export function ShellInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const isPersonalFinanceMode = pathname.startsWith("/personal-finance");
-  const isFullViewport = pathname === "/agent" || pathname === "/stocks" || pathname === "/terminal";
+  const isFullViewport = pathname === "/agent";
+  const isLgFullViewport = pathname === "/terminal";
   const activeNavSections = isPersonalFinanceMode ? PERSONAL_FINANCE_NAV : NAV_SECTIONS;
   const [activePersonalTab, setActivePersonalTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
@@ -335,7 +337,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
           <Link
             href={isPersonalFinanceMode ? "/personal-finance" : "/"}
             onClick={(e) => onNav(isPersonalFinanceMode ? "/personal-finance" : "/", e)}
-            className="orca-sidebar-brand-text min-w-0 flex-1 overflow-hidden pr-8"
+            className="orca-sidebar-brand-text min-w-0 flex-1 overflow-hidden mr-10"
             title={isPersonalFinanceMode ? "ORCA Personal Finance" : "ORCA Financial"}
           >
             <span className="block truncate text-[13px] font-bold tracking-wide text-text-primary">
@@ -544,6 +546,21 @@ export function ShellInner({ children }: { children: ReactNode }) {
                   <div className="min-w-0 flex-1 max-w-xs flex justify-end">
                     <GlobalSearch />
                   </div>
+                  <Link
+                    href="/copytrade"
+                    onClick={(e) => onNav("/copytrade", e)}
+                    onMouseEnter={() => onHover("/copytrade")}
+                    className={
+                      "hidden sm:inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] font-semibold transition-colors whitespace-nowrap " +
+                      (pathname.startsWith("/copytrade")
+                        ? "border-accent-primary/50 bg-accent-primary/15 text-accent-primary"
+                        : "border-border-subtle bg-surface-elevated/70 text-text-secondary hover:border-accent-primary/40 hover:text-text-primary")
+                    }
+                    title="Kết nối API Binance, OKX, Exness, XM & Auto-Trade"
+                  >
+                    <KeyRound className="size-3.5 text-accent-primary" />
+                    <span>API Sàn</span>
+                  </Link>
                   <NotifBell />
                   <Link
                     href="/settings"
@@ -577,7 +594,11 @@ export function ShellInner({ children }: { children: ReactNode }) {
           <main
             className={
               "orca-main-scroll min-h-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0 " +
-              (isFullViewport ? "overflow-hidden flex flex-col h-full" : "overflow-y-auto")
+              (isFullViewport
+                ? "overflow-hidden flex flex-col h-full"
+                : isLgFullViewport
+                  ? "overflow-y-auto lg:overflow-hidden lg:flex lg:flex-col lg:h-full"
+                  : "overflow-y-auto")
             }
           >
               <ErrorBoundary name="page" resetKey={pathname}>
@@ -587,7 +608,9 @@ export function ShellInner({ children }: { children: ReactNode }) {
                     "orca-page-transition " +
                     (isFullViewport
                       ? "flex-1 min-h-0 flex flex-col h-full p-1.5 sm:p-2.5 overflow-hidden"
-                      : "p-2 sm:p-3.5 max-w-[1600px] mx-auto w-full")
+                      : isLgFullViewport
+                        ? "p-1.5 sm:p-2.5 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:h-full lg:overflow-hidden"
+                        : "p-2 sm:p-3.5 max-w-[1600px] mx-auto w-full")
                   }
                 >
                   {children}

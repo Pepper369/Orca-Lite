@@ -5,6 +5,7 @@ import { Badge, fmtNum, Panel } from "@/components/ui";
 import { getAssetPipSize, getPriceDecimals } from "@/lib/engines/asset-precision";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
 import { DollarSign, Globe, Calculator, ArrowUpRight, ArrowDownRight, Clock, ShieldCheck } from "lucide-react";
+import { BrokerQuickTradeBar } from "@/components/broker-quick-trade-bar";
 
 interface Props {
   pair: string;
@@ -244,6 +245,33 @@ export function ForexTradeDesk({
             ))}
           </div>
         </div>
+
+        {/* Connected Exness / XM Broker Quick Execution */}
+        <BrokerQuickTradeBar
+          assetType="FOREX"
+          compact
+          order={
+            price != null && price > 0
+              ? {
+                  symbol: upperPair,
+                  assetType: "FOREX",
+                  direction: (changePercent ?? 0) >= 0 ? "BUY" : "SELL",
+                  entryPrice: (changePercent ?? 0) >= 0 ? askPrice : bidPrice,
+                  stopLossPrice:
+                    (changePercent ?? 0) >= 0
+                      ? Number((askPrice - 20 * pipFactor).toFixed(priceDecimals))
+                      : Number((bidPrice + 20 * pipFactor).toFixed(priceDecimals)),
+                  takeProfit1:
+                    (changePercent ?? 0) >= 0
+                      ? Number((askPrice + 40 * pipFactor).toFixed(priceDecimals))
+                      : Number((bidPrice - 40 * pipFactor).toFixed(priceDecimals)),
+                  masterLotsOrQty: lot,
+                  recommendedLeverage: 1,
+                  setupGrade: setupGrade ?? undefined,
+                }
+              : null
+          }
+        />
 
         {/* Swap Rates Note */}
         <div className="rounded border border-border-subtle/60 bg-surface-elevated/30 px-2 py-1.5 text-[9.5px] text-text-muted flex items-center justify-between">

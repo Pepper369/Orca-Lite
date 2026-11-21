@@ -385,6 +385,9 @@ export function AiAssistantWidget() {
 
   const currentPresets = mode === "market" ? MARKET_PRESETS : FINANCE_PRESETS;
 
+  // Hide floating AI launcher on the dedicated full-screen /agent route (avoids covering the Send button)
+  if (pathname === "/agent") return null;
+
   // Fixed bottom position guarantees it stays at bottom-right corner
   const fixedBottom = isMobile ? "76px" : "24px";
   const fixedRight = "20px";

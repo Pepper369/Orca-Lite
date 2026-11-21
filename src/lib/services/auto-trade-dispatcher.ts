@@ -10,6 +10,7 @@ import {
 import { calculateCryptoPositionSize } from "@/lib/engines/crypto-position-sizer";
 import {
   placeBinanceFuturesOrder,
+  placeMetaApiMt5Order,
   placeOkxSwapOrder,
 } from "@/lib/engines/exchange-execution-client";
 import type { SetupGrade } from "@/lib/engines/fx-crypto-precision-engine";
@@ -155,6 +156,41 @@ export async function executePlatformOrder(
   };
 
   if (acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA") {
+    if (acct.hasApiKey) {
+      const secrets = await getBrokerConnectionSecrets(acct.id);
+      if (!secrets) {
+        return {
+          ...baseOrder,
+          status: "REJECTED_EXCHANGE",
+          message: `Không tìm thấy khóa MetaApi giải mã cho tài khoản ${acct.name}`,
+        };
+      }
+      const res = await placeMetaApiMt5Order(
+        {
+          credentials: secrets,
+          symbol: signal.symbol,
+          direction: signal.direction,
+          baseQty: qtyOrLots,
+          entryPrice: marketPrice,
+          stopLossPrice: signal.stopLossPrice,
+          takeProfit1: signal.takeProfit1,
+          leverage,
+          idempotencyKey,
+        },
+        acct.platform,
+      );
+      return {
+        ...baseOrder,
+        copiedLotsOrQty: res.executedQty > 0 ? res.executedQty : qtyOrLots,
+        executionPrice: res.executedPrice > 0 ? res.executedPrice : marketPrice,
+        status: res.ok ? "FILLED" : "REJECTED_EXCHANGE",
+        exchangeOrderId: res.exchangeOrderId,
+        slOrderId: res.slOrderId,
+        tpOrderId: res.tpOrderId,
+        message: res.message,
+      };
+    }
+
     return {
       ...baseOrder,
       status: "PENDING_EA",

@@ -143,11 +143,11 @@ async function scanSingleCryptoPair(
     const liqClusters =
       openInterestUsd > 0
         ? detectCryptoLiquidationClusters(lastPrice, openInterestUsd, prelimAtrExec, {
-            symbol: pair,
-            fundingRate: funding.fundingRate,
-            priceChange24hPct: Number(ticker.priceChangePercent) || null,
-            orderBookImbalance: domImbalance,
-          })
+          symbol: pair,
+          fundingRate: funding.fundingRate,
+          priceChange24hPct: Number(ticker.priceChangePercent) || null,
+          orderBookImbalance: domImbalance,
+        })
         : null;
     const { liquidationClusterAligned, externalMagnets } = buildCryptoLiquidityContext(liqClusters);
 
@@ -169,19 +169,19 @@ async function scanSingleCryptoPair(
     const scalp =
       execBars.length >= 60
         ? analyzeScalpMulti({
-            symbol: pair,
-            barsM15: htfBars,
-            barsM5: execBars,
-            barsH1: bars1h.length >= 12 ? bars1h : null,
-            quoteVolume24h: quoteVol,
-            fundingRate: funding.fundingRate,
-            spreadPct: liveSpreadPct,
-            orderBookImbalance: domImbalance,
-            liquidationClusterAligned,
-            externalMagnets,
-            isLockout: shield.isLockout,
-            lockoutReason: shield.warningMessage,
-          })
+          symbol: pair,
+          barsM15: htfBars,
+          barsM5: execBars,
+          barsH1: bars1h.length >= 12 ? bars1h : null,
+          quoteVolume24h: quoteVol,
+          fundingRate: funding.fundingRate,
+          spreadPct: liveSpreadPct,
+          orderBookImbalance: domImbalance,
+          liquidationClusterAligned,
+          externalMagnets,
+          isLockout: shield.isLockout,
+          lockoutReason: shield.warningMessage,
+        })
         : null;
 
     const precision =
@@ -292,11 +292,11 @@ async function scanSingleCryptoPair(
     const kellySizing =
       action !== "WAIT" && sizeMult > 0
         ? calculateCrossAssetKelly({
-            winRate: probability / 100,
-            payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
-            isCrypto: true,
-            maxCapitalPerTrade: 0.02,
-          })
+          winRate: probability / 100,
+          payoffRatio: Math.max(1.0, precision.netRiskReward ?? precision.grossRiskReward ?? 1.8),
+          isCrypto: true,
+          maxCapitalPerTrade: 0.02,
+        })
         : null;
     const effectiveRiskPct =
       kellySizing && kellySizing.recommendedAllocation > 0

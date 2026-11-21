@@ -544,13 +544,13 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
         </div>
 
         {/* Timeframe Selector Pills */}
-        <div className="flex items-center gap-0.5 bg-surface-primary/70 p-0.5 rounded-lg border border-border-subtle/60">
+        <div className="flex max-w-full items-center gap-0.5 overflow-x-auto no-scrollbar bg-surface-primary/70 p-0.5 rounded-lg border border-border-subtle/60">
           {tfs.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTf(t)}
-              className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${
+              className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold transition ${
                 tf === t
                   ? "bg-accent-primary text-white shadow-sm"
                   : "text-text-muted hover:text-text-primary hover:bg-surface-elevated/60"

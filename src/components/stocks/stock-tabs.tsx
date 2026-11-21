@@ -77,7 +77,7 @@ export function StockTabs({ symbol }: { symbol: string }) {
       aria-label="Tab cổ phiếu"
       data-pending={pending ? "true" : undefined}
     >
-      <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-center overflow-x-auto no-scrollbar pr-1">
         {TABS.map((t) => {
           const href = `${base}${t.href}`;
           const active = clientActiveTab
@@ -138,16 +138,18 @@ export function StockTabs({ symbol }: { symbol: string }) {
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        title="Làm mới dữ liệu tab hiện tại"
-        aria-label="Làm mới dữ liệu"
-        className="ml-1 mr-1 inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border-subtle text-text-muted transition-colors hover:border-accent-primary/40 hover:text-accent-primary disabled:opacity-60"
-      >
-        <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
-      </button>
+      <div className="flex shrink-0 items-center border-l border-line/60 bg-surface-primary pl-1.5 pr-1">
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="Làm mới dữ liệu tab hiện tại"
+          aria-label="Làm mới dữ liệu"
+          className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border-subtle text-text-muted transition-colors hover:border-accent-primary/40 hover:text-accent-primary disabled:opacity-60"
+        >
+          <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
+        </button>
+      </div>
     </nav>
   );
 }

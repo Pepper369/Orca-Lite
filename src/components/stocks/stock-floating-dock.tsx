@@ -45,10 +45,14 @@ export const StockFloatingDock = memo(function StockFloatingDock({
   const [isMinimized, setIsMinimized] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
-  // Hiển thị dock khi người dùng cuộn qua 250px
+  // Hiển thị dock khi người dùng cuộn qua 250px (hỗ trợ cả window và container <main class="orca-main-scroll">)
   useEffect(() => {
+    const mainEl = document.querySelector<HTMLElement>("main.orca-main-scroll");
     const handleScroll = () => {
-      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      const scrollY = Math.max(
+        window.scrollY || document.documentElement.scrollTop || 0,
+        mainEl?.scrollTop || 0,
+      );
       setIsVisible(scrollY > 250);
 
       // Nhận diện section đang đọc
@@ -66,11 +70,17 @@ export const StockFloatingDock = memo(function StockFloatingDock({
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
+    mainEl?.addEventListener("scroll", handleScroll, { passive: true });
     handleScroll();
-    return () => window.removeEventListener("scroll", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      mainEl?.removeEventListener("scroll", handleScroll);
+    };
   }, []);
 
   const scrollToTop = () => {
+    const mainEl = document.querySelector<HTMLElement>("main.orca-main-scroll");
+    mainEl?.scrollTo({ top: 0, behavior: "smooth" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -83,10 +93,10 @@ export const StockFloatingDock = memo(function StockFloatingDock({
 
   if (!isVisible) return null;
 
-  // Trạng thái thu gọn nhỏ gọn (Pill)
+  // Trạng thái thu gọn nhỏ gọn (Pill) — cách phải 24 (96px) để không đè lên nút Orca AI Widget
   if (isMinimized) {
     return (
-      <aside aria-label="Bảng điều khiển nhanh cổ phiếu thu gọn" className="fixed bottom-16 md:bottom-5 right-4 z-40 animate-fade-in">
+      <aside aria-label="Bảng điều khiển nhanh cổ phiếu thu gọn" className="fixed bottom-[74px] md:bottom-6 right-20 md:right-24 z-40 animate-fade-in">
         <button
           type="button"
           onClick={() => setIsMinimized(false)}
@@ -105,7 +115,7 @@ export const StockFloatingDock = memo(function StockFloatingDock({
   }
 
   return (
-    <aside aria-label="Bảng điều khiển nhanh cổ phiếu" className="fixed bottom-16 md:bottom-5 inset-x-3 md:inset-x-auto md:right-6 z-40 flex justify-center md:justify-end animate-fade-in pointer-events-none">
+    <aside aria-label="Bảng điều khiển nhanh cổ phiếu" className="fixed bottom-[74px] md:bottom-6 left-3 right-20 md:left-auto md:right-24 z-40 flex justify-center md:justify-end animate-fade-in pointer-events-none">
       <div className="pointer-events-auto flex items-center flex-wrap gap-2 p-1.5 rounded-2xl border border-border-default bg-surface-elevated/95 backdrop-blur-md shadow-2xl text-xs max-w-full">
         {/* Tóm tắt mã & giá */}
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-surface-base border border-border-subtle shrink-0">

@@ -9,7 +9,7 @@ export interface BrokerCredentialsInput {
 
 export interface BrokerVerificationResult {
   verified: boolean;
-  platform: "BINANCE_FUTURES" | "OKX_FUTURES";
+  platform: "BINANCE_FUTURES" | "OKX_FUTURES" | "MT5_EXNESS" | "MT5_XM" | "MT5_EA";
   isTestnet: boolean;
   balanceUsd: number | null;
   availableMarginUsd: number | null;
@@ -698,6 +698,200 @@ export async function placeOkxSwapOrder(req: ExchangeOrderRequest): Promise<Exch
       executedQty: 0,
       executedPrice: req.entryPrice,
       message: err instanceof Error ? err.message : "Lỗi kết nối đặt lệnh OKX v5",
+    };
+  }
+}
+
+/* ---------------- MetaApi Cloud REST Connector (Exness / XM MT5) ---------------- */
+
+const METAAPI_CLIENT_BASE = "https://mt-client-api-v1.agiliumtrade.agiliumtrade.ai";
+
+/** Chuẩn hóa mã Forex/Vàng cho MT5 (vd: XAU/USD -> XAUUSD, EUR/USD + "m" -> EURUSDm). */
+export function toMt5BrokerSymbol(symbol: string, suffix?: string | null): string {
+  const raw = symbol.trim();
+  const cleanSuffix = suffix?.trim() ?? "";
+  let base = raw;
+  if (cleanSuffix && raw.toLowerCase().endsWith(cleanSuffix.toLowerCase())) {
+    base = raw.slice(0, -cleanSuffix.length);
+  }
+  const cleanBase = base.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return cleanSuffix ? `${cleanBase}${cleanSuffix}` : cleanBase;
+}
+
+/**
+ * Xác minh tài khoản Exness / XM MT5 qua MetaApi Cloud REST API.
+ * Quy ước lưu trong Broker Vault AES-256-GCM:
+ * - apiKey = MetaApi Auth Token
+ * - apiSecret = MetaApi Account ID
+ * - passphrase (tùy chọn) = Symbol suffix của sàn (vd: "m" cho Exness Standard Cent/Pro hoặc "#" cho XM)
+ */
+export async function verifyMetaApiMt5Account(
+  creds: BrokerCredentialsInput,
+  platform: "MT5_EXNESS" | "MT5_XM" | "MT5_EA" = "MT5_EXNESS",
+): Promise<BrokerVerificationResult> {
+  const started = Date.now();
+  const authToken = creds.apiKey.trim();
+  const accountId = creds.apiSecret.trim();
+
+  if (!authToken || !accountId) {
+    return {
+      verified: false,
+      platform,
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: 0,
+      rawMessage: "Cần nhập đủ MetaApi Token và MetaApi Account ID để kết nối Cloud MT5",
+    };
+  }
+
+  try {
+    const res = await fetch(
+      `${METAAPI_CLIENT_BASE}/users/current/accounts/${encodeURIComponent(accountId)}/account-information`,
+      {
+        method: "GET",
+        headers: {
+          "auth-token": authToken,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    const text = await res.text();
+    const json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    const latencyMs = Date.now() - started;
+
+    if (!res.ok || json.error) {
+      return {
+        verified: false,
+        platform,
+        isTestnet: creds.isTestnet,
+        balanceUsd: null,
+        availableMarginUsd: null,
+        canTrade: false,
+        latencyMs,
+        rawMessage: String(json.message ?? json.error ?? `MetaApi HTTP ${res.status}`),
+      };
+    }
+
+    const balance = Number(json.balance ?? json.equity ?? 0);
+    const freeMargin = Number(json.freeMargin ?? balance);
+    const tradeAllowed = json.tradeAllowed !== false;
+    const brokerName = typeof json.broker === "string" ? json.broker : platform;
+    const serverName = typeof json.server === "string" ? ` · ${json.server}` : "";
+
+    return {
+      verified: true,
+      platform,
+      isTestnet: creds.isTestnet,
+      balanceUsd: Number.isFinite(balance) ? balance : 0,
+      availableMarginUsd: Number.isFinite(freeMargin) ? freeMargin : 0,
+      canTrade: tradeAllowed,
+      positionMode: typeof json.type === "string" ? json.type : undefined,
+      latencyMs,
+      rawMessage: tradeAllowed
+        ? `${brokerName}${serverName} (Cloud MT5) sẵn sàng khớp lệnh`
+        : `${brokerName} kết nối thành công nhưng tài khoản đang tắt quyền giao dịch`,
+    };
+  } catch (err) {
+    return {
+      verified: false,
+      platform,
+      isTestnet: creds.isTestnet,
+      balanceUsd: null,
+      availableMarginUsd: null,
+      canTrade: false,
+      latencyMs: Date.now() - started,
+      rawMessage: err instanceof Error ? err.message : "Lỗi kết nối MetaApi Cloud MT5",
+    };
+  }
+}
+
+export async function placeMetaApiMt5Order(
+  req: ExchangeOrderRequest,
+  platform: "MT5_EXNESS" | "MT5_XM" | "MT5_EA" = "MT5_EXNESS",
+): Promise<ExchangeOrderResult> {
+  const authToken = req.credentials.apiKey.trim();
+  const accountId = req.credentials.apiSecret.trim();
+  const symbol = toMt5BrokerSymbol(req.symbol, req.credentials.passphrase);
+  const volume = Math.max(0.01, Number(req.baseQty.toFixed(2)));
+
+  if (!authToken || !accountId) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: req.entryPrice,
+      message: "Thiếu MetaApi Token hoặc Account ID để đẩy lệnh Forex MT5",
+    };
+  }
+
+  try {
+    const payload = {
+      actionType: req.direction === "BUY" ? "ORDER_TYPE_BUY" : "ORDER_TYPE_SELL",
+      symbol,
+      volume,
+      stopLoss: req.stopLossPrice,
+      takeProfit: req.takeProfit1,
+      comment: `ORCA:${sanitizeClientOrderId(req.idempotencyKey, 20)}`,
+    };
+
+    const res = await fetch(
+      `${METAAPI_CLIENT_BASE}/users/current/accounts/${encodeURIComponent(accountId)}/trade`,
+      {
+        method: "POST",
+        headers: {
+          "auth-token": authToken,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    const text = await res.text();
+    const json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+
+    const stringCode = String(json.stringCode ?? "");
+    const ok = res.ok && (stringCode === "TRADE_RETCODE_DONE" || stringCode === "TRADE_RETCODE_PLACED" || Boolean(json.orderId || json.positionId));
+    if (!ok) {
+      return {
+        ok: false,
+        status: "REJECTED_EXCHANGE",
+        exchangeOrderId: null,
+        slOrderId: null,
+        tpOrderId: null,
+        executedQty: 0,
+        executedPrice: req.entryPrice,
+        message: String(json.message ?? json.stringCode ?? `MetaApi MT5 từ chối lệnh (${res.status})`),
+      };
+    }
+
+    const orderId = String(json.orderId ?? json.positionId ?? sanitizeClientOrderId(req.idempotencyKey, 20));
+    return {
+      ok: true,
+      status: "FILLED",
+      exchangeOrderId: orderId,
+      slOrderId: "mt5-attached-sl",
+      tpOrderId: "mt5-attached-tp",
+      executedQty: volume,
+      executedPrice: req.entryPrice,
+      message: `${platform} Cloud MT5 khớp #${orderId} (${volume} lots ${symbol}, SL/TP đính kèm)`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "REJECTED_EXCHANGE",
+      exchangeOrderId: null,
+      slOrderId: null,
+      tpOrderId: null,
+      executedQty: 0,
+      executedPrice: req.entryPrice,
+      message: err instanceof Error ? err.message : "Lỗi kết nối đặt lệnh MetaApi Cloud MT5",
     };
   }
 }

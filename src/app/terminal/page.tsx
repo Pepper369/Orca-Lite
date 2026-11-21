@@ -109,19 +109,19 @@ export default function ProTerminalPage() {
   };
 
   return (
-    <div className={`flex flex-col h-full bg-background-primary text-text-primary ${fullscreen ? "fixed inset-0 z-50 p-2" : "p-2"}`}>
+    <div className={`flex flex-col lg:h-full bg-background-primary text-text-primary ${fullscreen ? "fixed inset-0 z-50 p-2 overflow-y-auto lg:overflow-hidden" : "p-1.5 sm:p-2"}`}>
       {/* Top Bar */}
-      <header className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle bg-surface-base/80 rounded-t-xl shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="flex items-center gap-1.5 font-bold tracking-tight text-[15px]">
-            <Zap className="size-4 text-accent-primary animate-pulse" />
+      <header className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border-subtle bg-surface-base/80 rounded-t-xl shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
+          <h1 className="flex items-center gap-1.5 font-bold tracking-tight text-[14px] sm:text-[15px] whitespace-nowrap">
+            <Zap className="size-4 shrink-0 text-accent-primary animate-pulse" />
             ORCA PRO TERMINAL
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-primary/20 text-accent-primary font-mono border border-accent-primary/30">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-primary/20 text-accent-primary font-mono border border-accent-primary/30 whitespace-nowrap">
               0ms SPA
             </span>
           </h1>
 
-          <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-text-muted">
+          <div className="hidden xl:flex items-center gap-1.5 text-[11px] text-text-muted whitespace-nowrap">
             <Cpu className="size-3.5 text-accent-primary" />
             <span>DuckDB-Wasm:</span>
             <span className={`font-mono font-semibold ${duckDbStatus === "ready" ? "text-positive" : "text-amber-400"}`}>
@@ -131,7 +131,7 @@ export default function ProTerminalPage() {
         </div>
 
         {/* Quick Tickers */}
-        <div className="hidden md:flex items-center gap-1 overflow-x-auto text-[11px] font-mono">
+        <div className="hidden md:flex min-w-0 flex-1 items-center gap-1 overflow-x-auto no-scrollbar text-[11px] font-mono">
           {TERMINAL_WATCHLIST.slice(0, 8).map((s) => (
             <button
               key={s}
@@ -140,7 +140,7 @@ export default function ProTerminalPage() {
               onMouseEnter={() => {
                 prefetchApi(`/api/v1/stocks/${s}`);
               }}
-              className={`px-2 py-0.5 rounded transition-all ${
+              className={`shrink-0 px-2 py-0.5 rounded transition-all ${
                 s === symbol
                   ? "bg-accent-primary text-white font-bold shadow-xs"
                   : "bg-surface-elevated/60 text-text-muted hover:text-text-primary"
@@ -151,17 +151,17 @@ export default function ProTerminalPage() {
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Link
             href={`/stocks/${symbol}`}
-            className="text-[11px] text-text-muted hover:text-accent-primary flex items-center gap-1 border border-border-subtle rounded px-2 py-1 bg-surface-elevated/40"
+            className="text-[11px] text-text-muted hover:text-accent-primary flex items-center gap-1 border border-border-subtle rounded px-2 py-1 bg-surface-elevated/40 whitespace-nowrap"
           >
             Mở chi tiết mã ↗
           </Link>
           <button
             type="button"
             onClick={() => setFullscreen((v) => !v)}
-            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-elevated border border-border-subtle"
+            className="p-1.5 shrink-0 rounded text-text-muted hover:text-text-primary hover:bg-surface-elevated border border-border-subtle"
             title={fullscreen ? "Thu nhỏ" : "Toàn màn hình"}
           >
             {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
@@ -170,7 +170,7 @@ export default function ProTerminalPage() {
       </header>
 
       {/* Main Terminal Grid */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-2 mt-2">
+      <div className="lg:flex-1 lg:min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-2 mt-2">
         {/* Left Panel: Watchlist & In-Memory Screener (2.5 Cols) */}
         <div className="hidden lg:flex lg:col-span-3 flex-col rounded-xl border border-border-subtle bg-surface-base overflow-hidden">
           <div className="p-2.5 border-b border-border-subtle bg-surface-elevated/40 flex items-center gap-2">
@@ -214,9 +214,9 @@ export default function ProTerminalPage() {
         </div>
 
         {/* Center Panel: Chart & Workspace (6.5 Cols) */}
-        <div className="lg:col-span-6 flex flex-col rounded-xl border border-border-subtle bg-surface-base overflow-hidden min-h-0">
+        <div className="lg:col-span-6 flex flex-col rounded-xl border border-border-subtle bg-surface-base lg:overflow-hidden min-h-0">
           {/* Active Symbol Header */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border-subtle bg-surface-elevated/30">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border-subtle bg-surface-elevated/30 shrink-0">
             <div className="flex items-center gap-3">
               <span className="font-bold text-lg font-mono text-accent-primary">{symbol}</span>
               {activeQuote?.price && (
@@ -228,7 +228,7 @@ export default function ProTerminalPage() {
             </div>
 
             {/* Bottom Panel Mode Switcher */}
-            <div className="flex items-center gap-1 bg-surface-elevated/80 p-0.5 rounded-lg border border-border-subtle text-[11px]">
+            <div className="flex items-center gap-1 bg-surface-elevated/80 p-0.5 rounded-lg border border-border-subtle text-[11px] shrink-0">
               <button
                 type="button"
                 onClick={() => setBottomTab("orderbook")}
@@ -261,12 +261,12 @@ export default function ProTerminalPage() {
           </div>
 
           {/* Interactive Chart */}
-          <div className="flex-1 min-h-[320px] p-2 bg-background-secondary/60">
-            <OrcaChart symbol={symbol} assetType="stock" height={360} />
+          <div className="lg:flex-1 lg:min-h-0 overflow-hidden p-2 bg-background-secondary/60">
+            <OrcaChart symbol={symbol} assetType="stock" height={300} />
           </div>
 
           {/* Bottom Module Area (Keep-Alive Multi-Mode) */}
-          <div className="h-64 border-t border-border-subtle bg-surface-base overflow-y-auto p-2">
+          <div className="shrink-0 max-h-72 lg:h-60 border-t border-border-subtle bg-surface-base overflow-y-auto p-2">
             {bottomTab === "orderbook" && (
               <div className="h-full">
                 <OrderBookPanel symbol={symbol} />

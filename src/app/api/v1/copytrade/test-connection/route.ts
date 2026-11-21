@@ -2,6 +2,7 @@ import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
 import {
   verifyBinanceFuturesAccount,
+  verifyMetaApiMt5Account,
   verifyOkxAccount,
   type BrokerVerificationResult,
 } from "@/lib/engines/exchange-execution-client";
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     const session = await getSessionUser(req);
     const body = (await req.json()) as {
       connectionId?: string;
-      platform?: "BINANCE_FUTURES" | "OKX_FUTURES";
+      platform?: "BINANCE_FUTURES" | "OKX_FUTURES" | "MT5_EXNESS" | "MT5_XM" | "MT5_EA";
       apiKey?: string;
       apiSecret?: string;
       passphrase?: string;
@@ -39,7 +40,11 @@ export async function POST(req: Request) {
       const acct = await getBrokerConnectionById(body.connectionId);
       if (!acct) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
 
-      if (acct.platform !== "BINANCE_FUTURES" && acct.platform !== "OKX_FUTURES") {
+      const isMt5 = acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA";
+      const supportsDirectTest =
+        acct.platform === "BINANCE_FUTURES" || acct.platform === "OKX_FUTURES" || (isMt5 && acct.hasApiKey);
+
+      if (!supportsDirectTest) {
         return ok({
           verification: {
             verified: acct.connectionStatus === "CONNECTED_VERIFIED",
@@ -49,10 +54,9 @@ export async function POST(req: Request) {
             availableMarginUsd: acct.balanceUsd,
             canTrade: acct.hasEaToken ?? false,
             latencyMs: 0,
-            rawMessage:
-              acct.platform === "MT5_EXNESS" || acct.platform === "MT5_XM" || acct.platform === "MT5_EA"
-                ? "XM / Exness kết nối qua EA MT5 Bridge (bật Expert Advisor trên MT5 để gửi heartbeat)"
-                : "Tài khoản chế độ Paper Simulation",
+            rawMessage: isMt5
+              ? "XM / Exness đang dùng EA MT5 Bridge (bật OrcaCopyTradeSlave.mq5 trên MT5 để gửi heartbeat, hoặc gắn MetaApi Key để test trực tiếp)"
+              : "Tài khoản chế độ Paper Simulation",
           },
           account: acct,
         });
@@ -66,7 +70,9 @@ export async function POST(req: Request) {
       const verification: BrokerVerificationResult =
         acct.platform === "BINANCE_FUTURES"
           ? await verifyBinanceFuturesAccount(secrets)
-          : await verifyOkxAccount(secrets);
+          : acct.platform === "OKX_FUTURES"
+            ? await verifyOkxAccount(secrets)
+            : await verifyMetaApiMt5Account(secrets, acct.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA");
 
       const updated = await updateBrokerConnectionState(acct.id, {
         connectionStatus:
@@ -104,12 +110,22 @@ export async function POST(req: Request) {
             apiSecret: body.apiSecret.trim(),
             isTestnet: body.isTestnet !== false,
           })
-        : await verifyOkxAccount({
-            apiKey: body.apiKey.trim(),
-            apiSecret: body.apiSecret.trim(),
-            passphrase: body.passphrase?.trim() ?? "",
-            isTestnet: body.isTestnet !== false,
-          });
+        : body.platform === "OKX_FUTURES"
+          ? await verifyOkxAccount({
+              apiKey: body.apiKey.trim(),
+              apiSecret: body.apiSecret.trim(),
+              passphrase: body.passphrase?.trim() ?? "",
+              isTestnet: body.isTestnet !== false,
+            })
+          : await verifyMetaApiMt5Account(
+              {
+                apiKey: body.apiKey.trim(),
+                apiSecret: body.apiSecret.trim(),
+                passphrase: body.passphrase?.trim() || null,
+                isTestnet: body.isTestnet !== false,
+              },
+              body.platform,
+            );
 
     return ok({ verification });
   } catch (err) {

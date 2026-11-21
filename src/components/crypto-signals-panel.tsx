@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
+import { BrokerQuickTradeBar } from "@/components/broker-quick-trade-bar";
 import {
   calculateCryptoPositionSize,
   type CryptoPositionSizerResult,
@@ -147,6 +148,9 @@ export function CryptoSignalsPanel() {
           </button>
         </div>
       </div>
+
+      {/* 1.5 BROKER API CONNECTION BAR (BINANCE / OKX) */}
+      <BrokerQuickTradeBar assetType="CRYPTO" />
 
       {/* 2. MAIN SIGNALS GRID */}
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-4">

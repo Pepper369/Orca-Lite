@@ -782,14 +782,14 @@ export function detectCryptoLiquidationClusters(
 export function buildCryptoLiquidityContext(liqClusters: LiquidationClusterResult | null): {
   liquidationClusterAligned: "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
   externalMagnets:
-    | {
-        price: number;
-        side: "BUY_SIDE" | "SELL_SIDE";
-        type: "SHORT_LIQ_CLUSTER" | "LONG_LIQ_CLUSTER";
-        notionalUsd: number;
-        isDominant: boolean;
-      }[]
-    | null;
+  | {
+    price: number;
+    side: "BUY_SIDE" | "SELL_SIDE";
+    type: "SHORT_LIQ_CLUSTER" | "LONG_LIQ_CLUSTER";
+    notionalUsd: number;
+    isDominant: boolean;
+  }[]
+  | null;
 } {
   if (!liqClusters) {
     return { liquidationClusterAligned: null, externalMagnets: null };

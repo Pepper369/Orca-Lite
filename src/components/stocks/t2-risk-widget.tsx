@@ -104,14 +104,14 @@ export function T2RiskWidget({
           <div className="bg-panel-2 p-2 rounded border border-line">
             <span className="text-[10px] text-ink-3 block">Độ rướn nhịp tăng</span>
             <span className={`text-base font-bold ${data.cumulativeRunGainPct >= 7.5 ? "text-rose-400" : "text-ink"}`}>
-              +{data.cumulativeRunGainPct}%
+              {data.cumulativeRunGainPct >= 0 ? "+" : ""}{data.cumulativeRunGainPct}%
             </span>
           </div>
 
           <div className="bg-panel-2 p-2 rounded border border-line">
             <span className="text-[10px] text-ink-3 block">Cách nền MA20</span>
             <span className={`text-base font-bold ${data.distanceFromMa20Pct >= 8.0 ? "text-rose-400" : "text-ink"}`}>
-              +{data.distanceFromMa20Pct}%
+              {data.distanceFromMa20Pct >= 0 ? "+" : ""}{data.distanceFromMa20Pct}%
             </span>
           </div>
 

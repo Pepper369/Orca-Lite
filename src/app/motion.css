@@ -244,8 +244,6 @@ html {
 }
 
 .panel, .orca-panel {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
   transition: border-color var(--dur-fast) var(--ease-out-soft),
               box-shadow var(--dur-fast) var(--ease-out-soft);
 }

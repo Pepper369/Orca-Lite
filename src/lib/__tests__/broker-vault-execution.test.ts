@@ -14,12 +14,16 @@ import {
   signBinanceQuery,
   signOkxRequest,
   toBinanceFuturesSymbol,
+  toMt5BrokerSymbol,
   toOkxSwapInstId,
+  verifyMetaApiMt5Account,
 } from "@/lib/engines/exchange-execution-client";
 import {
   createBrokerConnection,
+  deleteBrokerConnection,
   getBrokerConnectionSecrets,
   listBrokerConnections,
+  rotateBrokerCredentials,
   triggerGlobalKillSwitch,
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
@@ -281,4 +285,49 @@ test("Broker Vault Store: Encrypts secrets, issues one-time MT5 EA token & enfor
   const unlockedList = await listBrokerConnections();
   const targetAfterRelease = unlockedList.find((c) => c.id === binanceConn.id);
   assert.equal(targetAfterRelease?.killSwitched, false);
+
+  // Clean up test accounts
+  assert.equal(await deleteBrokerConnection(binanceConn.id), true);
+  assert.equal(await deleteBrokerConnection(exnessConn.id), true);
+});
+
+test("MetaApi MT5 Cloud (XM/Exness) + Credential Rotation & Delete Lifecycle", async () => {
+  assert.equal(toMt5BrokerSymbol("XAU/USD"), "XAUUSD");
+  assert.equal(toMt5BrokerSymbol("EURUSD", "m"), "EURUSDm");
+  assert.equal(toMt5BrokerSymbol("XAUUSDm", "m"), "XAUUSDm");
+  assert.equal(toMt5BrokerSymbol("GBP/USD", "#"), "GBPUSD#");
+
+  const emptyVerify = await verifyMetaApiMt5Account(
+    { apiKey: "", apiSecret: "", isTestnet: true },
+    "MT5_XM",
+  );
+  assert.equal(emptyVerify.verified, false);
+  assert.equal(emptyVerify.platform, "MT5_XM");
+
+  const { connection: xmMetaApi, oneTimeEaToken } = await createBrokerConnection({
+    name: "XM Cloud MetaApi Test",
+    platform: "MT5_XM",
+    balanceUsd: 3000,
+    riskMultiplier: 1.0,
+    isTestnet: true,
+    apiKey: "metaapi_jwt_token_test_12345",
+    apiSecret: "11111111-2222-3333-4444-555555555555",
+    passphrase: "#",
+  });
+  assert.equal(oneTimeEaToken, null, "MetaApi Cloud mode should not force one-time EA token");
+  assert.equal(xmMetaApi.hasApiKey, true);
+  assert.equal(xmMetaApi.connectionStatus, "UNVERIFIED");
+
+  const rotated = await rotateBrokerCredentials(xmMetaApi.id, {
+    apiKey: "metaapi_jwt_rotated_99999",
+    apiSecret: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    regenerateEaToken: true,
+  });
+  assert.ok(rotated.connection);
+  assert.ok(rotated.oneTimeEaToken?.startsWith("orca_ea_"));
+  const secretsAfter = await getBrokerConnectionSecrets(xmMetaApi.id);
+  assert.equal(secretsAfter?.apiKey, "metaapi_jwt_rotated_99999");
+
+  assert.equal(await deleteBrokerConnection(xmMetaApi.id), true);
+  assert.equal(await deleteBrokerConnection(xmMetaApi.id), false);
 });

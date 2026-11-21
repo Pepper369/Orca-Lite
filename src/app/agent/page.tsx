@@ -757,7 +757,7 @@ export default function AgentPage() {
               trường · Tài chính cá nhân · Gia sản
             </p>
           </div>
-          <Badge tone="accent">multi-persona</Badge>
+          <Badge tone="accent" className="shrink-0 whitespace-nowrap">multi-persona</Badge>
         </div>
       </Panel>
 
@@ -777,12 +777,23 @@ export default function AgentPage() {
                   : "w-full max-w-full border-line bg-panel-2 text-ink shadow-sm hover:border-line/80"
               }`}
             >
+              <div className="space-y-1.5 break-words [overflow-wrap:anywhere] [word-break:break-word]">
+                {m.role === "agent" ? (
+                  <>
+                    {renderStructured(m)}
+                    {renderStepper(m, i)}
+                    {renderAnswer(m.text, m.streaming)}
+                  </>
+                ) : (
+                  m.text
+                )}
+              </div>
               {m.role === "agent" && m.text && !m.streaming && (
-                <div className="absolute right-2.5 top-2.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10">
+                <div className="mt-2 flex justify-end border-t border-line/40 pt-1.5">
                   <button
                     type="button"
                     onClick={() => copyMessage(m.text, i)}
-                    className="flex items-center gap-1 rounded-md bg-canvas/90 px-2 py-1 text-[11px] text-ink-3 hover:text-accent border border-line/60 shadow-xs cursor-pointer transition-colors backdrop-blur-xs"
+                    className="flex items-center gap-1 rounded-md bg-canvas/70 px-2 py-0.5 text-[11px] text-ink-3 hover:text-accent border border-line/50 cursor-pointer transition-colors"
                     title="Sao chép câu trả lời"
                   >
                     {copiedIndex === i ? (
@@ -799,17 +810,6 @@ export default function AgentPage() {
                   </button>
                 </div>
               )}
-              <div className="space-y-1.5 break-words [overflow-wrap:anywhere] [word-break:break-word]">
-                {m.role === "agent" ? (
-                  <>
-                    {renderStructured(m)}
-                    {renderStepper(m, i)}
-                    {renderAnswer(m.text, m.streaming)}
-                  </>
-                ) : (
-                  m.text
-                )}
-              </div>
             </div>
           </div>
         ))}

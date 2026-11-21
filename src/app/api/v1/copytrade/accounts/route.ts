@@ -6,15 +6,19 @@ import {
 } from "@/lib/engines/copy-trade-engine";
 import {
   verifyBinanceFuturesAccount,
+  verifyMetaApiMt5Account,
   verifyOkxAccount,
   type BrokerVerificationResult,
 } from "@/lib/engines/exchange-execution-client";
 import {
   createBrokerConnection,
+  deleteBrokerConnection,
   getBrokerConnectionById,
   listBrokerConnections,
+  rotateBrokerCredentials,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
+import { getAutoTradeWorkerStatus } from "@/lib/services/auto-trade-worker";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +44,7 @@ export async function GET(req: Request) {
     {
       accounts,
       performance: getMasterTraderPerformance(),
+      workerStatus: getAutoTradeWorkerStatus(),
       totalManagedCapitalUsd: Math.round(totalManagedCapitalUsd),
       activeCount: accounts.filter((a) => a.isActive).length,
       verifiedLiveCount: accounts.filter((a) => a.connectionStatus === "CONNECTED_VERIFIED").length,
@@ -111,7 +116,13 @@ export async function POST(req: Request) {
     let verification: BrokerVerificationResult | null = null;
     let finalAccount = connection;
 
-    if (hasApiCreds && (body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES")) {
+    const isMt5Platform =
+      body.platform === "MT5_EXNESS" || body.platform === "MT5_XM" || body.platform === "MT5_EA";
+
+    if (
+      hasApiCreds &&
+      (body.platform === "BINANCE_FUTURES" || body.platform === "OKX_FUTURES" || isMt5Platform)
+    ) {
       verification =
         body.platform === "BINANCE_FUTURES"
           ? await verifyBinanceFuturesAccount({
@@ -119,12 +130,22 @@ export async function POST(req: Request) {
               apiSecret: body.apiSecret!.trim(),
               isTestnet: body.isTestnet !== false,
             })
-          : await verifyOkxAccount({
-              apiKey: body.apiKey!.trim(),
-              apiSecret: body.apiSecret!.trim(),
-              passphrase: body.passphrase!.trim(),
-              isTestnet: body.isTestnet !== false,
-            });
+          : body.platform === "OKX_FUTURES"
+            ? await verifyOkxAccount({
+                apiKey: body.apiKey!.trim(),
+                apiSecret: body.apiSecret!.trim(),
+                passphrase: body.passphrase!.trim(),
+                isTestnet: body.isTestnet !== false,
+              })
+            : await verifyMetaApiMt5Account(
+                {
+                  apiKey: body.apiKey!.trim(),
+                  apiSecret: body.apiSecret!.trim(),
+                  passphrase: body.passphrase?.trim() || null,
+                  isTestnet: body.isTestnet !== false,
+                },
+                body.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
+              );
 
       const updated = await updateBrokerConnectionState(connection.id, {
         connectionStatus:
@@ -227,5 +248,135 @@ export async function PATCH(req: Request) {
     return ok({ account: updated });
   } catch (err) {
     return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PATCH payload", 400);
+  }
+}
+
+export async function PUT(req: Request) {
+  const limited = await rateLimit(req, {
+    name: "copytrade-accounts-put",
+    binding: "RL_AUTH",
+    limit: 30,
+    windowSec: 60,
+  });
+  if (limited) return limited;
+
+  try {
+    const session = await getSessionUser(req);
+    const body = (await req.json()) as {
+      id?: string;
+      apiKey?: string;
+      apiSecret?: string;
+      passphrase?: string;
+      isTestnet?: boolean;
+      regenerateEaToken?: boolean;
+    };
+    if (!body.id) return badRequest("Thiếu id tài khoản");
+
+    const existing = await getBrokerConnectionById(body.id);
+    if (!existing) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
+
+    const all = await listBrokerConnections(session?.id ?? null);
+    if (session?.id && !all.some((a) => a.id === body.id)) {
+      return fail("FORBIDDEN", "Không có quyền chỉnh sửa kết nối của tài khoản khác", 403);
+    }
+
+    const { connection, oneTimeEaToken } = await rotateBrokerCredentials(body.id, {
+      apiKey: body.apiKey,
+      apiSecret: body.apiSecret,
+      passphrase: body.passphrase,
+      isTestnet: body.isTestnet,
+      regenerateEaToken: body.regenerateEaToken,
+      userId: session?.id ?? null,
+    });
+    if (!connection) return fail("NOT_FOUND", "Không thể cập nhật khóa kết nối", 404);
+
+    let verification: BrokerVerificationResult | null = null;
+    let finalAccount = connection;
+    const hasNewCreds = Boolean(body.apiKey?.trim() && body.apiSecret?.trim());
+    const isMt5 =
+      existing.platform === "MT5_EXNESS" || existing.platform === "MT5_XM" || existing.platform === "MT5_EA";
+
+    if (hasNewCreds && (existing.platform === "BINANCE_FUTURES" || existing.platform === "OKX_FUTURES" || isMt5)) {
+      verification =
+        existing.platform === "BINANCE_FUTURES"
+          ? await verifyBinanceFuturesAccount({
+              apiKey: body.apiKey!.trim(),
+              apiSecret: body.apiSecret!.trim(),
+              isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
+            })
+          : existing.platform === "OKX_FUTURES"
+            ? await verifyOkxAccount({
+                apiKey: body.apiKey!.trim(),
+                apiSecret: body.apiSecret!.trim(),
+                passphrase: body.passphrase?.trim() ?? "",
+                isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
+              })
+            : await verifyMetaApiMt5Account(
+                {
+                  apiKey: body.apiKey!.trim(),
+                  apiSecret: body.apiSecret!.trim(),
+                  passphrase: body.passphrase?.trim() || null,
+                  isTestnet: body.isTestnet ?? existing.isTestnet ?? true,
+                },
+                existing.platform as "MT5_EXNESS" | "MT5_XM" | "MT5_EA",
+              );
+
+      const updated = await updateBrokerConnectionState(connection.id, {
+        connectionStatus:
+          verification.verified && verification.canTrade
+            ? "CONNECTED_VERIFIED"
+            : verification.verified
+              ? "UNVERIFIED"
+              : "ERROR",
+        balanceUsd:
+          verification.verified && verification.balanceUsd !== null && verification.balanceUsd > 0
+            ? Number(verification.balanceUsd.toFixed(2))
+            : connection.balanceUsd,
+        lastVerifiedAt: verification.verified ? Date.now() : null,
+        lastError: verification.verified && verification.canTrade ? null : verification.rawMessage,
+      });
+      if (updated) finalAccount = updated;
+    }
+
+    return ok({ account: finalAccount, verification, oneTimeEaToken });
+  } catch (err) {
+    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PUT payload", 400);
+  }
+}
+
+export async function DELETE(req: Request) {
+  const limited = await rateLimit(req, {
+    name: "copytrade-accounts-delete",
+    binding: "RL_AUTH",
+    limit: 30,
+    windowSec: 60,
+  });
+  if (limited) return limited;
+
+  try {
+    const session = await getSessionUser(req);
+    const url = new URL(req.url);
+    let id = url.searchParams.get("id");
+    if (!id) {
+      try {
+        const body = (await req.json()) as { id?: string };
+        id = body.id ?? null;
+      } catch {
+        // ignore empty body
+      }
+    }
+    if (!id) return badRequest("Thiếu id tài khoản cần xóa");
+
+    const all = await listBrokerConnections(session?.id ?? null);
+    if (session?.id && !all.some((a) => a.id === id)) {
+      return fail("FORBIDDEN", "Không có quyền xóa kết nối của tài khoản khác", 403);
+    }
+
+    const removed = await deleteBrokerConnection(id, session?.id ?? null);
+    if (!removed) return fail("NOT_FOUND", "Không tìm thấy kết nối trong Vault", 404);
+
+    return ok({ deletedId: id });
+  } catch (err) {
+    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Không thể xóa kết nối", 400);
   }
 }

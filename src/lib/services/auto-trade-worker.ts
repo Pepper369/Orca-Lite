@@ -16,18 +16,26 @@ function isHighGrade(grade?: string, winrateScore?: number): boolean {
   return (winrateScore ?? 0) >= 75;
 }
 
-async function runAutoTradeTick(): Promise<void> {
-  if (isTickRunning) return;
+export async function runAutoTradeTick(): Promise<{
+  dispatched: number;
+  scannedAt: number;
+  activeAutoAccounts: number;
+}> {
+  if (isTickRunning) {
+    return { dispatched: lastDispatchedCount, scannedAt: lastTickAt ?? Date.now(), activeAutoAccounts: 0 };
+  }
   isTickRunning = true;
+  let activeAutoAccounts = 0;
 
   try {
     const accounts = await listBrokerConnections();
     const autoEnabled = accounts.filter(
       (a) => a.isActive && a.autoExecuteEnabled && !a.killSwitched,
     );
+    activeAutoAccounts = autoEnabled.length;
     if (autoEnabled.length === 0) {
       lastTickAt = Date.now();
-      return;
+      return { dispatched: 0, scannedAt: lastTickAt, activeAutoAccounts: 0 };
     }
 
     const [fxRes, crRes] = await Promise.allSettled([
@@ -129,8 +137,10 @@ async function runAutoTradeTick(): Promise<void> {
 
     lastTickAt = Date.now();
     lastDispatchedCount = dispatched;
+    return { dispatched, scannedAt: lastTickAt, activeAutoAccounts };
   } catch (err) {
     console.warn("[AutoTradeWorker] Tick error:", err instanceof Error ? err.message : String(err));
+    return { dispatched: 0, scannedAt: Date.now(), activeAutoAccounts };
   } finally {
     isTickRunning = false;
   }

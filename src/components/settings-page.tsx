@@ -7,6 +7,7 @@ import {
   Bell,
   Bot,
   Database,
+  KeyRound,
   LayoutDashboard,
   Monitor,
   ShieldCheck,
@@ -31,9 +32,11 @@ import {
   DataManagementTab,
 } from "@/components/settings-panels";
 import { SheetsSyncPanel } from "@/components/sheets-sync-panel";
+import { CopyTradePanel } from "@/components/copy-trade-panel";
 
 const TABS = [
   { id: "profile", label: "Hồ sơ", icon: User2 },
+  { id: "brokers", label: "Kết nối Sàn & API", icon: KeyRound },
   { id: "appearance", label: "Giao diện", icon: Monitor },
   { id: "dashboard", label: "Bảng điều khiển", icon: LayoutDashboard },
   { id: "trading", label: "Giao dịch & Phí", icon: Wallet },
@@ -103,6 +106,7 @@ export function SettingsPage() {
 
         <div className="col-span-12 min-w-0 space-y-2 md:col-span-9">
           {tab === "profile" && <ProfileTab onOpenSecurity={() => selectTab("security")} />}
+          {tab === "brokers" && <CopyTradePanel mode="vault" />}
           {tab === "appearance" && <AppearanceTab />}
           {tab === "dashboard" && <DashboardTab />}
           {tab === "trading" && <TradingTab />}

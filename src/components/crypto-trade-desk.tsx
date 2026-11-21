@@ -5,6 +5,7 @@ import { useApi } from "@/lib/hooks";
 import { Badge, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
 import { getPriceDecimals } from "@/lib/engines/asset-precision";
 import { BookOpen, Activity, Gauge, ArrowUpRight, ArrowDownRight, ShieldAlert, Zap } from "lucide-react";
+import { BrokerQuickTradeBar } from "@/components/broker-quick-trade-bar";
 import type { Meta } from "@/lib/types";
 
 interface Level {
@@ -471,6 +472,29 @@ function DeskBody({
             </div>
           )}
         </div>
+      )}
+
+      {showLeverage && (
+        <BrokerQuickTradeBar
+          assetType="CRYPTO"
+          compact
+          order={
+            effectivePlan && (sig.direction === "BUY" || sig.direction === "SELL")
+              ? {
+                  symbol: data.symbol,
+                  assetType: "CRYPTO",
+                  direction: sig.direction,
+                  entryPrice: effectivePlan.entry,
+                  stopLossPrice: effectivePlan.stopLoss,
+                  takeProfit1: effectivePlan.tp1 ?? effectivePlan.takeProfit,
+                  masterLotsOrQty: Math.max(0.001, Number(((500 * Math.max(1, leverage)) / Math.max(1e-9, effectivePlan.entry)).toFixed(4))),
+                  recommendedLeverage: Math.min(20, Math.max(1, leverage)),
+                  winrateScore: sig.confidencePct,
+                  setupGrade: sig.grade,
+                }
+              : null
+          }
+        />
       )}
 
       {mode === "all" && meta && <MetaLine meta={meta} />}

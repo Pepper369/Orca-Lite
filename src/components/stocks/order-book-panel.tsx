@@ -431,16 +431,16 @@ export function OrderBookPanel({
 
         {/* Total Depth of Market Bar (Cung - Cầu) */}
         <div className="border-t border-line bg-panel-2/40 px-3 py-2.5">
-          <div className="mb-1.5 flex items-center justify-between text-xs font-medium">
-            <span className="flex items-center gap-1.5 text-up">
-              <span className="size-2 rounded-full bg-up" />
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs font-medium">
+            <span className="flex items-center gap-1.5 whitespace-nowrap text-up">
+              <span className="size-2 shrink-0 rounded-full bg-up" />
               Tổng dư mua: <span className="font-bold text-ink">{fmtVol(data.bidTotal)}</span>
               <span className="text-[10px] text-ink-3 font-normal">({buyDepthPct.toFixed(1)}%)</span>
             </span>
-            <span className="flex items-center gap-1.5 text-down">
+            <span className="flex items-center gap-1.5 whitespace-nowrap text-down">
               <span className="text-[10px] text-ink-3 font-normal">({sellDepthPct.toFixed(1)}%)</span>
               Tổng dư bán: <span className="font-bold text-ink">{fmtVol(data.askTotal)}</span>
-              <span className="size-2 rounded-full bg-down" />
+              <span className="size-2 shrink-0 rounded-full bg-down" />
             </span>
           </div>
           <div className="flex h-2 overflow-hidden rounded-full bg-panel-3">
