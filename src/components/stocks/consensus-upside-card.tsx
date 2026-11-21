@@ -3,6 +3,7 @@
 import React from "react";
 import { useApi } from "@/lib/hooks";
 import type { StockConsensusUpside } from "@/lib/engines/consensus-upside-engine";
+import { sanitizeHref } from "@/lib/security/xss";
 
 export function ConsensusUpsideCard({
   symbol,
@@ -146,16 +147,21 @@ export function ConsensusUpsideCard({
                   </div>
                 )}
 
-                {rep.pdfUrl && (
-                  <a
-                    href={rep.pdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 text-[11px] font-medium flex items-center gap-1 transition-colors"
-                  >
-                    PDF
-                  </a>
-                )}
+                {(() => {
+                  const safePdfUrl = rep.pdfUrl
+                    ? sanitizeHref(rep.pdfUrl, { allowRelative: false, fallback: "" })
+                    : "";
+                  return safePdfUrl ? (
+                    <a
+                      href={safePdfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 text-[11px] font-medium flex items-center gap-1 transition-colors"
+                    >
+                      PDF
+                    </a>
+                  ) : null;
+                })()}
               </div>
             </div>
           ))}

@@ -5,6 +5,7 @@ import { FileText, Download, ExternalLink, TrendingUp, Award, Target, Percent } 
 import { useApi } from "@/lib/hooks";
 import type { StockReportsResult } from "@/lib/services/stock-reports";
 import { Loading, Panel, EmptyState } from "@/components/ui";
+import { sanitizeHref } from "@/lib/security/xss";
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
@@ -94,14 +95,17 @@ export const AnalyticReportsPanel = memo(function AnalyticReportsPanel({ symbol 
 
       {/* Reports List */}
       <div className="space-y-3">
-        {reports.map((r) => (
+        {reports.map((r) => {
+          const safeUrl = sanitizeHref(r.url);
+          const safePdfUrl = r.pdfUrl ? sanitizeHref(r.pdfUrl, { allowRelative: false, fallback: "" }) : "";
+          return (
           <div
             key={r.id}
             className="flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface-elevated/40 p-3.5 transition-colors hover:border-border-default"
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <a
-                href={r.url}
+                href={safeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group flex-1 text-[13px] font-medium leading-snug text-text-primary hover:text-accent-primary"
@@ -111,9 +115,9 @@ export const AnalyticReportsPanel = memo(function AnalyticReportsPanel({ symbol 
               </a>
               <div className="flex items-center gap-2 shrink-0">
                 {getRatingBadge(r.rating)}
-                {r.pdfUrl && (
+                {safePdfUrl && (
                   <a
-                    href={r.pdfUrl}
+                    href={safePdfUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 rounded bg-accent-primary/15 px-2 py-1 text-[11px] font-medium text-accent-primary hover:bg-accent-primary/25 transition-colors"
@@ -161,7 +165,8 @@ export const AnalyticReportsPanel = memo(function AnalyticReportsPanel({ symbol 
               <span>{fmtDate(r.date)}</span>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </Panel>
   );

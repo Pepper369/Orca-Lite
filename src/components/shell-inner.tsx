@@ -58,6 +58,7 @@ import { OrcaWordmark, OrcaMark, OrcaMobileBrand } from "@/components/logo";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { useApi } from "@/lib/hooks";
 import { useSettings } from "@/lib/settings";
+import { sanitizeImageSrc } from "@/lib/security/xss";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { NotifBell } from "@/components/notif-bell";
 import { PriceAlertEngine } from "@/components/price-alert-engine";
@@ -649,6 +650,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const displayName =
     settings.profile.displayName || me?.user?.name || me?.user?.email?.split("@")[0] || "";
   const initials = displayName.slice(0, 2).toUpperCase() || "?";
+  const safeAvatarUrl = sanitizeImageSrc(settings.profile.avatarUrl, {
+    allowSafeDataImage: true,
+  });
 
   const logout = async () => {
     try {
@@ -668,9 +672,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-elevated"
       >
         <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-border-subtle bg-surface-elevated text-[11px] font-bold">
-          {settings.profile.avatarUrl ? (
+          {safeAvatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={settings.profile.avatarUrl} alt="" className="size-full object-cover" />
+            <img src={safeAvatarUrl} alt="" className="size-full object-cover" />
           ) : settings.profile.avatarStyle === "orca" && me?.user ? (
             <OrcaMark size={28} className="rounded-md" />
           ) : me?.user ? (

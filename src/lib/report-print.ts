@@ -7,19 +7,7 @@
 
 import type { DailyReport } from "@/lib/services/report-engine";
 import { cleanHeading, sectionToLines } from "@/lib/report-format";
-
-/** Escape for HTML text/attrs without embedding literal entity sequences in source. */
-function esc(s: string): string {
-  const amp = String.fromCharCode(38) + "amp;";
-  const lt = String.fromCharCode(38) + "lt;";
-  const gt = String.fromCharCode(38) + "gt;";
-  const quot = String.fromCharCode(38) + "quot;";
-  return String(s ?? "")
-    .replace(/&/g, amp)
-    .replace(/</g, lt)
-    .replace(/>/g, gt)
-    .replace(/"/g, quot);
-}
+import { escapeHtml, sanitizeImageSrc } from "@/lib/security/xss";
 
 function fmtWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -161,17 +149,17 @@ function linesToHtml(paragraphs: string[]): string {
   const prose = lines.filter((l) => l.kind === "prose");
   const mostlyBullets = bullets.length >= Math.max(1, prose.length);
 
-  const proseHtml = prose.map((l) => `<p>${esc(l.text)}</p>`).join("");
+  const proseHtml = prose.map((l) => `<p>${escapeHtml(l.text)}</p>`).join("");
   const bulletHtml =
     bullets.length > 0
-      ? `<ul>${bullets.map((l) => `<li>${esc(l.text)}</li>`).join("")}</ul>`
+      ? `<ul>${bullets.map((l) => `<li>${escapeHtml(l.text)}</li>`).join("")}</ul>`
       : "";
 
   if (mostlyBullets) return proseHtml + bulletHtml;
 
   return lines
     .map((l) =>
-      l.kind === "bullet" ? `<ul><li>${esc(l.text)}</li></ul>` : `<p>${esc(l.text)}</p>`,
+      l.kind === "bullet" ? `<ul><li>${escapeHtml(l.text)}</li></ul>` : `<p>${escapeHtml(l.text)}</p>`,
     )
     .join("");
 }
@@ -184,35 +172,38 @@ export function printDailyReport(report: DailyReport): void {
   const when = fmtWhen(report.generatedAt);
   const dataUntil = fmtWhen(report.marketDataTimestamp);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const logoSrc = `${origin}/brand/orca-mark.svg`;
+  const logoSrc = sanitizeImageSrc(`${origin}/brand/orca-mark.svg`, {
+    allowSafeDataImage: false,
+    fallback: "/brand/orca-mark.svg",
+  });
 
   const sectionsHtml = (report.sections ?? [])
     .map((s) => {
       const toneClass = s.tone === "up" ? "up" : s.tone === "down" ? "down" : "";
       const heading = cleanHeading(s.heading);
       const body = linesToHtml(s.paragraphs ?? []);
-      return `<div class="chip ${toneClass}"><h2>${esc(heading)}</h2>${body}</div>`;
+      return `<div class="chip ${toneClass}"><h2>${escapeHtml(heading)}</h2>${body}</div>`;
     })
     .join("");
 
   const freshnessTags = Object.entries(report.freshness ?? {})
-    .map(([k, v]) => `<span class="tag">${esc(k)}: ${esc(String(v))}</span>`)
+    .map(([k, v]) => `<span class="tag">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`)
     .join("");
 
   const body = `
   <div class="wrap">
     <div class="hd">
-      <img class="logo" src="${esc(logoSrc)}" alt="ORCA" width="40" height="40" onerror="this.style.display='none'" />
+      ${logoSrc ? `<img class="logo" src="${escapeHtml(logoSrc)}" alt="ORCA" width="40" height="40" />` : ""}
       <div style="flex:1;min-width:0">
-        <h1>${esc(report.title)}</h1>
-        <p class="sub">${esc(report.subtitle)}</p>
+        <h1>${escapeHtml(report.title)}</h1>
+        <p class="sub">${escapeHtml(report.subtitle)}</p>
       </div>
       <span class="badge">ORCA RESEARCH</span>
     </div>
     <div class="meta">
-      <span>Phát hành: ${esc(when)}</span>
-      ${report.marketDataTimestamp ? `<span>· Dữ liệu đến: ${esc(dataUntil)}</span>` : ""}
-      <span>· ${esc(report.type.replace(/_/g, " "))}</span>
+      <span>Phát hành: ${escapeHtml(when)}</span>
+      ${report.marketDataTimestamp ? `<span>· Dữ liệu đến: ${escapeHtml(dataUntil)}</span>` : ""}
+      <span>· ${escapeHtml(String(report.type ?? "").replace(/_/g, " "))}</span>
     </div>
     ${freshnessTags ? `<div class="tags">${freshnessTags}</div>` : ""}
     ${sectionsHtml}
@@ -225,23 +216,25 @@ export function printDailyReport(report: DailyReport): void {
     return;
   }
 
+  w.opener = null;
+  w.document.open();
   w.document.write(`<!doctype html>
 <html lang="vi">
 <head>
   <meta charset="utf-8" />
-  <title>${esc(report.title)}</title>
+  <title>${escapeHtml(report.title)}</title>
   <style>${PRINT_CSS}</style>
 </head>
-<body>${body}
-<script>
-  window.onload = function () {
-    setTimeout(function () {
-      window.focus();
-      window.print();
-    }, 280);
-  };
-</script>
-</body>
+<body>${body}</body>
 </html>`);
   w.document.close();
+  for (const img of Array.from(w.document.querySelectorAll("img"))) {
+    img.addEventListener("error", () => {
+      img.style.display = "none";
+    });
+  }
+  w.setTimeout(() => {
+    w.focus();
+    w.print();
+  }, 280);
 }

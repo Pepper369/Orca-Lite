@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, ChartNoAxesCombined, ExternalLink, Landmark, RefreshCw, Search, X } from "lucide-react";
 import { Badge, Chg, FreshnessDot, Loading, Unavailable } from "@/components/ui";
 import { useApi } from "@/lib/hooks";
+import { sanitizeHref } from "@/lib/security/xss";
 import {
   ECONOMIC_DATASETS,
   ECONOMIC_FREQUENCIES,
@@ -117,7 +118,7 @@ export function EconomicDataPage({ dataset }: { dataset: EconomicDataset }) {
             <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-text-secondary">{config.description}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <a href={config.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 text-[12px] text-text-secondary hover:border-border-default hover:text-accent-primary">
+            <a href={sanitizeHref(config.sourceUrl, { allowRelative: false })} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 text-[12px] text-text-secondary hover:border-border-default hover:text-accent-primary">
               VietnamBiz Data <ExternalLink className="size-3.5" aria-hidden="true" />
             </a>
             <button type="button" onClick={() => void refresh()} disabled={isLoading || refreshing} title="Tải lại bảng dữ liệu; bộ nhớ đệm nguồn tối đa 15 phút" className="inline-flex items-center gap-1.5 rounded-lg border border-accent-primary/30 bg-accent-primary/10 px-3 py-2 text-[12px] text-accent-primary hover:bg-accent-primary/15 disabled:cursor-wait disabled:opacity-60">

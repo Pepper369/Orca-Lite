@@ -7,6 +7,7 @@ import type { NewsSentimentResult } from "@/lib/services/news-sentiment";
 import { Badge, FreshnessDot, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
 import { Brain, Newspaper, Layers } from "lucide-react";
 import { clusterNewsTitles } from "@/lib/services/vietnamese-financial-nlu";
+import { sanitizeHref } from "@/lib/security/xss";
 
 const TABS: { key: string; label: string }[] = [
   { key: "", label: "Tất cả" },
@@ -211,9 +212,9 @@ export default function NewsPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <a
-                        href={a.url}
+                        href={sanitizeHref(a.url)}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="text-[13.5px] font-medium leading-snug text-ink hover:text-accent"
                       >
                         {a.title}

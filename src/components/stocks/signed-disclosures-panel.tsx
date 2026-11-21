@@ -17,6 +17,7 @@ import { useApi } from "@/lib/hooks";
 import type { StockDisclosuresResult } from "@/lib/services/stock-disclosures";
 import type { SignedDisclosureDocument } from "@/lib/providers/vndirect-news";
 import { Loading, Panel } from "@/components/ui";
+import { sanitizeHref } from "@/lib/security/xss";
 
 const formatDate = (d: string | null) => {
   if (!d) return "—";
@@ -175,7 +176,7 @@ export const SignedDisclosuresPanel = memo(function SignedDisclosuresPanel({
 
                     {/* Title */}
                     <a
-                      href={doc.newsUrl}
+                      href={sanitizeHref(doc.newsUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-block text-[13px] font-medium text-text-primary hover:text-accent-primary transition-colors leading-snug line-clamp-2"
@@ -191,7 +192,7 @@ export const SignedDisclosuresPanel = memo(function SignedDisclosuresPanel({
                       doc.attachments.map((att, idx) => (
                         <a
                           key={idx}
-                          href={att.url}
+                          href={sanitizeHref(att.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 transition-all hover:bg-emerald-500/20 hover:border-emerald-500/50"
@@ -203,7 +204,7 @@ export const SignedDisclosuresPanel = memo(function SignedDisclosuresPanel({
                       ))
                     ) : (
                       <a
-                        href={doc.newsUrl}
+                        href={sanitizeHref(doc.newsUrl)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary"

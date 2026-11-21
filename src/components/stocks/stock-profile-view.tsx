@@ -6,6 +6,7 @@ import { ArrowRight, Building2, CalendarDays, ExternalLink, Gauge, Globe2, Refre
 import { useApi } from "@/lib/hooks";
 import type { StockCompanyPackage } from "@/lib/services/stock-company";
 import { Badge, fmtCompact, fmtNum, Loading, MetaLine, Panel, Unavailable } from "@/components/ui";
+import { normalizeExternalWebsite, sanitizeImageSrc } from "@/lib/security/xss";
 
 type Insight = string | { text: string; source?: string; confidence?: "high" | "medium" | "low"; meta?: { source?: string } };
 type Tone = "up" | "down" | "accent" | "warn";
@@ -168,13 +169,16 @@ export function StockProfileView({ symbol }: { symbol: string }) {
           </div>
           <div className="company-profile-top">
             <div className="company-profile-identity">
-              {p?.logo ? (
-                <img src={p.logo} alt={p.vnName ?? symbol} className="size-12 rounded-lg border border-line object-contain bg-bg-1" />
-              ) : (
-                <div className="flex size-12 items-center justify-center rounded-lg border border-line bg-bg-2 text-accent">
-                  <Building2 className="size-6" />
-                </div>
-              )}
+              {(() => {
+                const safeLogo = sanitizeImageSrc(p?.logo, { allowSafeDataImage: false });
+                return safeLogo ? (
+                  <img src={safeLogo} alt={p?.vnName ?? symbol} className="size-12 rounded-lg border border-line object-contain bg-bg-1" />
+                ) : (
+                  <div className="flex size-12 items-center justify-center rounded-lg border border-line bg-bg-2 text-accent">
+                    <Building2 className="size-6" />
+                  </div>
+                );
+              })()}
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-[18px] font-bold tracking-tight text-ink-1">{symbol}</h1>
@@ -196,16 +200,19 @@ export function StockProfileView({ symbol }: { symbol: string }) {
                   <Users className="size-3" /> {fmtNum(p.employees, 0)} NV
                 </span>
               ) : null}
-              {p?.website ? (
-                <a
-                  href={p.website.startsWith("http") ? p.website : `https://${p.website}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-line/60 px-2 py-1 hover:text-accent"
-                >
-                  <Globe2 className="size-3" /> Website <ExternalLink className="size-3" />
-                </a>
-              ) : null}
+              {(() => {
+                const safeWebsite = p?.website ? normalizeExternalWebsite(p.website) : "";
+                return safeWebsite ? (
+                  <a
+                    href={safeWebsite}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-line/60 px-2 py-1 hover:text-accent"
+                  >
+                    <Globe2 className="size-3" /> Website <ExternalLink className="size-3" />
+                  </a>
+                ) : null;
+              })()}
             </div>
           </div>
           {p?.vnSummary || p?.enSummary ? (

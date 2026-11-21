@@ -5,6 +5,7 @@ import { useApi } from "@/lib/hooks";
 import type { ForexRow, NewsArticle, TechnicalSnapshot } from "@/lib/types";
 import { Badge, FreshnessDot, Loading, Panel } from "@/components/ui";
 import { Brain, Calendar, Newspaper, ExternalLink } from "lucide-react";
+import { sanitizeHref } from "@/lib/security/xss";
 
 interface CalendarEvent {
   time?: string;
@@ -206,9 +207,9 @@ export function ForexNewsPanel({ pair, base, quote }: { pair: string; base: stri
         {articles.slice(0, 6).map((a, i) => (
           <a
             key={i}
-            href={a.url}
+            href={sanitizeHref(a.url)}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             className="flex items-start gap-1.5 rounded-md border border-border-subtle/40 bg-surface-elevated/20 px-2 py-1 text-[10.5px] text-text-secondary transition-colors hover:border-border-default hover:text-text-primary"
           >
             <ExternalLink className="mt-0.5 size-3 shrink-0 text-text-muted" />

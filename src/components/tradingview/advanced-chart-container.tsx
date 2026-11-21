@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { TradingViewDatafeed } from "@/chart/tradingview-datafeed";
 import { OrcaChart } from "@/components/orca-chart";
+import { sanitizeQuerySymbol } from "@/lib/security/xss";
 
 interface Props {
   symbol?: string;
@@ -100,7 +101,7 @@ export function TradingViewAdvancedChartContainer({
         ) : (
           <div ref={containerRef} className="h-full w-full flex items-center justify-center bg-black/40">
             <iframe
-              src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${currentSymbol}&interval=D&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Asia%2FHo_Chi_Minh&withdateranges=1&showpopupbutton=1`}
+              src={`https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${encodeURIComponent(sanitizeQuerySymbol(currentSymbol) || "SSI")}&interval=D&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Asia%2FHo_Chi_Minh&withdateranges=1&showpopupbutton=1`}
               className="h-full w-full border-0"
               title={`TradingView Advanced Chart for ${currentSymbol}`}
               allowTransparency

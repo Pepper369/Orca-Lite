@@ -6,6 +6,7 @@ import type { PriceScenario } from "@/lib/services/price-scenarios";
 import type { ApiResponse } from "@/lib/types";
 import { Badge, FreshnessDot, Loading, MetaLine, Panel } from "@/components/ui";
 import { OrcaMark } from "@/components/logo";
+import { escapeHtml, sanitizeImageSrc } from "@/lib/security/xss";
 import {
   Building2,
   Factory,
@@ -23,23 +24,14 @@ import {
   ListChecks,
 } from "lucide-react";
 
-function esc(s: string): string {
-  const a = String.fromCharCode(38);
-  return s
-    .replace(/&/g, a + "amp;")
-    .replace(/</g, a + "lt;")
-    .replace(/>/g, a + "gt;")
-    .replace(/"/g, a + "quot;");
-}
-
 function boldHtml(text: string): string {
-  return esc(text).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
 }
 
 function sectionHtml(title: string, lines: string[]): string {
   if (!lines?.length) return "";
   const body = lines.map((l) => `<p>${boldHtml(l)}</p>`).join("");
-  return `<h2>${esc(title)}</h2>${body}`;
+  return `<h2>${escapeHtml(title)}</h2>${body}`;
 }
 
 /** Tách dòng **tiêu đề nhóm** thành các khối con độc lập (dùng cho Catalyst / Vĩ mô). */
@@ -62,13 +54,13 @@ function groupedSectionHtml(title: string, lines: string[], tone: "catalyst" | "
   const blocks = groups
     .map((g) => {
       const h = g.head
-        ? `<div class="grp-h" style="color:${border}">${esc(g.head)}</div>`
+        ? `<div class="grp-h" style="color:${border}">${escapeHtml(g.head)}</div>`
         : "";
       const body = g.items.map((l) => `<p>${boldHtml(l)}</p>`).join("");
       return `<div class="grp" style="border-left:3px solid ${border};background:${bg}">${h}${body}</div>`;
     })
     .join("");
-  return `<h2>${esc(title)}</h2>${blocks}`;
+  return `<h2>${escapeHtml(title)}</h2>${blocks}`;
 }
 
 function valueChainHtml(vc: { input: string[]; process: string[]; output: string[] } | null): string {
@@ -78,32 +70,33 @@ function valueChainHtml(vc: { input: string[]; process: string[]; output: string
     ]);
   }
   const col = (label: string, items: string[]) =>
-    `<div><b>${esc(label)}</b>${(items?.length ? items : ["—"])
-      .map((x) => `<p style="margin:2px 0">• ${esc(x)}</p>`)
+    `<div><b>${escapeHtml(label)}</b>${(items?.length ? items : ["—"])
+      .map((x) => `<p style="margin:2px 0">• ${escapeHtml(x)}</p>`)
       .join("")}</div>`;
   return `<h2>4. Chuỗi giá trị (Input → Process → Output)</h2>
     <div class="scen">${col("Input", vc.input)}${col("Process", vc.process)}${col("Output", vc.output)}</div>`;
 }
 
 function chartSvgHtml(series: ChartPoint[], symbol: string): string {
-  if (!series?.length) return "<p>Không có chuỗi giá để vẽ chart.</p>";
+  const validSeries = (series ?? []).filter((p) => p && Number.isFinite(p.c));
+  if (!validSeries.length) return "<p>Không có chuỗi giá để vẽ chart.</p>";
   const w = 640;
   const h = 180;
   const pad = 12;
-  const ys = series.map((p) => p.c);
+  const ys = validSeries.map((p) => p.c);
   const min = Math.min(...ys);
   const max = Math.max(...ys);
   const span = max - min || 1;
-  const pts = series.map((p, i) => {
-    const x = pad + (i / Math.max(1, series.length - 1)) * (w - pad * 2);
+  const pts = validSeries.map((p, i) => {
+    const x = pad + (i / Math.max(1, validSeries.length - 1)) * (w - pad * 2);
     const y = pad + (1 - (p.c - min) / span) * (h - pad * 2);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const d = `M ${pts.join(" L ")}`;
-  const up = (series[series.length - 1]?.c ?? 0) >= (series[0]?.c ?? 0);
+  const up = (validSeries[validSeries.length - 1]?.c ?? 0) >= (validSeries[0]?.c ?? 0);
   const stroke = up ? "#16a34a" : "#dc2626";
   return `<div style="margin:8px 0 4px;font-size:10.5px;color:#5a6b8c;display:flex;justify-content:space-between">
-    <span>${esc(symbol)} · giá đóng cửa ~${series.length} phiên</span>
+    <span>${escapeHtml(symbol)} · giá đóng cửa ~${validSeries.length} phiên</span>
     <span>${min.toFixed(2)} — ${max.toFixed(2)}</span>
   </div>
   <svg viewBox="0 0 ${w} ${h}" width="100%" height="180" style="border:1px solid #ccd;border-radius:8px;background:#f8fafc">
@@ -123,11 +116,11 @@ function businessTableHtml(
     const tr = rows
       .map(
         (r) =>
-          `<tr><td>${esc(r.metric)}</td><td class="num">${esc(r.current)}</td><td class="num">${esc(r.prior)}</td><td class="num">${esc(r.change)}</td></tr>`,
+          `<tr><td>${escapeHtml(r.metric)}</td><td class="num">${escapeHtml(r.current)}</td><td class="num">${escapeHtml(r.prior)}</td><td class="num">${escapeHtml(r.change)}</td></tr>`,
       )
       .join("");
-    return `<p style="font-size:11px;color:#5a6b8c;margin:4px 0 6px">So sánh <b>${esc(mode)}</b> · ${esc(cLabel)} vs ${esc(pLabel)}</p>
-    <table class="kq"><thead><tr><th>Chỉ tiêu</th><th>${esc(cLabel)}</th><th>${esc(pLabel)}</th><th>${esc(mode)}</th></tr></thead><tbody>${tr}</tbody></table>`;
+    return `<p style="font-size:11px;color:#5a6b8c;margin:4px 0 6px">So sánh <b>${escapeHtml(mode)}</b> · ${escapeHtml(cLabel)} vs ${escapeHtml(pLabel)}</p>
+    <table class="kq"><thead><tr><th>Chỉ tiêu</th><th>${escapeHtml(cLabel)}</th><th>${escapeHtml(pLabel)}</th><th>${escapeHtml(mode)}</th></tr></thead><tbody>${tr}</tbody></table>`;
   }
   if (fallback?.length) return fallback.map((l) => `<p>${boldHtml(l)}</p>`).join("");
   return "<p>Chưa có số liệu KQKD 2 kỳ.</p>";
@@ -138,16 +131,20 @@ function printCompanyReport(report: CompanyAnalysisReport) {
     timeZone: "Asia/Ho_Chi_Minh",
   });
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const orcaLogoSrc = `${origin}/brand/orca-mark.svg`;
+  const orcaLogoSrc = sanitizeImageSrc(`${origin}/brand/orca-mark.svg`, {
+    allowSafeDataImage: false,
+    fallback: "/brand/orca-mark.svg",
+  });
+  const safeCompanyLogo = sanitizeImageSrc(report.companyLogo, { allowSafeDataImage: false });
   const s = report.sections;
   const body = `
   <div class="wrap">
     <div class="hd">
-      <img class="logo-orca" src="${orcaLogoSrc}" alt="ORCA" width="44" height="44" />
-      ${report.companyLogo ? `<img class="logo-co" src="${esc(report.companyLogo)}" alt="${esc(report.symbol)}" width="44" height="44" onerror="this.style.display='none'" />` : ""}
+      ${orcaLogoSrc ? `<img class="logo-orca" src="${escapeHtml(orcaLogoSrc)}" alt="ORCA" width="44" height="44" />` : ""}
+      ${safeCompanyLogo ? `<img class="logo-co" src="${escapeHtml(safeCompanyLogo)}" alt="${escapeHtml(report.symbol)}" width="44" height="44" />` : ""}
       <div style="flex:1">
-        <h1>${esc(report.title)}</h1>
-        <p>ORCA Company Report · ${esc(report.symbol)}${report.floor ? ` · ${esc(report.floor)}` : ""} · Data ${esc(report.dataQuality)}</p>
+        <h1>${escapeHtml(report.title)}</h1>
+        <p>ORCA Company Report · ${escapeHtml(report.symbol)}${report.floor ? ` · ${escapeHtml(report.floor)}` : ""} · Data ${escapeHtml(report.dataQuality)}</p>
       </div>
       <span class="bd">COMPANY</span>
     </div>
@@ -173,7 +170,7 @@ function printCompanyReport(report: CompanyAnalysisReport) {
 
     <div class="assump">
       <b>Assumptions & data traceability</b>
-      <p>Nguồn: Orca Financial Engine (profile, BCTC, ratios, dchart) · pipeline ORCA quant · tạo lúc ${esc(when)}.</p>
+      <p>Nguồn: Orca Financial Engine (profile, BCTC, ratios, dchart) · pipeline ORCA quant · tạo lúc ${escapeHtml(when)}.</p>
       <div class="foot">ORCA Financial — Generated from verified market data · không phải khuyến nghị đầu tư</div>
     </div>
   </div>
@@ -181,7 +178,9 @@ function printCompanyReport(report: CompanyAnalysisReport) {
 
   const w = window.open("", "_blank", "width=900,height=1200");
   if (!w) return;
-  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${esc(report.title)}</title><style>
+  w.opener = null;
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>${escapeHtml(report.title)}</title><style>
       @page{size:A4;margin:14mm 16mm 16mm 16mm}
       body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#0c1a33;margin:0;padding:0;line-height:1.6;font-size:12.5px}
       .wrap{max-width:180mm;margin:0 auto}
@@ -221,6 +220,11 @@ function printCompanyReport(report: CompanyAnalysisReport) {
       @media print{body{margin:0}}
     </style></head><body>${body}</body></html>`);
   w.document.close();
+  for (const img of Array.from(w.document.querySelectorAll("img"))) {
+    img.addEventListener("error", () => {
+      img.style.display = "none";
+    });
+  }
   w.focus();
   setTimeout(() => {
     w.print();
@@ -315,14 +319,17 @@ export function StockReportSection() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
                 <OrcaMark size={40} className="rounded-lg border border-border-subtle bg-white" />
-                {report.companyLogo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={report.companyLogo}
-                    alt={report.symbol}
-                    className="size-10 rounded-lg border border-border-subtle bg-white object-contain"
-                  />
-                ) : null}
+                {(() => {
+                  const safeLogo = sanitizeImageSrc(report.companyLogo, { allowSafeDataImage: false });
+                  return safeLogo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={safeLogo}
+                      alt={report.symbol}
+                      className="size-10 rounded-lg border border-border-subtle bg-white object-contain"
+                    />
+                  ) : null;
+                })()}
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="text-[16px] font-semibold text-text-primary">{report.title}</h2>
@@ -446,8 +453,8 @@ function ScenarioList({ label, items }: { label: string; items: string[] }) {
 
 function scenariosHtml(scenarios: PriceScenario[], summary: { currentRegime: string; primaryScenario: string }): string {
   if (!scenarios?.length) return "";
-  const cards = scenarios.map((s) => `<div class="scenario-card"><b>${esc(s.label)} · ${esc(s.title)}</b><small>${esc(s.horizon)} · Xác suất ${esc(s.probabilityRange)} · ${esc(s.dataQuality)}</small><strong>Nguyên nhân kỹ thuật</strong>${s.technicalCauses.map((x) => `<p>• ${esc(x)}</p>`).join("")}<strong>Nguyên nhân cơ bản</strong>${s.fundamentalCauses.map((x) => `<p>• ${esc(x)}</p>`).join("")}<strong>Trigger / vô hiệu</strong>${[...s.triggers, ...s.invalidationSignals].map((x) => `<p>• ${esc(x)}</p>`).join("")}<strong>Hướng hành động & việc cần làm</strong>${[...s.actionPlan, ...s.tasks].map((x) => `<p>• ${esc(x)}</p>`).join("")}</div>`).join("");
-  return `<h2>9. Kịch bản biến động thị giá & hành động</h2><p>Trạng thái: ${esc(summary.currentRegime)} · Ưu tiên: ${esc(summary.primaryScenario)}. Đây là kịch bản có điều kiện, không phải khuyến nghị chắc chắn.</p><div class="scenario-grid">${cards}</div>`;
+  const cards = scenarios.map((s) => `<div class="scenario-card"><b>${escapeHtml(s.label)} · ${escapeHtml(s.title)}</b><small>${escapeHtml(s.horizon)} · Xác suất ${escapeHtml(s.probabilityRange)} · ${escapeHtml(s.dataQuality)}</small><strong>Nguyên nhân kỹ thuật</strong>${s.technicalCauses.map((x) => `<p>• ${escapeHtml(x)}</p>`).join("")}<strong>Nguyên nhân cơ bản</strong>${s.fundamentalCauses.map((x) => `<p>• ${escapeHtml(x)}</p>`).join("")}<strong>Trigger / vô hiệu</strong>${[...s.triggers, ...s.invalidationSignals].map((x) => `<p>• ${escapeHtml(x)}</p>`).join("")}<strong>Hướng hành động & việc cần làm</strong>${[...s.actionPlan, ...s.tasks].map((x) => `<p>• ${escapeHtml(x)}</p>`).join("")}</div>`).join("");
+  return `<h2>9. Kịch bản biến động thị giá & hành động</h2><p>Trạng thái: ${escapeHtml(summary.currentRegime)} · Ưu tiên: ${escapeHtml(summary.primaryScenario)}. Đây là kịch bản có điều kiện, không phải khuyến nghị chắc chắn.</p><div class="scenario-grid">${cards}</div>`;
 }
 
 function Sec({
@@ -682,8 +689,12 @@ function BusinessBarChart({ data }: { data: BusinessChartPoint[] }) {
 
 function businessBarChartHtml(data: BusinessChartPoint[]): string {
   if (!data?.length) return "";
-  const max = Math.max(1, ...data.flatMap((d) => [d.revenue, d.grossProfit, d.netIncome].filter((v): v is number => v != null).map(Math.abs)));
-  const bars = data.map((d) => `<div class="bar-group"><small>${esc(d.period)}</small><div class="bars"><i style="height:${Math.max(2, (Math.abs(d.revenue ?? 0) / max) * 100)}%;background:#3b82f6"></i><i style="height:${Math.max(2, (Math.abs(d.grossProfit ?? 0) / max) * 100)}%;background:#14b8a6"></i><i style="height:${Math.max(2, (Math.abs(d.netIncome ?? 0) / max) * 100)}%;background:#f59e0b"></i></div></div>`).join("");
+  const max = Math.max(1, ...data.flatMap((d) => [d.revenue, d.grossProfit, d.netIncome].filter((v): v is number => v != null && Number.isFinite(v)).map(Math.abs)));
+  const pct = (val: number | null | undefined) => {
+    const num = val != null && Number.isFinite(val) ? (Math.abs(val) / max) * 100 : 0;
+    return Math.max(2, Math.min(100, num)).toFixed(2);
+  };
+  const bars = data.map((d) => `<div class="bar-group"><small>${escapeHtml(d.period)}</small><div class="bars"><i style="height:${pct(d.revenue)}%;background:#3b82f6"></i><i style="height:${pct(d.grossProfit)}%;background:#14b8a6"></i><i style="height:${pct(d.netIncome)}%;background:#f59e0b"></i></div></div>`).join("");
   return `<div class="business-chart"><div class="chart-legend">Doanh thu · LN gộp · LNST · đơn vị tỷ đồng</div><div class="bar-chart">${bars}</div></div>`;
 }
 

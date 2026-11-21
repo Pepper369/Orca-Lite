@@ -7,6 +7,7 @@ import { useApi } from "@/lib/hooks";
 import { useSettings } from "@/lib/settings";
 import { loadAlerts } from "@/lib/alerts-store";
 import type { NewsArticle } from "@/lib/types";
+import { sanitizeHref } from "@/lib/security/xss";
 
 type ReportItem = {
   id: string;
@@ -344,7 +345,7 @@ export function NotifBell() {
                       return (
                         <li key={a.id || a.url}>
                           <a
-                            href={a.url}
+                            href={sanitizeHref(a.url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => setOpen(false)}

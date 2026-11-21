@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSettings } from "@/lib/settings";
+import { sanitizeImageSrc } from "@/lib/security/xss";
 import { Button, Panel } from "@/components/ui";
 import { useApi } from "@/lib/hooks";
 import { OrcaMark } from "@/components/logo";
@@ -133,12 +134,15 @@ function ProfileAvatar({
 }) {
   const { settings } = useSettings();
   const initials = (displayName || "OR").slice(0, 2).toUpperCase();
+  const safeAvatarUrl = sanitizeImageSrc(settings.profile.avatarUrl, {
+    allowSafeDataImage: true,
+  });
 
-  if (settings.profile.avatarUrl) {
+  if (safeAvatarUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={settings.profile.avatarUrl}
+        src={safeAvatarUrl}
         alt="Avatar"
         className="size-full object-cover"
         style={{ width: size, height: size }}
@@ -460,13 +464,21 @@ export function ProfileTab({ onOpenSecurity }: { onOpenSecurity?: () => void }) 
                       const file = e.target.files?.[0];
                       e.target.value = "";
                       if (!file) return;
+                      if (!/^image\/(png|jpeg|jpg|webp|gif)$/i.test(file.type)) {
+                        alert("Chỉ hỗ trợ ảnh PNG, JPEG, WebP hoặc GIF.");
+                        return;
+                      }
                       if (file.size > 4 * 1024 * 1024) {
                         alert("Ảnh tối đa 4MB. Hãy chọn ảnh nhỏ hơn.");
                         return;
                       }
                       const reader = new FileReader();
                       reader.onload = () => {
-                        const dataUrl = String(reader.result || "");
+                        const dataUrl = sanitizeImageSrc(String(reader.result || ""), {
+                          allowRelative: false,
+                          allowSafeDataImage: true,
+                        });
+                        if (!dataUrl) return;
                         const img = new Image();
                         img.onload = () => {
                           const size = 160;

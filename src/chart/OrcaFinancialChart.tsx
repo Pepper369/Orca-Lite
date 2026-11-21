@@ -19,6 +19,7 @@ import { buildSmcOverlay } from "@/chart/smc-overlay";
 import { buildWyckoffOverlay } from "@/chart/wyckoff-overlay";
 import { applySmcPriceLines, type SmcLineBag } from "@/chart/smc-series-helpers";
 import type { OhlcvBar } from "@/lib/types";
+import { sanitizeQuerySymbol } from "@/lib/security/xss";
 
 interface Props {
   symbol: string;
@@ -131,7 +132,8 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   }, [extraLevels]);
 
   const limit = historyLimit(assetType, tf);
-  const chartUrl = `/api/v1/chart/history?symbol=${encodeURIComponent(symbol)}&assetType=${assetType}&timeframe=${tf}&limit=${limit}`;
+  const safeSym = sanitizeQuerySymbol(symbol) || symbol;
+  const chartUrl = `/api/v1/chart/history?symbol=${encodeURIComponent(safeSym)}&assetType=${encodeURIComponent(assetType)}&timeframe=${encodeURIComponent(tf)}&limit=${limit}`;
   const { data, isLoading, isValidating, mutate } = useApi<ChartMarketData>(chartUrl, {
     keepPreviousData: false,
     timeoutMs: 18_000,
@@ -168,7 +170,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       try {
         const { createChart, ColorType, CrosshairMode } = await import("lightweight-charts");
         if (cancelled || !hostRef.current) return;
-        hostRef.current.innerHTML = "";
+        hostRef.current.replaceChildren();
 
         chart = createChart(hostRef.current, {
           height,
@@ -212,7 +214,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
       ro?.disconnect();
       try {
         chart?.remove();
-        if (hostEl) hostEl.innerHTML = "";
+        if (hostEl) hostEl.replaceChildren();
       } catch {
         /* safety */
       }

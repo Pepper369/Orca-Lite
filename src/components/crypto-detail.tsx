@@ -22,6 +22,7 @@ import {
   Unavailable,
 } from "@/components/ui";
 import { getPriceDecimals } from "@/lib/engines/asset-precision";
+import { sanitizeHref } from "@/lib/security/xss";
 import type { PrecisionTradeSetup } from "@/lib/engines/fx-crypto-precision-engine";
 import {
   buildPrecisionChartLevels,
@@ -707,9 +708,9 @@ function CryptoNewsPanel({ symbol, base }: { symbol: string; base: string }) {
           {articles.slice(0, 6).map((a, i) => (
             <li key={i}>
               <a
-                href={a.url}
+                href={sanitizeHref(a.url)}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="line-clamp-2 text-[11px] leading-snug text-text-secondary hover:text-accent-primary"
               >
                 {a.title}

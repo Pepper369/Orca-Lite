@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
+import { sanitizeHref } from "@/lib/security/xss";
 import {
   Badge,
   Loading,
@@ -2097,9 +2098,9 @@ export function OQuantStudio() {
                               {c.sites.flatMap((s) => (s.articles || []).map((art) => ({ ...art, domain: s.domain }))).slice(0, 2).map((a, idx) => (
                                 <a
                                   key={idx}
-                                  href={a.url}
+                                  href={sanitizeHref(a.url)}
                                   target="_blank"
-                                  rel="noreferrer"
+                                  rel="noopener noreferrer"
                                   className="text-[10px] text-blue-400 hover:underline flex items-center gap-1"
                                 >
                                   <ExternalLink className="size-2.5" />

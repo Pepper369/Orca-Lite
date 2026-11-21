@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import type { TradingViewIdea } from "@/lib/providers/tradingview-ideas";
+import { sanitizeQuerySymbol } from "@/lib/security/xss";
 
 interface Props {
   symbol: string;
@@ -56,9 +57,9 @@ export function TradingViewIdeasPanel({ symbol }: Props) {
           <span className="text-[11px] text-text-tertiary">({ideas.length} ý tưởng)</span>
         </div>
         <a
-          href={`https://www.tradingview.com/symbols/${symbol}/ideas/`}
+          href={`https://www.tradingview.com/symbols/${encodeURIComponent(sanitizeQuerySymbol(symbol))}/ideas/`}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-xs text-accent hover:underline flex items-center gap-1"
         >
           Xem thêm trên TradingView ↗

@@ -8,6 +8,7 @@ import { useApi } from "@/lib/hooks";
 import { fmtCompact, Loading, Panel, Unavailable, ErrorState, EmptyState, FreshnessAlertBanner } from "@/components/ui";
 import dynamic from "next/dynamic";
 import { financialsApiUrl, type FinTablePayload } from "@/components/stocks/financials-table-data";
+import { sanitizeQuerySymbol } from "@/lib/security/xss";
 
 const AiFinancialPanel = dynamic(
   () => import("@/components/stocks/ai-financial-panel").then((m) => m.AiFinancialPanel),
@@ -201,18 +202,19 @@ export function StockFinancialsView({ symbol }: { symbol: string }) {
   })();
 
   if (isLoading && !data) {
+    const safeSym = encodeURIComponent(sanitizeQuerySymbol(symbol));
     return (
       <div className="stock-workspace space-y-3">
         <Loading rows={6} label="Đang tải BCTC…" />
         <Panel title="Nguồn đối chiếu BCTC">
           <ul className="space-y-1.5 text-[12px]">
             <li>
-              <a className="text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${symbol}`} target="_blank" rel="noopener noreferrer">
+              <a className="text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${safeSym}`} target="_blank" rel="noopener noreferrer">
                 KQKD {symbol} ↗
               </a>
             </li>
             <li>
-              <a className="text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${symbol}`} target="_blank" rel="noopener noreferrer">
+              <a className="text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${safeSym}`} target="_blank" rel="noopener noreferrer">
                 Cân đối kế toán {symbol} ↗
               </a>
             </li>
@@ -223,6 +225,7 @@ export function StockFinancialsView({ symbol }: { symbol: string }) {
   }
 
   if (!data?.financials) {
+    const safeSym = encodeURIComponent(sanitizeQuerySymbol(symbol));
     return (
       <div className="stock-workspace space-y-3">
         <ErrorState
@@ -233,17 +236,17 @@ export function StockFinancialsView({ symbol }: { symbol: string }) {
         <Panel title="Nguồn đối chiếu BCTC">
           <ul className="space-y-1.5 text-[12px]">
             <li>
-              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${symbol}`} target="_blank" rel="noopener noreferrer">
+              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${safeSym}`} target="_blank" rel="noopener noreferrer">
                 dstock…/bang-can-doi-ke-toan/{symbol}
               </a>
             </li>
             <li>
-              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${symbol}`} target="_blank" rel="noopener noreferrer">
+              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${safeSym}`} target="_blank" rel="noopener noreferrer">
                 dstock…/bao-cao-ket-qua-kinh-doanh/{symbol}
               </a>
             </li>
             <li>
-              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/${symbol}`} target="_blank" rel="noopener noreferrer">
+              <a className="break-all text-accent underline-offset-2 hover:underline" href={`https://dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/${safeSym}`} target="_blank" rel="noopener noreferrer">
                 dstock…/bao-cao-luu-chuyen-tien-te/{symbol}
               </a>
             </li>
@@ -427,41 +430,46 @@ export function StockFinancialsView({ symbol }: { symbol: string }) {
       </Panel>
 
       <Panel title="Nguồn đối chiếu BCTC">
-        <ul className="space-y-1.5 text-[12px]">
-          <li>
-            <span className="text-ink-3">Bảng cân đối kế toán: </span>
-            <a
-              className="break-all text-accent underline-offset-2 hover:underline"
-              href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${symbol}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              dstock.vndirect.com.vn/bang-can-doi-ke-toan/{symbol}
-            </a>
-          </li>
-          <li>
-            <span className="text-ink-3">Kết quả kinh doanh: </span>
-            <a
-              className="break-all text-accent underline-offset-2 hover:underline"
-              href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${symbol}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/{symbol}
-            </a>
-          </li>
-          <li>
-            <span className="text-ink-3">Lưu chuyển tiền tệ: </span>
-            <a
-              className="break-all text-accent underline-offset-2 hover:underline"
-              href={`https://dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/${symbol}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/{symbol}
-            </a>
-          </li>
-        </ul>
+        {(() => {
+          const safeSym = encodeURIComponent(sanitizeQuerySymbol(symbol));
+          return (
+            <ul className="space-y-1.5 text-[12px]">
+              <li>
+                <span className="text-ink-3">Bảng cân đối kế toán: </span>
+                <a
+                  className="break-all text-accent underline-offset-2 hover:underline"
+                  href={`https://dstock.vndirect.com.vn/bang-can-doi-ke-toan/${safeSym}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  dstock.vndirect.com.vn/bang-can-doi-ke-toan/{symbol}
+                </a>
+              </li>
+              <li>
+                <span className="text-ink-3">Kết quả kinh doanh: </span>
+                <a
+                  className="break-all text-accent underline-offset-2 hover:underline"
+                  href={`https://dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/${safeSym}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  dstock.vndirect.com.vn/bao-cao-ket-qua-kinh-doanh/{symbol}
+                </a>
+              </li>
+              <li>
+                <span className="text-ink-3">Lưu chuyển tiền tệ: </span>
+                <a
+                  className="break-all text-accent underline-offset-2 hover:underline"
+                  href={`https://dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/${safeSym}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  dstock.vndirect.com.vn/bao-cao-luu-chuyen-tien-te/{symbol}
+                </a>
+              </li>
+            </ul>
+          );
+        })()}
       </Panel>
     </div>
   );

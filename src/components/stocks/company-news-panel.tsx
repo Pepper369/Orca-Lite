@@ -5,6 +5,7 @@ import { ExternalLink, Newspaper } from "lucide-react";
 import { useApi } from "@/lib/hooks";
 import type { StockNewsResult } from "@/lib/services/stock-news";
 import { Loading, Panel, EmptyState } from "@/components/ui";
+import { sanitizeHref } from "@/lib/security/xss";
 
 const fmt = (iso: string | null) => {
   const t = iso ? Date.parse(iso) : NaN;
@@ -46,7 +47,7 @@ export const CompanyNewsPanel = memo(function CompanyNewsPanel({ symbol }: { sym
       <ul className="divide-y divide-border-subtle">
         {items.map((a) => (
           <li key={a.id} className="py-2">
-            <a href={a.url} target="_blank" rel="noopener noreferrer" className="group flex items-start gap-2 text-[13px] leading-snug text-text-primary hover:text-accent-primary">
+            <a href={sanitizeHref(a.url)} target="_blank" rel="noopener noreferrer" className="group flex items-start gap-2 text-[13px] leading-snug text-text-primary hover:text-accent-primary">
               <span className="min-w-0 flex-1">{a.title}</span>
               <ExternalLink className="mt-0.5 size-3 shrink-0 opacity-50 group-hover:opacity-100" />
             </a>

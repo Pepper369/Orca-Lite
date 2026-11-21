@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Context } from "react";
+import { sanitizeImageSrc } from "@/lib/security/xss";
 
 /**
  * ORCA Settings System — client store + server persistence.
@@ -208,17 +209,38 @@ let loggedIn = false;
 const listeners = new Set<() => void>();
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function safeCloneClean(obj: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    if (FORBIDDEN_KEYS.has(key)) continue;
+    clean[key] = obj[key];
+  }
+  return clean;
+}
+
 function mergeDeep(base: UserSettings, patch: Partial<UserSettings>): UserSettings {
   const out = { ...base } as UserSettings;
+  if (!patch || typeof patch !== "object") return out;
   for (const k of Object.keys(patch) as (keyof UserSettings)[]) {
+    if (FORBIDDEN_KEYS.has(String(k))) continue;
     const pv = patch[k];
     if (pv && typeof pv === "object" && !Array.isArray(pv) && k !== "updatedAt") {
       // @ts-expect-error structural merge
-      out[k] = { ...(base[k] as object), ...(pv as object) };
+      out[k] = { ...(base[k] as object), ...safeCloneClean(pv as Record<string, unknown>) };
     } else if (pv !== undefined) {
       // @ts-expect-error structural merge
       out[k] = pv;
     }
+  }
+  if (out.profile && typeof out.profile.avatarUrl === "string") {
+    const safeUrl = sanitizeImageSrc(out.profile.avatarUrl, {
+      allowRelative: true,
+      allowSafeDataImage: true,
+      fallback: "",
+    });
+    out.profile = { ...out.profile, avatarUrl: safeUrl || null };
   }
   return out;
 }

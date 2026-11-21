@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { MarketIntel } from "@/lib/services/market-intel";
 import type { NewsArticle } from "@/lib/types";
 import { fmtCompact } from "@/components/ui";
+import { sanitizeHref } from "@/lib/security/xss";
 
 function pct(p: number | null | undefined, digits = 2): string {
   if (p == null || !Number.isFinite(p)) return "—";
@@ -154,24 +155,27 @@ export function NewsFlowPanel({ articles }: { articles: NewsArticle[] }) {
         <p className="px-3 py-4 text-[11px] text-text-muted">Chưa có tin trong payload intel.</p>
       ) : (
         <div className="divide-y divide-border-subtle/40">
-          {list.map((a) => (
-            <a
-              key={a.id}
-              href={a.url || "/news"}
-              target={a.url ? "_blank" : undefined}
-              rel={a.url ? "noopener noreferrer" : undefined}
-              className="grid grid-cols-[2.6rem_3.4rem_1fr_auto] items-center gap-2 px-3 py-2 text-[11px] hover:bg-surface-elevated/40"
-            >
-              <time className="num text-text-muted">{timeLabel(a.publishedAt)}</time>
-              <span className="truncate text-text-muted" title={a.source}>
-                {a.source}
-              </span>
-              <b className="line-clamp-2 font-medium leading-snug text-text-primary">{a.title}</b>
-              <em className="not-italic rounded border border-border-subtle px-1 py-0.5 text-[9px] uppercase tracking-wide text-text-muted">
-                {CAT_VI[a.category] ?? a.category}
-              </em>
-            </a>
-          ))}
+          {list.map((a) => {
+            const safeUrl = a.url ? sanitizeHref(a.url, { allowRelative: false, fallback: "" }) : "";
+            return (
+              <a
+                key={a.id}
+                href={safeUrl || "/news"}
+                target={safeUrl ? "_blank" : undefined}
+                rel={safeUrl ? "noopener noreferrer" : undefined}
+                className="grid grid-cols-[2.6rem_3.4rem_1fr_auto] items-center gap-2 px-3 py-2 text-[11px] hover:bg-surface-elevated/40"
+              >
+                <time className="num text-text-muted">{timeLabel(a.publishedAt)}</time>
+                <span className="truncate text-text-muted" title={a.source}>
+                  {a.source}
+                </span>
+                <b className="line-clamp-2 font-medium leading-snug text-text-primary">{a.title}</b>
+                <em className="not-italic rounded border border-border-subtle px-1 py-0.5 text-[9px] uppercase tracking-wide text-text-muted">
+                  {CAT_VI[a.category] ?? a.category}
+                </em>
+              </a>
+            );
+          })}
         </div>
       )}
       <div className="border-t border-border-subtle/60 px-3 py-1.5 text-right">

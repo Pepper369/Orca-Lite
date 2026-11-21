@@ -4,6 +4,7 @@ import { memo } from "react";
 import { useApi } from "@/lib/hooks";
 import type { InsiderDealsResult } from "@/lib/services/stock-insider-deals";
 import { Loading, Panel, EmptyState } from "@/components/ui";
+import { sanitizeHref } from "@/lib/security/xss";
 import {
   Users,
   TrendingUp,
@@ -165,9 +166,9 @@ export const InsiderTradingPanel = memo(function InsiderTradingPanel({ symbol }:
                     </td>
                     <td className="py-2 px-3 text-right whitespace-nowrap">
                       <a
-                        href={deal.url}
+                        href={sanitizeHref(deal.url)}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-primary hover:underline"
                       >
                         Công bố <ExternalLink className="size-3" />
