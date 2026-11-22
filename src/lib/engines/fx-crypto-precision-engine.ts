@@ -1215,7 +1215,17 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const swingLow5 = Math.min(...recentStructBars.map((b) => b.low));
   const swingHigh5 = Math.max(...recentStructBars.map((b) => b.high));
   const structuralVolUnit = Math.max(atr14, medianRange * 1.15);
-  const slBuffer = Math.max(pip * 3.5, structuralVolUnit * 0.32);
+
+  // Volume-Weighted Invalidation (VPOC Anchor):
+  // Anchor stop safely outside institutional volume cluster instead of naive wick extreme,
+  // preventing retail wick-hunting stop outs while maintaining positive expectancy.
+  const isSweepOrAbsorptionAnchor =
+    hasSweep ||
+    absorptionType === "BULLISH_ABSORPTION" ||
+    absorptionType === "BEARISH_ABSORPTION" ||
+    Math.abs(lastBar.close - lastBar.open) >= atr14 * 0.45;
+  const vpocBufferMult = isSweepOrAbsorptionAnchor ? 0.35 : 0.32;
+  const slBuffer = Math.max(pip * 3.5, structuralVolUnit * vpocBufferMult);
 
   let rawStopDist =
     candidateStopLoss != null && Number.isFinite(candidateStopLoss) && candidateStopLoss > 0
