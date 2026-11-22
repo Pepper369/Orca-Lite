@@ -92,22 +92,17 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     }
   }
 
-  const prelimRanked = [...activeSetups].sort((x, y) => {
-    const lx = x.entry != null && x.stopLoss != null && x.direction !== "NONE" ? 1 : 0;
-    const ly = y.entry != null && y.stopLoss != null && y.direction !== "NONE" ? 1 : 0;
-    if (lx !== ly) return ly - lx;
-    return y.strength - x.strength;
-  });
-  const prelimCandidate = prelimRanked.find((s) => s.direction === "BUY" || s.direction === "SELL") ?? null;
-
-  // Intraday M5 Synthetic DOM Imbalance + Institutional Flow Intensity / Absorption / CVD Divergence
+  // Intraday M5 Flow Intensity / Absorption / CVD Divergence
+  // Truth-in-Data: Only pass orderBookImbalance to Precision Engine if explicitly supplied or CME-exchange calibrated (never double-count synthetic Garman-Klass CLV proxy alongside FII)
   const domM5 = reconstructSyntheticDom(pair, input.barsM5, filter.spreadPips);
   const flowM5 = generateDeepFlowSignal(
     pair,
     input.barsM5,
     filter.spreadPips != null ? { currentSpreadPips: filter.spreadPips } : undefined,
   );
-  const effDomImbalance = input.orderBookImbalance ?? domM5.orderBookImbalanceRatio;
+  const verifiedDomImbalance =
+    input.orderBookImbalance ??
+    (domM5.provenance === "CME_EXCHANGE_CALIBRATED" ? domM5.orderBookImbalanceRatio : null);
   const effFii = input.flowIntensityIndex ?? flowM5.flowIntensityIndex;
   const effAbsorption = input.absorptionType ?? flowM5.absorption.type;
   const effCvdDiv = input.volumeDeltaDivergence ?? flowM5.cvdDivergence;
@@ -119,15 +114,11 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     barsHtf: input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null,
     barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
     sharedCtx: ctxM5,
-    candidateDirection:
-      (prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL") &&
-      prelimCandidate.strength >= 68
-        ? prelimCandidate.direction
-        : "AUTO",
-    candidateEntry: prelimCandidate?.entry ?? null,
-    candidateStopLoss: prelimCandidate?.stopLoss ?? null,
+    candidateDirection: "AUTO",
+    candidateEntry: null,
+    candidateStopLoss: null,
     spreadPipsOrPct: filter.spreadPips,
-    orderBookImbalance: effDomImbalance,
+    orderBookImbalance: verifiedDomImbalance,
     flowIntensityIndex: effFii,
     absorptionType: effAbsorption,
     volumeDeltaDivergence: effCvdDiv,
@@ -142,9 +133,11 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   });
 
   // Only emit synthesized trend continuation levels when Precision Engine validates Grade B/A/A+ (NO coin-flip fallback in chop)
-  const hasLevels = activeSetups.some((s) => s.entry != null && s.stopLoss != null && s.direction !== "NONE");
+  const matchingSetups = activeSetups.filter(
+    (s) => s.direction === precision.direction && s.entry != null && s.stopLoss != null,
+  );
   if (
-    !hasLevels &&
+    matchingSetups.length === 0 &&
     regime.market !== "CHAOTIC" &&
     precision.grade !== "NO_TRADE" &&
     precision.direction !== "NEUTRAL" &&
@@ -204,6 +197,9 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   }
 
   const ranked = [...activeSetups].sort((x, y) => {
+    const mx = x.direction === precision.direction ? 1 : 0;
+    const my = y.direction === precision.direction ? 1 : 0;
+    if (mx !== my) return my - mx;
     const lx = x.entry != null && x.stopLoss != null && x.direction !== "NONE" ? 1 : 0;
     const ly = y.entry != null && y.stopLoss != null && y.direction !== "NONE" ? 1 : 0;
     if (lx !== ly) return ly - lx;
@@ -211,15 +207,26 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   });
 
   const primarySetup =
-    ranked.find((s) => s.status === "TRIGGERED" && s.entry != null) ??
-    ranked.find((s) => s.entry != null && s.direction !== "NONE") ??
-    ranked.find((s) => s.status === "AWAITING_M1_RETEST" || s.status === "AWAITING_M5_BREAKOUT") ??
+    ranked.find((s) => s.direction === precision.direction && s.status === "TRIGGERED" && s.entry != null) ??
+    ranked.find((s) => s.direction === precision.direction && s.entry != null) ??
     ranked[0] ??
     null;
 
   if (primarySetup) {
     primarySetup.grade = precision.grade;
-    if (precision.grade !== "NO_TRADE" && precision.entry != null && precision.stopLoss != null) {
+    if (
+      precision.grade !== "NO_TRADE" &&
+      precision.direction !== "NEUTRAL" &&
+      precision.entry != null &&
+      precision.stopLoss != null
+    ) {
+      primarySetup.direction = precision.direction;
+      primarySetup.entry = precision.entry;
+      primarySetup.stopLoss = precision.stopLoss;
+      primarySetup.invalidation = precision.stopLoss;
+      primarySetup.entryZone = precision.entryZone;
+      primarySetup.stopPips = toPips(pair, Math.abs(precision.entry - precision.stopLoss));
+      primarySetup.takeProfit = precision.tp2;
       primarySetup.takeProfit1 = precision.tp1;
       primarySetup.takeProfit2 = precision.tp2 ?? primarySetup.takeProfit;
       primarySetup.takeProfit3 = precision.tp3;
@@ -330,7 +337,7 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
       fii: effFii,
       absorption: effAbsorption,
       cvdDivergence: effCvdDiv,
-      domImbalance: effDomImbalance,
+      domImbalance: verifiedDomImbalance ?? undefined,
       cmeTicker: domM5.cmeContract?.cmeTicker,
       vpoc: flowM5.volumeProfile.vpocPrice,
       vwap: flowM5.vwap.vwap,

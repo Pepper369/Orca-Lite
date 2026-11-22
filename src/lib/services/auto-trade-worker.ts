@@ -586,6 +586,7 @@ export async function runAutoTradeTick(): Promise<{
 
     if (fxRes.status === "fulfilled" && fxRes.value) {
       for (const s of fxRes.value.data.signals) {
+        seenForex.add(s.pair);
         if (s.lastPrice > 0) updateLivePriceReference(s.pair, s.lastPrice);
         if (
           s.status === "ACTIVE" &&
@@ -688,6 +689,7 @@ export async function runAutoTradeTick(): Promise<{
 
     if (crRes.status === "fulfilled" && crRes.value) {
       for (const s of crRes.value.data.signals) {
+        seenCrypto.add(s.pair);
         if (s.lastPrice > 0) updateLivePriceReference(s.pair, s.lastPrice);
         if (
           s.status === "ACTIVE" &&

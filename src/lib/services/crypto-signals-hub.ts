@@ -110,13 +110,7 @@ async function scanSingleCryptoPair(
       binance.getKlines(pair, "15m", 120).catch(() => []),
       binance.getKlines(pair, "5m", 120).catch(() => []),
       binance.getSpotTicker(pair).catch(() => null),
-      binance.getFundingRate(pair).catch(() => ({
-        symbol: pair,
-        markPrice: 0,
-        indexPrice: 0,
-        fundingRate: 0.0001,
-        nextFundingTime: Date.now() + 8 * 3600000,
-      })),
+      binance.getFundingRate(pair).catch(() => null),
       binance.getOrderBook(pair, 10).catch(() => ({
         lastUpdateId: 0,
         bids: [],
@@ -162,11 +156,11 @@ async function scanSingleCryptoPair(
       bestBid > 0 && bestAsk >= bestBid
         ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2)
         : null;
-    const effectiveFundingRate =
+    const effectiveFundingRate: number | null =
       wsMicro && Number.isFinite(wsMicro.fundingRate) && wsMicro.fundingRate !== 0
         ? wsMicro.fundingRate
-        : funding.fundingRate;
-    const fundingAnalysis = analyzeFundingRate(effectiveFundingRate);
+        : (funding?.fundingRate ?? null);
+    const fundingAnalysis = analyzeFundingRate(effectiveFundingRate ?? 0);
     const bars1h = resampleOhlcvBars(htfBars, 4);
     const openInterestUsd = oi.openInterest > 0 ? Math.round(oi.openInterest * lastPrice) : 0;
     const prelimAtrExec = calcAtr(execBars, 14) ?? lastPrice * 0.015;
@@ -190,7 +184,7 @@ async function scanSingleCryptoPair(
 
     const shield = evaluateCryptoShield({
       symbol: pair,
-      fundingRate: effectiveFundingRate,
+      fundingRate: effectiveFundingRate ?? 0,
       recentPriceChangePct5m: recent5mPct,
       calendarEvents,
     });
@@ -250,17 +244,14 @@ async function scanSingleCryptoPair(
     const riskNotes: string[] = scalp?.riskNotes ? [...scalp.riskNotes] : [...vetoReasons];
 
     if (direction === "BUY" && dom.institutionalBias === "STRONG_BUY_WALL") {
-      probability = Math.min(86, probability + 4);
       evidence.push(`Bức tường mua L2 DOM (+${domImbalance}%) bảo vệ lực đỡ`);
     } else if (direction === "SELL" && dom.institutionalBias === "STRONG_SELL_WALL") {
-      probability = Math.min(86, probability + 4);
       evidence.push(`Bức tường bán L2 DOM (${domImbalance}%) đè nặng áp lực xả`);
     }
 
-    if (fundingAnalysis.fundingBias === "EXTREME_LONG_OVERHEAT" && direction === "BUY") {
+    if (effectiveFundingRate != null && fundingAnalysis.fundingBias === "EXTREME_LONG_OVERHEAT" && direction === "BUY") {
       riskNotes.push("Funding Rate dương cao: Cảnh giác bẫy quét thanh lý Long");
-    } else if (fundingAnalysis.fundingBias === "EXTREME_SHORT_SQUEEZE" && direction === "BUY") {
-      probability = Math.min(88, probability + 4);
+    } else if (effectiveFundingRate != null && fundingAnalysis.fundingBias === "EXTREME_SHORT_SQUEEZE" && direction === "BUY") {
       evidence.push("Funding Rate âm sâu: Kích hoạt nhịp Short Squeeze");
     }
 
@@ -297,7 +288,6 @@ async function scanSingleCryptoPair(
     const liquiditySweepDetected = precision.liquiditySweepDetected ?? false;
 
     if (isHighWinrateVerified) {
-      probability = Math.max(probability, Math.min(88, winrateScore));
       evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
     }
 
@@ -361,7 +351,7 @@ async function scanSingleCryptoPair(
       stopPct: action === "WAIT" ? null : stopPct,
       riskReward: precision.netRiskReward ?? precision.grossRiskReward ?? null,
       recommendedLeverage,
-      fundingRate: funding.fundingRate,
+      fundingRate: effectiveFundingRate ?? 0,
       fundingBias: fundingAnalysis.fundingBias,
       domImbalance,
       circuitBreakerLockout: shield.isLockout,

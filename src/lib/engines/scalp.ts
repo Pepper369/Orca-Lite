@@ -147,9 +147,6 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     });
   }
 
-  const prelimRanked = [...activeSetups].sort((x, y) => y.strength - x.strength);
-  const prelimCandidate = prelimRanked.find((s) => s.direction === "BUY" || s.direction === "SELL") ?? null;
-
   const precision = evaluatePrecisionTradeSetup({
     symbol: input.symbol.toUpperCase(),
     assetType: "CRYPTO",
@@ -157,13 +154,9 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     barsHtf: input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null,
     barsMacro: input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null,
     sharedCtx: ctxM5,
-    candidateDirection:
-      (prelimCandidate?.direction === "BUY" || prelimCandidate?.direction === "SELL") &&
-      prelimCandidate.strength >= 68
-        ? prelimCandidate.direction
-        : "AUTO",
-    candidateEntry: prelimCandidate?.entry ?? null,
-    candidateStopLoss: prelimCandidate?.stopLoss ?? null,
+    candidateDirection: "AUTO",
+    candidateEntry: null,
+    candidateStopLoss: null,
     spreadPipsOrPct: input.spreadPct ?? null,
     orderBookImbalance: input.orderBookImbalance ?? null,
     fundingRate: input.fundingRate ?? null,
@@ -177,9 +170,11 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
       input.lockoutReason ?? (!filter.eligible ? filter.reasons[0] ?? "Asset Filter blocked" : null),
   });
 
-  const hasLevels = activeSetups.some((s) => s.entry != null && s.stopLoss != null && s.direction !== "NONE");
+  const matchingSetups = activeSetups.filter(
+    (s) => s.direction === precision.direction && s.entry != null && s.stopLoss != null,
+  );
   if (
-    !hasLevels &&
+    matchingSetups.length === 0 &&
     regime.market !== "CHAOTIC" &&
     precision.grade !== "NO_TRADE" &&
     precision.direction !== "NEUTRAL" &&
@@ -210,17 +205,32 @@ export function analyzeScalpMulti(input: ScalpAnalyzeInput): ScalpSignal | null 
     });
   }
 
-  const ranked = [...activeSetups].sort((x, y) => y.strength - x.strength);
+  const ranked = [...activeSetups].sort((x, y) => {
+    const xMatch = x.direction === precision.direction ? 1 : 0;
+    const yMatch = y.direction === precision.direction ? 1 : 0;
+    if (xMatch !== yMatch) return yMatch - xMatch;
+    return y.strength - x.strength;
+  });
   const primarySetup =
-    ranked.find((s) => s.status === "TRIGGERED" && s.entry != null) ??
-    ranked.find((s) => s.entry != null && s.direction !== "NONE") ??
-    ranked.find((s) => s.status === "AWAITING_M1_RETEST" || s.status === "AWAITING_M5_BREAKOUT") ??
+    ranked.find((s) => s.direction === precision.direction && s.status === "TRIGGERED" && s.entry != null) ??
+    ranked.find((s) => s.direction === precision.direction && s.entry != null) ??
     ranked[0] ??
     null;
 
   if (primarySetup) {
     primarySetup.grade = precision.grade;
-    if (precision.grade !== "NO_TRADE" && precision.entry != null && precision.stopLoss != null) {
+    if (
+      precision.grade !== "NO_TRADE" &&
+      precision.direction !== "NEUTRAL" &&
+      precision.entry != null &&
+      precision.stopLoss != null
+    ) {
+      primarySetup.direction = precision.direction;
+      primarySetup.entry = precision.entry;
+      primarySetup.stopLoss = precision.stopLoss;
+      primarySetup.invalidation = precision.stopLoss;
+      primarySetup.entryZone = precision.entryZone;
+      primarySetup.takeProfit = precision.tp2;
       primarySetup.takeProfit1 = precision.tp1;
       primarySetup.takeProfit2 = precision.tp2 ?? primarySetup.takeProfit;
       primarySetup.takeProfit3 = precision.tp3;

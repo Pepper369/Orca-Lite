@@ -204,7 +204,9 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
             const dom = reconstructSyntheticDom(pair, detailSeries, sig.filter.spreadPips);
             if (!cmeTicker) cmeTicker = dom.cmeContract?.cmeTicker;
-            if (domImbalance == null) domImbalance = dom.orderBookImbalanceRatio;
+            if (domImbalance == null && dom.provenance === "CME_EXCHANGE_CALIBRATED") {
+              domImbalance = dom.orderBookImbalanceRatio;
+            }
 
             if (flow.absorption.detected) {
               if (flow.absorption.type === "BULLISH_ABSORPTION" && sig.direction === "watch-long") {
@@ -264,21 +266,24 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           setupGrade = "NO_TRADE";
         }
 
+        const entry = effectivePrecision?.entry ?? setup?.entry ?? null;
+        const sl = effectivePrecision?.stopLoss ?? setup?.stopLoss ?? null;
+        if (entry == null || sl == null) {
+          setupGrade = "NO_TRADE";
+        }
+
         const direction: ForexQuantSignalItem["direction"] = setupGrade === "NO_TRADE" ? "NEUTRAL" : rawDir;
         const action: ForexQuantSignalItem["action"] = direction === "NEUTRAL" ? "WAIT" : direction;
-        const isBuy = direction === "BUY";
 
-        const entry = effectivePrecision?.entry ?? setup?.entry ?? sig.last;
-        const sl = effectivePrecision?.stopLoss ?? setup?.stopLoss ?? (entry ? (isBuy ? entry * 0.995 : entry * 1.005) : null);
         const tp1 = effectivePrecision?.tp1 ?? sig.tp1 ?? setup?.takeProfit1 ?? null;
         const tp2 = effectivePrecision?.tp2 ?? sig.tp2 ?? setup?.takeProfit2 ?? setup?.takeProfit ?? null;
         const tp3 = effectivePrecision?.tp3 ?? sig.tp3 ?? setup?.takeProfit3 ?? null;
         const stopPips =
-          entry && sl
+          entry != null && sl != null
             ? Math.round((Math.abs(entry - sl) / sig.pipSize) * 10) / 10
-            : setup?.stopPips ?? 25;
+            : setup?.stopPips ?? null;
 
-        let probability = effectivePrecision?.calibratedWinRatePct ?? sig.probability ?? 50;
+        let probability = effectivePrecision?.calibratedWinRatePct ?? sig.probability ?? 0;
         const isHighWinrateVerified =
           direction !== "NEUTRAL" && ((effectivePrecision?.isHighWinrateVerified ?? false) || setupGrade === "A+");
         const winrateScore = Math.max(
@@ -288,7 +293,6 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         const liquiditySweepDetected = effectivePrecision?.liquiditySweepDetected ?? false;
 
         if (isHighWinrateVerified) {
-          probability = Math.max(probability, Math.min(86, winrateScore));
           evidence.unshift("🎯 Siêu tín hiệu Winrate cao (HTF Trend + OTE Sweep)");
         }
 

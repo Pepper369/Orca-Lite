@@ -1039,15 +1039,45 @@ export function calibrateAndRegisterLiveMetaModels(params?: {
 } {
   const assetType = params?.assetType ?? "ALL";
   const minOosWinRatePct = params?.minOosWinRatePct ?? 80;
+  const calSeeds = params?.calibrationSeeds ?? [101, 202];
+  const holdSeeds = params?.holdoutSeeds ?? [404, 505];
+
+  const isReportApproved = (rep: PurgedMetaLabelWalkForwardReport) =>
+    rep.oosBrierAfter <= rep.oosBrierBefore + 0.01 &&
+    rep.metaFilteredMetrics.winRatePct >= minOosWinRatePct &&
+    rep.metaFilteredMetrics.expectancyR >= 0.5;
+
+  if (assetType === "ALL") {
+    // Strictly isolate FOREX vs CRYPTO calibration so neither asset class contaminates the other's weights
+    const fxAssets = BENCHMARK_ASSETS.filter((a) => a.assetType === "FOREX");
+    const crAssets = BENCHMARK_ASSETS.filter((a) => a.assetType === "CRYPTO");
+    const fxReport = runPurgedMetaLabelWalkForward({
+      calibrationSeeds: calSeeds,
+      holdoutSeeds: holdSeeds,
+      assets: fxAssets,
+    });
+    const crReport = runPurgedMetaLabelWalkForward({
+      calibrationSeeds: calSeeds,
+      holdoutSeeds: holdSeeds,
+      assets: crAssets,
+    });
+    const fxApproved = isReportApproved(fxReport);
+    const crApproved = isReportApproved(crReport);
+    if (fxApproved) registerLiveTrainedMetaModel("FOREX", fxReport.model);
+    if (crApproved) registerLiveTrainedMetaModel("CRYPTO", crReport.model);
+    return {
+      registered: fxApproved || crApproved,
+      report: fxReport,
+    };
+  }
+
+  const scopedAssets = BENCHMARK_ASSETS.filter((a) => a.assetType === assetType);
   const report = runPurgedMetaLabelWalkForward({
-    calibrationSeeds: params?.calibrationSeeds ?? [101, 202],
-    holdoutSeeds: params?.holdoutSeeds ?? [404, 505],
-    assets: BENCHMARK_ASSETS.slice(0, 3),
+    calibrationSeeds: calSeeds,
+    holdoutSeeds: holdSeeds,
+    assets: scopedAssets.length > 0 ? scopedAssets : BENCHMARK_ASSETS.slice(0, 3),
   });
-  const approved =
-    report.oosBrierAfter <= report.oosBrierBefore + 0.01 &&
-    report.metaFilteredMetrics.winRatePct >= minOosWinRatePct &&
-    report.metaFilteredMetrics.expectancyR >= 0.5;
+  const approved = isReportApproved(report);
   if (approved) {
     registerLiveTrainedMetaModel(assetType, report.model);
   }

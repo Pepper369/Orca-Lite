@@ -291,13 +291,20 @@ test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-La
   assert.ok(Array.isArray(ict.bprZones), "Expected bprZones array in ICT result");
   assert.ok("htfPoiContext" in ict, "Expected htfPoiContext property in ICT result");
 
-  // Verify Phase 4 Walk-Forward Purged Meta-Labeling Live Calibration & Registry
+  // Verify Phase 4 Walk-Forward Purged Meta-Labeling Live Calibration & Registry (Strictly Isolated FOREX vs CRYPTO)
   clearLiveTrainedMetaModels();
   assert.equal(getLiveTrainedMetaModel("CRYPTO"), null);
   const calRes = calibrateAndRegisterLiveMetaModels({ assetType: "ALL" });
   assert.equal(calRes.registered, true);
-  assert.ok(getLiveTrainedMetaModel("CRYPTO") != null);
-  assert.ok(getLiveTrainedMetaModel("FOREX") != null);
+  const cryptoModelBefore = getLiveTrainedMetaModel("CRYPTO");
+  const forexModelBefore = getLiveTrainedMetaModel("FOREX");
+  assert.ok(cryptoModelBefore != null);
+  assert.ok(forexModelBefore != null);
+  assert.notEqual(
+    cryptoModelBefore,
+    forexModelBefore,
+    "CRYPTO and FOREX live Meta-Labeling models must be calibrated on their own asset classes without sharing object reference",
+  );
   assert.ok(calRes.report.oosBrierAfter <= calRes.report.oosBrierBefore + 0.01);
   clearLiveTrainedMetaModels();
 });

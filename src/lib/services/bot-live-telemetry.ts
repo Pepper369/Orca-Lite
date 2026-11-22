@@ -18,7 +18,7 @@ import {
   updatePlatformExchangeStopLoss,
   type LiveExchangeTelemetryResult,
 } from "@/lib/engines/exchange-execution-client";
-import { getBrokerMeta } from "@/lib/engines/broker-registry";
+import { getBrokerMeta, isCryptoPlatform, isForexPlatform } from "@/lib/engines/broker-registry";
 import {
   aggregateTierSummary,
   assignPoolNavShares,
@@ -100,8 +100,9 @@ export function notifyBotTelemetryChanged(reason: string): void {
 }
 
 function isCryptoOrderSymbol(symbol: string, platform: BrokerPlatform): boolean {
-  if (platform === "BINANCE_FUTURES" || platform === "OKX_FUTURES" || platform === "BYBIT_FUTURES") {
-    return true;
+  if (platform !== "TELEGRAM_1CLICK") {
+    if (isCryptoPlatform(platform)) return true;
+    if (isForexPlatform(platform)) return false;
   }
   const u = symbol.toUpperCase();
   return u.endsWith("USDT") || u.endsWith("USDC") || u.includes("BTC") || u.includes("ETH");
