@@ -232,6 +232,21 @@ export interface AccountPnlTelemetry {
   winratePct: number | null;
   lastSyncedAt: number;
   syncError: string | null;
+  /** True nếu tài khoản Forex đang tự động tạm nghỉ theo Timeline Thứ 7 & Chủ Nhật giờ Việt Nam (GMT+7). */
+  timelinePaused?: boolean;
+  timelinePauseReason?: string | null;
+}
+
+export interface BotTradingTimelineStatus {
+  timezone: "Asia/Ho_Chi_Minh (GMT+7)";
+  vnDayOfWeek: number; // 0 = CN, 1 = T2, ..., 6 = T7
+  vnDayLabelVi: string;
+  vnTimeLabel: string;
+  isVnWeekend: boolean;
+  cryptoBotActive: boolean;
+  forexBotActive: boolean;
+  forexPauseReasonVi: string | null;
+  scheduleSummaryVi: string;
 }
 
 export interface TierPnlAggregate {
@@ -326,6 +341,75 @@ export interface BotLiveTelemetrySnapshot {
   recentEvents: BotActivityEvent[];
   worker: BotWorkerTelemetry;
   quantFeed?: QuantEngineFeedItem[];
+  timeline?: BotTradingTimelineStatus;
+}
+
+const VN_DAY_NAMES: Record<number, string> = {
+  0: "Chủ Nhật",
+  1: "Thứ Hai",
+  2: "Thứ Ba",
+  3: "Thứ Tư",
+  4: "Thứ Năm",
+  5: "Thứ Sáu",
+  6: "Thứ Bảy",
+};
+
+/**
+ * SSOT Timeline Lịch Vận Hành Bot theo Giờ Việt Nam (Asia/Ho_Chi_Minh, GMT+7):
+ * - Thứ 2 -> Thứ 6 (GMT+7): Cả Bot Crypto (24/7) và Bot Forex đều hoạt động tự động.
+ * - Thứ 7 & Chủ Nhật (00:00 Thứ 7 -> 23:59 Chủ Nhật GMT+7): Tự động tạm dừng toàn bộ Bot tài khoản Forex,
+ *   chỉ duy trì Bot tài khoản Crypto chạy 24/7.
+ */
+export function evaluateBotTradingTimeline(nowMs = Date.now()): BotTradingTimelineStatus {
+  const safeMs = Number.isFinite(nowMs) && nowMs > 0 ? nowMs : Date.now();
+  const vnShifted = new Date(safeMs + 7 * 3600 * 1000);
+  const vnDayOfWeek = vnShifted.getUTCDay();
+  const vnDayLabelVi = VN_DAY_NAMES[vnDayOfWeek] ?? "Hôm nay";
+  const hh = String(vnShifted.getUTCHours()).padStart(2, "0");
+  const mm = String(vnShifted.getUTCMinutes()).padStart(2, "0");
+  const vnTimeLabel = `${hh}:${mm} GMT+7`;
+
+  const isVnWeekend = vnDayOfWeek === 6 || vnDayOfWeek === 0;
+  const cryptoBotActive = true;
+  const forexBotActive = !isVnWeekend;
+  const forexPauseReasonVi = isVnWeekend
+    ? `Timeline GMT+7 (${vnDayLabelVi} ${vnTimeLabel}): Tự động nghỉ giao dịch Forex vào Thứ 7 & Chủ Nhật giờ Việt Nam — chỉ chạy Bot Crypto 24/7.`
+    : null;
+  const scheduleSummaryVi = isVnWeekend
+    ? `Timeline ${vnDayLabelVi} (${vnTimeLabel}): Bot Forex TẠM NGHỈ T7 & CN · Chỉ chạy Bot Crypto 24/7`
+    : `Timeline ${vnDayLabelVi} (${vnTimeLabel}): Bot Crypto (24/7) & Bot Forex (T2–T6) ĐANG HOẠT ĐỘNG`;
+
+  return {
+    timezone: "Asia/Ho_Chi_Minh (GMT+7)",
+    vnDayOfWeek,
+    vnDayLabelVi,
+    vnTimeLabel,
+    isVnWeekend,
+    cryptoBotActive,
+    forexBotActive,
+    forexPauseReasonVi,
+    scheduleSummaryVi,
+  };
+}
+
+export function isAccountPausedByTimeline(
+  platform: BrokerPlatform,
+  nowMs = Date.now(),
+): { paused: boolean; reasonVi: string | null; timeline: BotTradingTimelineStatus } {
+  const timeline = evaluateBotTradingTimeline(nowMs);
+  const assetClass = classifyBrokerAssetClass(platform);
+  if (assetClass === "FOREX" && !timeline.forexBotActive) {
+    return {
+      paused: true,
+      reasonVi: timeline.forexPauseReasonVi,
+      timeline,
+    };
+  }
+  return {
+    paused: false,
+    reasonVi: null,
+    timeline,
+  };
 }
 
 /* ------------------------- Pure SSOT Financial Math ------------------------- */
@@ -504,7 +588,7 @@ export function aggregateTierSummary(
   let openPositionsCount = 0;
 
   for (const a of accounts) {
-    if (a.isActive && a.autoExecuteEnabled && !a.killSwitched) activeAutoCount++;
+    if (a.isActive && a.autoExecuteEnabled && !a.killSwitched && !a.timelinePaused) activeAutoCount++;
     startingCapitalUsd += a.initialNavUsd ?? a.startingCapitalUsd;
     walletBalanceUsd += a.walletBalanceUsd;
     equityUsd += a.navUsd ?? a.equityUsd;

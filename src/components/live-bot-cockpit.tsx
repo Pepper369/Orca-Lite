@@ -366,11 +366,19 @@ function AccountNavGroupTable({
                       <Badge tone={isReal ? "warn" : "accent"}>
                         {isReal ? "REAL" : demoSubtypeLabel(acc.demoSubtype)}
                       </Badge>
-                      {acc.autoExecuteEnabled && !acc.killSwitched && (
-                        <Badge tone="up">AUTO ON</Badge>
+                      {acc.timelinePaused ? (
+                        <Badge tone="warn">NGHỈ T7/CN (GMT+7)</Badge>
+                      ) : (
+                        acc.autoExecuteEnabled &&
+                        !acc.killSwitched && <Badge tone="up">AUTO ON</Badge>
                       )}
                       {acc.killSwitched && <Badge tone="down">KILL-SWITCH</Badge>}
                     </div>
+                    {acc.timelinePaused && acc.timelinePauseReason && (
+                      <div className="mt-0.5 text-[10px] font-medium text-amber-400">
+                        {acc.timelinePauseReason}
+                      </div>
+                    )}
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] font-mono text-text-muted">
                       <span>{acc.platform}</span>
                       <span>·</span>
@@ -685,6 +693,11 @@ export function LiveBotCockpit({
                   />
                   {sseState === "live" ? "SSE LIVE 2.5s" : "SYNC"}
                 </Badge>
+                {snap.timeline && (
+                  <Badge tone={snap.timeline.isVnWeekend ? "warn" : "up"}>
+                    {snap.timeline.scheduleSummaryVi}
+                  </Badge>
+                )}
               </div>
               <p className="text-[11px] text-text-muted flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="inline-flex items-center gap-1">

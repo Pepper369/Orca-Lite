@@ -1,6 +1,10 @@
 import "server-only";
 import { getAssetPipSize, resampleOhlcvBars, roundPrice } from "@/lib/engines/asset-precision";
-import type { QuantEngineFeedItem } from "@/lib/engines/bot-telemetry-types";
+import {
+  evaluateBotTradingTimeline,
+  isAccountPausedByTimeline,
+  type QuantEngineFeedItem,
+} from "@/lib/engines/bot-telemetry-types";
 import { analyzeFundingRate, evaluateTrueLevel2Dom } from "@/lib/engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "@/lib/engines/crypto-news-shield";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engines/forex-currency-strength";
@@ -88,7 +92,7 @@ interface WorkerGlobalState {
   latestTickFn?: () => Promise<unknown>;
 }
 
-const WORKER_CODE_VERSION = 5;
+const WORKER_CODE_VERSION = 6;
 
 const g = globalThis as typeof globalThis & {
   __orcaAutoTradeWorkerState?: WorkerGlobalState;
@@ -166,13 +170,7 @@ function isEligibleGrade(grade?: string | null, winrateScore?: number): boolean 
 }
 
 function isForexWeekendClosedUtc(nowMs = Date.now()): boolean {
-  const d = new Date(nowMs);
-  const day = d.getUTCDay(); // 0 = Sun, 5 = Fri, 6 = Sat
-  const hour = d.getUTCHours();
-  if (day === 6) return true;
-  if (day === 5 && hour >= 22) return true;
-  if (day === 0 && hour < 22) return true;
-  return false;
+  return !evaluateBotTradingTimeline(nowMs).forexBotActive;
 }
 
 /**
@@ -597,14 +595,21 @@ export async function runAutoTradeTick(): Promise<{
       }
     }
 
+    const timeline = evaluateBotTradingTimeline(Date.now());
     const accounts = await listBrokerConnections();
     const autoEnabled = accounts.filter(
-      (a) => a.isActive && a.autoExecuteEnabled && !a.killSwitched,
+      (a) =>
+        a.isActive &&
+        a.autoExecuteEnabled &&
+        !a.killSwitched &&
+        !isAccountPausedByTimeline(a.platform).paused,
     );
     activeAutoAccounts = autoEnabled.length;
 
     const [fxRes, crRes] = await Promise.allSettled([
-      withTimeout(getForexSignalsHubData(), 4_200, null),
+      timeline.forexBotActive
+        ? withTimeout(getForexSignalsHubData(), 4_200, null)
+        : Promise.resolve(null),
       withTimeout(getCryptoSignalsHubData(), 4_200, null),
     ]);
 
@@ -845,9 +850,9 @@ export async function runAutoTradeTick(): Promise<{
       }
     }
 
-    // 1) Always augment with SSOT 7-Gate Precision setups on remaining core pairs so Quant Engine pours live setups continuously
+    // 1) Always augment with SSOT 7-Gate Precision setups on remaining core pairs (skip Forex on Sat/Sun GMT+7 Timeline)
     const needCrypto = Math.max(2, 5 - seenCrypto.size);
-    const needForex = Math.max(2, 5 - seenForex.size);
+    const needForex = timeline.forexBotActive ? Math.max(2, 5 - seenForex.size) : 0;
     const precisionSetups = await scanLivePrecisionSetups({
       existingCryptoSymbols: seenCrypto,
       existingForexSymbols: seenForex,
@@ -901,7 +906,12 @@ export async function runAutoTradeTick(): Promise<{
     STATE.lastDispatchedCount = dispatched;
     STATE.lastScannedSignalsCount = signalsToDispatch.length;
 
-    const actionParts: string[] = [`Quét ${signalsToDispatch.length} tín hiệu Quant Real-Time`];
+    const actionParts: string[] = [
+      timeline.isVnWeekend
+        ? `[${timeline.vnDayLabelVi} GMT+7: Bot Forex tạm nghỉ · Chỉ chạy Crypto]`
+        : `[${timeline.vnDayLabelVi} GMT+7: Crypto + Forex Active]`,
+      `Quét ${signalsToDispatch.length} tín hiệu Quant`,
+    ];
     if (dispatched > 0) actionParts.push(`vào mới ${dispatched} lệnh`);
     if (exitStats.closedCount > 0) actionParts.push(`auto-chốt ${exitStats.closedCount} vị thế`);
     if (exitStats.trailedCount > 0) actionParts.push(`dịch Trailing SL ${exitStats.trailedCount} lệnh`);

@@ -41,6 +41,8 @@ import {
   calculatePositionRoePct,
   classifyAccountEnvironment,
   classifyAccountTier,
+  evaluateBotTradingTimeline,
+  isAccountPausedByTimeline,
   summarizeLinkedTradingAccounts,
 } from "@/lib/engines/bot-telemetry-types";
 import {
@@ -998,4 +1000,40 @@ test("Demo Account Full Reset: Resets DEMO NAV to $10,000, clears Demo orders & 
   for (const acc of afterAccounts) {
     await deleteBrokerConnection(acc.id, userId);
   }
+});
+
+test("Vietnam GMT+7 Bot Trading Timeline: Automatically pauses Forex bots on Sat & Sun Vietnam time while Crypto bots run 24/7", () => {
+  // 1) Saturday 00:30 GMT+7 (which is Friday 17:30 UTC) -> MUST already be Saturday in Vietnam time!
+  const satVnMs = Date.parse("2026-11-20T17:30:00.000Z"); // 2026-11-21 00:30:00 GMT+7 (Thứ Bảy)
+  const satTl = evaluateBotTradingTimeline(satVnMs);
+  assert.equal(satTl.vnDayOfWeek, 6);
+  assert.equal(satTl.vnDayLabelVi, "Thứ Bảy");
+  assert.equal(satTl.isVnWeekend, true);
+  assert.equal(satTl.forexBotActive, false);
+  assert.equal(satTl.cryptoBotActive, true);
+  assert.equal(isAccountPausedByTimeline("MT5_EXNESS", satVnMs).paused, true);
+  assert.equal(isAccountPausedByTimeline("MT5_XM", satVnMs).paused, true);
+  assert.equal(isAccountPausedByTimeline("OANDA_V20", satVnMs).paused, true);
+  assert.equal(isAccountPausedByTimeline("BINANCE_FUTURES", satVnMs).paused, false);
+  assert.equal(isAccountPausedByTimeline("OKX_FUTURES", satVnMs).paused, false);
+
+  // 2) Sunday 09:00 GMT+7 (2026-11-22 02:00:00 UTC) -> Chủ Nhật GMT+7 -> Forex paused, Crypto active
+  const sunVnMs = Date.parse("2026-11-22T02:00:00.000Z");
+  const sunTl = evaluateBotTradingTimeline(sunVnMs);
+  assert.equal(sunTl.vnDayOfWeek, 0);
+  assert.equal(sunTl.vnDayLabelVi, "Chủ Nhật");
+  assert.equal(sunTl.isVnWeekend, true);
+  assert.equal(sunTl.forexBotActive, false);
+  assert.equal(sunTl.cryptoBotActive, true);
+
+  // 3) Monday 00:15 GMT+7 (Sunday 2026-11-22 17:15:00 UTC) -> Thứ Hai GMT+7 -> Both Forex & Crypto active!
+  const monVnMs = Date.parse("2026-11-22T17:15:00.000Z");
+  const monTl = evaluateBotTradingTimeline(monVnMs);
+  assert.equal(monTl.vnDayOfWeek, 1);
+  assert.equal(monTl.vnDayLabelVi, "Thứ Hai");
+  assert.equal(monTl.isVnWeekend, false);
+  assert.equal(monTl.forexBotActive, true);
+  assert.equal(monTl.cryptoBotActive, true);
+  assert.equal(isAccountPausedByTimeline("MT5_EXNESS", monVnMs).paused, false);
+  assert.equal(isAccountPausedByTimeline("BINANCE_FUTURES", monVnMs).paused, false);
 });

@@ -30,6 +30,8 @@ import {
   calculateMarkToMarketPnlUsd,
   calculatePositionRoePct,
   classifyAccountEnvironment,
+  evaluateBotTradingTimeline,
+  isAccountPausedByTimeline,
   type AccountPnlTelemetry,
   type BotActivityEvent,
   type BotLiveTelemetrySnapshot,
@@ -207,12 +209,12 @@ async function refreshOpenPositionLiveQuotes(orders: CopyExecutionOrder[]): Prom
     }),
     fxSyms.size > 0
       ? getBiquotePublicQuotes([...fxSyms])
-          .then(({ ticks }) => {
-            for (const [sym, t] of Object.entries(ticks)) {
-              if (t.mid > 0) updateLivePriceReference(sym, t.mid);
-            }
-          })
-          .catch(() => null)
+        .then(({ ticks }) => {
+          for (const [sym, t] of Object.entries(ticks)) {
+            if (t.mid > 0) updateLivePriceReference(sym, t.mid);
+          }
+        })
+        .catch(() => null)
       : Promise.resolve(null),
   ]);
 }
@@ -664,6 +666,9 @@ export async function evaluateRealtimePositionExits(options?: {
     const assetType: "CRYPTO" | "FOREX" = isCryptoOrderSymbol(o.symbol, o.platform)
       ? "CRYPTO"
       : "FOREX";
+    if (assetType === "FOREX" && !evaluateBotTradingTimeline().forexBotActive && !options?.forceEvaluate) {
+      continue;
+    }
     const entry = o.executionPrice > 0 ? o.executionPrice : o.entryPrice;
     if (!Number.isFinite(entry) || entry <= 0) continue;
 
@@ -1016,6 +1021,7 @@ export async function buildBotLiveTelemetrySnapshot(
     const maxDailyLossUsd = Math.max(10, acct.maxDailyLossUsd ?? 500);
     const dailyLossAmount = Math.max(0, -(dailyRealizedPnlUsd + Math.min(0, unrealizedPnlUsd)));
     const dailyLossUsedPct = Number(Math.min(100, (dailyLossAmount / maxDailyLossUsd) * 100).toFixed(1));
+    const timelineCheck = isAccountPausedByTimeline(acct.platform, now);
 
     accountTelemetries.push({
       accountId: acct.id,
@@ -1029,6 +1035,8 @@ export async function buildBotLiveTelemetrySnapshot(
       isActive: acct.isActive,
       autoExecuteEnabled: Boolean(acct.autoExecuteEnabled),
       killSwitched: Boolean(acct.killSwitched),
+      timelinePaused: timelineCheck.paused,
+      timelinePauseReason: timelineCheck.reasonVi,
       connectionStatus: acct.connectionStatus ?? "PAPER_SIMULATED",
       pnlSource,
       initialNavUsd: startingCapitalUsd,
@@ -1070,6 +1078,7 @@ export async function buildBotLiveTelemetrySnapshot(
   const realNav = aggregateTierSummary(realAccounts, "REAL");
   const demoNav = aggregateTierSummary(demoAccounts, "DEMO");
   const w = getAutoTradeWorkerStatus();
+  const timeline = evaluateBotTradingTimeline(now);
 
   return {
     generatedAt: now,
@@ -1089,5 +1098,6 @@ export async function buildBotLiveTelemetrySnapshot(
       nextTickAt: w.started && w.lastTickAt ? w.lastTickAt + w.pollIntervalMs : null,
     },
     quantFeed: getLiveQuantEngineFeed(),
+    timeline,
   };
 }
