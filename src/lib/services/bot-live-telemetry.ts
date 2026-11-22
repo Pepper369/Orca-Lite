@@ -793,8 +793,15 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 2) Auto Stop-Loss / Breakeven Lock / Trailing Stop Hit
+    // 2) Auto Stop-Loss / Breakeven Lock / Trailing Stop Hit (with cross-feed basis spike sanity guard on newly opened orders)
     if (sl > 0 && ((isBuy && markPrice <= sl) || (!isBuy && markPrice >= sl))) {
+      const stopDist = Math.abs(entry - sl);
+      const jumpDist = Math.abs(markPrice - entry);
+      const ageMs = Date.now() - o.timestamp;
+      if (ageMs < 60_000 && stopDist > 0 && jumpDist > stopDist * 1.45 && !options?.forceEvaluate) {
+        // Cross-provider basis discrepancy detected within 60s of entry -> ignore phantom price jump
+        continue;
+      }
       const isProfitSl = (isBuy && sl >= entry) || (!isBuy && sl <= entry);
       const res = await closeTrackedBotPosition({
         orderId: o.orderId,

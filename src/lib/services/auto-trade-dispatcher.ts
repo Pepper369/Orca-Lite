@@ -477,19 +477,31 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
   const results: CopyExecutionOrder[] = [];
 
-  // Track currently open positions per account for autonomous portfolio concentration, duplicate-pair & Factor Exposure Budgeting
+  // Track currently open positions per account + recent Stop-Loss cooldown (30m)
   const openCountByAccount = new Map<string, number>();
   const openSymbolsByAccount = new Map<string, Set<string>>();
   const openPositionsByAccount = new Map<string, FactorExposurePosition[]>();
+  const recentSlCooldownByAccount = new Map<string, Set<string>>();
+  const SL_COOLDOWN_MS = 30 * 60 * 1000;
+  const nowScan = Date.now();
   if (!manualOverride && !opts.overrideAccounts) {
     const existingOrders = await listBotExecutionOrders(150, userId);
     for (const o of existingOrders) {
+      const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (
+        o.message.startsWith("[ĐÃ ĐÓNG]") &&
+        ((o.realizedPnlUsd != null && o.realizedPnlUsd < 0) || o.message.includes("AUTO SL GUARD")) &&
+        nowScan - o.timestamp <= SL_COOLDOWN_MS
+      ) {
+        const cdSet = recentSlCooldownByAccount.get(o.followerId) ?? new Set<string>();
+        cdSet.add(`${cleanSym}_${o.direction}`);
+        recentSlCooldownByAccount.set(o.followerId, cdSet);
+      }
       if (
         (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
         !o.message.startsWith("[ĐÃ ĐÓNG]")
       ) {
         openCountByAccount.set(o.followerId, (openCountByAccount.get(o.followerId) ?? 0) + 1);
-        const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
         const set = openSymbolsByAccount.get(o.followerId) ?? new Set<string>();
         set.add(cleanSym);
         openSymbolsByAccount.set(o.followerId, set);
@@ -574,6 +586,10 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       const cleanSym = signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
       const activeSyms = openSymbolsByAccount.get(acct.id);
       if (activeSyms?.has(cleanSym)) {
+        continue;
+      }
+      const slCooldownSet = recentSlCooldownByAccount.get(acct.id);
+      if (slCooldownSet?.has(`${cleanSym}_${signal.direction}`)) {
         continue;
       }
       const maxOpen = Math.max(1, acct.maxOpenPositions ?? 3);

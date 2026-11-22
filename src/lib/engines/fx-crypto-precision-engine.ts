@@ -905,9 +905,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     }
   }
 
-  if (assetType === "FOREX" && sessionLabel && (sessionLabel === "WEEKEND" || sessionLabel === "ROLLOVER")) {
+  if (assetType === "FOREX" && sessionLabel === "WEEKEND") {
+    precisionScore -= 25;
+    vetoReasons.push("Thị trường Forex/Vàng đang đóng cửa nghỉ cuối tuần (WEEKEND) — khóa mở lệnh mới");
+    gatesFailed.push("Session Veto: Thị trường Forex đóng cửa cuối tuần (WEEKEND)");
+  } else if (assetType === "FOREX" && sessionLabel === "ROLLOVER") {
     precisionScore -= 12;
-    gatesFailed.push(`Session Warning: Đang trong khung ${sessionLabel} giãn spread`);
+    gatesFailed.push("Session Warning: Đang trong khung ROLLOVER giãn spread");
   }
 
   // GATE 5: Direction-Aligned Reversal Pace (0x50f7)

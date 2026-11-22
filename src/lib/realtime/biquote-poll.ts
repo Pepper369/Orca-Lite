@@ -221,31 +221,53 @@ export function mergeBarsWithBiquoteLiveTick(
   intervalSec = 900,
 ): OhlcvBar[] {
   if (!Array.isArray(bars) || bars.length === 0) return bars;
-  const tick = getBiquoteLiveTick(symbol, STALE_MS);
+  const tick = getBiquoteLiveTick(symbol, STALE_MS) ?? getBiquoteLiveTickAny(symbol);
   if (!tick || !Number.isFinite(tick.price) || tick.price <= 0) return bars;
 
-  const out = bars.slice();
+  let out = bars.slice();
   const lastIdx = out.length - 1;
   const last = out[lastIdx]!;
-  const isMs = last.time > 1e11;
+
+  // Basis-alignment guard: if OHLCV came from Yahoo Futures (e.g. GC=F @ 3515.4 vs Spot XAUUSD @ 3539.14),
+  // parallel-shift the entire series into the Spot coordinate system so entry/SL/TP match Spot markPrice.
+  const recentSlice = out.slice(-14);
+  const avgBarRange =
+    recentSlice.reduce((s, b) => s + Math.max(0, b.high - b.low), 0) / Math.max(1, recentSlice.length);
+  const basisDelta = tick.price - last.close;
+  if (avgBarRange > 0 && Math.abs(basisDelta) > avgBarRange * 1.25) {
+    out = out.map((b) => ({
+      ...b,
+      open: b.open + basisDelta,
+      high: b.high + basisDelta,
+      low: b.low + basisDelta,
+      close: b.close + basisDelta,
+    }));
+  }
+
+  const shiftedLast = out[lastIdx]!;
+  if (tick.marketState === "closed") {
+    return out;
+  }
+
+  const isMs = shiftedLast.time > 1e11;
   const bucketSize = isMs ? intervalSec * 1000 : intervalSec;
   const tickTimeUnit = isMs ? tick.ts : Math.floor(tick.ts / 1000);
   const currentBucket = Math.floor(tickTimeUnit / bucketSize) * bucketSize;
 
-  if (currentBucket > last.time && currentBucket - last.time <= bucketSize * 4) {
+  if (currentBucket > shiftedLast.time && currentBucket - shiftedLast.time <= bucketSize * 4) {
     out.push({
       time: currentBucket,
-      open: last.close,
-      high: Math.max(last.close, tick.price),
-      low: Math.min(last.close, tick.price),
+      open: shiftedLast.close,
+      high: Math.max(shiftedLast.close, tick.price),
+      low: Math.min(shiftedLast.close, tick.price),
       close: tick.price,
-      volume: last.volume,
+      volume: shiftedLast.volume,
     });
   } else {
     out[lastIdx] = {
-      ...last,
-      high: Math.max(last.high, tick.price),
-      low: Math.min(last.low, tick.price),
+      ...shiftedLast,
+      high: Math.max(shiftedLast.high, tick.price),
+      low: Math.min(shiftedLast.low, tick.price),
       close: tick.price,
     };
   }

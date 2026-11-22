@@ -261,8 +261,22 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
           }
         }
 
+        const isMarketClosed =
+          sig.filter.sessionLabel === "WEEKEND" || !sig.filter.eligible;
+        if (isMarketClosed && !vetoReasons.some((r) => r.includes("WEEKEND") || r.includes("đóng cửa"))) {
+          vetoReasons.unshift(
+            `Thị trường Forex/Vàng đang ngoài phiên giao dịch (${sig.filter.sessionLabel}) — khóa mở vị thế mới`,
+          );
+        }
+
         let setupGrade: SetupGrade = effectivePrecision?.grade ?? "NO_TRADE";
-        if (newsLockout || spreadLockoutReason || vetoReasons.length > 0 || rawDir === "NEUTRAL") {
+        if (
+          isMarketClosed ||
+          newsLockout ||
+          spreadLockoutReason ||
+          vetoReasons.length > 0 ||
+          rawDir === "NEUTRAL"
+        ) {
           setupGrade = "NO_TRADE";
         }
 

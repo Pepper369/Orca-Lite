@@ -28,6 +28,7 @@ import {
   ensureBiquoteCoreWatch,
   getBiquoteLiveAll,
   getBiquoteLiveTick,
+  getBiquoteLiveTickAny,
   mergeBarsWithBiquoteLiveTick,
 } from "@/lib/realtime/biquote-poll";
 import {
@@ -145,6 +146,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 function isEligibleGrade(grade?: string | null, winrateScore?: number): boolean {
   if (grade) return grade === "A+" || grade === "A";
   return (winrateScore ?? 0) >= 75;
+}
+
+function isForexWeekendClosedUtc(nowMs = Date.now()): boolean {
+  const d = new Date(nowMs);
+  const day = d.getUTCDay(); // 0 = Sun, 5 = Fri, 6 = Sat
+  const hour = d.getUTCHours();
+  if (day === 6) return true;
+  if (day === 5 && hour >= 22) return true;
+  if (day === 0 && hour < 22) return true;
+  return false;
 }
 
 /**
@@ -385,7 +396,10 @@ async function scanLivePrecisionSetups(params: {
           const dailySeries = detail?.detail?.series ?? [];
           const rawExecBars = intraday15m.length >= 30 ? intraday15m : dailySeries;
           const execBars = mergeBarsWithBiquoteLiveTick(rawExecBars, pair, 900);
-          const bqTick = getBiquoteLiveTick(pair, 45_000);
+          const bqTick = getBiquoteLiveTick(pair, 45_000) ?? getBiquoteLiveTickAny(pair);
+          if (isForexWeekendClosedUtc() || bqTick?.marketState === "closed") {
+            return null;
+          }
           const livePrice =
             bqTick && bqTick.price > 0
               ? bqTick.price
@@ -585,10 +599,15 @@ export async function runAutoTradeTick(): Promise<{
     const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
 
     if (fxRes.status === "fulfilled" && fxRes.value) {
+      const fxMarketClosed = isForexWeekendClosedUtc();
       for (const s of fxRes.value.data.signals) {
         seenForex.add(s.pair);
-        if (s.lastPrice > 0) updateLivePriceReference(s.pair, s.lastPrice);
+        const bqAny = getBiquoteLiveTickAny(s.pair);
+        const refPx = bqAny && bqAny.price > 0 ? bqAny.price : s.lastPrice;
+        if (refPx > 0) updateLivePriceReference(s.pair, refPx);
         if (
+          !fxMarketClosed &&
+          bqAny?.marketState !== "closed" &&
           s.status === "ACTIVE" &&
           s.setupGrade === "A+" &&
           (s.winrateScore ?? s.probability) >= 82 &&
@@ -601,6 +620,9 @@ export async function runAutoTradeTick(): Promise<{
       const fxCandidates = fxRes.value.data.signals
         .filter(
           (s) =>
+            !fxMarketClosed &&
+            s.session !== "WEEKEND" &&
+            s.sessionEligible !== false &&
             (s.status === "ACTIVE" || s.status === "AWAITING_BREAKOUT") &&
             (s.direction === "BUY" || s.direction === "SELL") &&
             s.entryPrice != null &&
@@ -613,7 +635,8 @@ export async function runAutoTradeTick(): Promise<{
 
       for (const s of fxCandidates) {
         seenForex.add(s.pair);
-        const bqLive = getBiquoteLiveTick(s.pair, 30_000);
+        const bqLive = getBiquoteLiveTick(s.pair, 30_000) ?? getBiquoteLiveTickAny(s.pair);
+        if (bqLive?.marketState === "closed") continue;
         const liveTick = bqLive?.price;
         const marketPrice = liveTick && liveTick > 0 ? liveTick : s.lastPrice || s.entryPrice!;
         const pipFx = getAssetPipSize(s.pair, "FOREX", marketPrice);

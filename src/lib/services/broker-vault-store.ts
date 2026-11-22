@@ -1042,7 +1042,8 @@ export async function resetDemoBrokerAccounts(
   const isDemoConn = (c: { isTestnet?: boolean; hasApiKey?: boolean; connectionStatus?: ConnectionStatus }) =>
     c.isTestnet !== false || !c.hasApiKey || c.connectionStatus === "PAPER_SIMULATED";
 
-  let currentAccounts = await listBrokerConnections(userId);
+  const effectiveUserId = userId || undefined;
+  let currentAccounts = await listBrokerConnections(effectiveUserId);
   let demoList = currentAccounts.filter(isDemoConn);
 
   // If the user deleted all demo accounts previously, re-seed the default Paper Demo pair

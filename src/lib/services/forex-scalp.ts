@@ -5,7 +5,8 @@ import { validateBars, logQualityEvent } from "../quality";
 import { analyzeForexScalp, type ForexScalpSignal } from "../engines/forex-scalp";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
-import { mergeBarsWithBiquoteLiveTick } from "../realtime/biquote-poll";
+import { getBiquotePublicQuotes } from "../providers/forex";
+import { getBiquoteLiveTickAny, mergeBarsWithBiquoteLiveTick } from "../realtime/biquote-poll";
 import { getForexMarkets } from "./forex";
 import type { Meta, OhlcvBar } from "../types";
 import type { ChartCandle } from "../chart-const";
@@ -134,6 +135,11 @@ export async function buildForexScalpSignal(
         if (q5.status !== "VALID") void logQualityEvent("yahoo-fx", `fx-scalp:${pair}:m5`, q5);
         if (q15.status !== "VALID") void logQualityEvent("yahoo-fx", `fx-scalp:${pair}:m15`, q15);
 
+        // Ensure BiQuote cache is populated for this pair so Yahoo Futures (GC=F) basis is aligned to MT5 Spot
+        if (!getBiquoteLiveTickAny(pair)) {
+          await getBiquotePublicQuotes([pair]).catch(() => null);
+        }
+        const bqAny = getBiquoteLiveTickAny(pair);
         const liveBarsM5 = mergeBarsWithBiquoteLiveTick(q5.cleaned, pair, 300);
         const liveBarsM15 = mergeBarsWithBiquoteLiveTick(q15.cleaned, pair, 900);
 
@@ -146,6 +152,13 @@ export async function buildForexScalpSignal(
           calendarEvents,
           csmBaseMinusQuote,
         });
+        if (signal && bqAny?.marketState === "closed") {
+          signal.filter.eligible = false;
+          signal.filter.sessionLabel = "WEEKEND";
+          if (!signal.riskNotes.some((r) => r.includes("đóng cửa"))) {
+            signal.riskNotes.unshift("Thị trường Forex/Vàng đang đóng cửa (Market Closed) — tạm ngưng giao dịch");
+          }
+        }
         if (!signal) {
           throw new Error("engine could not compute forex scalp signal");
         }
