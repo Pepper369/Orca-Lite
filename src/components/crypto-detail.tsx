@@ -322,7 +322,7 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
                 <Badge tone="neutral">{sym}</Badge>
                 <AddToWatchlist symbol={sym} assetType="crypto" />
               </div>
-              <div className="num flex items-baseline gap-2 border-l border-border-subtle pl-2.5">
+              <div className="num mt-0.5 flex items-baseline gap-2">
                 <span className="text-[18px] font-bold leading-none text-text-primary sm:text-[20px]">{fmtNum(price, digits)}</span>
                 {chg != null && <Chg value={chg} className="text-[12px] font-semibold" />}
                 {isWsLive ? (
@@ -437,32 +437,69 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
         </div>
       </div>
 
-      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
-        <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
-          <FILL className="min-h-0 flex-[1.2]">
+      {/* ROW 1: HERO TRADING STAGE — Locked 640px height for 0px dead void & full right-column visibility */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:h-[640px]">
+        <div className="xl:col-span-3 flex h-full min-h-0 flex-col">
+          <FILL className="min-h-0 flex-1">
             <CryptoTradeDesk symbol={sym} mode="orderflow" />
           </FILL>
-          <OrderFlowPanel flow={orderFlow} />
-          <LiquidityZonesPanel
-            price={price}
-            digits={digits}
-            supports={supports}
-            resistances={resistances}
-            seriesLow={seriesLow}
-            seriesHigh={seriesHigh}
-          />
         </div>
-        <div className="xl:col-span-6 flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-primary">
-          <OrcaChart
-            symbol={sym}
-            assetType="crypto"
-            defaultTimeframe={interval}
-            height={560}
-            title={`${baseAsset}/USDT`}
-            extraLevels={chartExtraLevels}
-          />
+
+        <div className="xl:col-span-6 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-primary">
+          {tech ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle px-2.5 py-1.5 text-[10px] text-text-secondary">
+              <span className="font-semibold text-text-primary">Chỉ báo</span>
+              {tech.rsi14 != null && (
+                <span>
+                  RSI14{" "}
+                  <b className={tech.rsi14 >= 70 ? "text-down" : tech.rsi14 <= 30 ? "text-up" : "text-text-primary"}>
+                    {tech.rsi14.toFixed(1)}
+                  </b>
+                </span>
+              )}
+              {(tech.macd?.histogram ?? tech.macd?.hist) != null && (
+                <span>
+                  MACD{" "}
+                  <b className={(tech.macd?.histogram ?? tech.macd?.hist ?? 0) >= 0 ? "text-up" : "text-down"}>
+                    {(tech.macd?.histogram ?? tech.macd?.hist)!.toFixed(2)}
+                  </b>
+                </span>
+              )}
+              {tech.sma?.sma20 != null && (
+                <span>
+                  SMA20 <b className="text-text-primary">{fmtNum(tech.sma.sma20, digits)}</b>
+                </span>
+              )}
+              {tech.sma?.sma50 != null && (
+                <span>
+                  SMA50 <b className="text-text-primary">{fmtNum(tech.sma.sma50, digits)}</b>
+                </span>
+              )}
+              {tech.atr14 != null && (
+                <span>
+                  ATR14 <b className="text-text-primary">{fmtNum(tech.atr14, digits)}</b>
+                </span>
+              )}
+              {tech.trend?.label && (
+                <span>
+                  Trend <b className="text-text-primary">{tech.trend.label}</b>
+                </span>
+              )}
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <OrcaChart
+              symbol={sym}
+              assetType="crypto"
+              defaultTimeframe={interval}
+              height={tech ? 604 : 638}
+              title={`${baseAsset}/USDT`}
+              extraLevels={chartExtraLevels}
+            />
+          </div>
         </div>
-        <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
+
+        <div className="xl:col-span-3 flex h-full min-h-0 flex-col gap-2">
           {/* Inner Stage Switcher */}
           <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface-elevated/40 p-1 shrink-0">
             <button
@@ -518,8 +555,28 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
               />
             )}
           </FILL>
-          <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
+        </div>
+      </div>
+
+      {/* ROW 2: EXECUTION LEVERAGE, ORDER FLOW & LIQUIDITY ZONES (Balanced 4+4+4) */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
+        <div className="xl:col-span-4 flex flex-col">
           <CryptoTradeDesk symbol={sym} mode="leverage" />
+        </div>
+        <div className="xl:col-span-4 flex flex-col gap-2">
+          <OrderFlowPanel flow={orderFlow} />
+          <DerivativesStrip fundingRate={fundingRate} oi={data?.openInterest?.openInterest ?? null} vol={t?.quoteVolume ?? null} />
+        </div>
+        <div className="xl:col-span-4 flex flex-col gap-2">
+          <LiquidityZonesPanel
+            price={price}
+            digits={digits}
+            supports={supports}
+            resistances={resistances}
+            seriesLow={seriesLow}
+            seriesHigh={seriesHigh}
+          />
+          <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
         </div>
       </div>
 
@@ -581,16 +638,14 @@ export function CryptoDetailPage({ symbol }: { symbol: string }) {
         )}
       </div>
 
-      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
-        <div className="xl:col-span-7 flex min-h-[300px] flex-col">
+      {/* ROW 3: MARKET STRUCTURE & STICKY SENTIMENT/NEWS */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-start">
+        <div className="xl:col-span-8 flex flex-col">
           <MarketStructurePanel tab={structureTab} onTab={setStructureTab} pair={sym} interval={interval} tech={tech} patterns={patterns} cur={t} series={series} assetType="crypto" serverPrecision={precision} />
         </div>
-        <div className="xl:col-span-5 flex min-h-[300px] flex-col gap-2">
-          <DerivativesStrip fundingRate={fundingRate} oi={data?.openInterest?.openInterest ?? null} vol={t?.quoteVolume ?? null} />
-          <div className="grid grid-cols-2 gap-2 min-h-0 flex-1">
-            <CryptoSentimentPanel symbol={sym} ticker={t} tech={tech} />
-            <CryptoNewsPanel symbol={sym} base={baseAsset} />
-          </div>
+        <div className="xl:col-span-4 flex flex-col gap-2 xl:sticky xl:top-3">
+          <CryptoSentimentPanel symbol={sym} ticker={t} tech={tech} />
+          <CryptoNewsPanel symbol={sym} base={baseAsset} />
         </div>
       </div>
 

@@ -87,10 +87,10 @@ export function ForexTradeDesk({
     const now = new Date();
     const utcHour = now.getUTCHours();
     return [
-      { name: "Sydney (Úc)", hours: "21:00 - 06:00 UTC", isOpen: utcHour >= 21 || utcHour < 6 },
-      { name: "Tokyo (Châu Á)", hours: "00:00 - 09:00 UTC", isOpen: utcHour >= 0 && utcHour < 9 },
-      { name: "London (Châu Âu)", hours: "07:00 - 16:00 UTC", isOpen: utcHour >= 7 && utcHour < 16 },
-      { name: "New York (Mỹ)", hours: "12:00 - 21:00 UTC", isOpen: utcHour >= 12 && utcHour < 21 },
+      { name: "Sydney", hours: "21:00 - 06:00 UTC", isOpen: utcHour >= 21 || utcHour < 6 },
+      { name: "Tokyo", hours: "00:00 - 09:00 UTC", isOpen: utcHour >= 0 && utcHour < 9 },
+      { name: "London", hours: "07:00 - 16:00 UTC", isOpen: utcHour >= 7 && utcHour < 16 },
+      { name: "New York", hours: "12:00 - 21:00 UTC", isOpen: utcHour >= 12 && utcHour < 21 },
     ];
   }, []);
 
@@ -112,29 +112,25 @@ export function ForexTradeDesk({
         {/* Bid / Ask Dual Rate Box */}
         <div className="grid grid-cols-2 gap-1.5">
           <div className="panel-inset p-2 border-l-2 border-negative">
-            <div className="flex items-center justify-between text-[9px] uppercase tracking-wider text-negative font-medium">
-              <span className="flex items-center gap-1">
-                <ArrowDownRight className="size-3" /> GIÁ BÁN (BID)
-              </span>
-              <span>Bán ra</span>
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-negative font-semibold">
+              <ArrowDownRight className="size-3 shrink-0" />
+              <span className="truncate">GIÁ BÁN (BID)</span>
             </div>
             <div className="num mt-0.5 text-[15px] font-bold text-text-primary">
               {fmtNum(bidPrice, priceDecimals)}
             </div>
-            <div className="text-[9px] text-text-muted">Khớp lệnh thị trường SELL</div>
+            <div className="text-[9px] text-text-muted">Khớp lệnh SELL</div>
           </div>
 
           <div className="panel-inset p-2 border-l-2 border-positive">
-            <div className="flex items-center justify-between text-[9px] uppercase tracking-wider text-positive font-medium">
-              <span className="flex items-center gap-1">
-                <ArrowUpRight className="size-3" /> GIÁ MUA (ASK)
-              </span>
-              <span>Mua vào</span>
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-positive font-semibold">
+              <ArrowUpRight className="size-3 shrink-0" />
+              <span className="truncate">GIÁ MUA (ASK)</span>
             </div>
             <div className="num mt-0.5 text-[15px] font-bold text-text-primary">
               {fmtNum(askPrice, priceDecimals)}
             </div>
-            <div className="text-[9px] text-text-muted">Khớp lệnh thị trường BUY</div>
+            <div className="text-[9px] text-text-muted">Khớp lệnh BUY</div>
           </div>
         </div>
 

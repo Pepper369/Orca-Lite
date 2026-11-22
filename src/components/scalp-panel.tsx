@@ -182,7 +182,7 @@ function ScalpView({ result, meta }: { result: ScalpResult; meta: Meta | null })
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-1.5">
         <Metric label="Last" value={fmtNum(s.last, digits)} />
         <Metric
           label="Entry zone"

@@ -228,7 +228,7 @@ function DeskBody({
       {showOrderFlow && (
         <div className="space-y-2.5">
           {/* Signal & Core metrics grid */}
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-1.5 ${mode === "all" ? "sm:grid-cols-4" : ""}`}>
             <div className="panel-inset p-2">
               <div className="flex items-center justify-between gap-1 text-[9px] uppercase tracking-wider text-text-muted">
                 <span>Tín hiệu Desk</span>
@@ -416,7 +416,7 @@ function DeskBody({
 
             {effectivePlan && (
               <div className="mt-2 space-y-1.5">
-                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-1.5">
                   <Metric label="Điểm Entry" value={fmtNum(effectivePlan.entry, digits)} tone="neutral" />
                   <Metric
                     label={slMode === "structural" && hasStructuralPlan ? "SL Cấu trúc" : "Stop Loss"}
@@ -441,16 +441,16 @@ function DeskBody({
                 {/* Multi-Target Matrix */}
                 <div className="grid grid-cols-3 gap-1 pt-1 border-t border-border-subtle/50 text-[9.5px]">
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP1 (50%+BE): </span>
-                    <strong className="num text-positive">{fmtNum(effectivePlan.tp1, digits)}</strong>
+                    <div className="text-[8.5px] text-text-muted">TP1 (50%+BE)</div>
+                    <strong className="num text-[11px] text-positive">{fmtNum(effectivePlan.tp1, digits)}</strong>
                   </div>
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP2 (30%): </span>
-                    <strong className="num text-positive">{fmtNum(effectivePlan.tp2, digits)}</strong>
+                    <div className="text-[8.5px] text-text-muted">TP2 (30%)</div>
+                    <strong className="num text-[11px] text-positive">{fmtNum(effectivePlan.tp2, digits)}</strong>
                   </div>
                   <div className="panel-inset p-1.5 text-center">
-                    <span className="text-text-muted">TP3 (20%): </span>
-                    <strong className="num text-positive">{fmtNum(effectivePlan.tp3, digits)}</strong>
+                    <div className="text-[8.5px] text-text-muted">TP3 (20%)</div>
+                    <strong className="num text-[11px] text-positive">{fmtNum(effectivePlan.tp3, digits)}</strong>
                   </div>
                 </div>
               </div>

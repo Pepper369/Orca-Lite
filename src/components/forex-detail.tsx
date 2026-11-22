@@ -273,7 +273,7 @@ export function ForexDetailPage({ pair }: { pair: string }) {
                 <Badge tone="neutral">{pair}</Badge>
                 <AddToWatchlist symbol={pair} assetType="forex" />
               </div>
-              <div className="num flex items-baseline gap-2 border-l border-border-subtle pl-2.5">
+              <div className="num mt-0.5 flex items-baseline gap-2">
                 <span className="text-[18px] font-bold leading-none text-text-primary sm:text-[20px]">
                   {price != null ? fmtNum(price, digits) : "—"}
                 </span>
@@ -399,9 +399,10 @@ export function ForexDetailPage({ pair }: { pair: string }) {
         </div>
       </div>
 
-      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
-        <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
-          <FILL className="min-h-0 flex-[1.2]">
+      {/* ROW 1: HERO TRADING STAGE — Locked 640px height for 0px dead void & balanced 3+6+3 cockpit */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:h-[640px]">
+        <div className="xl:col-span-3 flex h-full min-h-0 flex-col">
+          <FILL className="min-h-0 flex-1">
             <ForexTradeDesk
               pair={pair}
               base={base}
@@ -412,20 +413,11 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               recommendedSizeMultiplier={precision?.recommendedSizeMultiplier ?? null}
             />
           </FILL>
-          <OrderFlowPanel flow={orderFlow} />
-          <LiquidityZonesPanel
-            price={price}
-            digits={digits}
-            supports={supports}
-            resistances={resistances}
-            seriesLow={seriesLow}
-            seriesHigh={seriesHigh}
-          />
         </div>
 
-        <div className="xl:col-span-6 flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-primary">
+        <div className="xl:col-span-6 flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-primary">
           {tech ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle px-2.5 py-1.5 text-[10px] text-text-secondary">
+            <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle px-2.5 py-1.5 text-[10px] text-text-secondary">
               <span className="font-semibold text-text-primary">Chỉ báo</span>
               {tech.rsi14 != null && (
                 <span>
@@ -478,17 +470,19 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               )}
             </div>
           ) : null}
-          <OrcaChart
-            symbol={pair}
-            assetType="forex"
-            defaultTimeframe={interval}
-            height={tech ? 520 : 560}
-            title={`${base}/${quote}`}
-            extraLevels={chartExtraLevels}
-          />
+          <div className="min-h-0 flex-1">
+            <OrcaChart
+              symbol={pair}
+              assetType="forex"
+              defaultTimeframe={interval}
+              height={tech ? 592 : 638}
+              title={`${base}/${quote}`}
+              extraLevels={chartExtraLevels}
+            />
+          </div>
         </div>
 
-        <div className="xl:col-span-3 flex min-h-[560px] flex-col gap-2">
+        <div className="xl:col-span-3 flex h-full min-h-0 flex-col gap-2">
           {/* Inner Stage Switcher */}
           <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface-elevated/40 p-1 shrink-0">
             <button
@@ -544,7 +538,27 @@ export function ForexDetailPage({ pair }: { pair: string }) {
               />
             )}
           </FILL>
+        </div>
+      </div>
+
+      {/* ROW 2: ORDER FLOW, LIQUIDITY ZONES & KEY LEVELS / MACRO CALENDAR (Balanced 4+4+4) */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
+        <div className="xl:col-span-4 flex flex-col">
+          <OrderFlowPanel flow={orderFlow} />
+        </div>
+        <div className="xl:col-span-4 flex flex-col">
+          <LiquidityZonesPanel
+            price={price}
+            digits={digits}
+            supports={supports}
+            resistances={resistances}
+            seriesLow={seriesLow}
+            seriesHigh={seriesHigh}
+          />
+        </div>
+        <div className="xl:col-span-4 flex flex-col gap-2">
           <KeyZonesCompact price={price} digits={digits} supports={supports} resistances={resistances} />
+          <EconomicCalendarPanel />
         </div>
       </div>
 
@@ -642,8 +656,9 @@ export function ForexDetailPage({ pair }: { pair: string }) {
         )}
       </div>
 
-      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-stretch">
-        <div className="xl:col-span-7 flex min-h-[300px] flex-col">
+      {/* ROW 3: MARKET STRUCTURE & STICKY SENTIMENT/NEWS */}
+      <div className="hidden xl:grid xl:grid-cols-12 xl:gap-2 xl:items-start">
+        <div className="xl:col-span-8 flex flex-col">
           <MarketStructurePanel
             tab={structureTab}
             onTab={setStructureTab}
@@ -657,12 +672,9 @@ export function ForexDetailPage({ pair }: { pair: string }) {
           />
         </div>
 
-        <div className="xl:col-span-5 flex min-h-[300px] flex-col gap-2">
-          <EconomicCalendarPanel />
-          <div className="grid grid-cols-2 gap-2 min-h-0 flex-1">
-            <SentimentPanelCompact pair={pair} current={cur} tech={tech} />
-            <ForexNewsPanel pair={pair} base={base} quote={quote} />
-          </div>
+        <div className="xl:col-span-4 flex flex-col gap-2 xl:sticky xl:top-3">
+          <SentimentPanelCompact pair={pair} current={cur} tech={tech} />
+          <ForexNewsPanel pair={pair} base={base} quote={quote} />
         </div>
       </div>
 
