@@ -7,11 +7,17 @@ import {
 } from "@/lib/engines/bot-telemetry-types";
 import {
   analyzeFundingRate,
+  computeMicropriceAndSpoofingSignal,
+  computeVolumeClockVpin,
   evaluateCryptoPerpQuadrantAndLeaderShield,
   evaluateTrueLevel2Dom,
 } from "@/lib/engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "@/lib/engines/crypto-news-shield";
-import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engines/forex-currency-strength";
+import {
+  calculateCurrencyStrengthMatrix,
+  evaluateTriangularCrossParity,
+  type PairPriceInput,
+} from "@/lib/engines/forex-currency-strength";
 import { evaluateNewsCircuitBreaker } from "@/lib/engines/forex-news-shield";
 import { generateDeepFlowSignal } from "@/lib/engines/forex-order-flow-pro";
 import { calibrateAndRegisterLiveMetaModels } from "@/lib/engines/fx-crypto-backtest-harness";
@@ -25,6 +31,7 @@ import {
   buildCryptoLiquidityContext,
   calculateUnifiedTradeRiskPlan,
   computeGarmanKlassLeverageCap,
+  computeHrpPortfolioSignalMultipliers,
   detectCryptoLiquidationClusters,
 } from "@/lib/engines/unified-cross-asset-quant";
 import { eventBus } from "@/lib/events";
@@ -96,7 +103,7 @@ interface WorkerGlobalState {
   latestTickFn?: () => Promise<unknown>;
 }
 
-const WORKER_CODE_VERSION = 6;
+const WORKER_CODE_VERSION = 7;
 
 const g = globalThis as typeof globalThis & {
   __orcaAutoTradeWorkerState?: WorkerGlobalState;
@@ -224,6 +231,15 @@ async function scanLivePrecisionSetups(params: {
             wsMicro != null
               ? Math.round(dom.imbalanceRatio * 0.65 + wsMicro.tickImbalancePct * 0.35)
               : dom.imbalanceRatio;
+          const aggressiveBuyShare =
+            wsMicro != null
+              ? Math.min(1, Math.max(0, 0.5 + wsMicro.tickImbalancePct / 200))
+              : 0.5 + dom.imbalanceRatio / 200;
+          const micropriceSig = computeMicropriceAndSpoofingSignal({
+            orderBook: book,
+            aggressiveBuyShare,
+          });
+          const vpinRes = computeVolumeClockVpin(execBars, 12);
           const bestBid = book.bids[0]?.price ?? 0;
           const bestAsk = book.asks[0]?.price ?? 0;
           const liveSpreadPct =
@@ -265,6 +281,9 @@ async function scanLivePrecisionSetups(params: {
             fundingRate,
             liquidationClusterAligned,
             externalMagnets,
+            micropriceSkewBps: micropriceSig.micropriceSkewBps,
+            spoofingOrAbsorptionState: micropriceSig.spoofingOrAbsorptionState,
+            vpinToxicity: vpinRes.vpin,
             isNewsOrCascadeLockout: shield.isLockout,
             lockoutReason: shield.warningMessage,
             empiricalFrictionROverride: getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride,
@@ -386,8 +405,9 @@ async function scanLivePrecisionSetups(params: {
     const marketsRes = await withTimeout(getForexMarkets().catch(() => null), 2_000, null);
     const fxRows = marketsRes?.data?.rows ?? [];
     const csmScoreMap = new Map<string, number>();
+    let csmInputs: PairPriceInput[] = [];
     if (fxRows.length >= 4) {
-      const csmInputs: PairPriceInput[] = fxRows
+      csmInputs = fxRows
         .filter((r) => r.price > 0)
         .map((r) => ({ pair: r.pair, price: r.price, changePercent: r.changePercent ?? 0 }));
       if (csmInputs.length >= 4) {
@@ -452,6 +472,8 @@ async function scanLivePrecisionSetups(params: {
             intraday15m.length >= 30 && dailySeries.length >= 30
               ? dailySeries
               : resampleOhlcvBars(execBars, 4);
+          const triangularParityAligned =
+            csmInputs.length >= 4 ? evaluateTriangularCrossParity(pair, csmInputs).alignment : null;
 
           const precision = evaluatePrecisionTradeSetup({
             symbol: pair,
@@ -462,6 +484,7 @@ async function scanLivePrecisionSetups(params: {
             absorptionType: flow.absorption.type,
             volumeDeltaDivergence: flow.cvdDivergence,
             csmBaseMinusQuote: csmSpread,
+            triangularParityAligned,
             spreadPipsOrPct: liveSpreadPips,
             isNewsOrCascadeLockout: cb.isLockout || !(flow.spreadSafety?.isSafe ?? true),
             lockoutReason: cb.warningMessage ?? flow.spreadSafety?.lockoutReason ?? null,
@@ -886,6 +909,32 @@ export async function runAutoTradeTick(): Promise<{
         (b.signal.winrateScore ?? 0) - (a.signal.winrateScore ?? 0) ||
         (b.signal.expectancyR ?? 0) - (a.signal.expectancyR ?? 0),
     );
+
+    // Apply Portfolio-Level Hierarchical Risk Parity (HRP) cluster diversification sizing across concurrent signals
+    if (signalsToDispatch.length >= 2) {
+      const hrpMults = computeHrpPortfolioSignalMultipliers(
+        signalsToDispatch.map((item) => ({
+          symbol: item.signal.symbol,
+          assetType: item.signal.assetType,
+          direction: item.signal.direction,
+          winrateScore: item.signal.winrateScore,
+          expectancyR: item.signal.expectancyR,
+        })),
+      );
+      for (const item of signalsToDispatch) {
+        const mult = hrpMults[item.signal.symbol] ?? 1.0;
+        if (item.signal.assetType === "CRYPTO") {
+          item.signal.masterLotsOrQty = Number(
+            Math.max(0.001, item.signal.masterLotsOrQty * mult).toFixed(4),
+          );
+        } else {
+          item.signal.masterLotsOrQty = Number(
+            Math.max(0.01, item.signal.masterLotsOrQty * mult).toFixed(2),
+          );
+        }
+      }
+    }
+
     quantFeedItems.sort((a, b) => b.winrateScore - a.winrateScore || b.expectancyR - a.expectancyR);
     STATE.lastQuantFeed = quantFeedItems.slice(0, 12);
 

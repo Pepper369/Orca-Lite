@@ -109,6 +109,15 @@ export interface ScalpAnalyzeInput {
   volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
   liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
   externalMagnets?: ExternalLiquidityMagnet[] | null;
+  micropriceSkewBps?: number | null;
+  spoofingOrAbsorptionState?:
+    | "BULLISH_ICEBERG_ABSORPTION"
+    | "BEARISH_ICEBERG_ABSORPTION"
+    | "BID_SPOOFING_RISK"
+    | "ASK_SPOOFING_RISK"
+    | "CLEAN_BOOK"
+    | null;
+  vpinToxicity?: number | null;
   isLockout?: boolean;
   lockoutReason?: string | null;
 }

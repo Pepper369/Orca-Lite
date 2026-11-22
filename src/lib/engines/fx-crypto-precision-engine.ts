@@ -1,5 +1,5 @@
 import type { OhlcvBar } from "../types";
-import { ema, sma, supportResistance } from "../technical";
+import { ema, supportResistance } from "../technical";
 import {
   estimateClvOrderFlowImbalance,
   getAssetPipSize,
@@ -33,7 +33,7 @@ import {
   type TrainedMetaLabelModel,
 } from "./meta-labeling-calibration";
 import { calculateRequiredSpeedPace } from "./quant-reversal-pace";
-import { buildSharedBarContext, type SharedBarContext } from "./unified-ta-kernel";
+import { buildSharedBarContext, scalarSmaAt, type SharedBarContext } from "./unified-ta-kernel";
 
 export type SetupGrade = "A+" | "A" | "B" | "NO_TRADE";
 
@@ -55,6 +55,20 @@ export interface PrecisionSetupInput {
   volumeDeltaDivergence?: "BULLISH_DIVERGENCE" | "BEARISH_DIVERGENCE" | "NONE" | null;
   liquidationClusterAligned?: "LONG_SQUEEZE_UP" | "SHORT_SQUEEZE_UP" | "LONG_FLUSH_DOWN" | "BALANCED" | null;
   externalMagnets?: ExternalLiquidityMagnet[] | null;
+  /** Stoikov (2018) Microprice skew in bps: (microprice - mid) / mid * 10000 */
+  micropriceSkewBps?: number | null;
+  /** L1 vs Deep L2-L10 Orderbook state from computeMicropriceAndSpoofingSignal */
+  spoofingOrAbsorptionState?:
+    | "BULLISH_ICEBERG_ABSORPTION"
+    | "BEARISH_ICEBERG_ABSORPTION"
+    | "BID_SPOOFING_RISK"
+    | "ASK_SPOOFING_RISK"
+    | "CLEAN_BOOK"
+    | null;
+  /** Volume-Clock Bulk Volume Classification VPIN [0, 1] */
+  vpinToxicity?: number | null;
+  /** Forex Triangular / G8 Orthogonal Cross-Rate Parity Check */
+  triangularParityAligned?: "CONFIRMED" | "DIVERGENT_FAKEOUT" | "NEUTRAL" | null;
   sessionLabel?: string | null;
   isNewsOrCascadeLockout?: boolean;
   lockoutReason?: string | null;
@@ -755,12 +769,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   }
 
   // GATE 3: Value Zone (OTE/FVG/Discount-Premium) + Parabolic Anti-Chase & Post-Exhaustion Knife Guard
-  const sma20Arr = sma(closes, 20);
-  const s20 = sma20Arr[n - 1] ?? currentPrice;
-  const std20Slice = closes.slice(-20);
-  const std20 = Math.sqrt(
-    std20Slice.reduce((sum, c) => sum + (c - s20) ** 2, 0) / Math.max(1, std20Slice.length),
-  );
+  // Zero-allocation scalar SMA(20) & variance pass via unified-ta-kernel
+  const s20 = scalarSmaAt(closes, Math.min(20, n), 0) ?? currentPrice;
+  const win20Start = Math.max(0, n - 20);
+  const win20Len = Math.max(1, n - win20Start);
+  let var20Sum = 0;
+  for (let i = win20Start; i < n; i++) {
+    const d = closes[i]! - s20;
+    var20Sum += d * d;
+  }
+  const std20 = Math.sqrt(var20Sum / win20Len);
   const bbZ = std20 > 1e-12 ? (currentPrice - s20) / std20 : 0;
   const distEma21Atr = atr14 > 0 ? Math.abs(currentPrice - e21) / atr14 : 0;
   const recent3Ret = n >= 4 ? Math.abs(currentPrice - closes[n - 4]!) : 0;
@@ -833,11 +851,15 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
   }
 
-  // GATE 4: Order Flow + FII/Absorption + Liquidation Clusters + CSM + Crypto Funding
-  if (isBuy && realImbalance >= 12) {
+  // GATE 4: Order Flow + FII/Absorption + Liquidation Clusters + CSM + Crypto Funding (with HAR-RV Volatility-Regime Adaptive Thresholds)
+  const volRegimeScale = Math.max(0.85, Math.min(1.25, Math.sqrt(Math.max(0.5, harVol.expansionRatio))));
+  const adaptiveImbalanceThresh = orderBookImbalance != null ? Math.round(12 * volRegimeScale) : 12;
+  const adaptiveFiiThresh = Math.round(22 * volRegimeScale);
+
+  if (isBuy && realImbalance >= adaptiveImbalanceThresh) {
     precisionScore += 6;
     gatesPassed.push(`Gate 4: Dòng tiền/CLV ủng hộ mua (+${realImbalance}%)`);
-  } else if (!isBuy && realImbalance <= -12) {
+  } else if (!isBuy && realImbalance <= -adaptiveImbalanceThresh) {
     precisionScore += 6;
     gatesPassed.push(`Gate 4: Dòng tiền/CLV ủng hộ bán (${realImbalance}%)`);
   } else if ((isBuy && realImbalance <= -35) || (!isBuy && realImbalance >= 35)) {
@@ -846,7 +868,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   }
 
   if (flowIntensityIndex != null) {
-    if ((isBuy && flowIntensityIndex >= 22) || (!isBuy && flowIntensityIndex <= -22)) {
+    if ((isBuy && flowIntensityIndex >= adaptiveFiiThresh) || (!isBuy && flowIntensityIndex <= -adaptiveFiiThresh)) {
       precisionScore += 5;
       gatesPassed.push(`Gate 4 (FII): Dòng tiền tổ chức ${flowIntensityIndex > 0 ? "+" : ""}${flowIntensityIndex} đồng thuận`);
     } else if ((isBuy && flowIntensityIndex <= -38) || (!isBuy && flowIntensityIndex >= 38)) {
@@ -858,6 +880,47 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   if ((isBuy && absorptionType === "BULLISH_ABSORPTION") || (!isBuy && absorptionType === "BEARISH_ABSORPTION")) {
     precisionScore += 5;
     gatesPassed.push(`Gate 4 (Absorption): Phát hiện ${absorptionType} đỡ giá`);
+  }
+
+  // Gate 4d: Stoikov (2018) Microprice Skew + L1-vs-Deep-L2 Iceberg Absorption & Anti-Spoofing Hard Veto
+  const spoofState = input.spoofingOrAbsorptionState ?? null;
+  const microSkewBps = input.micropriceSkewBps ?? null;
+  if (spoofState === "BULLISH_ICEBERG_ABSORPTION") {
+    if (isBuy) {
+      precisionScore += 6;
+      gatesPassed.push(
+        `Gate 4d (Stoikov Iceberg): Hấp thụ Iceberg Mua L1 (Microprice Skew ${microSkewBps != null ? `${microSkewBps >= 0 ? "+" : ""}${microSkewBps.toFixed(2)} bps` : "thuận chiều"})`,
+      );
+    } else {
+      precisionScore -= 8;
+      gatesFailed.push("Gate 4d (Iceberg Conflict): Tường Iceberg Mua L1 đang đỡ giá ngược lệnh SELL");
+    }
+  } else if (spoofState === "BEARISH_ICEBERG_ABSORPTION") {
+    if (!isBuy) {
+      precisionScore += 6;
+      gatesPassed.push(
+        `Gate 4d (Stoikov Iceberg): Hấp thụ Iceberg Bán L1 (Microprice Skew ${microSkewBps != null ? `${microSkewBps.toFixed(2)} bps` : "thuận chiều"})`,
+      );
+    } else {
+      precisionScore -= 8;
+      gatesFailed.push("Gate 4d (Iceberg Conflict): Tường Iceberg Bán L1 đang chặn giá ngược lệnh BUY");
+    }
+  } else if (isBuy && spoofState === "BID_SPOOFING_RISK") {
+    precisionScore -= 14;
+    vetoReasons.push("Cảnh báo Spoofing Bid L2: Tường mua tầng sâu L3-L10 ảo nhưng Microprice L1 nghiêng hẳn về phe bán");
+    gatesFailed.push("Gate 4d (Anti-Spoofing Veto): Chặn lệnh BUY do phát hiện tường Bid Spoofing");
+  } else if (!isBuy && spoofState === "ASK_SPOOFING_RISK") {
+    precisionScore -= 14;
+    vetoReasons.push("Cảnh báo Spoofing Ask L2: Tường bán tầng sâu L3-L10 ảo nhưng Microprice L1 đang đẩy giá lên");
+    gatesFailed.push("Gate 4d (Anti-Spoofing Veto): Chặn lệnh SELL do phát hiện tường Ask Spoofing");
+  } else if (
+    microSkewBps != null &&
+    ((isBuy && microSkewBps >= 1.5) || (!isBuy && microSkewBps <= -1.5))
+  ) {
+    precisionScore += 3;
+    gatesPassed.push(
+      `Gate 4d (Stoikov Microprice): Lệch giá vi mô L1 thuận chiều (${microSkewBps > 0 ? "+" : ""}${microSkewBps.toFixed(2)} bps)`,
+    );
   }
 
   if (
@@ -909,6 +972,17 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     } else if ((isBuy && csmBaseMinusQuote <= -2.2) || (!isBuy && csmBaseMinusQuote >= 2.2)) {
       precisionScore -= 10;
       gatesFailed.push(`Gate 4b (CSM): Đồng tiền cơ sở yếu ngược chiều (${csmBaseMinusQuote.toFixed(1)})`);
+    }
+  }
+
+  if (assetType === "FOREX" && input.triangularParityAligned != null) {
+    if (input.triangularParityAligned === "CONFIRMED") {
+      precisionScore += 4;
+      gatesPassed.push("Gate 4b (Triangular Parity): Tam giác tỷ giá chéo & nhân tố trực giao G8 đồng thuận");
+    } else if (input.triangularParityAligned === "DIVERGENT_FAKEOUT") {
+      precisionScore -= 10;
+      vetoReasons.push("Bẫy lệch tam giác tỷ giá chéo (Triangular Parity Fakeout) — xung lượng đơn lẻ ngược 2 chân tỷ giá gốc");
+      gatesFailed.push("Gate 4b (Triangular Parity Veto): Cặp chéo lệch pha hoàn toàn với tam giác thanh khoản");
     }
   }
 
@@ -1057,11 +1131,27 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (prev > 0 && cur > 0) tailReturns.push(Math.log(cur / prev));
   }
   const tailNu = estimateTailDegreesOfFreedom(tailReturns);
-  const hasExplicitOrderFlow = orderBookImbalance != null || flowIntensityIndex != null;
+  const hasExplicitOrderFlow = orderBookImbalance != null || flowIntensityIndex != null || input.vpinToxicity != null;
   const opposingFlow = hasExplicitOrderFlow && ((isBuy && realImbalance < -25) || (!isBuy && realImbalance > 25));
-  const estVpinToxicity = hasExplicitOrderFlow
-    ? Math.min(0.85, Math.max(0.22, 0.28 + (opposingFlow ? Math.abs(realImbalance) / 160 : 0)))
-    : undefined;
+  const explicitVpin =
+    input.vpinToxicity != null && Number.isFinite(input.vpinToxicity) && input.vpinToxicity > 0
+      ? Math.max(0.15, Math.min(0.95, input.vpinToxicity))
+      : null;
+  if (explicitVpin != null && explicitVpin >= 0.72 && opposingFlow) {
+    precisionScore -= 12;
+    vetoReasons.push(
+      `Độc tính dòng lệnh Volume-Clock VPIN cực cao (${(explicitVpin * 100).toFixed(1)}%) ngược chiều — chặn rủi ro quét thanh khoản`,
+    );
+    gatesFailed.push("Gate 4e (VPIN Toxicity Veto): Dòng lệnh thông tin độc hại ngược hướng");
+  }
+  const estVpinToxicity =
+    explicitVpin != null
+      ? opposingFlow
+        ? Math.min(0.92, Math.max(explicitVpin, 0.28 + Math.abs(realImbalance) / 160))
+        : explicitVpin
+      : hasExplicitOrderFlow
+        ? Math.min(0.85, Math.max(0.22, 0.28 + (opposingFlow ? Math.abs(realImbalance) / 160 : 0)))
+        : undefined;
   const estFundingExtremeZ =
     assetType === "CRYPTO" && fundingRate != null && Number.isFinite(fundingRate)
       ? Math.min(8, Math.abs(fundingRate) / 0.00025)

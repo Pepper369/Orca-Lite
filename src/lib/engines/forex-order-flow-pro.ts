@@ -45,6 +45,7 @@ export interface VwapBandsResult {
   lowerBand2: number; // -2 std dev (Extreme Oversold)
   position: "ABOVE_UPPER2" | "ABOVE_VWAP" | "BELOW_VWAP" | "BELOW_LOWER2";
   distanceToVwapPips: number;
+  anchorSession?: "TOKYO_OPEN" | "LONDON_OPEN" | "NY_OPEN" | "ROLLING_WINDOW";
 }
 
 export interface CvdPoint {
@@ -164,6 +165,7 @@ export function computeVolumeProfile(
   }));
 
   // Distribute volume across all overlapped price bins in [b.low, b.high] with body weighting
+  const weightBuf = new Float64Array(numBins);
   for (const b of bars) {
     const v = b.volume ?? 1;
     const candleRange = Math.max(1e-8, b.high - b.low);
@@ -190,7 +192,6 @@ export function computeVolumeProfile(
 
     const bodyLow = Math.min(b.open, b.close);
     const bodyHigh = Math.max(b.open, b.close);
-    const weights: number[] = [];
     let weightSum = 0;
     for (let idx = startBin; idx <= endBin; idx++) {
       const binLow = minPrice + idx * binStep;
@@ -198,12 +199,12 @@ export function computeVolumeProfile(
       const rangeOverlap = Math.max(0, Math.min(b.high, binHigh) - Math.max(b.low, binLow));
       const bodyOverlap = Math.max(0, Math.min(bodyHigh, binHigh) - Math.max(bodyLow, binLow));
       const w = Math.max(1e-6, rangeOverlap * 0.4 + bodyOverlap * 0.6);
-      weights.push(w);
+      weightBuf[idx - startBin] = w;
       weightSum += w;
     }
 
     for (let idx = startBin; idx <= endBin; idx++) {
-      const share = weightSum > 0 ? weights[idx - startBin]! / weightSum : 1 / (endBin - startBin + 1);
+      const share = weightSum > 0 ? weightBuf[idx - startBin]! / weightSum : 1 / (endBin - startBin + 1);
       rawBins[idx].volume += v * share;
       rawBins[idx].buyVolume += buyPart * share;
       rawBins[idx].sellVolume += sellPart * share;
@@ -273,6 +274,51 @@ export function computeVolumeProfile(
 }
 
 /**
+ * Detects the most recent UTC Institutional Session Open index (Tokyo 00:00 UTC, London 07:00 UTC, NY 12:00 UTC)
+ * when intraday bars are present and at least 6 bars have formed since the session anchor.
+ */
+function resolveSessionAnchorSlice(bars: OhlcvBar[]): {
+  slice: OhlcvBar[];
+  anchorSession: NonNullable<VwapBandsResult["anchorSession"]>;
+} {
+  const n = bars.length;
+  if (n <= 8) return { slice: bars, anchorSession: "ROLLING_WINDOW" };
+  const toMs = (t: number) => (t > 0 && t < 1e11 ? t * 1000 : t);
+  const lastMs = toMs(bars[n - 1]!.time);
+  const prevMs = toMs(bars[n - 2]!.time);
+  const stepMs = Math.abs(lastMs - prevMs);
+  // Only anchor to intraday session opens when bar interval is <= 1 hour
+  if (!(lastMs > 946684800000 && stepMs > 0 && stepMs <= 3_600_000)) {
+    return { slice: bars.slice(-96), anchorSession: "ROLLING_WINDOW" };
+  }
+
+  const searchStart = Math.max(1, n - 96);
+  // Scan backwards for the most recent institutional session open boundary with >= 6 bars of price discovery
+  for (let i = n - 6; i >= searchStart; i--) {
+    const curMs = toMs(bars[i]!.time);
+    const befMs = toMs(bars[i - 1]!.time);
+    if (curMs <= befMs || curMs - befMs > 6 * 3_600_000) continue;
+    const curDate = new Date(curMs);
+    const befDate = new Date(befMs);
+    const curMinOfDay = curDate.getUTCHours() * 60 + curDate.getUTCMinutes();
+    const befMinOfDay = befDate.getUTCHours() * 60 + befDate.getUTCMinutes();
+    const crossedDay = curDate.getUTCDate() !== befDate.getUTCDate();
+
+    if (befMinOfDay < 12 * 60 && curMinOfDay >= 12 * 60 && !crossedDay) {
+      return { slice: bars.slice(i), anchorSession: "NY_OPEN" };
+    }
+    if (befMinOfDay < 7 * 60 && curMinOfDay >= 7 * 60 && !crossedDay) {
+      return { slice: bars.slice(i), anchorSession: "LONDON_OPEN" };
+    }
+    if (crossedDay && curMinOfDay < 2 * 60) {
+      return { slice: bars.slice(i), anchorSession: "TOKYO_OPEN" };
+    }
+  }
+
+  return { slice: bars.slice(-96), anchorSession: "ROLLING_WINDOW" };
+}
+
+/**
  * 2. ANCHORED INSTITUTIONAL VWAP & STD DEV BANDS (±1σ, ±2σ)
  */
 export function computeSessionVwap(pair: string, bars: OhlcvBar[]): VwapBandsResult {
@@ -286,15 +332,17 @@ export function computeSessionVwap(pair: string, bars: OhlcvBar[]): VwapBandsRes
       lowerBand2: 0,
       position: "ABOVE_VWAP",
       distanceToVwapPips: 0,
+      anchorSession: "ROLLING_WINDOW",
     };
   }
 
+  const { slice: activeBars, anchorSession } = resolveSessionAnchorSlice(bars);
   let cumVol = 0;
   let cumVwapVol = 0;
-  const lastPrice = bars[bars.length - 1].close;
+  const lastPrice = bars[bars.length - 1]!.close;
 
-  for (const b of bars) {
-    const v = b.volume ?? 1;
+  for (const b of activeBars) {
+    const v = b.volume && b.volume > 0 ? b.volume : 1;
     const typicalPrice = (b.high + b.low + b.close) / 3;
     cumVol += v;
     cumVwapVol += typicalPrice * v;
@@ -302,10 +350,10 @@ export function computeSessionVwap(pair: string, bars: OhlcvBar[]): VwapBandsRes
 
   const vwap = cumVwapVol / (cumVol || 1);
 
-  // Compute variance for standard deviation bands
+  // Compute variance for standard deviation bands over the anchored session slice
   let cumVariance = 0;
-  for (const b of bars) {
-    const v = b.volume ?? 1;
+  for (const b of activeBars) {
+    const v = b.volume && b.volume > 0 ? b.volume : 1;
     const typicalPrice = (b.high + b.low + b.close) / 3;
     const diff = typicalPrice - vwap;
     cumVariance += diff * diff * v;
@@ -337,6 +385,7 @@ export function computeSessionVwap(pair: string, bars: OhlcvBar[]): VwapBandsRes
     lowerBand2,
     position,
     distanceToVwapPips,
+    anchorSession,
   };
 }
 

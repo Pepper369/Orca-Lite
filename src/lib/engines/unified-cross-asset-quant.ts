@@ -8,7 +8,7 @@
  * 4. Crypto Perpetuals & Spot (BTC, ETH, SOL): Garman-Klass Volatility Leverage Governor & Liquidation Clusters
  */
 
-import { normCdf, normInv } from "./advanced-quant-math";
+import { calculateHRP, normCdf, normInv } from "./advanced-quant-math";
 import { roundPrice } from "./asset-precision";
 import { calculateCryptoPositionSize } from "./crypto-position-sizer";
 import {
@@ -1174,4 +1174,109 @@ export function calculateUnifiedTradeRiskPlan(
     recommendedLotsOrQty: Number(Math.max(0.01, fxSizer.standardLots).toFixed(2)),
     estimatedLiquidationPrice: null,
   };
+}
+
+// ============================================================================
+// 6. Portfolio-Level Hierarchical Risk Parity (HRP) Multi-Signal Sizing
+// ============================================================================
+
+export interface HrpCandidateSignal {
+  symbol: string;
+  assetType: "CRYPTO" | "FOREX";
+  direction: "BUY" | "SELL";
+  winrateScore?: number;
+  expectancyR?: number;
+}
+
+/**
+ * Estimates structural directional return correlation between two concurrent trade candidates
+ * (incorporating asset class, shared base/quote currency legs, and trade direction).
+ */
+function estimateDirectionalSignalCorrelation(a: HrpCandidateSignal, b: HrpCandidateSignal): number {
+  if (a.symbol === b.symbol) return a.direction === b.direction ? 1.0 : -0.95;
+  const dirSign = a.direction === b.direction ? 1 : -1;
+
+  if (a.assetType === "CRYPTO" && b.assetType === "CRYPTO") {
+    const isMajorA = a.symbol.startsWith("BTC") || a.symbol.startsWith("ETH");
+    const isMajorB = b.symbol.startsWith("BTC") || b.symbol.startsWith("ETH");
+    const rawCorr = isMajorA && isMajorB ? 0.82 : isMajorA || isMajorB ? 0.74 : 0.78;
+    return Math.max(-0.95, Math.min(0.95, rawCorr * dirSign));
+  }
+
+  if (a.assetType === "FOREX" && b.assetType === "FOREX") {
+    const cleanA = a.symbol.toUpperCase().replace(/[^A-Z]/g, "");
+    const cleanB = b.symbol.toUpperCase().replace(/[^A-Z]/g, "");
+    const baseA = cleanA.slice(0, 3);
+    const quoteA = cleanA.slice(3, 6);
+    const baseB = cleanB.slice(0, 3);
+    const quoteB = cleanB.slice(3, 6);
+
+    // Effective exposure (+1 = buying currency, -1 = selling currency)
+    const expA = new Map<string, number>([
+      [baseA, a.direction === "BUY" ? 1 : -1],
+      [quoteA, a.direction === "BUY" ? -1 : 1],
+    ]);
+    const expB = new Map<string, number>([
+      [baseB, b.direction === "BUY" ? 1 : -1],
+      [quoteB, b.direction === "BUY" ? -1 : 1],
+    ]);
+
+    let sharedScore = 0;
+    for (const [curr, signA] of expA.entries()) {
+      const signB = expB.get(curr);
+      if (signB != null) {
+        sharedScore += signA * signB * (curr === "USD" ? 0.76 : 0.68);
+      }
+    }
+    return Math.max(-0.92, Math.min(0.92, sharedScore));
+  }
+
+  // Cross-Asset (CRYPTO vs FOREX/XAUUSD): low structural correlation (~0.15)
+  const involvesGold = a.symbol.startsWith("XAU") || b.symbol.startsWith("XAU");
+  return (involvesGold ? 0.22 : 0.12) * dirSign;
+}
+
+/**
+ * Computes Hierarchical Risk Parity (López de Prado 2016) cluster diversification multipliers
+ * for a batch of concurrent trade signals so correlated clusters share risk budget while
+ * uncorrelated setups receive full/boosted allocation.
+ */
+export function computeHrpPortfolioSignalMultipliers(
+  candidates: HrpCandidateSignal[],
+): Record<string, number> {
+  const n = candidates.length;
+  if (n === 0) return {};
+  if (n === 1) return { [candidates[0]!.symbol]: 1.0 };
+
+  const keys = candidates.map((c, idx) => `${c.symbol}#${idx}`);
+  const stds = candidates.map((c) => {
+    const p = Math.min(0.92, Math.max(0.5, (c.winrateScore ?? 75) / 100));
+    // Binomial outcome std dev scaled by asset class volatility factor
+    const assetVolScale = c.assetType === "CRYPTO" ? 1.18 : 1.0;
+    return Math.max(0.15, Math.sqrt(p * (1 - p)) * assetVolScale);
+  });
+
+  const corrMatrix: number[][] = [];
+  const covMatrix: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    corrMatrix[i] = [];
+    covMatrix[i] = [];
+    for (let j = 0; j < n; j++) {
+      const r = i === j ? 1.0 : estimateDirectionalSignalCorrelation(candidates[i]!, candidates[j]!);
+      corrMatrix[i]![j] = r;
+      covMatrix[i]![j] = r * stds[i]! * stds[j]!;
+    }
+  }
+
+  const hrp = calculateHRP(keys, covMatrix, corrMatrix);
+  const out: Record<string, number> = {};
+  for (let i = 0; i < n; i++) {
+    const k = keys[i]!;
+    const sym = candidates[i]!.symbol;
+    const rawW = hrp.weights[k] ?? 1 / n;
+    // Scale relative to 1/N equal weight, clamped to [0.65, 1.20]
+    const mult = Number(Math.max(0.65, Math.min(1.20, rawW * n)).toFixed(3));
+    out[sym] = mult;
+  }
+  return out;
 }

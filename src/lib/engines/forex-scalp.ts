@@ -123,6 +123,7 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
     absorptionType: effAbsorption,
     volumeDeltaDivergence: effCvdDiv,
     csmBaseMinusQuote: input.csmBaseMinusQuote ?? null,
+    triangularParityAligned: input.triangularParityAligned ?? null,
     sessionLabel: filter.sessionLabel,
     isNewsOrCascadeLockout: !filter.newsOk || !filter.eligible,
     lockoutReason: !filter.newsOk

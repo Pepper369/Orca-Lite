@@ -3,7 +3,11 @@ import { buildMeta } from "../freshness";
 import { getYahooChart, yahooSymbolForPair, yahooIntervalFor } from "../providers/yahoo";
 import { validateBars, logQualityEvent } from "../quality";
 import { analyzeForexScalp, type ForexScalpSignal } from "../engines/forex-scalp";
-import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
+import {
+  calculateCurrencyStrengthMatrix,
+  evaluateTriangularCrossParity,
+  type PairPriceInput,
+} from "../engines/forex-currency-strength";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
 import { getBiquotePublicQuotes } from "../providers/forex";
 import { getBiquoteLiveTickAny, mergeBarsWithBiquoteLiveTick } from "../realtime/biquote-poll";
@@ -56,6 +60,7 @@ export async function buildForexScalpSignal(
   overrides?: {
     calendarEvents?: Awaited<ReturnType<typeof getGlobalMacroShieldEvents>>;
     csmBaseMinusQuote?: number | null;
+    triangularParityAligned?: "CONFIRMED" | "DIVERGENT_FAKEOUT" | "NEUTRAL" | null;
   },
 ): Promise<{ result: ForexScalpResult; meta: Meta } | null> {
   const cleanRaw = pairRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -87,6 +92,8 @@ export async function buildForexScalpSignal(
         ]);
 
         let csmBaseMinusQuote: number | null = hasCsmOverride ? (overrides!.csmBaseMinusQuote ?? null) : null;
+        let triangularParityAligned: "CONFIRMED" | "DIVERGENT_FAKEOUT" | "NEUTRAL" | null =
+          overrides?.triangularParityAligned ?? null;
         if (marketsRes?.data?.rows?.length) {
           const csmInputs: PairPriceInput[] = marketsRes.data.rows
             .filter((r) => r.price > 0)
@@ -106,6 +113,9 @@ export async function buildForexScalpSignal(
               csmBaseMinusQuote = Number((baseScore - quoteScore).toFixed(1));
             } else if ((baseCurr === "XAU" || pair.includes("OIL")) && quoteScore != null) {
               csmBaseMinusQuote = Number((5.0 - quoteScore).toFixed(1));
+            }
+            if (triangularParityAligned == null) {
+              triangularParityAligned = evaluateTriangularCrossParity(pair, csmInputs).alignment;
             }
           }
         }
@@ -151,6 +161,7 @@ export async function buildForexScalpSignal(
           barsH1,
           calendarEvents,
           csmBaseMinusQuote,
+          triangularParityAligned,
         });
         if (signal && bqAny?.marketState === "closed") {
           signal.filter.eligible = false;

@@ -3,7 +3,12 @@ import { buildMeta } from "../freshness";
 import { cached } from "../cache";
 import * as binance from "../providers/binance";
 import { analyzeScalpMulti } from "../engines/scalp";
-import { analyzeFundingRate, evaluateTrueLevel2Dom } from "../engines/crypto-derivatives-engine";
+import {
+  analyzeFundingRate,
+  computeMicropriceAndSpoofingSignal,
+  computeVolumeClockVpin,
+  evaluateTrueLevel2Dom,
+} from "../engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "../engines/crypto-news-shield";
 import { atr as calcAtr } from "../technical";
 import { resampleOhlcvBars } from "../engines/asset-precision";
@@ -143,13 +148,20 @@ async function scanSingleCryptoPair(
     );
     const quoteVol = Number((ticker as { quoteVolume?: string }).quoteVolume ?? 0) || null;
 
-    // L2 DOM + Real-Time WS AggTrade Micro-Flow Blend, True Spread, 1H Macro Bars & Funding Rate Analysis
+    // L2 DOM + Real-Time WS AggTrade Micro-Flow Blend, Stoikov Microprice, Volume-Clock VPIN, True Spread, 1H Macro Bars & Funding Rate Analysis
     const dom = evaluateTrueLevel2Dom(book, 5);
     const wsMicro = binanceWs.getMicroFlow(pair);
     const domImbalance =
       wsMicro != null
         ? Math.round(dom.imbalanceRatio * 0.65 + wsMicro.tickImbalancePct * 0.35)
         : dom.imbalanceRatio;
+    const aggressiveBuyShare =
+      wsMicro != null ? Math.min(1, Math.max(0, 0.5 + wsMicro.tickImbalancePct / 200)) : 0.5 + dom.imbalanceRatio / 200;
+    const micropriceSig = computeMicropriceAndSpoofingSignal({
+      orderBook: book,
+      aggressiveBuyShare,
+    });
+    const vpinRes = computeVolumeClockVpin(execBars, 12);
     const bestBid = book.bids[0]?.price ?? 0;
     const bestAsk = book.asks[0]?.price ?? 0;
     const liveSpreadPct =
@@ -189,7 +201,7 @@ async function scanSingleCryptoPair(
       calendarEvents,
     });
 
-    // Multi-TF Scalp + Precision Engine (with 1H macro alignment, real L2 spread & liquidation magnet context)
+    // Multi-TF Scalp + Precision Engine (with 1H macro alignment, real L2 spread, Stoikov microprice, BVC VPIN & liquidation magnet context)
     const scalp =
       execBars.length >= 60
         ? analyzeScalpMulti({
@@ -203,6 +215,9 @@ async function scanSingleCryptoPair(
           orderBookImbalance: domImbalance,
           liquidationClusterAligned,
           externalMagnets,
+          micropriceSkewBps: micropriceSig.micropriceSkewBps,
+          spoofingOrAbsorptionState: micropriceSig.spoofingOrAbsorptionState,
+          vpinToxicity: vpinRes.vpin,
           isLockout: shield.isLockout,
           lockoutReason: shield.warningMessage,
         })
@@ -222,6 +237,9 @@ async function scanSingleCryptoPair(
         fundingRate: effectiveFundingRate,
         liquidationClusterAligned,
         externalMagnets,
+        micropriceSkewBps: micropriceSig.micropriceSkewBps,
+        spoofingOrAbsorptionState: micropriceSig.spoofingOrAbsorptionState,
+        vpinToxicity: vpinRes.vpin,
         isNewsOrCascadeLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
         empiricalFrictionROverride: empFrictionCr,

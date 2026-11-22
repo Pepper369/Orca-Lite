@@ -361,9 +361,12 @@ export function evaluateHighWinrateGate(params: {
   // -------------------------------------------------------------
   // GATE 6: ANTI-CHASE, STRUCTURAL SL/RR & BREAKEVEN AUTOMATION
   // -------------------------------------------------------------
-  const rsiArr = rsi(closes, 14);
-  const rsi14 = rsiArr[rsiArr.length - 1];
-  const atr14 = atr(series, 14) ?? avgRange;
+  const rsi14 =
+    params.precomputed !== undefined
+      ? params.precomputed.rsi14
+      : (rsi(closes, 14)[closes.length - 1] ?? null);
+  const atr14 =
+    (params.precomputed !== undefined ? params.precomputed.atr14 : atr(series, 14)) ?? avgRange;
 
   if (params.ictResult) {
     const htfPoiMatches =

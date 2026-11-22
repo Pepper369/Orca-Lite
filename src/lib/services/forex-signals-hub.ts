@@ -4,7 +4,11 @@ import { buildForexScalpSignal } from "./forex-scalp";
 import { generateDeepFlowSignal } from "../engines/forex-order-flow-pro";
 import { evaluateNewsCircuitBreaker } from "../engines/forex-news-shield";
 import { reconstructSyntheticDom } from "../engines/forex-cme-dom-bridge";
-import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "../engines/forex-currency-strength";
+import {
+  calculateCurrencyStrengthMatrix,
+  evaluateTriangularCrossParity,
+  type PairPriceInput,
+} from "../engines/forex-currency-strength";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-crypto-precision-engine";
 import { getEmpiricalFrictionTelemetry } from "../engines/exchange-execution-client";
 import { calculateUnifiedTradeRiskPlan } from "../engines/unified-cross-asset-quant";
@@ -97,7 +101,7 @@ const GRADE_RANK: Record<SetupGrade, number> = {
 export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData; meta: Meta } | null> {
   const { cached } = await import("../cache");
 
-  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v4", {
+  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v2", {
     ttlMs: 20_000,
     staleMs: 120_000,
     softSwr: true,
@@ -119,8 +123,9 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
       ]);
 
       const csmScoreMap = new Map<string, number>();
+      let csmInputs: PairPriceInput[] = [];
       if (marketsRes?.data?.rows?.length) {
-        const csmInputs: PairPriceInput[] = marketsRes.data.rows
+        csmInputs = marketsRes.data.rows
           .filter((r) => r.price > 0)
           .map((r) => ({
             pair: r.pair,
@@ -150,11 +155,17 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
       const results = await Promise.allSettled(
         MONITORED_PAIRS.map(async (pair) => {
           const csmBaseMinusQuote = csmForPair(pair);
+          const triangularParityAligned =
+            csmInputs.length >= 4 ? evaluateTriangularCrossParity(pair, csmInputs).alignment : null;
           const [res, detail] = await Promise.all([
-            buildForexScalpSignal(pair, { calendarEvents, csmBaseMinusQuote }),
+            buildForexScalpSignal(pair, {
+              calendarEvents,
+              csmBaseMinusQuote,
+              triangularParityAligned,
+            }),
             getForexDetail(pair).catch(() => null),
           ]);
-          return { pair, res, detail, csmBaseMinusQuote };
+          return { pair, res, detail, csmBaseMinusQuote, triangularParityAligned };
         }),
       );
 
@@ -162,7 +173,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
       for (const item of results) {
         if (item.status !== "fulfilled" || !item.value.res) continue;
-        const { pair, res, detail, csmBaseMinusQuote: csmSpread } = item.value;
+        const { pair, res, detail, csmBaseMinusQuote: csmSpread, triangularParityAligned } = item.value;
         const sig = res.result.signal;
         const setup = sig.primarySetup;
 
@@ -237,6 +248,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
                 absorptionType: absorption,
                 volumeDeltaDivergence: cvdDiv,
                 csmBaseMinusQuote: csmSpread,
+                triangularParityAligned,
                 sessionLabel: sig.filter.sessionLabel,
                 spreadPipsOrPct: sig.filter.spreadPips,
                 isNewsOrCascadeLockout: newsLockout || Boolean(spreadLockoutReason),
@@ -316,30 +328,30 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         const riskPlan =
           entry && sl && action !== "WAIT" && sizeMult > 0
             ? calculateUnifiedTradeRiskPlan({
-                assetType: "FOREX",
-                symbol: pair,
-                direction: direction === "SELL" ? "SELL" : "BUY",
-                winRatePct: probability,
-                payoffRatio: Math.max(
-                  1.0,
-                  effectivePrecision?.netRiskReward ?? effectivePrecision?.grossRiskReward ?? 1.8,
-                ),
-                sizeMultiplier: sizeMult,
-                entryPrice: entry,
-                stopLossPrice: sl,
-                takeProfit1: tp1,
-                takeProfit2: tp2,
-                takeProfit3: tp3,
-                accountBalanceUsd: 10_000,
-                crossRates: {
-                  usdJpy: findFx("USDJPY"),
-                  gbpUsd: findFx("GBPUSD"),
-                  usdChf: findFx("USDCHF"),
-                  usdCad: findFx("USDCAD"),
-                  audUsd: findFx("AUDUSD"),
-                  nzdUsd: findFx("NZDUSD"),
-                },
-              })
+              assetType: "FOREX",
+              symbol: pair,
+              direction: direction === "SELL" ? "SELL" : "BUY",
+              winRatePct: probability,
+              payoffRatio: Math.max(
+                1.0,
+                effectivePrecision?.netRiskReward ?? effectivePrecision?.grossRiskReward ?? 1.8,
+              ),
+              sizeMultiplier: sizeMult,
+              entryPrice: entry,
+              stopLossPrice: sl,
+              takeProfit1: tp1,
+              takeProfit2: tp2,
+              takeProfit3: tp3,
+              accountBalanceUsd: 10_000,
+              crossRates: {
+                usdJpy: findFx("USDJPY"),
+                gbpUsd: findFx("GBPUSD"),
+                usdChf: findFx("USDCHF"),
+                usdCad: findFx("USDCAD"),
+                audUsd: findFx("AUDUSD"),
+                nzdUsd: findFx("NZDUSD"),
+              },
+            })
             : null;
         const recommendedLots = riskPlan?.recommendedLotsOrQty ?? 0;
 

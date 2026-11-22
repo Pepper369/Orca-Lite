@@ -113,6 +113,7 @@ export interface ForexScalpInput {
   nowMs?: number;
   calendarEvents?: { name?: string; time?: string; currency?: string; importance?: string }[];
   csmBaseMinusQuote?: number | null;
+  triangularParityAligned?: "CONFIRMED" | "DIVERGENT_FAKEOUT" | "NEUTRAL" | null;
   orderBookImbalance?: number | null;
   flowIntensityIndex?: number | null;
   absorptionType?: "BULLISH_ABSORPTION" | "BEARISH_ABSORPTION" | "NONE" | null;

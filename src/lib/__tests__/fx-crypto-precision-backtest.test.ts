@@ -22,6 +22,8 @@ import {
   getLiveTrainedMetaModel,
 } from "../engines/meta-labeling-calibration";
 import { evaluateCryptoPerpQuadrantAndLeaderShield } from "../engines/crypto-derivatives-engine";
+import { evaluateTriangularCrossParity } from "../engines/forex-currency-strength";
+import { computeHrpPortfolioSignalMultipliers } from "../engines/unified-cross-asset-quant";
 import type { OhlcvBar } from "../types";
 
 test("Precision FR-001: Asset pipSize & micro-coin 8-decimal rounding (XAUUSD, USDJPY, EURUSD, PEPEUSDT)", () => {
@@ -340,4 +342,62 @@ test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-La
   });
   assert.equal(divTrap.quadrant, "EXHAUSTION_DIVERGENCE_TRAP");
   assert.equal(divTrap.leaderVeto, true);
+
+  // 3) Stoikov Microprice Anti-Spoofing Veto + Iceberg Absorption Boost + Volume-Clock VPIN Toxicity Veto
+  const btcSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "BTCUSDT")!;
+  const { bars: turtleBars } = generateRegimeBars(btcSpec, "TURTLE_SOUP_SWEEP_REVERSAL", 101 + 3 * 31 + 3 * 97, 120);
+  const spoofVetoEval = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    spoofingOrAbsorptionState: "BID_SPOOFING_RISK",
+    micropriceSkewBps: -3.2,
+  });
+  assert.equal(spoofVetoEval.grade, "NO_TRADE", "BID_SPOOFING_RISK must veto BUY setup");
+  assert.ok(spoofVetoEval.vetoReasons.some((v) => v.includes("Spoofing Bid")));
+
+  const vpinVetoEval = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    orderBookImbalance: -38,
+    vpinToxicity: 0.78,
+  });
+  assert.equal(vpinVetoEval.grade, "NO_TRADE", "High VPIN toxicity with opposing order flow must veto trade");
+  assert.ok(vpinVetoEval.vetoReasons.some((v) => v.includes("VPIN")));
+
+  // 4) Forex Triangular Cross-Rate Parity Check (Confirmed vs Divergent Fakeout)
+  const sampleBasket = [
+    { pair: "EURUSD", price: 1.085, changePercent: 0.42 },
+    { pair: "USDJPY", price: 154.2, changePercent: 0.35 },
+    { pair: "GBPUSD", price: 1.265, changePercent: 0.25 },
+    { pair: "AUDUSD", price: 0.655, changePercent: 0.15 },
+    { pair: "EURJPY", price: 167.3, changePercent: 0.74 },
+  ];
+  const parityConfirmed = evaluateTriangularCrossParity("EURJPY", sampleBasket);
+  assert.equal(parityConfirmed.alignment, "CONFIRMED");
+
+  const fakeoutBasket = [
+    { pair: "EURUSD", price: 1.085, changePercent: -0.45 },
+    { pair: "USDJPY", price: 154.2, changePercent: -0.35 },
+    { pair: "GBPUSD", price: 1.265, changePercent: -0.25 },
+    { pair: "AUDUSD", price: 0.655, changePercent: -0.15 },
+    { pair: "EURJPY", price: 167.3, changePercent: 0.32 },
+  ];
+  const parityFakeout = evaluateTriangularCrossParity("EURJPY", fakeoutBasket);
+  assert.equal(parityFakeout.alignment, "DIVERGENT_FAKEOUT");
+
+  // 5) Portfolio-Level HRP Multi-Signal Diversification Multiplier
+  const hrpMults = computeHrpPortfolioSignalMultipliers([
+    { symbol: "SOLUSDT", assetType: "CRYPTO", direction: "BUY", winrateScore: 84 },
+    { symbol: "SUIUSDT", assetType: "CRYPTO", direction: "BUY", winrateScore: 82 },
+    { symbol: "AVAXUSDT", assetType: "CRYPTO", direction: "BUY", winrateScore: 81 },
+    { symbol: "XAUUSD", assetType: "FOREX", direction: "SELL", winrateScore: 86 },
+  ]);
+  assert.ok(
+    (hrpMults["XAUUSD"] ?? 0) > (hrpMults["AVAXUSDT"] ?? 1),
+    `Uncorrelated XAUUSD hedge (${hrpMults["XAUUSD"]}) should receive higher HRP multiplier than clustered altcoin (${hrpMults["AVAXUSDT"]})`,
+  );
 });

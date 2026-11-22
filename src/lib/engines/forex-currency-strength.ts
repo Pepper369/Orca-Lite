@@ -438,3 +438,123 @@ export function filterRedundantUsdClusterSignals<
   return { accepted, rejectedUsdDuplicates };
 }
 
+export interface TriangularParityCheckResult {
+  pair: string;
+  alignment: "CONFIRMED" | "DIVERGENT_FAKEOUT" | "NEUTRAL";
+  observedReturnPct: number;
+  syntheticReturnPct: number;
+  parityDiscrepancyPct: number;
+  rationaleVi: string;
+}
+
+/**
+ * Evaluates Triangular Synthetic Cross-Rate Parity & G8 Orthogonal Factor Confirmation.
+ * For non-USD cross pairs (e.g. EURJPY, GBPJPY, EURGBP, AUDJPY), compares the observed return r_{AB}
+ * against the synthetic USD-leg triangular return (r_{A,USD} - r_{B,USD}) and latent orthogonal factors (f_A - f_B).
+ * For USD major pairs, compares observed return against the G8 Laplacian orthogonal factor spread.
+ */
+export function evaluateTriangularCrossParity(
+  pairRaw: string,
+  pairs: PairPriceInput[],
+): TriangularParityCheckResult {
+  const clean = pairRaw.toUpperCase().replace(/[^A-Z]/g, "");
+  if (clean.length < 6 || pairs.length < 4) {
+    return {
+      pair: clean,
+      alignment: "NEUTRAL",
+      observedReturnPct: 0,
+      syntheticReturnPct: 0,
+      parityDiscrepancyPct: 0,
+      rationaleVi: "Chưa đủ dữ liệu rổ tiền tệ để kiểm định tam giác tỷ giá.",
+    };
+  }
+
+  const base = clean.slice(0, 3) as MajorCurrency;
+  const quote = clean.slice(3, 6) as MajorCurrency;
+  if (!MAJOR_CURRENCIES.includes(base) || !MAJOR_CURRENCIES.includes(quote) || base === quote) {
+    return {
+      pair: clean,
+      alignment: "NEUTRAL",
+      observedReturnPct: 0,
+      syntheticReturnPct: 0,
+      parityDiscrepancyPct: 0,
+      rationaleVi: "Cặp tài sản ngoài rổ tiền tệ G8 chuẩn.",
+    };
+  }
+
+  const returnMap = new Map<string, number>();
+  for (const item of pairs) {
+    const pClean = item.pair.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6);
+    if (pClean.length === 6 && Number.isFinite(item.changePercent)) {
+      returnMap.set(pClean, item.changePercent);
+    }
+  }
+
+  // Signed return of currency C against USD (+% means C appreciated vs USD)
+  const getReturnVsUsd = (curr: MajorCurrency): number | null => {
+    if (curr === "USD") return 0;
+    const direct = returnMap.get(`${curr}USD`);
+    if (direct != null) return direct;
+    const inverse = returnMap.get(`USD${curr}`);
+    if (inverse != null) return -inverse;
+    return null;
+  };
+
+  const ortho = decomposeOrthogonalCurrencyFactors(pairs);
+  const fBase = ortho.latentFactorsPct[base] ?? 0;
+  const fQuote = ortho.latentFactorsPct[quote] ?? 0;
+  const factorFittedPct = fBase - fQuote;
+
+  const observed =
+    returnMap.get(clean) ??
+    (returnMap.has(`${quote}${base}`) ? -(returnMap.get(`${quote}${base}`) ?? 0) : factorFittedPct);
+
+  const rBaseUsd = getReturnVsUsd(base);
+  const rQuoteUsd = getReturnVsUsd(quote);
+  const isCrossPair = base !== "USD" && quote !== "USD";
+
+  // For cross pairs (e.g. EURJPY), synthetic return = r(EUR/USD) - r(JPY/USD) = r(EURUSD) + r(USDJPY)
+  const synthetic =
+    isCrossPair && rBaseUsd != null && rQuoteUsd != null
+      ? Number((rBaseUsd - rQuoteUsd).toFixed(4))
+      : Number(factorFittedPct.toFixed(4));
+
+  const discrepancy = Number((observed - synthetic).toFixed(4));
+  const absObs = Math.abs(observed);
+  const absSyn = Math.abs(synthetic);
+
+  if (absObs >= 0.08 && observed * synthetic > 0 && absSyn >= absObs * 0.45) {
+    return {
+      pair: clean,
+      alignment: "CONFIRMED",
+      observedReturnPct: Number(observed.toFixed(4)),
+      syntheticReturnPct: synthetic,
+      parityDiscrepancyPct: discrepancy,
+      rationaleVi: isCrossPair
+        ? `Tam giác tỷ giá chéo ${base}/${quote} đồng thuận 2 chân USD gốc (Thực ${observed >= 0 ? "+" : ""}${observed.toFixed(2)}% vs Tổng hợp ${synthetic >= 0 ? "+" : ""}${synthetic.toFixed(2)}%).`
+        : `Nhân tố trực giao G8 xác nhận xung lượng ${base}/${quote} (${synthetic >= 0 ? "+" : ""}${synthetic.toFixed(2)}%).`,
+    };
+  }
+
+  if (absObs >= 0.14 && observed * synthetic < 0 && Math.abs(discrepancy) >= 0.22) {
+    return {
+      pair: clean,
+      alignment: "DIVERGENT_FAKEOUT",
+      observedReturnPct: Number(observed.toFixed(4)),
+      syntheticReturnPct: synthetic,
+      parityDiscrepancyPct: discrepancy,
+      rationaleVi: `Bẫy lệch tam giác tỷ giá ${base}/${quote}: Giá nhảy đơn lẻ (${observed >= 0 ? "+" : ""}${observed.toFixed(2)}%) ngược hoàn toàn 2 chân tỷ giá tổng hợp (${synthetic >= 0 ? "+" : ""}${synthetic.toFixed(2)}%).`,
+    };
+  }
+
+  return {
+    pair: clean,
+    alignment: "NEUTRAL",
+    observedReturnPct: Number(observed.toFixed(4)),
+    syntheticReturnPct: synthetic,
+    parityDiscrepancyPct: discrepancy,
+    rationaleVi: `Tam giác tỷ giá ${base}/${quote} ở trạng thái cân bằng.`,
+  };
+}
+
+

@@ -56,6 +56,22 @@ test("Order Flow Pro: Anchored VWAP & Standard Deviation Bands", () => {
   assert.ok(vwapResult.lowerBand1 < vwapResult.vwap);
   assert.ok(vwapResult.lowerBand2 < vwapResult.lowerBand1);
   assert.ok(vwapResult.distanceToVwapPips >= 0);
+
+  // Verify Institutional UTC Session Anchor (07:00 UTC London Open)
+  const londonAnchorBaseMs = Date.UTC(2026, 10, 20, 6, 30, 0); // 06:30 UTC
+  const londonBars: OhlcvBar[] = [];
+  for (let i = 0; i < 20; i++) {
+    londonBars.push({
+      time: londonAnchorBaseMs + i * 5 * 60_000, // crosses 07:00 UTC at i=6 with 14 bars after
+      open: 1.082 + i * 0.0001,
+      high: 1.0825 + i * 0.0001,
+      low: 1.0818 + i * 0.0001,
+      close: 1.0822 + i * 0.0001,
+      volume: 2000,
+    });
+  }
+  const londonVwap = computeSessionVwap("EURUSD", londonBars);
+  assert.equal(londonVwap.anchorSession, "LONDON_OPEN");
 });
 
 test("Order Flow Pro: CVD Divergence & Bullish Absorption Detection", () => {
