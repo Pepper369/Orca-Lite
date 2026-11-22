@@ -236,6 +236,17 @@ function legacyBaselineDecision(bars: OhlcvBar[]): {
   return { direction, entry, stopLoss, takeProfit };
 }
 
+export interface SimulationExecutionOptions {
+  /** When true, eliminates intra-bar look-ahead on entry bar (TP1 cannot be claimed on entry bar unless bar close confirms it) */
+  enforceCausalIntraBar?: boolean;
+  /** Realistic adverse slippage in R units when stopping out at Breakeven (e.g. 0.04R) */
+  breakevenSlippageR?: number;
+  /** Market order latency slippage (as fraction of riskDist, e.g. 0.02) */
+  marketSlippageR?: number;
+  /** Minimum penetration through limit entry (as fraction of riskDist) required for queue fill */
+  minLimitPenetrationFraction?: number;
+}
+
 function simulateTradeOutcome(params: {
   barsFuture: OhlcvBar[];
   direction: "BUY" | "SELL";
@@ -248,6 +259,7 @@ function simulateTradeOutcome(params: {
   frictionPrice: number;
   useBreakevenScaling: boolean;
   tpWeights?: [number, number, number];
+  executionOptions?: SimulationExecutionOptions;
 }): { filled: boolean; netR: number; tp1Hit: boolean; barsHeld: number } {
   const {
     barsFuture,
@@ -261,18 +273,26 @@ function simulateTradeOutcome(params: {
     frictionPrice,
     useBreakevenScaling,
     tpWeights = [0.5, 0.3, 0.2],
+    executionOptions,
   } = params;
 
   if (!barsFuture.length) return { filled: false, netR: 0, tp1Hit: false, barsHeld: 0 };
+
+  const riskDist = Math.max(1e-12, Math.abs(intendedEntry - stopLoss));
+  const frictionR = frictionPrice / riskDist;
+  const beSlipR = executionOptions?.breakevenSlippageR ?? 0.04;
+  const enforceCausal = executionOptions?.enforceCausalIntraBar ?? true;
 
   let startIdx = 0;
   let fillPrice = barsFuture[0]!.open;
 
   if (entryMode === "LIMIT_PULLBACK") {
     let found = -1;
+    const minPen = (executionOptions?.minLimitPenetrationFraction ?? 0.015) * riskDist;
     for (let j = 0; j < Math.min(3, barsFuture.length); j++) {
       const b = barsFuture[j]!;
-      if (b.low <= intendedEntry && intendedEntry <= b.high) {
+      const penetration = direction === "BUY" ? intendedEntry - b.low : b.high - intendedEntry;
+      if (penetration >= minPen && intendedEntry <= b.high && intendedEntry >= b.low) {
         found = j;
         break;
       }
@@ -280,10 +300,10 @@ function simulateTradeOutcome(params: {
     if (found === -1) return { filled: false, netR: 0, tp1Hit: false, barsHeld: 0 };
     startIdx = found;
     fillPrice = intendedEntry;
+  } else {
+    const marketSlip = (executionOptions?.marketSlippageR ?? 0.015) * riskDist;
+    fillPrice = direction === "BUY" ? barsFuture[0]!.open + marketSlip : barsFuture[0]!.open - marketSlip;
   }
-
-  const riskDist = Math.max(1e-12, Math.abs(intendedEntry - stopLoss));
-  const frictionR = frictionPrice / riskDist;
 
   if (!useBreakevenScaling) {
     // Legacy single exit at SL or TP2
@@ -319,13 +339,21 @@ function simulateTradeOutcome(params: {
     const b = barsFuture[k]!;
     const hitSl = direction === "BUY" ? b.low <= currentSl : b.high >= currentSl;
     if (hitSl) {
-      const exitR = direction === "BUY" ? (currentSl - fillPrice) / riskDist : (fillPrice - currentSl) / riskDist;
+      const isAtBe = currentSl === fillPrice;
+      const beSlipPenalty = isAtBe ? beSlipR : 0;
+      const exitR =
+        (direction === "BUY" ? (currentSl - fillPrice) / riskDist : (fillPrice - currentSl) / riskDist) -
+        beSlipPenalty;
       realizedR += remainingWeight * exitR;
       return { filled: true, netR: realizedR - frictionR, tp1Hit, barsHeld: k - startIdx + 1 };
     }
 
     if (!tp1Hit) {
-      const hitTp1 = direction === "BUY" ? b.high >= tp1 : b.low <= tp1;
+      const isEntryBar = k === startIdx && entryMode === "LIMIT_PULLBACK";
+      // Conservative intra-bar causality: on the entry candle, price dipped to intendedEntry first.
+      // Pre-entry wicks cannot trigger TP1 before the fill; only close or post-entry movement can.
+      const canHitTp1OnEntryBar = !isEntryBar || !enforceCausal || (direction === "BUY" ? b.close >= tp1 : b.close <= tp1);
+      const hitTp1 = canHitTp1OnEntryBar && (direction === "BUY" ? b.high >= tp1 : b.low <= tp1);
       if (hitTp1) {
         tp1Hit = true;
         const r1 = Math.abs(tp1 - fillPrice) / riskDist;
@@ -448,11 +476,14 @@ export function runWalkForwardComparison(params: {
   seeds?: number[];
   assets?: BenchmarkAssetSpec[];
   regimes?: BenchmarkRegime[];
+  executionOptions?: SimulationExecutionOptions;
+  frictionMultiplier?: number;
 }): WalkForwardComparisonReport {
   const split = params.split;
   const seeds = params.seeds ?? (split === "CALIBRATION" ? [101, 202, 303] : [404, 505, 606]);
   const assets = params.assets ?? BENCHMARK_ASSETS;
   const regimes = params.regimes ?? BENCHMARK_REGIMES;
+  const frictionMult = params.frictionMultiplier ?? 1.0;
 
   const legacyRecords: { netR: number; tp1Hit: boolean; isTrap: boolean }[] = [];
   const aaPlusRecords: { netR: number; tp1Hit: boolean; isTrap: boolean }[] = [];
@@ -476,9 +507,9 @@ export function runWalkForwardComparison(params: {
           const futureBars = bars.slice(t + 1);
           const curPrice = bars[t]!.close;
           const frictionPrice =
-            asset.assetType === "FOREX"
+            (asset.assetType === "FOREX"
               ? (asset.spreadPipsOrPct + 0.35) * pip
-              : curPrice * (asset.spreadPipsOrPct + 0.0006);
+              : curPrice * (asset.spreadPipsOrPct + 0.0006)) * frictionMult;
 
           // 1. Legacy Baseline
           if (t >= nextAllowedLegacy) {
@@ -494,6 +525,7 @@ export function runWalkForwardComparison(params: {
               tp3: leg.takeProfit,
               frictionPrice,
               useBreakevenScaling: false,
+              executionOptions: params.executionOptions,
             });
             if (legOut.filled) {
               legacyRecords.push({
@@ -534,6 +566,7 @@ export function runWalkForwardComparison(params: {
                 tp3: prec.tp3,
                 frictionPrice,
                 useBreakevenScaling: true,
+                executionOptions: params.executionOptions,
               });
               if (out.filled) {
                 const rec = {
@@ -574,6 +607,149 @@ export function runWalkForwardComparison(params: {
     upgradedAllGrades,
     winRateLiftPp,
     trapReductionPct,
+  };
+}
+
+export interface MicrostructureStressAuditReport {
+  standard: {
+    totalTrades: number;
+    winRatePct: number;
+    expectancyR: number;
+    profitFactor: number;
+  };
+  slippageStress: {
+    totalTrades: number;
+    winRatePct: number;
+    expectancyR: number;
+    profitFactor: number;
+    winRateDecayPp: number;
+  };
+  spreadBlowoutStress: {
+    totalTrades: number;
+    winRatePct: number;
+    expectancyR: number;
+    profitFactor: number;
+    winRateDecayPp: number;
+  };
+  extremeCombinedStress: {
+    totalTrades: number;
+    winRatePct: number;
+    expectancyR: number;
+    profitFactor: number;
+    winRateDecayPp: number;
+  };
+  isRobustUnderStress: boolean;
+  commentaryVi: string;
+}
+
+/**
+ * Real-World Microstructure Stress Audit:
+ * Evaluates the bot's trade setups under hostile real-market execution conditions:
+ * 1. Standard realistic execution (intra-bar causality, BE slippage, queue fill check)
+ * 2. High latency slippage stress (delayed market fills, 0.08R BE slippage)
+ * 3. Spread blowout stress (2.0x spread widening during volatility)
+ * 4. Extreme combined stress (2.0x spread + high slippage + deep queue penetration required)
+ */
+export function runMicrostructureStressAudit(params?: {
+  seeds?: number[];
+  assets?: BenchmarkAssetSpec[];
+  regimes?: BenchmarkRegime[];
+}): MicrostructureStressAuditReport {
+  const seeds = params?.seeds ?? [404, 505, 606];
+  const assets = params?.assets;
+  const regimes = params?.regimes;
+
+  const stdRep = runWalkForwardComparison({
+    split: "HOLDOUT",
+    seeds,
+    assets,
+    regimes,
+    executionOptions: {
+      enforceCausalIntraBar: true,
+      breakevenSlippageR: 0.04,
+      marketSlippageR: 0.015,
+      minLimitPenetrationFraction: 0.015,
+    },
+  }).upgradedAAPlus;
+
+  const slipRep = runWalkForwardComparison({
+    split: "HOLDOUT",
+    seeds,
+    assets,
+    regimes,
+    executionOptions: {
+      enforceCausalIntraBar: true,
+      breakevenSlippageR: 0.08,
+      marketSlippageR: 0.05,
+      minLimitPenetrationFraction: 0.035,
+    },
+  }).upgradedAAPlus;
+
+  const spreadRep = runWalkForwardComparison({
+    split: "HOLDOUT",
+    seeds,
+    assets,
+    regimes,
+    frictionMultiplier: 2.0,
+    executionOptions: {
+      enforceCausalIntraBar: true,
+      breakevenSlippageR: 0.06,
+      marketSlippageR: 0.02,
+      minLimitPenetrationFraction: 0.02,
+    },
+  }).upgradedAAPlus;
+
+  const extremeRep = runWalkForwardComparison({
+    split: "HOLDOUT",
+    seeds,
+    assets,
+    regimes,
+    frictionMultiplier: 2.0,
+    executionOptions: {
+      enforceCausalIntraBar: true,
+      breakevenSlippageR: 0.10,
+      marketSlippageR: 0.06,
+      minLimitPenetrationFraction: 0.04,
+    },
+  }).upgradedAAPlus;
+
+  const isRobust =
+    extremeRep.winRatePct >= 75 &&
+    extremeRep.expectancyR >= 0.5 &&
+    extremeRep.profitFactor >= 4.0;
+
+  return {
+    standard: {
+      totalTrades: stdRep.totalTrades,
+      winRatePct: stdRep.winRatePct,
+      expectancyR: stdRep.expectancyR,
+      profitFactor: stdRep.profitFactor,
+    },
+    slippageStress: {
+      totalTrades: slipRep.totalTrades,
+      winRatePct: slipRep.winRatePct,
+      expectancyR: slipRep.expectancyR,
+      profitFactor: slipRep.profitFactor,
+      winRateDecayPp: Number((stdRep.winRatePct - slipRep.winRatePct).toFixed(1)),
+    },
+    spreadBlowoutStress: {
+      totalTrades: spreadRep.totalTrades,
+      winRatePct: spreadRep.winRatePct,
+      expectancyR: spreadRep.expectancyR,
+      profitFactor: spreadRep.profitFactor,
+      winRateDecayPp: Number((stdRep.winRatePct - spreadRep.winRatePct).toFixed(1)),
+    },
+    extremeCombinedStress: {
+      totalTrades: extremeRep.totalTrades,
+      winRatePct: extremeRep.winRatePct,
+      expectancyR: extremeRep.expectancyR,
+      profitFactor: extremeRep.profitFactor,
+      winRateDecayPp: Number((stdRep.winRatePct - extremeRep.winRatePct).toFixed(1)),
+    },
+    isRobustUnderStress: isRobust,
+    commentaryVi: isRobust
+      ? `Hệ thống vượt qua bài kiểm thử vi cấu trúc khắc nghiệt: Winrate duy trì ${extremeRep.winRatePct}% (E[R] +${extremeRep.expectancyR}R, PF ${extremeRep.profitFactor}) ngay cả khi spread giãn gấp 2 lần và trượt giá trễ mạng cao.`
+      : `Cảnh báo: Hệ thống nhạy cảm với trượt giá hoặc giãn spread, winrate giảm còn ${extremeRep.winRatePct}%. Cần kiểm soát chặt giờ ra tin và độ trễ sàn.`,
   };
 }
 

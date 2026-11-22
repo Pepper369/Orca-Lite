@@ -15,6 +15,7 @@ import {
   BENCHMARK_ASSETS,
   calibrateAndRegisterLiveMetaModels,
   generateRegimeBars,
+  runMicrostructureStressAudit,
   runWalkForwardComparison,
 } from "../engines/fx-crypto-backtest-harness";
 import {
@@ -466,5 +467,30 @@ test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-La
   assert.ok(
     empColdVetoSetup.vetoReasons.some((v) => v.includes("Empirical Winrate Veto")),
     "Empirical Winrate Veto reason must be recorded",
+  );
+});
+
+test("Microstructure Stress Audit: Verifies Robustness Under Double-Spread & High Latency Slippage", () => {
+  const audit = runMicrostructureStressAudit({ seeds: [404, 505] });
+
+  console.log("\n=== REAL-WORLD MICROSTRUCTURE STRESS AUDIT REPORT ===");
+  console.log("1. Standard Realistic :", audit.standard);
+  console.log("2. Slippage Stress    :", audit.slippageStress);
+  console.log("3. Spread Blowout (2x):", audit.spreadBlowoutStress);
+  console.log("4. Extreme Combined   :", audit.extremeCombinedStress);
+  console.log("Verdict               :", audit.commentaryVi, "\n");
+
+  assert.ok(audit.isRobustUnderStress, "Bot must remain robust under combined extreme microstructure stress");
+  assert.ok(
+    audit.extremeCombinedStress.winRatePct >= 75,
+    `Extreme stress winRate must stay >= 75%, got ${audit.extremeCombinedStress.winRatePct}%`,
+  );
+  assert.ok(
+    audit.extremeCombinedStress.expectancyR >= 0.5,
+    `Extreme stress expectancy must stay >= 0.5R, got ${audit.extremeCombinedStress.expectancyR}R`,
+  );
+  assert.ok(
+    audit.extremeCombinedStress.profitFactor >= 4.0,
+    `Extreme stress profit factor must stay >= 4.0, got ${audit.extremeCombinedStress.profitFactor}`,
   );
 });

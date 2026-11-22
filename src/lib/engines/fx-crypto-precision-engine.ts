@@ -1230,7 +1230,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
     if (matchingFvgs.length > 0) {
       const fvg = matchingFvgs[matchingFvgs.length - 1]!;
-      const proximalPrice = isBuy ? fvg.top : fvg.bottom;
+      const fvgDepth = Math.abs(fvg.top - fvg.bottom);
+      const queuePenetrationOffset = Math.min(fvgDepth * 0.12, atr14 * 0.04);
+      const proximalPrice = isBuy ? fvg.top - queuePenetrationOffset : fvg.bottom + queuePenetrationOffset;
       const isBetterPrice = isBuy ? proximalPrice < currentPrice : proximalPrice > currentPrice;
       if (isBetterPrice && Math.abs(currentPrice - proximalPrice) <= atr14 * 0.22) {
         rawEntry = proximalPrice;
@@ -1502,8 +1504,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const w3 = exitPolicy.tp3ClosePct / 100;
   const tp1R = tp1Dist / Math.max(1e-12, stopDist);
   const tp3R = tp3Dist / Math.max(1e-12, stopDist);
+  const beSlippageR = 0.04;
   const expectancyR = Number(
-    (pTp1 * (w1 * tp1R) + pTp2 * (w2 * grossRiskReward) + pTp3 * (w3 * tp3R) - (1 - pTp1) * 1.0 - frictionR).toFixed(2),
+    (
+      pTp1 * (w1 * tp1R) +
+      pTp2 * (w2 * grossRiskReward) +
+      pTp3 * (w3 * tp3R) -
+      (1 - pTp1) * 1.0 -
+      Math.max(0, pTp1 - pTp2) * (1 - w1) * beSlippageR -
+      frictionR
+    ).toFixed(2),
   );
 
   // Enforce LIMIT_PULLBACK when scenario requires strict maker entry (S3 Squeeze / S4 Macro Shock)
