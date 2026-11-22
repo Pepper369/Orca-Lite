@@ -1026,6 +1026,24 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 4 (Liquidation Magnet): Cụm thanh lý ${liquidationClusterAligned} hút giá thuận chiều`);
   }
 
+  // Gate 4f: Ghost-Sweep vs True Absorption Arbiter (Quant 60% vs ICT 30%)
+  // When an ICT sweep candle occurs but aggressive order flow is violently against the direction (realImbalance <= -58% for BUY, >= 58% for SELL)
+  // and NO institutional passive absorption or iceberg is detected, this is a structural breakdown (falling knife), not a sweep.
+  const isGhostSweepTrap =
+    hasSweep &&
+    !hasBreakout &&
+    ((isBuy && realImbalance <= -58 && spoofState !== "BULLISH_ICEBERG_ABSORPTION" && absorptionType !== "BULLISH_ABSORPTION") ||
+      (!isBuy && realImbalance >= 58 && spoofState !== "BEARISH_ICEBERG_ABSORPTION" && absorptionType !== "BEARISH_ABSORPTION"));
+  if (isGhostSweepTrap) {
+    vetoReasons.push(
+      isBuy
+        ? `Bẫy quét râu giả lập (Ghost Sweep) — lực bán Market quá mạnh (Imbalance ${realImbalance}%) không có lực hấp thụ, nguy cơ sập đáy tiếp`
+        : `Bẫy quét râu giả lập (Ghost Sweep) — lực mua Market quá mạnh (Imbalance +${realImbalance}%) không có lực hấp thụ, nguy cơ thủng đỉnh tiếp`,
+    );
+    gatesFailed.push("Gate 4f (Ghost-Sweep Breakdown Veto): Dòng tiền vi mô đang ép sập cấu trúc, cấm bắt dao rơi");
+    precisionScore -= 18;
+  }
+
   // Forward Liquidity Pool Money-Flow Alignment & Stop-Hunt Ceiling Guard
   const fwdLiq = ict.forwardLiquidityForecast ?? null;
   const fwdSameSideTarget = isBuy ? fwdLiq?.aboveTarget : fwdLiq?.belowTarget;
@@ -1151,6 +1169,27 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     if (betterPrice) {
       rawEntry = oteEntry;
       entryMode = "LIMIT_PULLBACK";
+    }
+  }
+
+  // Entry Optimization: Proximal boundary of Fair Value Gap
+  // When price displaced away from an active FVG, anchor entry at the proximal boundary (top of bullish FVG, bottom of bearish FVG)
+  // to ensure near 100% fill rate while securing tighter stop loss and higher net R:R.
+  const activeFvgs = ict.activeFvgList ?? [];
+  if (entryMode === "MARKET_CONFIRMED" && !hasBreakout && !pace.isIrreversibleLock && activeFvgs.length > 0) {
+    const matchingFvgs = activeFvgs.filter(
+      (g) =>
+        (isBuy && g.direction === "BULLISH_FVG" && g.bottom <= currentPrice && g.top >= currentPrice - atr14 * 0.35) ||
+        (!isBuy && g.direction === "BEARISH_FVG" && g.top >= currentPrice && g.bottom <= currentPrice + atr14 * 0.35),
+    );
+    if (matchingFvgs.length > 0) {
+      const fvg = matchingFvgs[matchingFvgs.length - 1]!;
+      const proximalPrice = isBuy ? fvg.top : fvg.bottom;
+      const isBetterPrice = isBuy ? proximalPrice < currentPrice : proximalPrice > currentPrice;
+      if (isBetterPrice && Math.abs(currentPrice - proximalPrice) <= atr14 * 0.22) {
+        rawEntry = proximalPrice;
+        entryMode = "LIMIT_PULLBACK";
+      }
     }
   }
 
@@ -1447,9 +1486,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const smcScore = Math.min(10, Math.max(2, smcMssPts + smcStructPts));
 
   const triPillarTotal = quantScore + ictScore + smcScore;
-  const quantPass = quantScore >= 32;
-  const ictPass = ictScore >= 12;
-  const smcPass = smcScore >= 4;
+  const quantPass = quantScore >= 30;
+  const ictPass = ictScore >= 11;
+  const smcPass = smcScore >= 3;
 
   const triPillarComposition: TriPillarComposition = {
     quantScore,
@@ -1471,12 +1510,21 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push("Gate 6b (Net Expectancy Bleed Veto): Kỳ vọng toán học sau ma sát không đạt chuẩn an toàn");
   }
 
-  // Assign final setup grade
+  // Assign final setup grade with Tri-Pillar 60/30/10 Hierarchical Enforcement:
+  // - Grade A+: Requires ALL 3 pillars to pass (Quant 60% >= 32, ICT 30% >= 12, SMC 10% >= 4)
+  // - Grade A : Requires Quant 60% >= 32 AND at least one of (ICT >= 12 or SMC >= 4)
+  // - Grade B : Moderate confluence setups with positive expectancy
   let grade: SetupGrade = "NO_TRADE";
   if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL" && !scenarioVector.isHardLockout) {
-    if (precisionScore >= 78 && expectancyR >= 0.28) grade = "A+";
-    else if (precisionScore >= 65 && expectancyR >= 0.14) grade = "A";
-    else if (precisionScore >= 54 && expectancyR >= 0.03) grade = "B";
+    const isTriPillarApex = quantPass && ictPass && smcPass;
+
+    if (precisionScore >= 78 && expectancyR >= 0.28 && isTriPillarApex) {
+      grade = "A+";
+    } else if (precisionScore >= 65 && expectancyR >= 0.14) {
+      grade = "A";
+    } else if (precisionScore >= 54 && expectancyR >= 0.03) {
+      grade = "B";
+    }
   }
 
   const enrichedRegime: PrecisionTradeSetup["regime"] = {
