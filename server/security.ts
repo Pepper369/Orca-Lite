@@ -80,6 +80,7 @@ export function buildCspHeader(opts: {
         "https://cdn.jsdelivr.net",
         "https://api.binance.com",
         "https://fapi.binance.com",
+        "https://biquote.io",
       ]
     : [
         "'self'",
@@ -91,6 +92,7 @@ export function buildCspHeader(opts: {
         "https://cdn.jsdelivr.net",
         "https://api.binance.com",
         "https://fapi.binance.com",
+        "https://biquote.io",
       ];
 
   return [
