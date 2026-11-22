@@ -817,24 +817,38 @@ export async function evaluateRealtimePositionExits(options?: {
       continue;
     }
 
-    // 3) Opposite High-Conviction Quant Signal Reversal Exit (only on INITIAL unbanked positions after >= 5m M5 bar confirmation)
+    // 3) Opposite High-Conviction Quant Signal Reversal Exit & In-Flight Profit Protection
     const reversalDir = options?.reversals?.get(cleanSym);
-    if (
-      stage === "INITIAL" &&
-      reversalDir &&
-      reversalDir !== o.direction &&
-      Date.now() - o.timestamp >= 300_000
-    ) {
-      const res = await closeTrackedBotPosition({
-        orderId: o.orderId,
-        reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
-        overrideClosePrice: markPrice,
-      });
-      if (res.ok) closedCount++;
-      continue;
+    if (reversalDir && reversalDir !== o.direction) {
+      const holdMs = Date.now() - o.timestamp;
+      if (stage === "INITIAL" && holdMs >= 300_000) {
+        const res = await closeTrackedBotPosition({
+          orderId: o.orderId,
+          reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
+          overrideClosePrice: markPrice,
+        });
+        if (res.ok) closedCount++;
+        continue;
+      }
+      // Phase 4 In-Flight Scenario Shift Tightening: if position is in profit (>= 25% of TP1) when opposite A+ signal appears, lock 65% of open profit immediately
+      const targetDistRev = tp1 > 0 ? Math.abs(tp1 - entry) : 0;
+      const favMoveRev = isBuy ? markPrice - entry : entry - markPrice;
+      if (targetDistRev > pip * 3 && favMoveRev >= targetDistRev * 0.25) {
+        const tightSl = roundPrice(
+          isBuy ? entry + favMoveRev * 0.65 : entry - favMoveRev * 0.65,
+          o.symbol,
+          assetType,
+        );
+        const betterSl = isBuy ? tightSl > sl + pip : tightSl < sl - pip;
+        if (betterSl) {
+          await saveBotExecutionOrder({ ...o, stopLossPrice: tightSl });
+          trailedCount++;
+          continue;
+        }
+      }
     }
 
-    // 4) Dynamic Breakeven & Pre-TP1 Profit Shield Ratchet (asset-accurate pip/tick sizing)
+    // 4) Dynamic Breakeven, Pre-TP1 Profit Shield & Phase 4 Time-Decay Stagnation Shield (45m Half-Life)
     const activeTarget =
       stage === "TP2_TRAIL" && tp3 > 0
         ? tp3
@@ -844,13 +858,21 @@ export async function evaluateRealtimePositionExits(options?: {
     if (activeTarget > 0 && sl > 0) {
       const targetDist = Math.abs(activeTarget - entry);
       const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
-      if (targetDist > pip * 3 && favorableMove >= targetDist * 0.40) {
+      const holdDurationMs = Date.now() - o.timestamp;
+      const isStagnant45m =
+        stage === "INITIAL" &&
+        holdDurationMs >= 45 * 60_000 &&
+        favorableMove >= pip * 2 &&
+        favorableMove < targetDist * 0.40;
+      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.40 || isStagnant45m)) {
         const lockDist =
           favorableMove >= targetDist * 0.72
             ? favorableMove * 0.58
             : favorableMove >= targetDist * 0.58
               ? favorableMove * 0.32
-              : Math.max(pip * 2, targetDist * 0.10);
+              : isStagnant45m
+                ? Math.max(pip, favorableMove * 0.5)
+                : Math.max(pip * 2, targetDist * 0.10);
         const candidateSl = roundPrice(
           isBuy ? entry + lockDist : entry - lockDist,
           o.symbol,

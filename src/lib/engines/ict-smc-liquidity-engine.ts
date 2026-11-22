@@ -152,6 +152,16 @@ export interface HtfPoiContext {
   rationaleVi: string;
 }
 
+export interface IctAmdPowerOf3Context {
+  phase: "ACCUMULATION" | "MANIPULATION_JUDAS" | "DISTRIBUTION_EXPANSION" | "NEUTRAL";
+  manipulationSide: "BEAR_TRAP_LOW_SWEEP" | "BULL_TRAP_HIGH_SWEEP" | "NONE";
+  favoredDirection: "BUY" | "SELL" | "NEUTRAL";
+  boxHigh: number;
+  boxLow: number;
+  targetOppositeEdge: number | null;
+  rationaleVi: string;
+}
+
 export interface IctSmcAnalysisResult {
   symbol: string;
   bias: "STRONG_BULLISH" | "BULLISH" | "STRONG_BEARISH" | "BEARISH" | "NEUTRAL";
@@ -167,6 +177,7 @@ export interface IctSmcAnalysisResult {
   activeFvgList: IctFvgZone[];
   bprZones?: IctBprZone[];
   htfPoiContext?: HtfPoiContext | null;
+  amdPowerOf3?: IctAmdPowerOf3Context;
   orderBlocks: IctOrderBlockZone[];
   optimalTradeSetup: OteTradeSetup;
   marketStructure: {
@@ -385,6 +396,18 @@ export function analyzeIctSmcLiquidity(params: {
     flowCycle,
   });
 
+  const amdPowerOf3 = detectIctAmdPowerOf3({
+    bars,
+    currentPrice,
+    atr14: atrVal,
+    recentSweeps,
+    lastMss,
+    displacementDetected,
+    pipSize,
+    symbol,
+    assetType: isForex ? "FOREX" : "CRYPTO",
+  });
+
   return {
     symbol,
     bias,
@@ -400,6 +423,7 @@ export function analyzeIctSmcLiquidity(params: {
     activeFvgList,
     bprZones,
     htfPoiContext,
+    amdPowerOf3,
     orderBlocks,
     optimalTradeSetup,
     marketStructure: {
@@ -1546,6 +1570,15 @@ function createEmptyResult(symbol: string, price: number): IctSmcAnalysisResult 
     activeFvgList: [],
     bprZones: [],
     htfPoiContext: null,
+    amdPowerOf3: {
+      phase: "NEUTRAL",
+      manipulationSide: "NONE",
+      favoredDirection: "NEUTRAL",
+      boxHigh: price,
+      boxLow: price,
+      targetOppositeEdge: null,
+      rationaleVi: "Chưa đủ dữ liệu nến để phân tích chu kỳ ICT AMD.",
+    },
     orderBlocks: [],
     optimalTradeSetup: {
       direction: "NEUTRAL",
@@ -1571,5 +1604,136 @@ function createEmptyResult(symbol: string, price: number): IctSmcAnalysisResult 
     },
     marketStructure: { lastMss: "NONE", displacementDetected: false, flowCycle: "BALANCED" },
     summaryVi: "Dữ liệu chưa đủ.",
+  };
+}
+
+/**
+ * Phase 1 Upgrade: Causal ICT Power-of-3 (AMD: Accumulation -> Manipulation Judas -> Distribution Expansion)
+ * Evaluates the prior 16-bar compression/Asian box [n-18..n-4] and checks whether bars [n-3..n-1]
+ * executed a false-breakout Judas Manipulation sweep or entered Distribution Expansion.
+ */
+function detectIctAmdPowerOf3(params: {
+  bars: OhlcvBar[];
+  currentPrice: number;
+  atr14: number;
+  recentSweeps: AdvancedSweepEvent[];
+  lastMss: "BULLISH_MSS" | "BEARISH_MSS" | "NONE";
+  displacementDetected: boolean;
+  pipSize: number;
+  symbol: string;
+  assetType: "FOREX" | "CRYPTO";
+}): IctAmdPowerOf3Context {
+  const { bars, currentPrice, atr14, recentSweeps, lastMss, displacementDetected, symbol, assetType } = params;
+  const n = bars.length;
+  const fmt = (p: number) => roundPrice(p, symbol, assetType);
+  if (n < 18) {
+    return {
+      phase: "NEUTRAL",
+      manipulationSide: "NONE",
+      favoredDirection: "NEUTRAL",
+      boxHigh: fmt(currentPrice),
+      boxLow: fmt(currentPrice),
+      targetOppositeEdge: null,
+      rationaleVi: "Chưa đủ mẫu nến cho chu kỳ AMD.",
+    };
+  }
+
+  const boxStart = Math.max(0, n - 18);
+  const boxEnd = n - 4;
+  let boxHigh = -Infinity;
+  let boxLow = Infinity;
+  for (let i = boxStart; i <= boxEnd; i++) {
+    const b = bars[i]!;
+    if (b.high > boxHigh) boxHigh = b.high;
+    if (b.low < boxLow) boxLow = b.low;
+  }
+  const boxSpan = Math.max(1e-12, boxHigh - boxLow);
+  const isCompressedBox = boxSpan <= Math.max(1e-12, atr14 * 3.4);
+
+  let recentMinLow = Infinity;
+  let recentMaxHigh = -Infinity;
+  for (let i = n - 3; i < n; i++) {
+    const b = bars[i]!;
+    if (b.low < recentMinLow) recentMinLow = b.low;
+    if (b.high > recentMaxHigh) recentMaxHigh = b.high;
+  }
+
+  const sweptBelowBox =
+    (recentMinLow < boxLow && currentPrice > boxLow) ||
+    recentSweeps.some((s) => s.side === "SELL_SIDE_SWEPT" && s.barIndex >= n - 4);
+  const sweptAboveBox =
+    (recentMaxHigh > boxHigh && currentPrice < boxHigh) ||
+    recentSweeps.some((s) => s.side === "BUY_SIDE_SWEPT" && s.barIndex >= n - 4);
+
+  if (sweptBelowBox && !sweptAboveBox) {
+    const inDist = lastMss === "BULLISH_MSS" || displacementDetected;
+    return {
+      phase: inDist ? "DISTRIBUTION_EXPANSION" : "MANIPULATION_JUDAS",
+      manipulationSide: "BEAR_TRAP_LOW_SWEEP",
+      favoredDirection: "BUY",
+      boxHigh: fmt(boxHigh),
+      boxLow: fmt(boxLow),
+      targetOppositeEdge: fmt(boxHigh),
+      rationaleVi: `ICT Power-of-3 (${inDist ? "Distribution" : "Judas Manipulation"}): Đã quét thanh khoản đáy hộp ${fmt(boxLow)} (Bear Trap) và rút chân hướng lên biên đối diện ${fmt(boxHigh)}.`,
+    };
+  }
+
+  if (sweptAboveBox && !sweptBelowBox) {
+    const inDist = lastMss === "BEARISH_MSS" || displacementDetected;
+    return {
+      phase: inDist ? "DISTRIBUTION_EXPANSION" : "MANIPULATION_JUDAS",
+      manipulationSide: "BULL_TRAP_HIGH_SWEEP",
+      favoredDirection: "SELL",
+      boxHigh: fmt(boxHigh),
+      boxLow: fmt(boxLow),
+      targetOppositeEdge: fmt(boxLow),
+      rationaleVi: `ICT Power-of-3 (${inDist ? "Distribution" : "Judas Manipulation"}): Đã quét thanh khoản đỉnh hộp ${fmt(boxHigh)} (Bull Trap) và rút chân hướng xuống biên đối diện ${fmt(boxLow)}.`,
+    };
+  }
+
+  if (currentPrice > boxHigh && (lastMss === "BULLISH_MSS" || displacementDetected)) {
+    return {
+      phase: "DISTRIBUTION_EXPANSION",
+      manipulationSide: "NONE",
+      favoredDirection: "BUY",
+      boxHigh: fmt(boxHigh),
+      boxLow: fmt(boxLow),
+      targetOppositeEdge: fmt(boxHigh + boxSpan * 0.618),
+      rationaleVi: `ICT Power-of-3 (Distribution): Phá vỡ hộp tích lũy ${fmt(boxHigh)} với xung lực mở rộng tăng.`,
+    };
+  }
+
+  if (currentPrice < boxLow && (lastMss === "BEARISH_MSS" || displacementDetected)) {
+    return {
+      phase: "DISTRIBUTION_EXPANSION",
+      manipulationSide: "NONE",
+      favoredDirection: "SELL",
+      boxHigh: fmt(boxHigh),
+      boxLow: fmt(boxLow),
+      targetOppositeEdge: fmt(boxLow - boxSpan * 0.618),
+      rationaleVi: `ICT Power-of-3 (Distribution): Phá vỡ hộp tích lũy ${fmt(boxLow)} với xung lực mở rộng giảm.`,
+    };
+  }
+
+  if (isCompressedBox && currentPrice >= boxLow && currentPrice <= boxHigh) {
+    return {
+      phase: "ACCUMULATION",
+      manipulationSide: "NONE",
+      favoredDirection: "NEUTRAL",
+      boxHigh: fmt(boxHigh),
+      boxLow: fmt(boxLow),
+      targetOppositeEdge: null,
+      rationaleVi: `ICT Power-of-3 (Accumulation): Giá đang nén thanh khoản trong hộp [${fmt(boxLow)} – ${fmt(boxHigh)}].`,
+    };
+  }
+
+  return {
+    phase: "NEUTRAL",
+    manipulationSide: "NONE",
+    favoredDirection: "NEUTRAL",
+    boxHigh: fmt(boxHigh),
+    boxLow: fmt(boxLow),
+    targetOppositeEdge: null,
+    rationaleVi: "Chu kỳ ICT AMD trung tính.",
   };
 }

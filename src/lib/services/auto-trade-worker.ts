@@ -5,7 +5,11 @@ import {
   isAccountPausedByTimeline,
   type QuantEngineFeedItem,
 } from "@/lib/engines/bot-telemetry-types";
-import { analyzeFundingRate, evaluateTrueLevel2Dom } from "@/lib/engines/crypto-derivatives-engine";
+import {
+  analyzeFundingRate,
+  evaluateCryptoPerpQuadrantAndLeaderShield,
+  evaluateTrueLevel2Dom,
+} from "@/lib/engines/crypto-derivatives-engine";
 import { evaluateCryptoShield } from "@/lib/engines/crypto-news-shield";
 import { calculateCurrencyStrengthMatrix, type PairPriceInput } from "@/lib/engines/forex-currency-strength";
 import { evaluateNewsCircuitBreaker } from "@/lib/engines/forex-news-shield";
@@ -783,9 +787,21 @@ export async function runAutoTradeTick(): Promise<{
         const isBuyCr = s.direction === "BUY";
         const refEntryCr = s.entryPrice ?? marketPrice;
         const wsMicroCr = binanceWs.getMicroFlow(s.pair);
+        const btcMicro = binanceWs.getMicroFlow("BTCUSDT");
+        const perpAlpha = evaluateCryptoPerpQuadrantAndLeaderShield({
+          symbol: s.pair,
+          direction: s.direction as "BUY" | "SELL",
+          priceChange5mPct: wsMicroCr?.velocityPct10s ?? 0,
+          domImbalancePct: s.domImbalance ?? 0,
+          tickImbalancePct: wsMicroCr?.tickImbalancePct ?? null,
+          fundingRate: s.fundingRate,
+          btcPriceChange5mPct: btcMicro?.velocityPct10s ?? null,
+          btcTickImbalancePct: btcMicro?.tickImbalancePct ?? null,
+        });
         const microFlowAligned =
-          !wsMicroCr ||
-          (isBuyCr ? wsMicroCr.tickImbalancePct > -40 : wsMicroCr.tickImbalancePct < 40);
+          !perpAlpha.leaderVeto &&
+          (!wsMicroCr ||
+            (isBuyCr ? wsMicroCr.tickImbalancePct > -40 : wsMicroCr.tickImbalancePct < 40));
         const pullbackTriggered =
           s.entryMode === "LIMIT_PULLBACK"
             ? riskDist <= 0 || Math.abs(marketPrice - refEntryCr) <= riskDist * 0.35

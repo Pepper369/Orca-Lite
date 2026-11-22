@@ -13,8 +13,10 @@ import {
 } from "./ict-smc-liquidity-engine";
 import {
   applySymmetricCusumFilter,
+  computeAdaptiveStrategyWeights,
   computeScenarioDynamicExitPolicy,
   computeYangZhangVolatility,
+  estimateOrnsteinUhlenbeck,
   estimateTailDegreesOfFreedom,
   evaluateMarketScenarioVector,
   filterOnlineRegimeHmm,
@@ -22,6 +24,7 @@ import {
   type HmmRegimeState,
   type MarketScenarioVectorResult,
   type ScenarioDynamicExitPolicy,
+  type StrategyArchetypeId,
 } from "./advanced-quant-math";
 import { evaluateHighWinrateGate } from "./high-winrate-gate";
 import {
@@ -95,6 +98,16 @@ export interface PrecisionTradeSetup {
     cusumBreak?: "BULL_BREAK" | "BEAR_BREAK" | "NONE";
     yangZhangVolPct?: number;
     harForecastVolPct?: number;
+    mtfTensorState?:
+      | "HTF_TREND_LTF_PULLBACK"
+      | "FULL_MTF_EXPANSION"
+      | "MEAN_REVERT_SWEEP_RECLAIM"
+      | "COUNTER_HTF_EXHAUSTION"
+      | "CONFLICTED_CHOP";
+    amdPhase?: "ACCUMULATION" | "MANIPULATION_JUDAS" | "DISTRIBUTION_EXPANSION" | "NEUTRAL";
+    playbookArchetype?: StrategyArchetypeId;
+    ouHalfLife?: number | null;
+    ouZScore?: number;
   };
   metaLabelProbability?: number;
   scenario?: MarketScenarioVectorResult;
@@ -718,11 +731,14 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push("Gate 2: Chưa có nhịp quét Sweep/MSS");
   }
 
-  // Gate 2b: Multi-Timeframe ICT POI + Inversion FVG (IFVG) + Balanced Price Range (BPR) Confluence
+  // Gate 2b: Multi-Timeframe ICT POI + Inversion FVG (IFVG) + Balanced Price Range (BPR) + ICT Power-of-3 AMD Confluence
   const htfPoiMatches =
     (isBuy && ict.htfPoiContext?.alignedSide === "BUY") ||
     (!isBuy && ict.htfPoiContext?.alignedSide === "SELL");
   const ifvgOrBprMatches = isBuy ? bullIfvgOrBpr : bearIfvgOrBpr;
+  const amdMatches =
+    (isBuy && ict.amdPowerOf3?.favoredDirection === "BUY") ||
+    (!isBuy && ict.amdPowerOf3?.favoredDirection === "SELL");
   if (htfPoiMatches && ifvgOrBprMatches) {
     precisionScore += 6;
     gatesPassed.push(`Gate 2b (ICT Multi-TF): Hội tụ ${ict.htfPoiContext?.poiType} + IFVG/BPR`);
@@ -732,6 +748,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if (ifvgOrBprMatches) {
     precisionScore += 4;
     gatesPassed.push("Gate 2b (IFVG/BPR): Phản ứng tại vùng Inversion FVG / Balanced Price Range");
+  }
+  if (amdMatches && ict.amdPowerOf3?.phase === "MANIPULATION_JUDAS") {
+    precisionScore += 4;
+    gatesPassed.push(`Gate 2c (ICT AMD Power-of-3): ${ict.amdPowerOf3.rationaleVi}`);
   }
 
   // GATE 3: Value Zone (OTE/FVG/Discount-Premium) + Parabolic Anti-Chase & Post-Exhaustion Knife Guard
@@ -1065,6 +1085,36 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   const prelimGrossRr = Number((target2Dist / Math.max(1e-12, stopDist)).toFixed(2));
   const exitPolicy = computeScenarioDynamicExitPolicy(scenarioVector, prelimGrossRr);
+  const strategyEnsemble = computeAdaptiveStrategyWeights({ scenarioVector });
+  const ouProcess = estimateOrnsteinUhlenbeck(closes.slice(-36));
+
+  // Hierarchical Multi-Timeframe State Tensor (Macro H1/H4 x Structure M15 x Execution M5)
+  const mtfTensorState: NonNullable<PrecisionTradeSetup["regime"]["mtfTensorState"]> =
+    htfMatches && (inValuePullback || hasPullbackReclaim)
+      ? "HTF_TREND_LTF_PULLBACK"
+      : htfMatches && macroMatches && (hasBreakout || execBias === (isBuy ? "BULLISH" : "BEARISH"))
+        ? "FULL_MTF_EXPANSION"
+        : (hasSweep && hasMss) || (ouProcess.isStationary && Math.abs(ouProcess.currentZScore) >= 1.4)
+          ? "MEAN_REVERT_SWEEP_RECLAIM"
+          : hasExhaustionShift
+            ? "COUNTER_HTF_EXHAUSTION"
+            : "CONFLICTED_CHOP";
+
+  if (
+    mtfTensorState === "HTF_TREND_LTF_PULLBACK" &&
+    scenarioVector.dominantScenario === "S1_TREND_EXPANSION"
+  ) {
+    precisionScore += 3;
+    gatesPassed.push("Gate 1c (MTF Tensor S1): HTF Trend Expansion + LTF Value Pullback Reclaim");
+  } else if (
+    mtfTensorState === "MEAN_REVERT_SWEEP_RECLAIM" &&
+    scenarioVector.dominantScenario === "S2_MEAN_REVERT_RANGE"
+  ) {
+    precisionScore += 3;
+    gatesPassed.push(
+      `Gate 1c (MTF Tensor S2): Mean-Reversion Sweep Reclaim (OU Half-Life ${Number.isFinite(ouProcess.halfLife) ? `${ouProcess.halfLife} nến` : "n/a"}, Z=${ouProcess.currentZScore.toFixed(2)})`,
+    );
+  }
 
   // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3 while capping at 2.85R for fast capital turnover; S2 tightens TP1)
   const tp1Dist = stopDist * Math.min(1.05, Math.max(0.85, exitPolicy.tp1RMultiple));
@@ -1191,6 +1241,11 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     cusumBreak: cusumFilter.latestBreak,
     yangZhangVolPct: Number((yzVol.annualizedVol * 100).toFixed(2)),
     harForecastVolPct: harVol.forecastAnnualVolPct,
+    mtfTensorState,
+    amdPhase: ict.amdPowerOf3?.phase ?? "NEUTRAL",
+    playbookArchetype: strategyEnsemble.topStrategy,
+    ouHalfLife: Number.isFinite(ouProcess.halfLife) ? ouProcess.halfLife : null,
+    ouZScore: ouProcess.currentZScore,
   };
 
   const breakevenPlan: PrecisionTradeSetup["breakevenPlan"] = {

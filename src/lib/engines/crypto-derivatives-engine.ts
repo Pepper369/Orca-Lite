@@ -18,6 +18,138 @@ import {
   type OhlcScalarBar,
 } from "./unified-cross-asset-quant";
 
+export interface CryptoPerpQuadrantLeaderResult {
+  quadrant:
+    | "LONG_BUILDUP"
+    | "SHORT_COVERING_SQUEEZE"
+    | "SHORT_BUILDUP"
+    | "LONG_LIQUIDATION_FLUSH"
+    | "EXHAUSTION_DIVERGENCE_TRAP"
+    | "NEUTRAL_FLOW";
+  leaderVeto: boolean;
+  leaderVetoReasonVi: string | null;
+  scoreBonus: number;
+  rationaleVi: string;
+}
+
+/**
+ * Phase 3 Institutional Crypto Perpetual Alpha:
+ * 1) 4-Quadrant Derivatives Flow Matrix (Price Delta x Order-Book/Tick CVD x Funding Rate)
+ * 2) BTCUSDT Market-Leader Correlation Shield: blocks buying Altcoins when BTC is actively dumping
+ *    or shorting Altcoins when BTC is actively squeezing upward.
+ */
+export function evaluateCryptoPerpQuadrantAndLeaderShield(params: {
+  symbol: string;
+  direction: "BUY" | "SELL";
+  priceChange5mPct: number;
+  domImbalancePct: number;
+  tickImbalancePct?: number | null;
+  fundingRate?: number | null;
+  btcPriceChange5mPct?: number | null;
+  btcTickImbalancePct?: number | null;
+}): CryptoPerpQuadrantLeaderResult {
+  const {
+    symbol,
+    direction,
+    priceChange5mPct,
+    domImbalancePct,
+    tickImbalancePct = null,
+    fundingRate = null,
+    btcPriceChange5mPct = null,
+    btcTickImbalancePct = null,
+  } = params;
+
+  const cleanSym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const isAltcoin = cleanSym !== "BTCUSDT" && cleanSym !== "BTCUSDC";
+  const isBuy = direction === "BUY";
+  const blendedFlow =
+    tickImbalancePct != null && Number.isFinite(tickImbalancePct)
+      ? domImbalancePct * 0.6 + tickImbalancePct * 0.4
+      : domImbalancePct;
+
+  // 1) BTC Market-Leader Domino Shield on Altcoins
+  if (isAltcoin && btcPriceChange5mPct != null && Number.isFinite(btcPriceChange5mPct)) {
+    const btcFlow = btcTickImbalancePct ?? 0;
+    if (isBuy && btcPriceChange5mPct <= -0.45 && btcFlow <= -35) {
+      return {
+        quadrant: "LONG_LIQUIDATION_FLUSH",
+        leaderVeto: true,
+        leaderVetoReasonVi: `BTC Leader Shield: BTCUSDT đang xả mạnh 5m (${btcPriceChange5mPct.toFixed(2)}%, TickFlow ${btcFlow}%) — khóa mở lệnh BUY Altcoin ${cleanSym}`,
+        scoreBonus: -15,
+        rationaleVi: "Chặn mua Altcoin ngược nhịp xả Domino của BTCUSDT.",
+      };
+    }
+    if (!isBuy && btcPriceChange5mPct >= 0.45 && btcFlow >= 35) {
+      return {
+        quadrant: "SHORT_COVERING_SQUEEZE",
+        leaderVeto: true,
+        leaderVetoReasonVi: `BTC Leader Shield: BTCUSDT đang kéo mạnh 5m (+${btcPriceChange5mPct.toFixed(2)}%, TickFlow +${btcFlow}%) — khóa mở lệnh SELL Altcoin ${cleanSym}`,
+        scoreBonus: -15,
+        rationaleVi: "Chặn bán khống Altcoin ngược sóng Squeeze của BTCUSDT.",
+      };
+    }
+  }
+
+  // 2) 4-Quadrant Derivatives Flow Matrix
+  const fRate = fundingRate ?? 0;
+  if (priceChange5mPct > 0.08 && blendedFlow <= -25) {
+    return {
+      quadrant: "EXHAUSTION_DIVERGENCE_TRAP",
+      leaderVeto: isBuy,
+      leaderVetoReasonVi: isBuy
+        ? `Phân kỳ Kiệt sức Phái sinh: Giá ${cleanSym} kéo lên (+${priceChange5mPct.toFixed(2)}%) nhưng dòng tiền L2/CVD đang xả ròng (${blendedFlow.toFixed(0)}%)`
+        : null,
+      scoreBonus: isBuy ? -12 : 6,
+      rationaleVi: "Tăng giá rỗng ngược dòng tiền CVD/DOM (Bull-Trap Absorption).",
+    };
+  }
+  if (priceChange5mPct < -0.08 && blendedFlow >= 25) {
+    return {
+      quadrant: "EXHAUSTION_DIVERGENCE_TRAP",
+      leaderVeto: !isBuy,
+      leaderVetoReasonVi: !isBuy
+        ? `Phân kỳ Hấp thụ Đáy: Giá ${cleanSym} ép xuống (${priceChange5mPct.toFixed(2)}%) nhưng dòng tiền L2/CVD đang gom ròng (+${blendedFlow.toFixed(0)}%)`
+        : null,
+      scoreBonus: !isBuy ? -12 : 6,
+      rationaleVi: "Đạp giá rỗng được hấp thụ bởi tường mua L2/CVD (Bear-Trap Absorption).",
+    };
+  }
+
+  if (priceChange5mPct >= 0 && blendedFlow >= 15) {
+    const isSqueeze = fRate < -0.00015;
+    return {
+      quadrant: isSqueeze ? "SHORT_COVERING_SQUEEZE" : "LONG_BUILDUP",
+      leaderVeto: false,
+      leaderVetoReasonVi: null,
+      scoreBonus: isBuy ? (isSqueeze ? 7 : 5) : -6,
+      rationaleVi: isSqueeze
+        ? `Short Covering Squeeze (Flow +${blendedFlow.toFixed(0)}%, Funding ${(fRate * 100).toFixed(3)}%)`
+        : `Long Build-up chuẩn tổ chức (Flow +${blendedFlow.toFixed(0)}%)`,
+    };
+  }
+
+  if (priceChange5mPct <= 0 && blendedFlow <= -15) {
+    const isFlush = fRate > 0.0003;
+    return {
+      quadrant: isFlush ? "LONG_LIQUIDATION_FLUSH" : "SHORT_BUILDUP",
+      leaderVeto: false,
+      leaderVetoReasonVi: null,
+      scoreBonus: !isBuy ? (isFlush ? 7 : 5) : -6,
+      rationaleVi: isFlush
+        ? `Long Liquidation Flush (Flow ${blendedFlow.toFixed(0)}%, Funding +${(fRate * 100).toFixed(3)}%)`
+        : `Short Build-up chủ động (Flow ${blendedFlow.toFixed(0)}%)`,
+    };
+  }
+
+  return {
+    quadrant: "NEUTRAL_FLOW",
+    leaderVeto: false,
+    leaderVetoReasonVi: null,
+    scoreBonus: 0,
+    rationaleVi: "Dòng tiền phái sinh cân bằng.",
+  };
+}
+
 export interface MicropriceSpoofingResult {
   midPrice: number;
   microprice: number;

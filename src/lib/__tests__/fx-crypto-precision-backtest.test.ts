@@ -21,6 +21,7 @@ import {
   clearLiveTrainedMetaModels,
   getLiveTrainedMetaModel,
 } from "../engines/meta-labeling-calibration";
+import { evaluateCryptoPerpQuadrantAndLeaderShield } from "../engines/crypto-derivatives-engine";
 import type { OhlcvBar } from "../types";
 
 test("Precision FR-001: Asset pipSize & micro-coin 8-decimal rounding (XAUUSD, USDJPY, EURUSD, PEPEUSDT)", () => {
@@ -307,4 +308,36 @@ test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-La
   );
   assert.ok(calRes.report.oosBrierAfter <= calRes.report.oosBrierBefore + 0.01);
   clearLiveTrainedMetaModels();
+
+  // Phase 1-3 Multi-TF & Multi-Scenario Upgrade Verification:
+  // 1) ICT Power-of-3 AMD Context
+  assert.ok(ict.amdPowerOf3 != null, "Expected amdPowerOf3 context in ICT result");
+  const precCheck = evaluatePrecisionTradeSetup({
+    symbol: "EURUSD",
+    assetType: "FOREX",
+    barsExecution: bars.slice(0, 80),
+  });
+  assert.ok(precCheck.regime.mtfTensorState != null, "Expected mtfTensorState in Precision regime");
+  assert.ok(precCheck.regime.playbookArchetype != null, "Expected playbookArchetype in Precision regime");
+
+  // 2) Crypto 4-Quadrant & BTC Market-Leader Domino Veto on Altcoins
+  const altVeto = evaluateCryptoPerpQuadrantAndLeaderShield({
+    symbol: "SOLUSDT",
+    direction: "BUY",
+    priceChange5mPct: 0.15,
+    domImbalancePct: 20,
+    btcPriceChange5mPct: -0.65,
+    btcTickImbalancePct: -45,
+  });
+  assert.equal(altVeto.leaderVeto, true, "BTC dump must veto buying Altcoins");
+
+  const divTrap = evaluateCryptoPerpQuadrantAndLeaderShield({
+    symbol: "BTCUSDT",
+    direction: "BUY",
+    priceChange5mPct: 0.25,
+    domImbalancePct: -35,
+    tickImbalancePct: -40,
+  });
+  assert.equal(divTrap.quadrant, "EXHAUSTION_DIVERGENCE_TRAP");
+  assert.equal(divTrap.leaderVeto, true);
 });
