@@ -44,12 +44,10 @@ export function EconomicCalendarPanel() {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch(
-          "https://biquote.io/api/calendar?importance=high&countries=US,EU,GB,JP",
-          { cache: "no-store" },
-        );
+        const res = await fetch("/api/v1/forex/calendar", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as CalendarEvent[];
+        const json = await res.json();
+        const data = (Array.isArray(json) ? json : json.data) as CalendarEvent[];
         if (!cancelled) {
           const now = Date.now();
           const sorted = (Array.isArray(data) ? data : [])

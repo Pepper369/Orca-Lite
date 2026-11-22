@@ -479,12 +479,13 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const accounts = opts.overrideAccounts ?? (await listBrokerConnections(userId));
   const results: CopyExecutionOrder[] = [];
 
-  // Track currently open positions per account + recent Stop-Loss cooldown (30m)
+  // Track currently open positions per account + recent Stop-Loss cooldown (25m freeze on whole symbol) + consecutive loss count
   const openCountByAccount = new Map<string, number>();
   const openSymbolsByAccount = new Map<string, Set<string>>();
   const openPositionsByAccount = new Map<string, FactorExposurePosition[]>();
   const recentSlCooldownByAccount = new Map<string, Set<string>>();
-  const SL_COOLDOWN_MS = 30 * 60 * 1000;
+  const consecutiveSlLossesByAccount = new Map<string, number>();
+  const SL_COOLDOWN_MS = 25 * 60 * 1000;
   const nowScan = Date.now();
   if (!manualOverride && !opts.overrideAccounts) {
     // Hard gate: on Saturday & Sunday Vietnam time (GMT+7), automatically pause all FOREX signal dispatch
@@ -495,14 +496,23 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     const existingOrders = await listBotExecutionOrders(150, userId);
     for (const o of existingOrders) {
       const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (
+      const isSlLoss =
         o.message.startsWith("[ĐÃ ĐÓNG]") &&
-        ((o.realizedPnlUsd != null && o.realizedPnlUsd < 0) || o.message.includes("AUTO SL GUARD")) &&
-        nowScan - o.timestamp <= SL_COOLDOWN_MS
-      ) {
+        ((o.realizedPnlUsd != null && o.realizedPnlUsd < 0) || o.message.includes("AUTO SL GUARD"));
+
+      if (isSlLoss && nowScan - o.timestamp <= SL_COOLDOWN_MS) {
         const cdSet = recentSlCooldownByAccount.get(o.followerId) ?? new Set<string>();
-        cdSet.add(`${cleanSym}_${o.direction}`);
+        // Freeze symbol entirely across BOTH directions (BUY and SELL) to stop whipsaw/revenge trading
+        cdSet.add(cleanSym);
         recentSlCooldownByAccount.set(o.followerId, cdSet);
+      }
+
+      // Count consecutive SL losses in the past 60 minutes
+      if (o.message.startsWith("[ĐÃ ĐÓNG]") && nowScan - o.timestamp <= 60 * 60 * 1000) {
+        const currentCount = consecutiveSlLossesByAccount.get(o.followerId) ?? 0;
+        if (isSlLoss) {
+          consecutiveSlLossesByAccount.set(o.followerId, currentCount + 1);
+        }
       }
       if (
         (o.status === "FILLED_PAPER" || o.status === "FILLED" || o.status === "PENDING_EA") &&
@@ -623,13 +633,22 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
         continue;
       }
       const slCooldownSet = recentSlCooldownByAccount.get(acct.id);
-      if (slCooldownSet?.has(`${cleanSym}_${signal.direction}`)) {
+      if (slCooldownSet?.has(cleanSym)) {
         continue;
       }
       const maxOpen = Math.max(1, acct.maxOpenPositions ?? 3);
       const currentOpen = openCountByAccount.get(acct.id) ?? 0;
       if (currentOpen >= maxOpen) {
         continue;
+      }
+
+      // Consecutive Loss Brake: Nếu tài khoản dính >= 2 lệnh SL trong 1 giờ qua, siết chặt kỷ luật
+      const recentSlCount = consecutiveSlLossesByAccount.get(acct.id) ?? 0;
+      if (recentSlCount >= 2) {
+        if (signal.setupGrade !== "A+" || (signal.winrateScore ?? 0) < 92) {
+          continue; // Từ chối kèo thường, chỉ vào kèo Super A+ (>=92đ) để bảo vệ vốn
+        }
+        factorSizeMultiplier *= 0.5; // Giảm 50% rủi ro khi thị trường đang khó
       }
 
       const factorBudget = evaluateFactorExposureBudget({

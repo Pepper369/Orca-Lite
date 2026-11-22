@@ -927,7 +927,8 @@ export async function evaluateRealtimePositionExits(options?: {
     const reversalDir = options?.reversals?.get(cleanSym);
     if (reversalDir && reversalDir !== o.direction) {
       const holdMs = Date.now() - o.timestamp;
-      if (stage === "INITIAL" && holdMs >= 300_000) {
+      // Chỉ chấp nhận Reversal Exit khi vị thế đã giữ >= 15 phút để tránh nhiễu M5 pullbacks
+      if (stage === "INITIAL" && holdMs >= 900_000) {
         const res = await closeTrackedBotPosition({
           orderId: o.orderId,
           reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
@@ -936,12 +937,12 @@ export async function evaluateRealtimePositionExits(options?: {
         if (res.ok) closedCount++;
         continue;
       }
-      // Phase 4 In-Flight Scenario Shift Tightening: if position is in profit (>= 25% of TP1) when opposite A+ signal appears, lock 65% of open profit immediately
+      // Tighten SL when position is already deeply in profit (>= 50% of TP1) upon confirmed opposite signal
       const targetDistRev = tp1 > 0 ? Math.abs(tp1 - entry) : 0;
       const favMoveRev = isBuy ? markPrice - entry : entry - markPrice;
-      if (targetDistRev > pip * 3 && favMoveRev >= targetDistRev * 0.25) {
+      if (targetDistRev > pip * 3 && favMoveRev >= targetDistRev * 0.50) {
         const tightSl = roundPrice(
-          isBuy ? entry + favMoveRev * 0.65 : entry - favMoveRev * 0.65,
+          isBuy ? entry + favMoveRev * 0.50 : entry - favMoveRev * 0.50,
           o.symbol,
           assetType,
         );
@@ -954,7 +955,7 @@ export async function evaluateRealtimePositionExits(options?: {
       }
     }
 
-    // 4) Dynamic Breakeven, Early +0.35R/+0.48R Fee-Lock Shield & Phase 4 Time-Decay Stagnation Shield (45m Half-Life)
+    // 4) Clean Breathing-Room Breakeven Guard (Stage INITIAL) & True Post-TP1 Trailing Stop (Stage TP1_BE/TP2_TRAIL)
     const activeTarget =
       stage === "TP2_TRAIL" && tp3 > 0
         ? tp3
@@ -966,88 +967,85 @@ export async function evaluateRealtimePositionExits(options?: {
       const stopDistInit = Math.abs(entry - sl);
       const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
       const holdDurationMs = Date.now() - o.timestamp;
-      const isStagnant45m =
-        stage === "INITIAL" &&
-        holdDurationMs >= 45 * 60_000 &&
-        favorableMove >= pip * 2 &&
-        favorableMove < targetDist * 0.40;
+      const minBeBuffer = Math.max(pip * 2.5, entry * (assetType === "CRYPTO" ? 0.0008 : 0.00015));
 
-      // Early Loss-Halving at +0.40x TP1 distance: tighten initial SL by 48% only when trade has genuinely progressed
-      if (
-        stage === "INITIAL" &&
-        targetDist > pip * 3 &&
-        favorableMove >= targetDist * 0.40 &&
-        favorableMove < targetDist * 0.55 &&
-        ((isBuy && sl < entry) || (!isBuy && sl > entry))
-      ) {
-        const halfLossSl = roundPrice(
-          isBuy ? entry - stopDistInit * 0.48 : entry + stopDistInit * 0.48,
-          o.symbol,
-          assetType,
-        );
-        const improvedHalf = isBuy ? halfLossSl > sl + pip * 2 : halfLossSl < sl - pip * 2;
-        if (improvedHalf) {
-          await saveBotExecutionOrder({ ...o, stopLossPrice: halfLossSl });
-          trailedCount++;
-          continue;
+      // STAGE INITIAL: Khi chưa khớp TP1, TUYỆT ĐỐI KHÔNG kéo Trailing SL quá sát gây ngạt vị thế (micro-win).
+      // Chỉ dịch SL về Breakeven (Hòa vốn an toàn + phí sàn) khi giá đã đạt >= 75% quãng đường đến TP1.
+      if (stage === "INITIAL" && targetDist > pip * 3) {
+        const isStagnant45m = holdDurationMs >= 45 * 60_000 && favorableMove >= targetDist * 0.40;
+        if (favorableMove >= targetDist * 0.75 || isStagnant45m) {
+          const candidateBeSl = roundPrice(
+            isBuy ? entry + minBeBuffer : entry - minBeBuffer,
+            o.symbol,
+            assetType,
+          );
+          const hasBreathSpace = isBuy ? markPrice > candidateBeSl + pip * 2 : markPrice < candidateBeSl - pip * 2;
+          const improved = (isBuy ? candidateBeSl > sl + pip * 2 : candidateBeSl < sl - pip * 2) && hasBreathSpace;
+          if (improved) {
+            await saveBotExecutionOrder({ ...o, stopLossPrice: candidateBeSl });
+            trailedCount++;
+            recordBotActivity({
+              level: "info",
+              category: "GUARDRAIL",
+              symbol: o.symbol,
+              accountName: o.followerName,
+              platform: o.platform,
+              message: `[BREAKEVEN GUARD] Dời SL ${o.direction} ${o.symbol} về Breakeven ${candidateBeSl} khi đạt ${Math.round((favorableMove / targetDist) * 100)}% TP1 (bảo vệ vốn an toàn)`,
+            });
+            continue;
+          }
         }
       }
 
-      // Noise-Buffered Breakeven Guard: Wait until >= 55% of TP1 distance before locking Breakeven,
-      // with a minimum noise buffer to avoid whipsawing out positions on micro-spread flickers
-      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.55 || isStagnant45m)) {
-        const minBeBuffer = Math.max(pip * 2.5, entry * (assetType === "CRYPTO" ? 0.0006 : 0.00015));
-        const lockDist =
-          favorableMove >= targetDist * 0.80
-            ? favorableMove * 0.72
-            : favorableMove >= targetDist * 0.65
-              ? favorableMove * 0.52
-              : favorableMove >= targetDist * 0.55
-                ? Math.max(minBeBuffer, targetDist * 0.16)
-                : isStagnant45m
-                  ? Math.max(pip * 1.5, favorableMove * 0.5)
-                  : minBeBuffer;
-        const candidateSl = roundPrice(
-          isBuy ? entry + lockDist : entry - lockDist,
-          o.symbol,
-          assetType,
-        );
-        // Verify breath space: candidate SL must not choke current live mark price directly
-        const hasBreathSpace = isBuy ? markPrice > candidateSl + pip * 2 : markPrice < candidateSl - pip * 2;
-        const improved = (isBuy ? candidateSl > sl + pip * 2 : candidateSl < sl - pip * 2) && hasBreathSpace;
-        if (improved) {
-          let syncedSlOrderId = o.slOrderId ?? null;
-          const acct = await getBrokerConnectionById(o.followerId);
-          if (acct?.hasApiKey) {
-            const secrets = await getBrokerConnectionSecrets(acct.id);
-            if (secrets) {
-              const slSync = await updatePlatformExchangeStopLoss(acct.platform, {
-                credentials: secrets,
-                symbol: o.symbol,
-                direction: o.direction,
-                previousSlOrderId: o.slOrderId,
-                exchangeOrderId: o.exchangeOrderId,
-                newStopLossPrice: candidateSl,
-              });
-              if (slSync.ok && slSync.newSlOrderId) {
-                syncedSlOrderId = slSync.newSlOrderId;
+      // STAGE TP1_BE / TP2_TRAIL: ĐÃ CHỐT 50% TP1 THÀNH CÔNG -> Lúc này mới Trailing Stop 50% còn lại để gồng lời TP2/TP3
+      if ((stage === "TP1_BE" || stage === "TP2_TRAIL") && targetDist > pip * 3) {
+        if (favorableMove >= targetDist * 0.50) {
+          const lockDist =
+            favorableMove >= targetDist * 0.80
+              ? favorableMove * 0.65
+              : favorableMove * 0.45;
+          const candidateSl = roundPrice(
+            isBuy ? entry + lockDist : entry - lockDist,
+            o.symbol,
+            assetType,
+          );
+          const hasBreathSpace = isBuy ? markPrice > candidateSl + pip * 2 : markPrice < candidateSl - pip * 2;
+          const improved = (isBuy ? candidateSl > sl + pip * 2 : candidateSl < sl - pip * 2) && hasBreathSpace;
+          if (improved) {
+            let syncedSlOrderId = o.slOrderId ?? null;
+            const acct = await getBrokerConnectionById(o.followerId);
+            if (acct?.hasApiKey) {
+              const secrets = await getBrokerConnectionSecrets(acct.id);
+              if (secrets) {
+                const slSync = await updatePlatformExchangeStopLoss(acct.platform, {
+                  credentials: secrets,
+                  symbol: o.symbol,
+                  direction: o.direction,
+                  previousSlOrderId: o.slOrderId,
+                  exchangeOrderId: o.exchangeOrderId,
+                  newStopLossPrice: candidateSl,
+                });
+                if (slSync.ok && slSync.newSlOrderId) {
+                  syncedSlOrderId = slSync.newSlOrderId;
+                }
               }
             }
+            await saveBotExecutionOrder({
+              ...o,
+              stopLossPrice: candidateSl,
+              slOrderId: syncedSlOrderId,
+            });
+            trailedCount++;
+            recordBotActivity({
+              level: "info",
+              category: "GUARDRAIL",
+              symbol: o.symbol,
+              accountName: o.followerName,
+              platform: o.platform,
+              message: `[RUNNER TRAILING SL] Dịch Stop-Loss ${o.direction} ${o.symbol} lên ${candidateSl} khóa lãi Runner @ Mark ${markPrice}`,
+            });
+            continue;
           }
-          await saveBotExecutionOrder({
-            ...o,
-            stopLossPrice: candidateSl,
-            slOrderId: syncedSlOrderId,
-          });
-          trailedCount++;
-          recordBotActivity({
-            level: "info",
-            category: "GUARDRAIL",
-            symbol: o.symbol,
-            accountName: o.followerName,
-            platform: o.platform,
-            message: `[TRAILING SL] Dịch Stop-Loss ${o.direction} ${o.symbol} lên ${candidateSl} (khóa lãi an toàn @ Mark ${markPrice})`,
-          });
         }
       }
     }
