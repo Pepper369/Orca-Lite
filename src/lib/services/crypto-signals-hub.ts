@@ -387,7 +387,7 @@ async function scanSingleCryptoPair(
 }
 
 export async function getCryptoSignalsHubData(): Promise<{ data: CryptoSignalsHubData; meta: Meta } | null> {
-  const res = await cached("crypto-signals-hub-live-v2", {
+  const res = await cached("crypto-signals-hub-live-v4", {
     ttlMs: 15_000,
     staleMs: 30_000,
     producer: async () => {

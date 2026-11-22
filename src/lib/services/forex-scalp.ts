@@ -64,7 +64,7 @@ export async function buildForexScalpSignal(
 
   try {
     const { cached } = await import("../cache");
-    const cacheRes = await cached<{ result: ForexScalpResult; meta: Meta }>(`forex:scalp:v2:${pair}`, {
+    const cacheRes = await cached<{ result: ForexScalpResult; meta: Meta }>(`forex:scalp:v4:${pair}`, {
       ttlMs: 15_000,
       staleMs: 120_000,
       softSwr: true,

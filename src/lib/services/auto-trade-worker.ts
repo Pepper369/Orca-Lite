@@ -75,6 +75,7 @@ const CORE_REALTIME_FOREX_PAIRS = [
 ] as const;
 
 interface WorkerGlobalState {
+  version?: number;
   started: boolean;
   isTickRunning: boolean;
   lastTickAt: number | null;
@@ -84,7 +85,10 @@ interface WorkerGlobalState {
   lastQuantFeed: QuantEngineFeedItem[];
   metaModelCalibrated: boolean;
   timer: ReturnType<typeof setInterval> | null;
+  latestTickFn?: () => Promise<unknown>;
 }
+
+const WORKER_CODE_VERSION = 5;
 
 const g = globalThis as typeof globalThis & {
   __orcaAutoTradeWorkerState?: WorkerGlobalState;
@@ -93,6 +97,7 @@ const g = globalThis as typeof globalThis & {
 const STATE: WorkerGlobalState =
   g.__orcaAutoTradeWorkerState ??
   (g.__orcaAutoTradeWorkerState = {
+    version: WORKER_CODE_VERSION,
     started: false,
     isTickRunning: false,
     lastTickAt: null,
@@ -103,6 +108,18 @@ const STATE: WorkerGlobalState =
     metaModelCalibrated: false,
     timer: null,
   });
+
+// Hot-reload (HMR) Guard: always kill stale interval closures from older module evaluations
+if (STATE.version !== WORKER_CODE_VERSION) {
+  if (STATE.timer) {
+    clearInterval(STATE.timer);
+    STATE.timer = null;
+  }
+  STATE.started = false;
+  STATE.isTickRunning = false;
+  STATE.metaModelCalibrated = false;
+  STATE.version = WORKER_CODE_VERSION;
+}
 
 function ensureLiveMetaModelCalibrated(): void {
   if (STATE.metaModelCalibrated) return;
@@ -941,6 +958,7 @@ export function triggerImmediateAutoTradeScan(): void {
 }
 
 export function initAutoTradeWorker(): void {
+  STATE.latestTickFn = runAutoTradeTick;
   if (IS_TEST_RUNNER) return;
   if (STATE.started && STATE.timer) return;
   STATE.started = true;
@@ -953,15 +971,17 @@ export function initAutoTradeWorker(): void {
 
   // Trigger initial real-time quant scan immediately on startup
   const bootTimer = setTimeout(() => {
-    void runAutoTradeTick();
+    void (STATE.latestTickFn ?? runAutoTradeTick)();
   }, 300);
   bootTimer.unref?.();
 
   STATE.timer = setInterval(() => {
-    void runAutoTradeTick();
+    void (STATE.latestTickFn ?? runAutoTradeTick)();
   }, POLL_INTERVAL_MS);
   STATE.timer.unref?.();
 }
+
+STATE.latestTickFn = runAutoTradeTick;
 
 export function getAutoTradeWorkerStatus() {
   return {

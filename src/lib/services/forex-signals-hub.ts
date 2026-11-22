@@ -97,7 +97,7 @@ const GRADE_RANK: Record<SetupGrade, number> = {
 export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData; meta: Meta } | null> {
   const { cached } = await import("../cache");
 
-  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v2", {
+  const res = await cached<{ data: ForexSignalsHubData; meta: Meta }>("forex:signals:hub:v4", {
     ttlMs: 20_000,
     staleMs: 120_000,
     softSwr: true,

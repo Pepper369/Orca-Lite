@@ -485,6 +485,15 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
   const SL_COOLDOWN_MS = 30 * 60 * 1000;
   const nowScan = Date.now();
   if (!manualOverride && !opts.overrideAccounts) {
+    // Hard gate: never auto-dispatch FOREX/Metals orders during UTC weekend market closure
+    if (signal.assetType === "FOREX") {
+      const d = new Date(nowScan);
+      const day = d.getUTCDay();
+      const hour = d.getUTCHours();
+      if (day === 6 || (day === 5 && hour >= 22) || (day === 0 && hour < 22)) {
+        return [];
+      }
+    }
     const existingOrders = await listBotExecutionOrders(150, userId);
     for (const o of existingOrders) {
       const cleanSym = o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
