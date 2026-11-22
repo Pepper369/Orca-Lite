@@ -494,6 +494,7 @@ export function LiveBotCockpit({
   const [envFilter, setEnvFilter] = useState<"SPLIT" | "REAL" | "DEMO">("SPLIT");
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
+  const [resetDemoBusy, setResetDemoBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -587,6 +588,38 @@ export function LiveBotCockpit({
     }
   }, [mutateRest, onAfterAction]);
 
+  const handleResetDemo = useCallback(async () => {
+    if (resetDemoBusy) return;
+    setResetDemoBusy(true);
+    setActionMsg(null);
+    try {
+      const res = await fetch("/api/v1/copytrade/positions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset_demo", initialBalanceUsd: 10_000 }),
+      });
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { message?: string };
+        error?: { message?: string };
+      };
+      if (!res.ok || json.success === false) {
+        setActionMsg({ ok: false, text: json.error?.message || "Không thể reset tài khoản Demo" });
+      } else {
+        setActionMsg({
+          ok: true,
+          text: json.data?.message || "Đã reset tài khoản Demo về $10,000 và bắt đầu trade lại từ đầu.",
+        });
+      }
+      await mutateRest();
+      onAfterAction?.();
+    } catch {
+      setActionMsg({ ok: false, text: "Lỗi kết nối khi reset tài khoản Demo" });
+    } finally {
+      setResetDemoBusy(false);
+    }
+  }, [resetDemoBusy, mutateRest, onAfterAction]);
+
   const handleClosePosition = useCallback(
     async (pos: LiveOpenPosition) => {
       if (!pos.orderId || closingOrderId) return;
@@ -672,7 +705,17 @@ export function LiveBotCockpit({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={scanBusy}
+              disabled={resetDemoBusy || scanBusy}
+              onClick={() => void handleResetDemo()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/45 bg-cyan-500/10 px-2.5 py-1.5 text-[11.5px] font-semibold text-cyan-500 hover:bg-cyan-500/20 transition-colors disabled:opacity-50"
+              title="Reset toàn bộ tài khoản DEMO về $10,000 gốc, xóa lịch sử lệnh cũ và cho Bot trade lại từ đầu (không ảnh hưởng REAL NAV)"
+            >
+              <FlaskConical className={`size-3.5 ${resetDemoBusy ? "animate-spin" : ""}`} />
+              {resetDemoBusy ? "Đang Reset Demo..." : "Reset Demo ($10K) & Trade Lại"}
+            </button>
+            <button
+              type="button"
+              disabled={scanBusy || resetDemoBusy}
               onClick={() => void handleScanNow()}
               className="inline-flex items-center gap-1.5 rounded-lg bg-accent-primary px-3 py-1.5 text-[11.5px] font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
             >

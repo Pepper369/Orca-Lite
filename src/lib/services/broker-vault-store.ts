@@ -553,6 +553,7 @@ export async function updateBrokerConnectionState(
     lastVerifiedAt: number | null;
     lastError: string | null;
     totalCopiedTrades: number;
+    winratePct: number;
     totalPnlUsd: number;
     dailyRealizedPnlUsd: number;
     dailyPnlDate: string;
@@ -573,6 +574,7 @@ export async function updateBrokerConnectionState(
       }
       if (patch.lastError !== undefined) dbPatch.lastError = patch.lastError;
       if (patch.totalCopiedTrades !== undefined) dbPatch.totalCopiedTrades = patch.totalCopiedTrades;
+      if (patch.winratePct !== undefined) dbPatch.winratePct = String(patch.winratePct);
       if (patch.totalPnlUsd !== undefined) dbPatch.totalPnlUsd = String(patch.totalPnlUsd);
       if (patch.dailyRealizedPnlUsd !== undefined) dbPatch.dailyRealizedPnlUsd = String(patch.dailyRealizedPnlUsd);
       if (patch.dailyPnlDate !== undefined) dbPatch.dailyPnlDate = patch.dailyPnlDate;
@@ -1019,4 +1021,148 @@ export async function rotateBrokerCredentials(
   if (input.isTestnet !== undefined) target.isTestnet = input.isTestnet;
 
   return { connection: stripSecrets(target), oneTimeEaToken };
+}
+
+/**
+ * Resets all DEMO / Testnet / Paper Sandbox accounts back to clean starting capital ($10,000 default),
+ * wipes all prior Demo execution orders, and re-enables Auto-Trade so the Demo bots start fresh from scratch.
+ * Never touches LIVE_REAL (isTestnet === false && hasApiKey) accounts.
+ */
+export async function resetDemoBrokerAccounts(
+  userId?: string | null,
+  initialBalanceUsd = 10_000,
+): Promise<{
+  resetCount: number;
+  clearedOrdersCount: number;
+  accounts: FollowerAccount[];
+}> {
+  const safeStartBal =
+    Number.isFinite(initialBalanceUsd) && initialBalanceUsd > 0 ? Number(initialBalanceUsd.toFixed(2)) : 10_000;
+  const today = getTodayUtcDate();
+  const isDemoConn = (c: { isTestnet?: boolean; hasApiKey?: boolean; connectionStatus?: ConnectionStatus }) =>
+    c.isTestnet !== false || !c.hasApiKey || c.connectionStatus === "PAPER_SIMULATED";
+
+  let currentAccounts = await listBrokerConnections(userId);
+  let demoList = currentAccounts.filter(isDemoConn);
+
+  // If the user deleted all demo accounts previously, re-seed the default Paper Demo pair
+  if (demoList.length === 0) {
+    const defaults = createDefaultDemoConnections(userId ?? null);
+    for (const d of defaults) {
+      d.balanceUsd = safeStartBal;
+      if (!DEV_CONNECTIONS_STORE.some((x) => x.id === d.id)) {
+        DEV_CONNECTIONS_STORE.push(d);
+      }
+      if (shouldUseVaultDb()) {
+        try {
+          await db
+            .insert(brokerConnections)
+            .values({
+              id: d.id,
+              userId: d.userId,
+              name: d.name,
+              platform: d.platform,
+              accountNumberMasked: d.accountNumberMasked,
+              balanceUsd: String(safeStartBal),
+              riskMultiplier: String(d.riskMultiplier),
+              maxAllowedSlippagePips: String(d.maxAllowedSlippagePips),
+              leverageCap: d.leverageCap ?? 5,
+              isTestnet: true,
+              isActive: true,
+              autoExecuteEnabled: true,
+              killSwitched: false,
+              connectionStatus: d.connectionStatus,
+              maxDailyLossUsd: String(d.maxDailyLossUsd ?? 500),
+              dailyRealizedPnlUsd: "0",
+              dailyPnlDate: today,
+              maxOpenPositions: d.maxOpenPositions ?? 3,
+              totalCopiedTrades: 0,
+              winratePct: "0",
+              totalPnlUsd: "0",
+            })
+            .onConflictDoNothing();
+        } catch (err) {
+          tripVaultDbCooldown(err);
+        }
+      }
+    }
+    currentAccounts = await listBrokerConnections(userId);
+    demoList = currentAccounts.filter(isDemoConn);
+  }
+
+  const demoIds = demoList.map((d) => d.id);
+  const demoIdSet = new Set(demoIds);
+  let clearedOrdersCount = 0;
+
+  if (demoIds.length > 0 && shouldUseVaultDb()) {
+    try {
+      const hasStageTable = await ensureBotPositionStagesTable();
+      const existingRows = await db
+        .select({ id: botExecutionOrders.id })
+        .from(botExecutionOrders)
+        .where(inArray(botExecutionOrders.connectionId, demoIds));
+      const orderIds = existingRows.map((r) => r.id);
+
+      if (hasStageTable && orderIds.length > 0) {
+        await db
+          .execute(
+            sql`DELETE FROM orca_bot_position_stages WHERE order_id IN (${sql.join(
+              orderIds.map((oid) => sql`${oid}`),
+              sql`, `,
+            )})`,
+          )
+          .catch(() => null);
+      }
+
+      const deletedRows = await db
+        .delete(botExecutionOrders)
+        .where(inArray(botExecutionOrders.connectionId, demoIds))
+        .returning({ id: botExecutionOrders.id });
+      clearedOrdersCount += deletedRows.length;
+    } catch (err) {
+      tripVaultDbCooldown(err);
+    }
+  }
+
+  // Also clear matching Demo orders from in-memory store
+  for (let i = DEV_ORDERS_STORE.length - 1; i >= 0; i--) {
+    if (demoIdSet.has(DEV_ORDERS_STORE[i]!.followerId)) {
+      DEV_ORDERS_STORE.splice(i, 1);
+      clearedOrdersCount++;
+    }
+  }
+
+  const resetAccounts: FollowerAccount[] = [];
+  for (const demo of demoList) {
+    const updated = await updateBrokerConnectionState(demo.id, {
+      balanceUsd: safeStartBal,
+      totalPnlUsd: 0,
+      dailyRealizedPnlUsd: 0,
+      dailyPnlDate: today,
+      totalCopiedTrades: 0,
+      winratePct: 0,
+      killSwitched: false,
+      isActive: true,
+      autoExecuteEnabled: true,
+      lastError: null,
+      connectionStatus: demo.hasApiKey
+        ? "CONNECTED_VERIFIED"
+        : demo.hasEaToken
+          ? "AWAITING_EA"
+          : "PAPER_SIMULATED",
+    });
+    if (updated) resetAccounts.push(updated);
+  }
+
+  await recordVaultAuditLog(userId, "DEMO_ACCOUNTS_RESET", {
+    resetCount: resetAccounts.length,
+    clearedOrdersCount,
+    initialBalanceUsd: safeStartBal,
+  });
+
+  return {
+    resetCount: resetAccounts.length,
+    clearedOrdersCount,
+    accounts: resetAccounts,
+  };
 }

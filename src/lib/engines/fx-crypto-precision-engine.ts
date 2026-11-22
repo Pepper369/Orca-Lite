@@ -753,6 +753,23 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     (isBuy && maxRsiWin10 >= 73 && twoRedCrash && !hasSweep) ||
     (!isBuy && minRsiWin10 <= 27 && twoGreenSurge && !hasSweep);
 
+  const lastBodySigned = lastBar.close - lastBar.open;
+  const closeLocInBar = lastRange > 1e-12 ? (lastBar.close - lastBar.low) / lastRange : 0.5;
+  const isCounterImpulseCandleTrap =
+    !hasSweep &&
+    ((isBuy && lastBodySigned <= -atr14 * 0.65 && closeLocInBar <= 0.28) ||
+      (!isBuy && lastBodySigned >= atr14 * 0.65 && closeLocInBar >= 0.72));
+
+  const dr = ict.optimalTradeSetup.dealingRange;
+  const drSpan = Math.max(pip, dr.swingHigh - dr.swingLow);
+  const dealingRangePos = (currentPrice - dr.swingLow) / drSpan;
+  const isRangeExtremeOppositeTrap =
+    adxVal < 21 &&
+    !hasBreakout &&
+    !hasSweep &&
+    ((isBuy && dealingRangePos >= 0.88 && rsi14 >= 64) ||
+      (!isBuy && dealingRangePos <= 0.12 && rsi14 <= 36));
+
   if (isParabolicExtended) {
     vetoReasons.push(`Chạy quá đà Parabolic (${distEma21Atr.toFixed(1)}x ATR từ EMA21, RSI ${rsi14.toFixed(0)}) — cấm đuổi lệnh`);
     gatesFailed.push("Gate 3 (Anti-Chase Veto): Quá mua/quá bán căng quá mức");
@@ -765,6 +782,22 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
     gatesFailed.push("Gate 3b (Falling-Knife Veto): Xả mạnh ngay sau cực trị quá mua/quá bán");
     precisionScore -= 18;
+  } else if (isCounterImpulseCandleTrap) {
+    vetoReasons.push(
+      isBuy
+        ? "Nến hiện tại đang xả mạnh đóng cửa sát đáy (Counter-Impulse Marubozu) — chặn vào nhầm lệnh BUY"
+        : "Nến hiện tại đang kéo mạnh đóng cửa sát đỉnh (Counter-Impulse Marubozu) — chặn vào nhầm lệnh SELL",
+    );
+    gatesFailed.push("Gate 3d (Anti-Wrong-Entry Veto): Xung lực nến đóng cửa ngược hoàn toàn hướng lệnh");
+    precisionScore -= 16;
+  } else if (isRangeExtremeOppositeTrap) {
+    vetoReasons.push(
+      isBuy
+        ? `Giá đang sát trần vùng sideway (${(dealingRangePos * 100).toFixed(0)}% Dealing Range) — chặn mua đỉnh vùng giá`
+        : `Giá đang sát đáy vùng sideway (${(dealingRangePos * 100).toFixed(0)}% Dealing Range) — chặn bán đáy vùng giá`,
+    );
+    gatesFailed.push("Gate 3e (Range Ceiling/Floor Veto): Tránh mua đỉnh / bán đáy trong vùng tích lũy");
+    precisionScore -= 14;
   }
 
   const inValuePullback =

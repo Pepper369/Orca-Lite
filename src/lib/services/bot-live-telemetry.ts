@@ -2,7 +2,11 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { eventBus } from "@/lib/events";
 import { getAssetPipSize, roundPrice } from "@/lib/engines/asset-precision";
-import { recordLiveMetaLabelOutcome } from "@/lib/engines/meta-labeling-calibration";
+import {
+  clearLiveTrainedMetaModels,
+  recordLiveMetaLabelOutcome,
+} from "@/lib/engines/meta-labeling-calibration";
+import { calibrateAndRegisterLiveMetaModels } from "@/lib/engines/fx-crypto-backtest-harness";
 import * as binance from "@/lib/providers/binance";
 import { getBiquotePublicQuotes } from "@/lib/providers/forex";
 import { binanceWs, ensureBinanceWsStarted } from "@/lib/realtime/binance-ws";
@@ -36,6 +40,7 @@ import {
   getBrokerConnectionSecrets,
   listBotExecutionOrders,
   listBrokerConnections,
+  resetDemoBrokerAccounts,
   saveBotExecutionOrder,
   updateBrokerConnectionState,
 } from "@/lib/services/broker-vault-store";
@@ -477,6 +482,59 @@ export async function closeTrackedBotPosition(params: {
     symbol: order.symbol,
     accountName: acct.name,
     message: `Đã chốt${tag} ${order.symbol} tại ${closePrice} · Lãi/Lỗ chốt: ${chunkSign}$${chunkRealizedPnlUsd.toFixed(2)} (Tổng kèo: ${pnlSign}$${totalRealizedTradePnl.toFixed(2)})`,
+  };
+}
+
+/**
+ * Resets all DEMO accounts back to clean $10,000 starting NAV, wipes old Demo orders,
+ * recalibrates the isolated FOREX & CRYPTO Meta-Labeling models, and triggers an immediate fresh Auto-Trade scan.
+ */
+export async function resetDemoAccountsAndRestartTrading(
+  userId?: string | null,
+  initialBalanceUsd = 10_000,
+): Promise<{
+  ok: boolean;
+  resetCount: number;
+  clearedOrdersCount: number;
+  dispatchedCount: number;
+  message: string;
+}> {
+  const res = await resetDemoBrokerAccounts(userId, initialBalanceUsd);
+  CLOSED_ORDER_IDS.clear();
+  for (const acc of res.accounts) {
+    EXCHANGE_CACHE.delete(acc.id);
+  }
+  clearLiveTrainedMetaModels();
+  try {
+    calibrateAndRegisterLiveMetaModels({ assetType: "ALL" });
+  } catch {
+    /* ignore calibration fallback */
+  }
+
+  let dispatchedCount = 0;
+  if (!IS_TEST_RUNNER) {
+    try {
+      const workerMod = await import("@/lib/services/auto-trade-worker");
+      const tick = await workerMod.runAutoTradeTick();
+      dispatchedCount = tick.dispatched;
+    } catch {
+      /* ignore immediate tick error */
+    }
+  }
+
+  const msg = `Đã reset ${res.resetCount} tài khoản DEMO về $${initialBalanceUsd.toLocaleString()} gốc, xóa ${res.clearedOrdersCount} lệnh cũ và khởi động lại Bot Auto-Trade (${dispatchedCount} lệnh mới vừa khớp).`;
+  recordBotActivity({
+    level: "ok",
+    category: "GUARDRAIL",
+    message: `🔄 [RESET DEMO] ${msg}`,
+  });
+
+  return {
+    ok: true,
+    resetCount: res.resetCount,
+    clearedOrdersCount: res.clearedOrdersCount,
+    dispatchedCount,
+    message: msg,
   };
 }
 

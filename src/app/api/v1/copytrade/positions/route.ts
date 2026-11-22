@@ -1,6 +1,9 @@
 import { badRequest, fail, ok } from "@/lib/envelope";
 import { getSessionUser } from "@/lib/auth";
-import { closeTrackedBotPosition } from "@/lib/services/bot-live-telemetry";
+import {
+  closeTrackedBotPosition,
+  resetDemoAccountsAndRestartTrading,
+} from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -17,11 +20,24 @@ export async function POST(req: Request) {
   try {
     const session = await getSessionUser(req);
     if (!session && process.env.NODE_ENV === "production") {
-      return fail("UNAUTHENTICATED", "Đăng nhập để đóng vị thế bot", 401);
+      return fail("UNAUTHENTICATED", "Đăng nhập để quản lý vị thế bot", 401);
     }
-    const body = (await req.json()) as { action?: string; orderId?: string };
+    const body = (await req.json()) as {
+      action?: string;
+      orderId?: string;
+      initialBalanceUsd?: number;
+    };
+
+    if (body.action === "reset_demo") {
+      const resetRes = await resetDemoAccountsAndRestartTrading(
+        session?.id ?? null,
+        body.initialBalanceUsd ?? 10_000,
+      );
+      return ok(resetRes);
+    }
+
     if (body.action !== "close" || !body.orderId?.trim()) {
-      return badRequest("Cần cung cấp action='close' và orderId vị thế cần chốt");
+      return badRequest("Cần cung cấp action='close' (kèm orderId) hoặc action='reset_demo'");
     }
 
     const res = await closeTrackedBotPosition({

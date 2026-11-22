@@ -626,10 +626,15 @@ export async function runAutoTradeTick(): Promise<{
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
         const lots = Math.max(0.01, s.recommendedLots || 0.2);
         const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
+        const isBuyFx = s.direction === "BUY";
+        const refEntryFx = s.entryPrice ?? marketPrice;
         const pullbackTriggered =
-          s.entryMode !== "LIMIT_PULLBACK" ||
-          riskDist <= 0 ||
-          Math.abs(marketPrice - (s.entryPrice ?? marketPrice)) <= riskDist * 0.35;
+          s.entryMode === "LIMIT_PULLBACK"
+            ? riskDist <= 0 || Math.abs(marketPrice - refEntryFx) <= riskDist * 0.35
+            : riskDist <= 0 ||
+              (isBuyFx
+                ? marketPrice >= refEntryFx - riskDist * 0.25
+                : marketPrice <= refEntryFx + riskDist * 0.25);
 
         if (s.status === "ACTIVE" && pullbackTriggered) {
           signalsToDispatch.push({
@@ -730,12 +735,21 @@ export async function runAutoTradeTick(): Promise<{
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
         const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
+        const isBuyCr = s.direction === "BUY";
+        const refEntryCr = s.entryPrice ?? marketPrice;
+        const wsMicroCr = binanceWs.getMicroFlow(s.pair);
+        const microFlowAligned =
+          !wsMicroCr ||
+          (isBuyCr ? wsMicroCr.tickImbalancePct > -40 : wsMicroCr.tickImbalancePct < 40);
         const pullbackTriggered =
-          s.entryMode !== "LIMIT_PULLBACK" ||
-          riskDist <= 0 ||
-          Math.abs(marketPrice - (s.entryPrice ?? marketPrice)) <= riskDist * 0.35;
+          s.entryMode === "LIMIT_PULLBACK"
+            ? riskDist <= 0 || Math.abs(marketPrice - refEntryCr) <= riskDist * 0.35
+            : riskDist <= 0 ||
+              (isBuyCr
+                ? marketPrice >= refEntryCr - riskDist * 0.25
+                : marketPrice <= refEntryCr + riskDist * 0.25);
 
-        if (s.status === "ACTIVE" && pullbackTriggered) {
+        if (s.status === "ACTIVE" && pullbackTriggered && microFlowAligned) {
           signalsToDispatch.push({
             signal: {
               id: sigId,

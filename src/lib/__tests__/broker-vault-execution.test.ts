@@ -48,6 +48,7 @@ import {
   closeTrackedBotPosition,
   evaluateRealtimePositionExits,
   getLivePriceReference,
+  resetDemoAccountsAndRestartTrading,
   updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
 import { getLiveMetaOutcomeTelemetry } from "@/lib/engines/meta-labeling-calibration";
@@ -929,4 +930,72 @@ test("Winrate Bottleneck Shields: TP Drift Preservation, Pre-TP1 Profit Shield, 
   // Clean up
   await closeTrackedBotPosition({ orderId: liveOrd!.orderId, userId, overrideClosePrice: 3065 });
   await deleteBrokerConnection(demoConn.id, userId);
+});
+
+test("Demo Account Full Reset: Resets DEMO NAV to $10,000, clears Demo orders & preserves REAL accounts", async () => {
+  const userId = `usr_demo_reset_${Date.now()}`;
+  const { connection: realAcc } = await createBrokerConnection({
+    userId,
+    name: "Binance Live Real",
+    platform: "BINANCE_FUTURES",
+    balanceUsd: 25_000,
+    riskMultiplier: 1.0,
+    isTestnet: false,
+    apiKey: "bn_real_keep_key_123456",
+    apiSecret: "bn_real_keep_sec_654321",
+  });
+  const { connection: demoAcc } = await createBrokerConnection({
+    userId,
+    name: "Binance Demo Resettable",
+    platform: "BINANCE_FUTURES",
+    balanceUsd: 6_420,
+    riskMultiplier: 1.0,
+    isTestnet: true,
+  });
+
+  // Dispatch a demo trade and close it so demo account has altered balance & order history
+  const [ord] = await dispatchSignalWithVault({
+    signal: {
+      ...SAMPLE_CRYPTO_SIGNAL,
+      id: `sig_reset_demo_${Date.now()}`,
+      symbol: "BTCUSDT",
+      direction: "BUY",
+      entryPrice: 90_000,
+      stopLossPrice: 88_500,
+      takeProfit1: 92_000,
+    },
+    currentMarketPrice: 90_000,
+    manualOverride: true,
+    userId,
+    targetFollowerIds: [demoAcc.id],
+  });
+  assert.ok(ord);
+  await closeTrackedBotPosition({ orderId: ord!.orderId, userId, overrideClosePrice: 89_000 });
+
+  // Execute full Demo reset
+  const resetRes = await resetDemoAccountsAndRestartTrading(userId, 10_000);
+  assert.equal(resetRes.ok, true);
+  assert.ok(resetRes.resetCount >= 1);
+  assert.ok(resetRes.clearedOrdersCount >= 1);
+
+  const afterAccounts = await listBrokerConnections(userId);
+  const realAfter = afterAccounts.find((a) => a.id === realAcc.id)!;
+  const demoAfter = afterAccounts.find((a) => a.id === demoAcc.id)!;
+  assert.equal(realAfter.balanceUsd, 25_000, "REAL account balance must never be touched by Demo reset");
+  assert.equal(demoAfter.balanceUsd, 10_000, "DEMO account balance must be reset to $10,000");
+  assert.equal(demoAfter.totalPnlUsd, 0);
+  assert.equal(demoAfter.totalCopiedTrades, 0);
+  assert.equal(demoAfter.winratePct, 0);
+  assert.equal(demoAfter.autoExecuteEnabled, true);
+
+  const remainingOrders = await listBotExecutionOrders(20, userId);
+  assert.equal(
+    remainingOrders.filter((o) => o.followerId === demoAcc.id).length,
+    0,
+    "All prior Demo execution orders must be cleared on reset",
+  );
+
+  for (const acc of afterAccounts) {
+    await deleteBrokerConnection(acc.id, userId);
+  }
 });
