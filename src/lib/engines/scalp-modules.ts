@@ -57,15 +57,18 @@ export function runAssetFilter(input: ScalpAnalyzeInput): AssetFilterResult {
   const reasons: string[] = [];
   const tier = classifyTier(input.symbol, input.quoteVolume24h ?? null);
   const dataQualityOk =
-    input.barsM15.length >= 40 &&
-    input.barsM5.length >= 60 &&
+    input.barsM15.length >= 28 &&
+    input.barsM5.length >= 45 &&
     input.barsM15.every((b) => Number.isFinite(b.close) && b.close > 0);
 
   if (!dataQualityOk) reasons.push("Thieu du lieu OHLCV lien tuc (M15/M5)");
 
   const vols = input.barsM5.map((b) => b.volume).filter((v) => v > 0);
   const medVol = median(vols.slice(-40, -1));
-  const lastVol = input.barsM5[input.barsM5.length - 1]?.volume ?? 0;
+  const curBarVol = input.barsM5[input.barsM5.length - 1]?.volume ?? 0;
+  const prevClosedBarVol = input.barsM5[input.barsM5.length - 2]?.volume ?? 0;
+  // Use max(forming bar volume, just-closed bar volume) so a newly opened candle in its first seconds is not falsely flagged as low volume
+  const lastVol = Math.max(curBarVol, prevClosedBarVol);
   const volumeRatio = medVol > 0 ? lastVol / medVol : null;
   if (volumeRatio != null && volumeRatio < 0.25) {
     reasons.push(`Volume hien tai thap bat thuong (x${volumeRatio.toFixed(2)} median)`);

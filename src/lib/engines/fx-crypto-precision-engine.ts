@@ -650,6 +650,57 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     }
   }
 
+  // Controlled Live Impulse Reversal Re-Evaluation:
+  // When live L2/OrderFlow telemetry is present and the lagging HTF bias selects a direction that is
+  // actively contradicted by a strong Counter-Impulse Marubozu + Irreversible Pace Lock + Multi-Pillar confirmation,
+  // pivot to the live impulse direction instead of deadlocking into a self-vetoed NO_TRADE.
+  const hasLiveMicroTelemetry =
+    orderBookImbalance != null || flowIntensityIndex != null || input.micropriceSkewBps != null;
+  let isLiveImpulseReversalPivot = false;
+  if (hasLiveMicroTelemetry && candidateDirection === "AUTO" && !isDeadChop) {
+    const bodySigned = lastBar.close - lastBar.open;
+    const closeLoc = lastRange > 1e-12 ? (lastBar.close - lastBar.low) / lastRange : 0.5;
+    const strongBullMarubozu = bodySigned >= atr14 * 0.62 && closeLoc >= 0.72;
+    const strongBearMarubozu = bodySigned <= -atr14 * 0.62 && closeLoc <= 0.28;
+
+    const bullPillars =
+      (bullSweepRecent ? 1 : 0) +
+      (bullMss ? 1 : 0) +
+      (microSignals.bullBreakout ? 1 : 0) +
+      (bullDivSignal ? 1 : 0) +
+      (realImbalance >= 12 ? 1 : 0) +
+      (histLast > 0 ? 1 : 0) +
+      (currentPrice > e9 ? 1 : 0);
+    const bearPillars =
+      (bearSweepRecent ? 1 : 0) +
+      (bearMss ? 1 : 0) +
+      (microSignals.bearBreakout ? 1 : 0) +
+      (bearDivSignal ? 1 : 0) +
+      (realImbalance <= -12 ? 1 : 0) +
+      (histLast < 0 ? 1 : 0) +
+      (currentPrice < e9 ? 1 : 0);
+
+    if (
+      (resolvedDir === "SELL" || resolvedDir === "NEUTRAL") &&
+      strongBullMarubozu &&
+      bullPillars >= 2 &&
+      realImbalance >= -10 &&
+      rsi14 < 72
+    ) {
+      resolvedDir = "BUY";
+      isLiveImpulseReversalPivot = true;
+    } else if (
+      (resolvedDir === "BUY" || resolvedDir === "NEUTRAL") &&
+      strongBearMarubozu &&
+      bearPillars >= 2 &&
+      realImbalance <= 10 &&
+      rsi14 > 28
+    ) {
+      resolvedDir = "SELL";
+      isLiveImpulseReversalPivot = true;
+    }
+  }
+
   const vetoReasons: string[] = [];
   const gatesPassed: string[] = [];
   const gatesFailed: string[] = [];
@@ -697,6 +748,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else if (htfMatches || (macroMatches && !htfOpposes)) {
     precisionScore += 12;
     gatesPassed.push(`Gate 1: Thuận khung lớn (${htfBias}/${macroBias})`);
+  } else if (isLiveImpulseReversalPivot) {
+    precisionScore += 10;
+    gatesPassed.push("Gate 1: Đảo chiều xung lực thực gian thực (Live Marubozu + Pace Lock + Order Flow Reclaim)");
   } else if (htfOpposes && macroOpposes && !(hasSweep && hasMss) && !hasExhaustionShift) {
     precisionScore -= 20;
     vetoReasons.push(`Ngược xu hướng cả HTF lẫn Macro (${htfBias}/${macroBias}) mà chưa có Sweep+MSS đảo chiều`);
@@ -1061,11 +1115,17 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   // Compute friction ahead of SL clamping so compressed low-ATR setups don't place stops inside spread/fee noise
   let totalFrictionPrice: number;
+  const isLiveTightCryptoBook =
+    assetType === "CRYPTO" && spreadPipsOrPct != null && spreadPipsOrPct >= 0 && spreadPipsOrPct < 0.00025;
   if (assetType === "FOREX") {
     const clean = symbol.toUpperCase();
     const defaultSpread = clean.startsWith("XAU") ? 2.5 : clean.includes("JPY") ? 1.2 : 1.0;
     const sp = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? spreadPipsOrPct : defaultSpread;
     totalFrictionPrice = (sp + 0.35) * pip;
+  } else if (isLiveTightCryptoBook) {
+    // Live L2 orderbook with <2.5 bps spread: use Maker-aware / blended institutional round-trip fee (4.2 - 5.5 bps)
+    const feeFloor = entryMode === "LIMIT_PULLBACK" ? 0.00042 : 0.00052;
+    totalFrictionPrice = rawEntry * Math.max(feeFloor, (spreadPipsOrPct ?? 0) + 0.00042);
   } else {
     const spDec = spreadPipsOrPct != null && spreadPipsOrPct >= 0 ? Math.min(spreadPipsOrPct, 0.02) : 0.0004;
     totalFrictionPrice = rawEntry * Math.max(0.0008, spDec + 0.0006);
@@ -1085,11 +1145,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
         : swingHigh5 + slBuffer - rawEntry;
 
   // Ensure stop is anchored outside recent 5-bar micro-swing & spread/fee noise while keeping fast capital turnover
+  const maxVolMultForStop = isLiveTightCryptoBook ? 3.2 : 2.1;
+  const maxStopCapMult = isLiveTightCryptoBook ? 3.4 : 2.2;
   const minFrictionSafeStop =
-    candidateStopLoss == null ? Math.min(structuralVolUnit * 2.1, totalFrictionPrice / 0.19) : 0;
+    candidateStopLoss == null ? Math.min(structuralVolUnit * maxVolMultForStop, totalFrictionPrice / 0.19) : 0;
   const upperStopCap = Math.max(structuralVolUnit * 1.6, minFrictionSafeStop);
   const stopDist = Math.min(
-    structuralVolUnit * 2.2,
+    structuralVolUnit * maxStopCapMult,
     upperStopCap,
     Math.max(structuralVolUnit * 0.90, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
   );

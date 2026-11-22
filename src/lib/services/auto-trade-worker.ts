@@ -52,6 +52,7 @@ import {
 } from "@/lib/services/auto-trade-dispatcher";
 import {
   evaluateRealtimePositionExits,
+  getPairEmpiricalWinrateModifier,
   recordBotActivity,
   updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
@@ -103,7 +104,7 @@ interface WorkerGlobalState {
   latestTickFn?: () => Promise<unknown>;
 }
 
-const WORKER_CODE_VERSION = 7;
+const WORKER_CODE_VERSION = 8;
 
 const g = globalThis as typeof globalThis & {
   __orcaAutoTradeWorkerState?: WorkerGlobalState;
@@ -215,13 +216,19 @@ async function scanLivePrecisionSetups(params: {
             binance.getOrderBook(pair, 10).catch(() => ({ lastUpdateId: 0, bids: [], asks: [] })),
             binance.getOpenInterest(pair).catch(() => ({ openInterest: 0, time: Date.now() })),
           ]);
-          const execBars = bars5m.length >= 60 ? bars5m : bars15m;
-          const htfBars = bars15m.length >= 40 ? bars15m : execBars;
           const wsMark = binanceWs.getMark(pair, 20_000)?.markPrice ?? binanceWs.getTicker(pair, 20_000)?.price;
           const livePrice =
             wsMark && wsMark > 0
               ? wsMark
-              : Number(spot?.lastPrice ?? 0) || (execBars.length > 0 ? execBars[execBars.length - 1]!.close : 0);
+              : Number(spot?.lastPrice ?? 0) || (bars5m.length > 0 ? bars5m[bars5m.length - 1]!.close : 0);
+          const atr5m = bars5m.length >= 30 ? (calcAtr(bars5m, 14) ?? 0) : 0;
+          const isM5Compressed = livePrice > 0 && atr5m > 0 && atr5m / livePrice < 0.0022 && bars15m.length >= 45;
+          const execBars = isM5Compressed ? bars15m : bars5m.length >= 60 ? bars5m : bars15m;
+          const htfBars = isM5Compressed
+            ? resampleOhlcvBars(bars15m, 4)
+            : bars15m.length >= 40
+              ? bars15m
+              : execBars;
           if (livePrice <= 0 || execBars.length < 30) return null;
           updateLivePriceReference(pair, livePrice);
 
@@ -909,6 +916,35 @@ export async function runAutoTradeTick(): Promise<{
         (b.signal.winrateScore ?? 0) - (a.signal.winrateScore ?? 0) ||
         (b.signal.expectancyR ?? 0) - (a.signal.expectancyR ?? 0),
     );
+
+    // Apply Per-Pair Empirical Real-State Winrate Throttle & Portfolio-Level HRP sizing
+    if (signalsToDispatch.length > 0) {
+      const empMods = await Promise.all(
+        signalsToDispatch.map((item) => getPairEmpiricalWinrateModifier(item.signal.symbol)),
+      );
+      const filteredByEmpirical: typeof signalsToDispatch = [];
+      for (let i = 0; i < signalsToDispatch.length; i++) {
+        const item = signalsToDispatch[i]!;
+        const mod = empMods[i]!;
+        const adjScore = Math.max(0, Math.min(99, (item.signal.winrateScore ?? 75) + mod.winrateScoreBonus));
+        item.signal.winrateScore = adjScore;
+        if (mod.requireAPlusOnly && (item.signal.setupGrade !== "A+" || adjScore < 80)) {
+          continue;
+        }
+        if (item.signal.assetType === "CRYPTO") {
+          item.signal.masterLotsOrQty = Number(
+            Math.max(0.001, item.signal.masterLotsOrQty * mod.sizeMultiplier).toFixed(4),
+          );
+        } else {
+          item.signal.masterLotsOrQty = Number(
+            Math.max(0.01, item.signal.masterLotsOrQty * mod.sizeMultiplier).toFixed(2),
+          );
+        }
+        filteredByEmpirical.push(item);
+      }
+      signalsToDispatch.length = 0;
+      signalsToDispatch.push(...filteredByEmpirical);
+    }
 
     // Apply Portfolio-Level Hierarchical Risk Parity (HRP) cluster diversification sizing across concurrent signals
     if (signalsToDispatch.length >= 2) {

@@ -124,18 +124,27 @@ async function scanSingleCryptoPair(
       binance.getOpenInterest(pair).catch(() => ({ openInterest: 0, time: Date.now() })),
     ]);
 
-    const rawExecBars = klines5m.length >= 60 ? klines5m : klines15m;
-    const htfBars = klines15m.length >= 40 ? klines15m : rawExecBars;
-    if (!rawExecBars || rawExecBars.length < 30 || !ticker) {
-      return null;
-    }
-
     const wsPrice =
       binanceWs.getMark(pair, 20_000)?.markPrice ?? binanceWs.getTicker(pair, 20_000)?.price;
     const lastPrice =
       wsPrice && wsPrice > 0
         ? wsPrice
-        : Number(ticker.lastPrice) || rawExecBars[rawExecBars.length - 1]!.close;
+        : Number(ticker.lastPrice) || (klines5m[klines5m.length - 1]?.close ?? klines15m[klines15m.length - 1]?.close ?? 0);
+
+    // Adaptive M5 -> M15 Timeframe Escalation under Low-Volatility Compression:
+    // When M5 ATR is compressed (< 22 bps of price), escalate execution timeframe to M15 (and HTF to 1H)
+    // so structural stop distance is 1.8x wider and exchange fees do not erode 1R expectancy.
+    const atr5mCheck = klines5m.length >= 30 ? (calcAtr(klines5m, 14) ?? 0) : 0;
+    const isM5Compressed = lastPrice > 0 && atr5mCheck > 0 && atr5mCheck / lastPrice < 0.0022 && klines15m.length >= 45;
+    const rawExecBars = isM5Compressed ? klines15m : klines5m.length >= 60 ? klines5m : klines15m;
+    const htfBars = isM5Compressed
+      ? resampleOhlcvBars(klines15m, 4)
+      : klines15m.length >= 40
+        ? klines15m
+        : rawExecBars;
+    if (!rawExecBars || rawExecBars.length < 30 || !ticker || lastPrice <= 0) {
+      return null;
+    }
     const execBars = rawExecBars.map((b, idx) =>
       idx === rawExecBars.length - 1 && lastPrice > 0
         ? {

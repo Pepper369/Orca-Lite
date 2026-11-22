@@ -250,6 +250,10 @@ export async function buildScalpSignal(symbolRaw: string, timeframe = "5m"): Pro
         const funding = detail?.detail.funding?.fundingRate ?? null;
         const oi = detail?.detail.openInterest?.openInterest ?? null;
         const domImbalance = book ? evaluateTrueLevel2Dom(book, 5).imbalanceRatio : null;
+        const bestBid = book?.bids?.[0]?.price ?? 0;
+        const bestAsk = book?.asks?.[0]?.price ?? 0;
+        const liveSpreadPct =
+          bestBid > 0 && bestAsk >= bestBid ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2) : null;
 
         const n5 = q5.cleaned.length;
         const recent5mPct =
@@ -272,6 +276,7 @@ export async function buildScalpSignal(symbolRaw: string, timeframe = "5m"): Pro
           quoteVolume24h: row?.quoteVolume ?? null,
           fundingRate: funding,
           openInterest: oi,
+          spreadPct: liveSpreadPct,
           orderBookImbalance: domImbalance,
           isLockout: shield.isLockout,
           lockoutReason: shield.warningMessage,

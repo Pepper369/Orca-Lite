@@ -367,6 +367,112 @@ function computeAccountWinrateStats(
   return { closedTradesCount, wins, winratePct };
 }
 
+export interface PairEmpiricalWinrateModifier {
+  symbol: string;
+  resolvedCount: number;
+  wins: number;
+  empiricalWinRatePct: number | null;
+  consecutiveLosses: number;
+  consecutiveWins: number;
+  requireAPlusOnly: boolean;
+  winrateScoreBonus: number;
+  sizeMultiplier: number;
+}
+
+/**
+ * Computes real-state empirical winrate & streak feedback for a specific trading pair
+ * from recent resolved orders in the database, enabling adaptive per-pair quality gating.
+ */
+export async function getPairEmpiricalWinrateModifier(
+  symbolRaw: string,
+): Promise<PairEmpiricalWinrateModifier> {
+  const clean = symbolRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  try {
+    const orders = await listBotExecutionOrders(150);
+    const pairResolved = orders
+      .filter(
+        (o) =>
+          o.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "") === clean &&
+          (o.message.startsWith("[ĐÃ ĐÓNG]") ||
+            ((o.positionStage === "TP1_BE" || o.positionStage === "TP2_TRAIL") &&
+              o.realizedPnlUsd != null &&
+              o.realizedPnlUsd > 0)),
+      )
+      .slice(0, 12);
+
+    if (pairResolved.length === 0) {
+      return {
+        symbol: clean,
+        resolvedCount: 0,
+        wins: 0,
+        empiricalWinRatePct: null,
+        consecutiveLosses: 0,
+        consecutiveWins: 0,
+        requireAPlusOnly: false,
+        winrateScoreBonus: 0,
+        sizeMultiplier: 1.0,
+      };
+    }
+
+    let wins = 0;
+    let consecutiveLosses = 0;
+    let consecutiveWins = 0;
+    let streakBroken = false;
+    let firstOutcomeIsWin: boolean | null = null;
+
+    for (const o of pairResolved) {
+      let isWin = false;
+      if (o.realizedPnlUsd != null && Number.isFinite(o.realizedPnlUsd)) {
+        isWin = o.realizedPnlUsd > 0;
+      } else {
+        const m = o.message.match(/PnL\s*([+-]?\$?\d+(?:\.\d+)?)/);
+        if (m) isWin = Number(m[1]!.replace("$", "")) > 0;
+      }
+      if (isWin) wins++;
+
+      if (!streakBroken) {
+        if (firstOutcomeIsWin === null) firstOutcomeIsWin = isWin;
+        if (isWin === firstOutcomeIsWin) {
+          if (isWin) consecutiveWins++;
+          else consecutiveLosses++;
+        } else {
+          streakBroken = true;
+        }
+      }
+    }
+
+    const resolvedCount = pairResolved.length;
+    const empiricalWinRatePct = Number(((wins / resolvedCount) * 100).toFixed(1));
+    const isColdStreak = consecutiveLosses >= 2 || (resolvedCount >= 3 && empiricalWinRatePct < 55);
+    const isHotStreak =
+      consecutiveWins >= 2 || (resolvedCount >= 2 && empiricalWinRatePct >= 75 && consecutiveLosses === 0);
+
+    return {
+      symbol: clean,
+      resolvedCount,
+      wins,
+      empiricalWinRatePct,
+      consecutiveLosses,
+      consecutiveWins,
+      requireAPlusOnly: isColdStreak,
+      winrateScoreBonus: isHotStreak ? 4 : isColdStreak ? -6 : 0,
+      sizeMultiplier: isColdStreak ? 0.65 : isHotStreak ? 1.1 : 1.0,
+    };
+  } catch {
+    return {
+      symbol: clean,
+      resolvedCount: 0,
+      wins: 0,
+      empiricalWinRatePct: null,
+      consecutiveLosses: 0,
+      consecutiveWins: 0,
+      requireAPlusOnly: false,
+      winrateScoreBonus: 0,
+      sizeMultiplier: 1.0,
+    };
+  }
+}
+
 export async function closeTrackedBotPosition(params: {
   orderId: string;
   userId?: string | null;
@@ -848,7 +954,7 @@ export async function evaluateRealtimePositionExits(options?: {
       }
     }
 
-    // 4) Dynamic Breakeven, Pre-TP1 Profit Shield & Phase 4 Time-Decay Stagnation Shield (45m Half-Life)
+    // 4) Dynamic Breakeven, Early +0.35R/+0.48R Fee-Lock Shield & Phase 4 Time-Decay Stagnation Shield (45m Half-Life)
     const activeTarget =
       stage === "TP2_TRAIL" && tp3 > 0
         ? tp3
@@ -857,6 +963,7 @@ export async function evaluateRealtimePositionExits(options?: {
           : tp1;
     if (activeTarget > 0 && sl > 0) {
       const targetDist = Math.abs(activeTarget - entry);
+      const stopDistInit = Math.abs(entry - sl);
       const favorableMove = isBuy ? markPrice - entry : entry - markPrice;
       const holdDurationMs = Date.now() - o.timestamp;
       const isStagnant45m =
@@ -864,15 +971,39 @@ export async function evaluateRealtimePositionExits(options?: {
         holdDurationMs >= 45 * 60_000 &&
         favorableMove >= pip * 2 &&
         favorableMove < targetDist * 0.40;
-      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.40 || isStagnant45m)) {
+
+      // Early Loss-Halving at +0.32x TP1 distance: tighten initial SL by 50% so green trades rarely turn into full -1R losses
+      if (
+        stage === "INITIAL" &&
+        targetDist > pip * 3 &&
+        favorableMove >= targetDist * 0.32 &&
+        favorableMove < targetDist * 0.46 &&
+        ((isBuy && sl < entry) || (!isBuy && sl > entry))
+      ) {
+        const halfLossSl = roundPrice(
+          isBuy ? entry - stopDistInit * 0.48 : entry + stopDistInit * 0.48,
+          o.symbol,
+          assetType,
+        );
+        const improvedHalf = isBuy ? halfLossSl > sl + pip * 2 : halfLossSl < sl - pip * 2;
+        if (improvedHalf) {
+          await saveBotExecutionOrder({ ...o, stopLossPrice: halfLossSl });
+          trailedCount++;
+          continue;
+        }
+      }
+
+      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.46 || isStagnant45m)) {
         const lockDist =
-          favorableMove >= targetDist * 0.72
-            ? favorableMove * 0.58
-            : favorableMove >= targetDist * 0.58
-              ? favorableMove * 0.32
-              : isStagnant45m
-                ? Math.max(pip, favorableMove * 0.5)
-                : Math.max(pip * 2, targetDist * 0.10);
+          favorableMove >= targetDist * 0.80
+            ? favorableMove * 0.72
+            : favorableMove >= targetDist * 0.65
+              ? favorableMove * 0.52
+              : favorableMove >= targetDist * 0.46
+                ? Math.max(pip * 2, targetDist * 0.14)
+                : isStagnant45m
+                  ? Math.max(pip, favorableMove * 0.5)
+                  : Math.max(pip * 2, targetDist * 0.10);
         const candidateSl = roundPrice(
           isBuy ? entry + lockDist : entry - lockDist,
           o.symbol,
