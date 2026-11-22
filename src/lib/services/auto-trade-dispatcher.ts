@@ -590,6 +590,30 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
       continue;
     }
 
+    // 2c) Net Expectancy Bleed Protection: E[R] >= 0.16R
+    if (!manualOverride && signal.expectancyR !== undefined && signal.expectancyR < 0.16) {
+      results.push({
+        orderId,
+        followerId: acct.id,
+        followerName: acct.name,
+        platform: acct.platform,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        copiedLotsOrQty: 0,
+        entryPrice: signal.entryPrice,
+        executionPrice: marketPrice,
+        slippagePips: 0,
+        status: "REJECTED_LOW_GRADE",
+        stopLossPrice: signal.stopLossPrice,
+        takeProfit1: signal.takeProfit1,
+        timestamp: now,
+        signalId: signal.id,
+        idempotencyKey,
+        message: `Auto-Bot từ chối: Net Expectancy E[R] = ${signal.expectancyR}R < +0.16R (nguy cơ bào mòn tài khoản do ma sát)`,
+      });
+      continue;
+    }
+
     // 2b) Portfolio Concentration, Active Symbol & Macro Factor Exposure Budget Guard (autonomous mode)
     let factorSizeMultiplier = 1.0;
     if (!manualOverride && !opts.overrideAccounts) {

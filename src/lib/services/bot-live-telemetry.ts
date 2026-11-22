@@ -972,12 +972,12 @@ export async function evaluateRealtimePositionExits(options?: {
         favorableMove >= pip * 2 &&
         favorableMove < targetDist * 0.40;
 
-      // Early Loss-Halving at +0.32x TP1 distance: tighten initial SL by 50% so green trades rarely turn into full -1R losses
+      // Early Loss-Halving at +0.40x TP1 distance: tighten initial SL by 48% only when trade has genuinely progressed
       if (
         stage === "INITIAL" &&
         targetDist > pip * 3 &&
-        favorableMove >= targetDist * 0.32 &&
-        favorableMove < targetDist * 0.46 &&
+        favorableMove >= targetDist * 0.40 &&
+        favorableMove < targetDist * 0.55 &&
         ((isBuy && sl < entry) || (!isBuy && sl > entry))
       ) {
         const halfLossSl = roundPrice(
@@ -993,25 +993,28 @@ export async function evaluateRealtimePositionExits(options?: {
         }
       }
 
-      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.46 || isStagnant45m)) {
+      // Noise-Buffered Breakeven Guard: Wait until >= 55% of TP1 distance before locking Breakeven,
+      // with a minimum noise buffer to avoid whipsawing out positions on micro-spread flickers
+      if (targetDist > pip * 3 && (favorableMove >= targetDist * 0.55 || isStagnant45m)) {
+        const minBeBuffer = Math.max(pip * 2.5, entry * (assetType === "CRYPTO" ? 0.0006 : 0.00015));
         const lockDist =
           favorableMove >= targetDist * 0.80
             ? favorableMove * 0.72
             : favorableMove >= targetDist * 0.65
               ? favorableMove * 0.52
-              : favorableMove >= targetDist * 0.46
-                ? Math.max(pip * 2, targetDist * 0.14)
+              : favorableMove >= targetDist * 0.55
+                ? Math.max(minBeBuffer, targetDist * 0.16)
                 : isStagnant45m
-                  ? Math.max(pip, favorableMove * 0.5)
-                  : Math.max(pip * 2, targetDist * 0.10);
+                  ? Math.max(pip * 1.5, favorableMove * 0.5)
+                  : minBeBuffer;
         const candidateSl = roundPrice(
           isBuy ? entry + lockDist : entry - lockDist,
           o.symbol,
           assetType,
         );
-        const improved = isBuy
-          ? candidateSl > sl + pip * 2
-          : candidateSl < sl - pip * 2;
+        // Verify breath space: candidate SL must not choke current live mark price directly
+        const hasBreathSpace = isBuy ? markPrice > candidateSl + pip * 2 : markPrice < candidateSl - pip * 2;
+        const improved = (isBuy ? candidateSl > sl + pip * 2 : candidateSl < sl - pip * 2) && hasBreathSpace;
         if (improved) {
           let syncedSlOrderId = o.slOrderId ?? null;
           const acct = await getBrokerConnectionById(o.followerId);

@@ -892,6 +892,22 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     precisionScore -= 14;
   }
 
+  // Gate 2d: Anti-Sweep Directional Collision Arbiter (Hierarchical Decoupling of ICT vs SMC)
+  // When an SSL sweep with confirmed displacement/MSS occurs, selling into it is prohibited.
+  // When a BSL sweep with confirmed displacement/MSS occurs, buying into it is prohibited.
+  const isAntiSweepCollision =
+    (!isBuy && bullSweepWithConfirm && !hasBreakout) ||
+    (isBuy && bearSweepWithConfirm && !hasBreakout);
+  if (isAntiSweepCollision) {
+    vetoReasons.push(
+      isBuy
+        ? "Bẫy quét thanh khoản đỉnh (BSL Sweep) đảo chiều vừa diễn ra — cấm mua đuổi vào vùng cung tạo lập xả hàng"
+        : "Bẫy quét thanh khoản đáy (SSL Sweep) đảo chiều vừa diễn ra — cấm bán đuổi vào vùng cầu tạo lập hấp thụ",
+    );
+    gatesFailed.push("Gate 2d (Anti-Sweep Collision Veto): Xung đột trực tiếp với râu quét thanh khoản ngược chiều");
+    precisionScore -= 18;
+  }
+
   const inValuePullback =
     (isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "DISCOUNT" || (currentPrice >= e21 - atr14 * 0.65 && currentPrice <= e9 + atr14 * 0.45))) ||
     (!isBuy && (ict.optimalTradeSetup.dealingRange.currentZone === "PREMIUM" || (currentPrice <= e21 + atr14 * 0.65 && currentPrice >= e9 - atr14 * 0.45)));
@@ -1096,12 +1112,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ? candidateEntry
     : currentPrice;
 
-  // Prefer pullback limit entry inside OTE/FVG only when close (<= 0.25x ATR) and NOT a fast expansion/breakout/sweep bar
+  // Prefer pullback limit entry inside OTE/FVG when close (<= 0.28x ATR, or <= 0.38x ATR under high friction) and NOT a fast expansion/breakout/sweep bar
   const oteEntry = ict.optimalTradeSetup.direction === finalDir ? ict.optimalTradeSetup.entryOptimal : null;
   const strongDisplacementCandle = Math.abs(lastBar.close - lastBar.open) >= atr14 * 0.45;
+  const oteProximityAtr = (spreadPipsOrPct != null && spreadPipsOrPct > 0.0006) ? 0.38 : 0.28;
   if (
     oteEntry != null &&
-    Math.abs(currentPrice - oteEntry) <= atr14 * 0.25 &&
+    Math.abs(currentPrice - oteEntry) <= atr14 * oteProximityAtr &&
     !hasBreakout &&
     !pace.isIrreversibleLock &&
     !(hasSweep && strongDisplacementCandle)
@@ -1375,6 +1392,14 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     entryMode = "LIMIT_PULLBACK";
   }
 
+  // Net Expectancy Bleed Guard: Veto low-edge setups where friction destroys mathematical expectancy
+  if (expectancyR < 0.02 || (frictionR >= 0.20 && expectancyR < 0.08)) {
+    vetoReasons.push(
+      `Net Expectancy E[R]=${expectancyR}R quá thấp so với chi phí ma sát (${frictionR}R) — nguy cơ bào mòn tài khoản`,
+    );
+    gatesFailed.push("Gate 6b (Net Expectancy Bleed Veto): Kỳ vọng toán học sau ma sát không đạt chuẩn an toàn");
+  }
+
   // Assign final setup grade
   let grade: SetupGrade = "NO_TRADE";
   if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL" && !scenarioVector.isHardLockout) {
@@ -1446,8 +1471,14 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     };
   }
 
+  const isCounterTrendSetup =
+    (isBuy && (htfBias === "BEARISH" || macroBias === "BEARISH")) ||
+    (!isBuy && (htfBias === "BULLISH" || macroBias === "BULLISH"));
+  const counterTrendMult = isCounterTrendSetup && (hasSweep || hasExhaustionShift) ? 0.75 : 1.0;
   const baseGradeMult = grade === "A+" ? 1.0 : grade === "A" ? 0.85 : 0.5;
-  const sizeMult = Number((baseGradeMult * scenarioVector.entropyDampener).toFixed(2));
+  const sizeMult = Number(
+    (baseGradeMult * scenarioVector.entropyDampener * counterTrendMult).toFixed(2),
+  );
   const entryZone: [number, number] = isBuy
     ? [fmtP(rawEntry - stopDist * 0.25), fmtP(rawEntry)]
     : [fmtP(rawEntry), fmtP(rawEntry + stopDist * 0.25)];
