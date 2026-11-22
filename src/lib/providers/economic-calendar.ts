@@ -176,6 +176,8 @@ export async function getEconomicCalendar(asOfDate: Date = new Date()): Promise<
   };
 }
 
+import { getUnifiedMacroCalendarEvents } from "./forex-factory-calendar";
+
 const COUNTRY_TO_CURRENCY: Record<EconomicCalendarEvent["country"], string> = {
   US: "USD",
   EU: "EUR",
@@ -185,11 +187,27 @@ const COUNTRY_TO_CURRENCY: Record<EconomicCalendarEvent["country"], string> = {
 };
 
 /**
- * Maps scheduled high-impact global macro events (US/EU/GLOBAL) into circuit-breaker format.
+ * Maps scheduled high-impact global macro events (Forex Factory Live -> US/EU/GLOBAL Scheduled) into circuit-breaker format.
  */
 export async function getGlobalMacroShieldEvents(
   asOfDate: Date = new Date(),
 ): Promise<{ name: string; currency: string; time: string; importance: string }[]> {
+  try {
+    const liveEvents = await getUnifiedMacroCalendarEvents();
+    if (liveEvents.length > 0) {
+      return liveEvents
+        .filter((ev) => ev.impact === "CRITICAL" || ev.impact === "HIGH")
+        .map((ev) => ({
+          name: ev.title,
+          currency: ev.currency,
+          time: ev.time,
+          importance: ev.impact === "CRITICAL" ? "CRITICAL" : "high",
+        }));
+    }
+  } catch {
+    // Fallback sang lịch tĩnh
+  }
+
   try {
     const snap = await getEconomicCalendar(asOfDate);
     return snap.events

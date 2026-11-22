@@ -71,10 +71,11 @@ const BENCHMARK_CORRELATIONS: { pairA: string; pairB: string; corr: number }[] =
 ];
 
 /**
- * Calculates Currency Strength Matrix from pair price changes.
+ * Calculates Currency Strength Matrix from pair price changes and optional Forex Factory Macro Biases.
  */
 export function calculateCurrencyStrengthMatrix(
-  pairs: PairPriceInput[]
+  pairs: PairPriceInput[],
+  macroBiases?: Map<string, { biasScore: number }>,
 ): CurrencyStrengthMatrixResult {
   // Map of accumulated points for each currency
   const currencyPoints: Record<MajorCurrency, { totalChange: number; count: number }> = {
@@ -125,7 +126,11 @@ export function calculateCurrencyStrengthMatrix(
   const scores: CurrencyStrengthScore[] = rawResults.map(({ curr, avgChange }) => {
     // Normalization onto 0.0 - 10.0 scale, centered at 5.0
     const normalized = ((avgChange - minChange) / range) * 8.0 + 1.0;
-    const score = Math.round(Math.min(9.9, Math.max(0.1, normalized)) * 10) / 10;
+    const techScore = Math.min(9.9, Math.max(0.1, normalized));
+    const macroBias = macroBiases?.get(curr)?.biasScore ?? 0;
+    // 70% Technical Price Action Momentum + 30% Forex Factory Macro Catalyst
+    const blended = macroBias !== 0 ? techScore * 0.70 + (5.0 + macroBias) * 0.30 : techScore;
+    const score = Math.round(Math.min(9.9, Math.max(0.1, blended)) * 10) / 10;
 
     let status: CurrencyStrengthScore["status"] = "NEUTRAL";
     let tone: CurrencyStrengthScore["tone"] = "neutral";

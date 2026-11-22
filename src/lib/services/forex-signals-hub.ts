@@ -13,6 +13,7 @@ import { evaluatePrecisionTradeSetup, type SetupGrade } from "../engines/fx-cryp
 import { getEmpiricalFrictionTelemetry } from "../engines/exchange-execution-client";
 import { calculateUnifiedTradeRiskPlan } from "../engines/unified-cross-asset-quant";
 import { getGlobalMacroShieldEvents } from "../providers/economic-calendar";
+import { computeForexFactoryMacroBiasMap } from "../providers/forex-factory-calendar";
 import { getForexDetail, getForexMarkets } from "./forex";
 import type { Meta } from "../types";
 
@@ -116,10 +117,11 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
         { name: "New York (Mỹ)", hours: "12:00 - 21:00 UTC", isOpen: utcHour >= 12 && utcHour < 21 },
       ];
 
-      // Pre-load global macro calendar & CSM once BEFORE pair fanout (prevents 8x duplicate provider calls)
-      const [calendarEvents, marketsRes] = await Promise.all([
+      // Pre-load global macro calendar, Forex Factory Macro Biases & CSM once BEFORE pair fanout (prevents duplicate provider calls)
+      const [calendarEvents, marketsRes, macroBiasMap] = await Promise.all([
         getGlobalMacroShieldEvents(now).catch(() => []),
         getForexMarkets().catch(() => null),
+        computeForexFactoryMacroBiasMap().catch(() => new Map()),
       ]);
 
       const csmScoreMap = new Map<string, number>();
@@ -133,7 +135,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
             changePercent: r.changePercent ?? 0,
           }));
         if (csmInputs.length >= 4) {
-          const csm = calculateCurrencyStrengthMatrix(csmInputs);
+          const csm = calculateCurrencyStrengthMatrix(csmInputs, macroBiasMap);
           for (const s of csm.scores) csmScoreMap.set(s.currency, s.score);
         }
       }

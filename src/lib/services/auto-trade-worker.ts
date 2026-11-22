@@ -37,6 +37,7 @@ import {
 import { eventBus } from "@/lib/events";
 import * as binance from "@/lib/providers/binance";
 import { getGlobalMacroShieldEvents } from "@/lib/providers/economic-calendar";
+import { computeForexFactoryMacroBiasMap } from "@/lib/providers/forex-factory-calendar";
 import { getBiquotePublicOhlc } from "@/lib/providers/forex";
 import { binanceWs, ensureBinanceWsStarted } from "@/lib/realtime/binance-ws";
 import {
@@ -413,7 +414,10 @@ async function scanLivePrecisionSetups(params: {
       (p) => !params.existingForexSymbols.has(p),
     ).slice(0, params.needForexCount + 2);
 
-    const marketsRes = await withTimeout(getForexMarkets().catch(() => null), 2_000, null);
+    const [marketsRes, macroBiasMap] = await Promise.all([
+      withTimeout(getForexMarkets().catch(() => null), 2_000, null),
+      withTimeout(computeForexFactoryMacroBiasMap().catch(() => new Map()), 2_500, new Map()),
+    ]);
     const fxRows = marketsRes?.data?.rows ?? [];
     const csmScoreMap = new Map<string, number>();
     let csmInputs: PairPriceInput[] = [];
@@ -422,7 +426,7 @@ async function scanLivePrecisionSetups(params: {
         .filter((r) => r.price > 0)
         .map((r) => ({ pair: r.pair, price: r.price, changePercent: r.changePercent ?? 0 }));
       if (csmInputs.length >= 4) {
-        const csm = calculateCurrencyStrengthMatrix(csmInputs);
+        const csm = calculateCurrencyStrengthMatrix(csmInputs, macroBiasMap);
         for (const s of csm.scores) csmScoreMap.set(s.currency, s.score);
       }
     }
