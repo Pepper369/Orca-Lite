@@ -80,11 +80,24 @@ export interface PrecisionSetupInput {
   empiricalFrictionROverride?: number | null;
 }
 
+export interface TriPillarComposition {
+  quantScore: number; // 0 - 60 (Weight 60%)
+  ictScore: number; // 0 - 30 (Weight 30%)
+  smcScore: number; // 0 - 10 (Weight 10%)
+  totalScore: number; // 0 - 100
+  weightsPct: { quant: 60; ict: 30; smc: 10 };
+  quantPass: boolean;
+  ictPass: boolean;
+  smcPass: boolean;
+  rationaleVi: string;
+}
+
 export interface PrecisionTradeSetup {
   direction: "BUY" | "SELL" | "NEUTRAL";
   action: "BUY" | "SELL" | "WAIT";
   grade: SetupGrade;
   precisionScore: number; // 0 - 100
+  triPillarComposition?: TriPillarComposition;
   calibratedWinRatePct: number; // 38 - 84
   expectancyR: number;
   recommendedSizeMultiplier: number; // 1.0 (A+), 0.85 (A), 0.5 (B), 0 (NO_TRADE)
@@ -149,6 +162,17 @@ function emptyPrecisionSetup(reason: string): PrecisionTradeSetup {
     action: "WAIT",
     grade: "NO_TRADE",
     precisionScore: 30,
+    triPillarComposition: {
+      quantScore: 16,
+      ictScore: 8,
+      smcScore: 4,
+      totalScore: 28,
+      weightsPct: { quant: 60, ict: 30, smc: 10 },
+      quantPass: false,
+      ictPass: false,
+      smcPass: false,
+      rationaleVi: reason,
+    },
     calibratedWinRatePct: 40,
     expectancyR: 0,
     recommendedSizeMultiplier: 0,
@@ -1392,6 +1416,53 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     entryMode = "LIMIT_PULLBACK";
   }
 
+  // ------------------------------------------------------------------
+  // TRI-PILLAR WEIGHTED COMPOSITION: QUANT (60%) + ICT (30%) + SMC (10%)
+  // ------------------------------------------------------------------
+  let quantRegimePts = 12;
+  if (regimeState === "TRENDING_UP" || regimeState === "TRENDING_DOWN") quantRegimePts += 5;
+  if (!isDeadChop && (adxVal >= 18 || erVal >= 0.28)) quantRegimePts += 3;
+
+  let quantMicroPts = 6;
+  if ((isBuy && realImbalance >= adaptiveImbalanceThresh) || (!isBuy && realImbalance <= -adaptiveImbalanceThresh)) quantMicroPts += 5;
+  if (microSkewBps != null && ((isBuy && microSkewBps >= 1.5) || (!isBuy && microSkewBps <= -1.5))) quantMicroPts += 3;
+  if ((spoofState === "BULLISH_ICEBERG_ABSORPTION" && isBuy) || (spoofState === "BEARISH_ICEBERG_ABSORPTION" && !isBuy)) quantMicroPts += 4;
+  if ((absorptionType === "BULLISH_ABSORPTION" && isBuy) || (absorptionType === "BEARISH_ABSORPTION" && !isBuy)) quantMicroPts += 4;
+
+  let quantStatPts = 6;
+  if (cusumAligned > 0) quantStatPts += 4;
+  if (pace.isIrreversibleLock && ((isBuy && pace.lockDirection === "BULLISH_LOCKED") || (!isBuy && pace.lockDirection === "BEARISH_LOCKED"))) quantStatPts += 4;
+  if (metaPred.calibratedProbability >= 0.50) quantStatPts += 4;
+  const quantScore = Math.min(60, Math.max(10, quantRegimePts + quantMicroPts + quantStatPts));
+
+  let ictSweepPts = hasSweep ? (hasSweep && (hasMss || hasDiv) ? 13 : 10) : 4;
+  let ictFvgPts = ifvgOrBprMatches ? 6 : 2;
+  if (fwdLiq?.primaryTarget && ((isBuy && fwdLiq.primaryTarget.side === "BUY_SIDE") || (!isBuy && fwdLiq.primaryTarget.side === "SELL_SIDE"))) ictFvgPts += 3;
+  let ictOtePts = inValuePullback ? 5 : 2;
+  if (amdMatches && ict.amdPowerOf3?.phase === "MANIPULATION_JUDAS") ictOtePts += 3;
+  const ictScore = Math.min(30, Math.max(5, ictSweepPts + ictFvgPts + ictOtePts));
+
+  let smcMssPts = hasMss ? 6 : 2;
+  let smcStructPts = htfMatches ? 4 : (htfMatches || macroMatches) ? 2 : 0;
+  const smcScore = Math.min(10, Math.max(2, smcMssPts + smcStructPts));
+
+  const triPillarTotal = quantScore + ictScore + smcScore;
+  const quantPass = quantScore >= 32;
+  const ictPass = ictScore >= 12;
+  const smcPass = smcScore >= 4;
+
+  const triPillarComposition: TriPillarComposition = {
+    quantScore,
+    ictScore,
+    smcScore,
+    totalScore: triPillarTotal,
+    weightsPct: { quant: 60, ict: 30, smc: 10 },
+    quantPass,
+    ictPass,
+    smcPass,
+    rationaleVi: `Tri-Pillar 60/30/10: Quant ${quantScore}/60 (${quantPass ? "PASS" : "FAIL"}) + ICT ${ictScore}/30 (${ictPass ? "PASS" : "FAIL"}) + SMC ${smcScore}/10 (${smcPass ? "PASS" : "FAIL"})`,
+  };
+
   // Net Expectancy Bleed Guard: Veto low-edge setups where friction destroys mathematical expectancy
   if (expectancyR < 0.02 || (frictionR >= 0.20 && expectancyR < 0.08)) {
     vetoReasons.push(
@@ -1442,6 +1513,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       action: "WAIT",
       grade: "NO_TRADE",
       precisionScore,
+      triPillarComposition,
       calibratedWinRatePct,
       expectancyR,
       recommendedSizeMultiplier: 0,
@@ -1488,6 +1560,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     action: finalDir,
     grade,
     precisionScore,
+    triPillarComposition,
     calibratedWinRatePct,
     expectancyR,
     recommendedSizeMultiplier: sizeMult,
@@ -1513,6 +1586,6 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     winrateScore: gateCheck.winrateScore,
     liquiditySweepDetected: gateCheck.liquiditySweepDetected,
     forwardLiquidity: fwdLiq,
-    summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | ${scenarioVector.dominantScenario} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
+    summaryVi: `${symbol}: ${finalDir} [Grade ${grade} | Tri-Pillar: Q${quantScore}+ICT${ictScore}+SMC${smcScore} | ${scenarioVector.dominantScenario} | E[R] +${expectancyR}R | WinRate ~${calibratedWinRatePct}%] tại ${fmtP(rawEntry)}`,
   };
 }
