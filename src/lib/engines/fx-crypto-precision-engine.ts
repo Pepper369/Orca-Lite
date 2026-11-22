@@ -873,8 +873,8 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const closeLocInBar = lastRange > 1e-12 ? (lastBar.close - lastBar.low) / lastRange : 0.5;
   const isCounterImpulseCandleTrap =
     !hasSweep &&
-    ((isBuy && lastBodySigned <= -atr14 * 0.65 && closeLocInBar <= 0.28) ||
-      (!isBuy && lastBodySigned >= atr14 * 0.65 && closeLocInBar >= 0.72));
+    ((isBuy && lastBodySigned <= -atr14 * 0.62 && closeLocInBar <= 0.30) ||
+      (!isBuy && lastBodySigned >= atr14 * 0.62 && closeLocInBar >= 0.70));
 
   const dr = ict.optimalTradeSetup.dealingRange;
   const drSpan = Math.max(pip, dr.swingHigh - dr.swingLow);
@@ -1172,11 +1172,11 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     totalFrictionPrice = rawEntry * Math.max(0.0008, spDec + 0.0006);
   }
 
-  const recentStructBars = barsExecution.slice(-5);
+  const recentStructBars = barsExecution.slice(-7);
   const swingLow5 = Math.min(...recentStructBars.map((b) => b.low));
   const swingHigh5 = Math.max(...recentStructBars.map((b) => b.high));
   const structuralVolUnit = Math.max(atr14, medianRange * 1.15);
-  const slBuffer = Math.max(pip * 3, structuralVolUnit * 0.30);
+  const slBuffer = Math.max(pip * 3.5, structuralVolUnit * 0.32);
 
   let rawStopDist =
     candidateStopLoss != null && Number.isFinite(candidateStopLoss) && candidateStopLoss > 0
@@ -1185,7 +1185,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
         ? rawEntry - (swingLow5 - slBuffer)
         : swingHigh5 + slBuffer - rawEntry;
 
-  // Ensure stop is anchored outside recent 5-bar micro-swing & spread/fee noise while keeping fast capital turnover
+  // Ensure stop is anchored outside recent 7-bar micro-swing & spread/fee noise while keeping fast capital turnover
   const maxVolMultForStop = isLiveTightCryptoBook ? 3.2 : 2.1;
   const maxStopCapMult = isLiveTightCryptoBook ? 3.4 : 2.2;
   const minFrictionSafeStop =
@@ -1194,7 +1194,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const stopDist = Math.min(
     structuralVolUnit * maxStopCapMult,
     upperStopCap,
-    Math.max(structuralVolUnit * 0.90, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
+    Math.max(structuralVolUnit * 0.94, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
   );
   const rawSl = isBuy ? rawEntry - stopDist : rawEntry + stopDist;
 
@@ -1310,7 +1310,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   }
 
   // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3 while capping at 2.85R for fast capital turnover; S2 tightens TP1)
-  const tp1Dist = stopDist * Math.min(1.05, Math.max(0.85, exitPolicy.tp1RMultiple));
+  const tp1Dist = stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
   const cappedTp3R = Math.min(2.85, exitPolicy.tp3RMultiple);
   const tp3Dist = Math.max(target2Dist * 1.22, stopDist * cappedTp3R);
 
