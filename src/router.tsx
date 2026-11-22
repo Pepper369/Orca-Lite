@@ -4,6 +4,16 @@ import React, { Suspense, lazy, useMemo } from "react";
 import { usePathname } from "@/lib/shims/next-navigation";
 import { StockKeepAliveWorkspace, type StockTabKey } from "@/components/stocks/stock-keep-alive-workspace";
 import { Loading } from "@/components/ui";
+import { ErrorBoundary } from "@/components/error-boundary";
+
+function getSearchParam(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search).get(key);
+  } catch {
+    return null;
+  }
+}
 
 const DashboardView = lazy(() => import("@/components/dashboard").then((m) => ({ default: m.Dashboard })));
 const VnMarketCenterPage = lazy(() => import("@/app/stocks/page"));
@@ -65,8 +75,14 @@ export function AppRouter() {
       content = <VnMarketCenterPage />;
     } else if (segments[1] === "sectors") {
       content = <SectorTrendPage />;
+    } else if (segments[1] === "screener") {
+      content = <ScreenerPage />;
     } else {
-      const symbol = segments[1].toUpperCase();
+      const rawSymbol =
+        segments[1] === "detail"
+          ? getSearchParam("symbol") || "VNM"
+          : segments[1] || "";
+      const symbol = rawSymbol.toUpperCase();
       let tab: StockTabKey = "overview";
       if (segments[2] === "financials") tab = "financials";
       else if (segments[2] === "fundamentals") tab = "fundamentals";
@@ -92,16 +108,30 @@ export function AppRouter() {
   } else if (root === "crypto") {
     if (segments.length === 1) {
       content = <CryptoPage />;
+    } else if (segments[1] === "trade-desk") {
+      const qSymbol = getSearchParam("symbol") || "BTCUSDT";
+      content = <CryptoDetailPage symbol={qSymbol.toUpperCase()} />;
     } else {
-      const symbol = segments[1].toUpperCase();
+      const rawSymbol =
+        segments[1] === "detail"
+          ? getSearchParam("symbol") || "BTCUSDT"
+          : segments[1];
+      const symbol = (rawSymbol || "BTCUSDT").toUpperCase();
       content = <CryptoDetailPage symbol={symbol} />;
     }
   } else if (root === "forex") {
     if (segments.length === 1) {
       content = <ForexPage />;
+    } else if (segments[1] === "trade-desk") {
+      const qPair = getSearchParam("pair") || "EURUSD";
+      content = <ForexDetailPage pair={qPair.toUpperCase().replace(/[^A-Z]/g, "") || "EURUSD"} />;
     } else {
-      const pair = segments[1].toUpperCase().replace(/[^A-Z]/g, "");
-      content = <ForexDetailPage pair={pair} />;
+      const rawPair =
+        segments[1] === "detail"
+          ? getSearchParam("pair") || "EURUSD"
+          : segments[1];
+      const pair = (rawPair || "EURUSD").toUpperCase().replace(/[^A-Z]/g, "");
+      content = <ForexDetailPage pair={pair || "EURUSD"} />;
     }
   } else if (root === "commodities") {
     content = <CommoditiesPage />;
@@ -143,5 +173,9 @@ export function AppRouter() {
     content = <DashboardView />;
   }
 
-  return <Suspense fallback={fallback}>{content}</Suspense>;
+  return (
+    <ErrorBoundary name="router-view" resetKey={pathname}>
+      <Suspense fallback={fallback}>{content}</Suspense>
+    </ErrorBoundary>
+  );
 }

@@ -36,18 +36,18 @@ export function ForexTradeDesk({
   const [leverage, setLeverage] = useState<number>(100);
 
   const curPrice = price ?? 1.0;
-  const upperPair = pair.toUpperCase();
+  const upperPair = (pair || "EURUSD").toUpperCase();
   const isGold = upperPair.startsWith("XAU");
   const isSilver = upperPair.startsWith("XAG");
   const isOil = upperPair.includes("OIL");
-  const pipFactor = getAssetPipSize(pair, "FOREX", curPrice);
-  const priceDecimals = getPriceDecimals(curPrice, pair, "FOREX");
+  const pipFactor = getAssetPipSize(upperPair, "FOREX", curPrice);
+  const priceDecimals = getPriceDecimals(curPrice, upperPair, "FOREX");
   const contractUnitsPerLot = isGold ? 100 : isSilver ? 5_000 : isOil ? 1_000 : 100_000;
   const unitLabel = isGold || isSilver ? "oz" : isOil ? "bbl" : "đơn vị";
 
   // Approximate institutional spread (pips)
   const spreadPips = useMemo(() => {
-    const p = pair.toUpperCase();
+    const p = upperPair;
     if (p.startsWith("XAU")) return 2.0;
     if (p.startsWith("XAG")) return 2.5;
     if (p.includes("OIL")) return 3.0;
@@ -58,7 +58,7 @@ export function ForexTradeDesk({
     if (p.includes("USDCAD")) return 1.3;
     if (p.includes("USDCHF")) return 1.4;
     return 1.8;
-  }, [pair]);
+  }, [upperPair]);
 
   const halfSpread = (spreadPips * pipFactor) / 2;
   const bidPrice = curPrice - halfSpread;
@@ -67,20 +67,23 @@ export function ForexTradeDesk({
   // Pip value in USD for selected lot size
   const pipValueUsd = useMemo(() => {
     const units = lot * contractUnitsPerLot;
-    if (quote.toUpperCase() === "USD") {
+    const q = (quote || "USD").toUpperCase();
+    const b = (base || (pair ? pair.slice(0, 3) : "EUR")).toUpperCase();
+    if (q === "USD") {
       return units * pipFactor;
     }
-    if (base.toUpperCase() === "USD") {
+    if (b === "USD") {
       return (units * pipFactor) / curPrice;
     }
     return (units * pipFactor) / (curPrice || 1);
-  }, [lot, contractUnitsPerLot, base, quote, curPrice, pipFactor]);
+  }, [lot, contractUnitsPerLot, base, quote, curPrice, pipFactor, pair]);
 
   // Margin required in USD at selected leverage
   const marginRequired = useMemo(() => {
-    const contractValueUsd = lot * contractUnitsPerLot * (base.toUpperCase() === "USD" ? 1 : curPrice);
+    const b = (base || (pair ? pair.slice(0, 3) : "EUR")).toUpperCase();
+    const contractValueUsd = lot * contractUnitsPerLot * (b === "USD" ? 1 : curPrice);
     return contractValueUsd / leverage;
-  }, [lot, contractUnitsPerLot, base, curPrice, leverage]);
+  }, [lot, contractUnitsPerLot, base, curPrice, leverage, pair]);
 
   // Global Session status (UTC based)
   const sessions = useMemo(() => {
@@ -104,7 +107,7 @@ export function ForexTradeDesk({
       }
       right={
         <Badge tone="accent">
-          {base}/{quote}
+          {base || "EUR"}/{quote || "USD"}
         </Badge>
       }
     >
