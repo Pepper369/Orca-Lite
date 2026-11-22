@@ -232,7 +232,7 @@ async function scanSingleCryptoPair(
         })
         : null;
 
-    const empFrictionCr = getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride;
+    const empTelemetryCr = getEmpiricalFrictionTelemetry(pair);
     const precision =
       scalp?.precision ??
       evaluatePrecisionTradeSetup({
@@ -251,7 +251,10 @@ async function scanSingleCryptoPair(
         vpinToxicity: vpinRes.vpin,
         isNewsOrCascadeLockout: shield.isLockout,
         lockoutReason: shield.warningMessage,
-        empiricalFrictionROverride: empFrictionCr,
+        empiricalFrictionROverride: empTelemetryCr.recommendedFrictionROverride,
+        empiricalWinRatePct: empTelemetryCr.empiricalWinRatePct,
+        empiricalSampleCount: empTelemetryCr.sampleCount,
+        empiricalConsecutiveLosses: empTelemetryCr.consecutiveLosses,
       });
 
     const primarySetup = scalp?.primarySetup ?? null;

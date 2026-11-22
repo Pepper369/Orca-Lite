@@ -400,4 +400,71 @@ test("Phase 2 & 4 Upgrade: ICT Multi-TF HTF POI + BPR/IFVG & Live Purged Meta-La
     (hrpMults["XAUUSD"] ?? 0) > (hrpMults["AVAXUSDT"] ?? 1),
     `Uncorrelated XAUUSD hedge (${hrpMults["XAUUSD"]}) should receive higher HRP multiplier than clustered altcoin (${hrpMults["AVAXUSDT"]})`,
   );
+
+  // 6) Option 4: CVD Divergence Absorption Confirmation & Anti-Absorption Veto
+  const cvdAlignedBuy = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    volumeDeltaDivergence: "BULLISH_DIVERGENCE",
+  });
+  assert.ok(
+    cvdAlignedBuy.gatesPassed.some((g) => g.includes("Gate 4g (CVD Divergence)")),
+    "Aligned BULLISH_DIVERGENCE on BUY must pass Gate 4g CVD Divergence absorption confirmation",
+  );
+
+  const cvdAntiAbsorptionVeto = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    orderBookImbalance: -30,
+    volumeDeltaDivergence: "BEARISH_DIVERGENCE",
+  });
+  assert.equal(
+    cvdAntiAbsorptionVeto.grade,
+    "NO_TRADE",
+    "BEARISH_DIVERGENCE with opposing flow on BUY must trigger Anti-Absorption Veto",
+  );
+  assert.ok(
+    cvdAntiAbsorptionVeto.vetoReasons.some((v) => v.includes("CVD Bearish Divergence Veto")),
+    "Anti-Absorption Veto reason must be present",
+  );
+
+  // 7) Option 3: Empirical Winrate Capital Allocator & Drawdown Throttle
+  const empHotSetup = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    empiricalWinRatePct: 88,
+    empiricalSampleCount: 8,
+    empiricalConsecutiveLosses: 0,
+  });
+  if (empHotSetup.grade !== "NO_TRADE") {
+    assert.ok(
+      empHotSetup.gatesPassed.some((g) => g.includes("Gate 7c (Empirical Edge)")),
+      "Hot streak (88% winrate, 8 samples) must pass Gate 7c Empirical Edge",
+    );
+  }
+
+  const empColdVetoSetup = evaluatePrecisionTradeSetup({
+    symbol: "BTCUSDT",
+    assetType: "CRYPTO",
+    barsExecution: turtleBars.slice(0, 58),
+    spreadPipsOrPct: btcSpec.spreadPipsOrPct,
+    empiricalWinRatePct: 35,
+    empiricalSampleCount: 6,
+    empiricalConsecutiveLosses: 3,
+  });
+  assert.equal(
+    empColdVetoSetup.grade,
+    "NO_TRADE",
+    "Cold streak (3 consecutive losses, 35% winrate) must trigger Empirical Winrate Veto",
+  );
+  assert.ok(
+    empColdVetoSetup.vetoReasons.some((v) => v.includes("Empirical Winrate Veto")),
+    "Empirical Winrate Veto reason must be recorded",
+  );
 });

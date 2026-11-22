@@ -277,6 +277,7 @@ async function scanLivePrecisionSetups(params: {
             calendarEvents,
           });
 
+          const empTelemetryCr = getEmpiricalFrictionTelemetry(pair);
           const precision = evaluatePrecisionTradeSetup({
             symbol: pair,
             assetType: "CRYPTO",
@@ -293,7 +294,10 @@ async function scanLivePrecisionSetups(params: {
             vpinToxicity: vpinRes.vpin,
             isNewsOrCascadeLockout: shield.isLockout,
             lockoutReason: shield.warningMessage,
-            empiricalFrictionROverride: getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride,
+            empiricalFrictionROverride: empTelemetryCr.recommendedFrictionROverride,
+            empiricalWinRatePct: empTelemetryCr.empiricalWinRatePct,
+            empiricalSampleCount: empTelemetryCr.sampleCount,
+            empiricalConsecutiveLosses: empTelemetryCr.consecutiveLosses,
           });
 
           if (
@@ -482,6 +486,7 @@ async function scanLivePrecisionSetups(params: {
           const triangularParityAligned =
             csmInputs.length >= 4 ? evaluateTriangularCrossParity(pair, csmInputs).alignment : null;
 
+          const empTelemetryFx = getEmpiricalFrictionTelemetry(pair);
           const precision = evaluatePrecisionTradeSetup({
             symbol: pair,
             assetType: "FOREX",
@@ -495,7 +500,10 @@ async function scanLivePrecisionSetups(params: {
             spreadPipsOrPct: liveSpreadPips,
             isNewsOrCascadeLockout: cb.isLockout || !(flow.spreadSafety?.isSafe ?? true),
             lockoutReason: cb.warningMessage ?? flow.spreadSafety?.lockoutReason ?? null,
-            empiricalFrictionROverride: getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride,
+            empiricalFrictionROverride: empTelemetryFx.recommendedFrictionROverride,
+            empiricalWinRatePct: empTelemetryFx.empiricalWinRatePct,
+            empiricalSampleCount: empTelemetryFx.sampleCount,
+            empiricalConsecutiveLosses: empTelemetryFx.consecutiveLosses,
           });
 
           if (

@@ -231,7 +231,7 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
 
         // 2. Harmonized Precision Evaluation (use intraday directly when available; compute daily only as fallback)
         const intradayPrecision = sig.precision ?? null;
-        const empFrictionFx = getEmpiricalFrictionTelemetry(pair).recommendedFrictionROverride;
+        const empTelemetryFx = getEmpiricalFrictionTelemetry(pair);
         const effectivePrecision =
           intradayPrecision ??
           (detailSeries.length >= 30
@@ -253,7 +253,10 @@ export async function getForexSignalsHub(): Promise<{ data: ForexSignalsHubData;
                 spreadPipsOrPct: sig.filter.spreadPips,
                 isNewsOrCascadeLockout: newsLockout || Boolean(spreadLockoutReason),
                 lockoutReason: newsWarning ?? spreadLockoutReason,
-                empiricalFrictionROverride: empFrictionFx,
+                empiricalFrictionROverride: empTelemetryFx.recommendedFrictionROverride,
+                empiricalWinRatePct: empTelemetryFx.empiricalWinRatePct,
+                empiricalSampleCount: empTelemetryFx.sampleCount,
+                empiricalConsecutiveLosses: empTelemetryFx.consecutiveLosses,
               })
             : null);
 

@@ -78,6 +78,12 @@ export interface PrecisionSetupInput {
   trainedMetaModel?: TrainedMetaLabelModel | null;
   /** Realized execution Implementation Shortfall override from live fills (in R units) */
   empiricalFrictionROverride?: number | null;
+  /** Empirical historical winrate % from closed trade telemetry [0, 100] */
+  empiricalWinRatePct?: number | null;
+  /** Empirical sample count of resolved trades */
+  empiricalSampleCount?: number | null;
+  /** Empirical streak: consecutive losses */
+  empiricalConsecutiveLosses?: number | null;
 }
 
 export interface TriPillarComposition {
@@ -412,6 +418,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     timeframeSec = 300,
     secondsRemaining = 60,
     sharedCtx,
+    empiricalWinRatePct = null,
+    empiricalSampleCount = null,
+    empiricalConsecutiveLosses = null,
   } = input;
 
   if (!barsExecution || barsExecution.length < 30) {
@@ -976,6 +985,43 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 4 (Absorption): Phát hiện ${absorptionType} đỡ giá`);
   }
 
+  // Gate 4g: CVD Divergence Absorption Confirmation & Anti-Absorption Veto
+  if (volumeDeltaDivergence === "BULLISH_DIVERGENCE") {
+    if (isBuy) {
+      precisionScore += 6;
+      gatesPassed.push(
+        "Gate 4g (CVD Divergence): Phân kỳ khối lượng delta CVD xác nhận đáy gom hàng (Bullish Absorption)",
+      );
+    } else {
+      precisionScore -= 8;
+      gatesFailed.push(
+        "Gate 4g (CVD Conflict): Phân kỳ đáy CVD cảnh báo lực mua gom ngầm ngược hướng lệnh SELL",
+      );
+      if (realImbalance >= 25) {
+        vetoReasons.push(
+          "CVD Bullish Divergence Veto: Khối lượng bán kiệt quệ, cá mập đang gom ngầm ngược hướng lệnh SELL",
+        );
+      }
+    }
+  } else if (volumeDeltaDivergence === "BEARISH_DIVERGENCE") {
+    if (!isBuy) {
+      precisionScore += 6;
+      gatesPassed.push(
+        "Gate 4g (CVD Divergence): Phân kỳ khối lượng delta CVD xác nhận đỉnh xả hàng (Bearish Absorption)",
+      );
+    } else {
+      precisionScore -= 8;
+      gatesFailed.push(
+        "Gate 4g (CVD Conflict): Phân kỳ đỉnh CVD cảnh báo áp lực bán tháo ngầm ngược hướng lệnh BUY",
+      );
+      if (realImbalance <= -25) {
+        vetoReasons.push(
+          "CVD Bearish Divergence Veto: Khối lượng mua kiệt quệ, cá mập đang xả ngầm ngược hướng lệnh BUY",
+        );
+      }
+    }
+  }
+
   // Gate 4d: Stoikov (2018) Microprice Skew + L1-vs-Deep-L2 Iceberg Absorption & Anti-Spoofing Hard Veto
   const spoofState = input.spoofingOrAbsorptionState ?? null;
   const microSkewBps = input.micropriceSkewBps ?? null;
@@ -1477,6 +1523,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   if (microSkewBps != null && ((isBuy && microSkewBps >= 1.5) || (!isBuy && microSkewBps <= -1.5))) quantMicroPts += 3;
   if ((spoofState === "BULLISH_ICEBERG_ABSORPTION" && isBuy) || (spoofState === "BEARISH_ICEBERG_ABSORPTION" && !isBuy)) quantMicroPts += 4;
   if ((absorptionType === "BULLISH_ABSORPTION" && isBuy) || (absorptionType === "BEARISH_ABSORPTION" && !isBuy)) quantMicroPts += 4;
+  if ((volumeDeltaDivergence === "BULLISH_DIVERGENCE" && isBuy) || (volumeDeltaDivergence === "BEARISH_DIVERGENCE" && !isBuy)) quantMicroPts += 4;
 
   let quantStatPts = 6;
   if (cusumAligned > 0) quantStatPts += 4;
@@ -1534,6 +1581,61 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       grade = "A";
     } else if (precisionScore >= 54 && expectancyR >= 0.03) {
       grade = "B";
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // OPTION 3: EMPIRICAL WINRATE CAPITAL ALLOCATOR & DRAWDOWN THROTTLE
+  // ------------------------------------------------------------------
+  let empiricalSizeScale = 1.0;
+  const empWinRate =
+    empiricalWinRatePct != null && Number.isFinite(empiricalWinRatePct)
+      ? empiricalWinRatePct
+      : null;
+  const empCount =
+    empiricalSampleCount != null && Number.isFinite(empiricalSampleCount)
+      ? empiricalSampleCount
+      : 0;
+  const empLossStreak =
+    empiricalConsecutiveLosses != null && Number.isFinite(empiricalConsecutiveLosses)
+      ? empiricalConsecutiveLosses
+      : 0;
+
+  if (empCount >= 4 && empWinRate != null && grade !== "NO_TRADE") {
+    if (empLossStreak >= 3 && empWinRate < 40) {
+      // Severe toxic regime / deep drawdown: hard veto for ALL grades to prevent capital bleed
+      vetoReasons.push(
+        `Empirical Winrate Veto: Cặp ${symbol} đang chịu chuỗi drawdown nặng (${empLossStreak} lệnh lỗ liên tiếp, winrate ${empWinRate}%), tạm dừng mọi giao dịch bảo toàn vốn`,
+      );
+      gatesFailed.push(
+        `Gate 7c (Empirical Drawdown Veto): Khóa toàn bộ lệnh Grade ${grade} do winrate thực tế ${empWinRate}% < 40%`,
+      );
+      grade = "NO_TRADE";
+    } else if (empLossStreak >= 3 || empWinRate < 45) {
+      if (grade !== "A+") {
+        vetoReasons.push(
+          `Empirical Winrate Veto: Cặp ${symbol} đang chịu chuỗi drawdown (${empLossStreak} lệnh lỗ liên tiếp, winrate ${empWinRate}%), tạm dừng vào lệnh bảo toàn vốn`,
+        );
+        gatesFailed.push(
+          `Gate 7c (Empirical Drawdown Veto): Chặn lệnh Grade ${grade} do winrate thực tế ${empWinRate}% thấp hơn 45%`,
+        );
+        grade = "NO_TRADE";
+      } else {
+        empiricalSizeScale = 0.35;
+        gatesFailed.push(
+          `Gate 7c (Empirical Throttle): Cặp ${symbol} giảm quy mô lệnh xuống 0.35x do chuỗi drawdown (${empLossStreak} lệnh lỗ liên tiếp, winrate ${empWinRate}%)`,
+        );
+      }
+    } else if (empLossStreak >= 2 || empWinRate < 60) {
+      empiricalSizeScale = 0.65;
+      gatesFailed.push(
+        `Gate 7c (Empirical Throttle): Điều tiết quy mô vốn 0.65x do winrate thực tế ${empWinRate}% (${empCount} lệnh)`,
+      );
+    } else if (empCount >= 6 && empWinRate >= 80 && empLossStreak === 0) {
+      empiricalSizeScale = 1.15;
+      gatesPassed.push(
+        `Gate 7c (Empirical Edge): Cặp ${symbol} đạt winrate thực tế ${empWinRate}% (${empCount} lệnh), kích hoạt tối đa phân bổ vốn`,
+      );
     }
   }
 
@@ -1606,8 +1708,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     (!isBuy && (htfBias === "BULLISH" || macroBias === "BULLISH"));
   const counterTrendMult = isCounterTrendSetup && (hasSweep || hasExhaustionShift) ? 0.75 : 1.0;
   const baseGradeMult = grade === "A+" ? 1.0 : grade === "A" ? 0.85 : 0.5;
+  const rawSize = baseGradeMult * scenarioVector.entropyDampener * counterTrendMult * empiricalSizeScale;
   const sizeMult = Number(
-    (baseGradeMult * scenarioVector.entropyDampener * counterTrendMult).toFixed(2),
+    Math.min(1.0, Math.max(0.15, rawSize)).toFixed(2),
   );
   const entryZone: [number, number] = isBuy
     ? [fmtP(rawEntry - stopDist * 0.25), fmtP(rawEntry)]

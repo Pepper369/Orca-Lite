@@ -449,10 +449,48 @@ export interface EmpiricalFrictionSummary {
   p95SlippageBps: number;
   empiricalFrictionR: number;
   recommendedFrictionROverride: number | null;
+  empiricalWinRatePct?: number | null;
+  consecutiveLosses?: number;
+  consecutiveWins?: number;
+}
+
+export interface ExecutionTradeOutcomeSample {
+  symbol: string;
+  isWin: boolean;
+  realizedPnlR: number;
+  timestamp: number;
 }
 
 const SLIPPAGE_TELEMETRY_BUFFER: ExecutionSlippageSample[] = [];
 const MAX_SLIPPAGE_TELEMETRY_SAMPLES = 250;
+const TRADE_OUTCOME_BUFFER: ExecutionTradeOutcomeSample[] = [];
+const MAX_TRADE_OUTCOME_SAMPLES = 250;
+
+/**
+ * Records a completed trade outcome (win/loss and realized R) for empirical winrate feedback.
+ */
+export function recordExecutionTradeOutcome(params: {
+  symbol: string;
+  isWin: boolean;
+  realizedPnlR?: number | null;
+  timestamp?: number;
+}): ExecutionTradeOutcomeSample | null {
+  const cleanSym = params.symbol ? params.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+  if (!cleanSym) return null;
+
+  const sample: ExecutionTradeOutcomeSample = {
+    symbol: cleanSym,
+    isWin: params.isWin,
+    realizedPnlR: params.realizedPnlR ?? (params.isWin ? 1.0 : -1.0),
+    timestamp: Number.isFinite(params.timestamp) && (params.timestamp ?? 0) > 0 ? (params.timestamp as number) : Date.now(),
+  };
+
+  TRADE_OUTCOME_BUFFER.push(sample);
+  if (TRADE_OUTCOME_BUFFER.length > MAX_TRADE_OUTCOME_SAMPLES) {
+    TRADE_OUTCOME_BUFFER.shift();
+  }
+  return sample;
+}
 
 /**
  * Records realized execution price vs intended signal entry price to close the feedback loop
@@ -541,15 +579,44 @@ export function getEmpiricalFrictionTelemetry(symbol?: string): EmpiricalFrictio
   const list = cleanSym
     ? SLIPPAGE_TELEMETRY_BUFFER.filter((s) => s.symbol === cleanSym)
     : SLIPPAGE_TELEMETRY_BUFFER;
+  const tradeList = cleanSym
+    ? TRADE_OUTCOME_BUFFER.filter((s) => s.symbol === cleanSym)
+    : TRADE_OUTCOME_BUFFER;
+
+  let empiricalWinRatePct: number | null = null;
+  let consecutiveLosses = 0;
+  let consecutiveWins = 0;
+
+  if (tradeList.length > 0) {
+    const wins = tradeList.filter((s) => s.isWin).length;
+    empiricalWinRatePct = Number(((wins / tradeList.length) * 100).toFixed(1));
+    let streakBroken = false;
+    let firstIsWin: boolean | null = null;
+    for (let i = tradeList.length - 1; i >= 0; i--) {
+      const item = tradeList[i]!;
+      if (!streakBroken) {
+        if (firstIsWin === null) firstIsWin = item.isWin;
+        if (item.isWin === firstIsWin) {
+          if (item.isWin) consecutiveWins++;
+          else consecutiveLosses++;
+        } else {
+          streakBroken = true;
+        }
+      }
+    }
+  }
 
   const n = list.length;
   if (n === 0) {
     return {
-      sampleCount: 0,
+      sampleCount: tradeList.length,
       avgSlippageBps: 0,
       p95SlippageBps: 0,
       empiricalFrictionR: 0.06,
       recommendedFrictionROverride: null,
+      empiricalWinRatePct,
+      consecutiveLosses,
+      consecutiveWins,
     };
   }
 
@@ -565,11 +632,14 @@ export function getEmpiricalFrictionTelemetry(symbol?: string): EmpiricalFrictio
   );
 
   return {
-    sampleCount: n,
+    sampleCount: Math.max(n, tradeList.length),
     avgSlippageBps,
     p95SlippageBps,
     empiricalFrictionR,
     recommendedFrictionROverride: n >= 3 ? empiricalFrictionR : null,
+    empiricalWinRatePct,
+    consecutiveLosses,
+    consecutiveWins,
   };
 }
 
