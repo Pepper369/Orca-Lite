@@ -151,6 +151,109 @@ export function evaluateNewsCircuitBreaker(
   };
 }
 
+/**
+ * Institutional 3-Phase Event Lifecycle Evaluator
+ * Maps temporal proximity of high-impact events to execution rules and volatility buffers.
+ */
+export function evaluateFullEventLifecycle(
+  pair: string,
+  nowMs = Date.now(),
+  calendarEvents: { name?: string; time?: string; currency?: string; importance?: string }[] = []
+): {
+  phase: "PRE_EVENT_COMPRESSION" | "EVENT_SHOCK_FREEZE" | "POST_EVENT_RECOVERY" | "POST_EVENT_DRIFT" | "NORMAL_EXPANSION";
+  isLockout: boolean;
+  minutesToEvent: number | null;
+  activeEvent: HighImpactNewsEvent | null;
+  executionRule: "REJECT_MARKET_ORDERS" | "PASSIVE_LIMIT_ONLY" | "TWAP_ONLY" | "ALLOW_ALL";
+  spreadMultiplier: number;
+  slippageBufferPips: number;
+  rationaleVi: string;
+} {
+  const cb = evaluateNewsCircuitBreaker(pair, nowMs, calendarEvents);
+  const ev = cb.relevantEvent;
+  const mins = cb.minutesToEvent;
+
+  if (!ev || mins === null || Math.abs(mins) > 240) {
+    return {
+      phase: "NORMAL_EXPANSION",
+      isLockout: false,
+      minutesToEvent: mins,
+      activeEvent: null,
+      executionRule: "ALLOW_ALL",
+      spreadMultiplier: 1.0,
+      slippageBufferPips: 1.5,
+      rationaleVi: "Ngoài phạm vi ảnh hưởng của tin vĩ mô. Giao dịch bình thường theo chiến lược cơ sở.",
+    };
+  }
+
+  // Event Shock Freeze: -15 mins to +20 mins (mins > 0 means before event, mins <= 0 means after event in evaluateNewsCircuitBreaker)
+  if (cb.isLockout) {
+    return {
+      phase: "EVENT_SHOCK_FREEZE",
+      isLockout: true,
+      minutesToEvent: mins,
+      activeEvent: ev,
+      executionRule: "REJECT_MARKET_ORDERS",
+      spreadMultiplier: 3.0,
+      slippageBufferPips: cb.slippageBufferPips,
+      rationaleVi: cb.warningMessage ?? "Vùng đóng băng giao dịch khẩn cấp (Event Shock Freeze).",
+    };
+  }
+
+  // Pre-event Compression: 15 to 60 mins before event (mins > 0 in evaluateNewsCircuitBreaker is pre-event)
+  if (mins > 15 && mins <= 60) {
+    return {
+      phase: "PRE_EVENT_COMPRESSION",
+      isLockout: false,
+      minutesToEvent: mins,
+      activeEvent: ev,
+      executionRule: "PASSIVE_LIMIT_ONLY",
+      spreadMultiplier: 1.6,
+      slippageBufferPips: 3.5,
+      rationaleVi: `Co cụm biến động trước tin [${ev.name}] (${mins} phút trước giờ G). Giảm 50% đòn bẩy và chỉ dùng lệnh Limit thụ động.`,
+    };
+  }
+
+  // Post-event Recovery: 20 to 60 mins after event (mins < 0, between -20 and -60)
+  if (mins < -20 && mins >= -60) {
+    return {
+      phase: "POST_EVENT_RECOVERY",
+      isLockout: false,
+      minutesToEvent: mins,
+      activeEvent: ev,
+      executionRule: "TWAP_ONLY",
+      spreadMultiplier: 1.4,
+      slippageBufferPips: 2.8,
+      rationaleVi: `Thanh khoản đang hồi phục sau tin [${ev.name}] (${Math.abs(mins)} phút sau giờ G). Ưu tiên giải ngân theo TWAP.`,
+    };
+  }
+
+  // Post-event Drift: 60 to 240 mins after event (mins between -60 and -240)
+  if (mins < -60 && mins >= -240) {
+    return {
+      phase: "POST_EVENT_DRIFT",
+      isLockout: false,
+      minutesToEvent: mins,
+      activeEvent: ev,
+      executionRule: "ALLOW_ALL",
+      spreadMultiplier: 1.1,
+      slippageBufferPips: 2.0,
+      rationaleVi: `Xu hướng vĩ mô mới đã thiết lập (Post-Event Drift sau [${ev.name}]). Kích hoạt chiến lược Trend-Following theo hướng phản ứng.`,
+    };
+  }
+
+  return {
+    phase: "NORMAL_EXPANSION",
+    isLockout: false,
+    minutesToEvent: mins,
+    activeEvent: ev,
+    executionRule: "ALLOW_ALL",
+    spreadMultiplier: 1.0,
+    slippageBufferPips: 1.5,
+    rationaleVi: "Biến động bình thường.",
+  };
+}
+
 export interface DynamicSlippageResult {
   baseSpreadPips: number;
   recommendedSlippagePips: number;

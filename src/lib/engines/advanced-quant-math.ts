@@ -2305,3 +2305,475 @@ export function computeAdaptiveStrategyWeights(params: {
     rationaleVi: `Phân bổ Chiến lược Đa kịch bản: Ưu tiên ${topStrategy} (${(topWeight * 100).toFixed(1)}%) | Kỳ vọng Sharpe Tổ hợp=${expectedEnsembleSharpe.toFixed(2)}.`,
   };
 }
+
+// ============================================================================
+// 10. Factor Matrix Orthogonalization (Löwdin Symmetric Orthogonalization)
+// ============================================================================
+
+export interface FactorOrthogonalizationResult {
+  orthogonalizedMatrix: number[][]; // N x K orthogonalized factors
+  correlationMatrixBefore: number[][]; // K x K original correlation matrix
+  correlationMatrixAfter: number[][]; // K x K orthogonalized correlation matrix (near identity)
+  conditionNumber: number; // lambda_max / lambda_min
+  maxAbsCrossCorrelationBefore: number;
+  maxAbsCrossCorrelationAfter: number;
+  eigenvalues: number[];
+  rationaleVi: string;
+}
+
+/**
+ * Computes eigenvalues and eigenvectors of a symmetric K x K real matrix via Jacobi rotations.
+ */
+export function symmetricJacobiEigenvalues(
+  matrix: number[][],
+  maxSweeps = 60,
+  epsilon = 1e-12
+): { eigenvalues: number[]; eigenvectors: number[][] } {
+  const n = matrix.length;
+  // Deep clone matrix A and initialize V as identity
+  const A: number[][] = matrix.map((row) => [...row]);
+  const V: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))
+  );
+
+  for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    let maxOffDiag = 0;
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        const absVal = Math.abs(A[p]![q]!);
+        if (absVal > maxOffDiag) maxOffDiag = absVal;
+      }
+    }
+
+    if (maxOffDiag < epsilon) break;
+
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        const apq = A[p]![q]!;
+        if (Math.abs(apq) < epsilon) continue;
+
+        const app = A[p]![p]!;
+        const aqq = A[q]![q]!;
+        const tau = (aqq - app) / (2 * apq);
+        const t = tau >= 0 ? 1 / (tau + Math.sqrt(1 + tau * tau)) : -1 / (-tau + Math.sqrt(1 + tau * tau));
+        const c = 1 / Math.sqrt(1 + t * t);
+        const s = t * c;
+        const theta = s / (1 + c);
+
+        A[p]![p] = app - t * apq;
+        A[q]![q] = aqq + t * apq;
+        A[p]![q] = 0;
+        A[q]![p] = 0;
+
+        for (let r = 0; r < n; r++) {
+          if (r !== p && r !== q) {
+            const arp = A[r]![p]!;
+            const arq = A[r]![q]!;
+            A[r]![p] = arp - s * (arq + theta * arp);
+            A[p]![r] = A[r]![p]!;
+            A[r]![q] = arq + s * (arp - theta * arq);
+            A[q]![r] = A[r]![q]!;
+          }
+          // Update eigenvectors
+          const vrp = V[r]![p]!;
+          const vrq = V[r]![q]!;
+          V[r]![p] = vrp - s * (vrq + theta * vrp);
+          V[r]![q] = vrq + s * (vrp - theta * vrq);
+        }
+      }
+    }
+  }
+
+  // Extract eigenvalues and pair with eigenvectors
+  const pairs: { val: number; vec: number[] }[] = [];
+  for (let i = 0; i < n; i++) {
+    const val = A[i]![i]!;
+    const vec: number[] = [];
+    for (let r = 0; r < n; r++) {
+      vec.push(V[r]![i]!);
+    }
+    pairs.push({ val, vec });
+  }
+
+  // Sort descending by eigenvalue
+  pairs.sort((a, b) => b.val - a.val);
+
+  const eigenvalues = pairs.map((p) => p.val);
+  const eigenvectors: number[][] = Array.from({ length: n }, (_, r) =>
+    Array.from({ length: n }, (_, c) => pairs[c]!.vec[r]!)
+  );
+
+  return { eigenvalues, eigenvectors };
+}
+
+/**
+ * Löwdin Symmetric Factor Orthogonalization:
+ * Takes an N x K factor matrix (N observations, K factors),
+ * standardizes columns to zero mean / unit variance,
+ * and transforms them into orthonormal factors F_orth = Z * C^(-1/2).
+ * Minimizes deviation ||F_orth - Z||_F, keeping factors maximally aligned with their original intuition.
+ */
+export function orthogonalizeFactorMatrix(
+  factorMatrix: number[][],
+  ridgeLambda = 1e-4
+): FactorOrthogonalizationResult {
+  if (!Array.isArray(factorMatrix) || factorMatrix.length < 2) {
+    throw new Error("orthogonalizeFactorMatrix requires at least 2 rows");
+  }
+  const n = factorMatrix.length;
+  const k = factorMatrix[0]?.length ?? 0;
+  if (k < 2) {
+    throw new Error("orthogonalizeFactorMatrix requires at least 2 factors (columns)");
+  }
+
+  // 1. Standardize each column
+  const means: number[] = new Array(k).fill(0);
+  const stds: number[] = new Array(k).fill(0);
+
+  for (let j = 0; j < k; j++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      sum += factorMatrix[i]![j]!;
+    }
+    means[j] = sum / n;
+
+    let varSum = 0;
+    for (let i = 0; i < n; i++) {
+      const diff = factorMatrix[i]![j]! - means[j]!;
+      varSum += diff * diff;
+    }
+    stds[j] = Math.sqrt(Math.max(1e-8, varSum / (n - 1)));
+  }
+
+  const Z: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: k }, (_, j) => (factorMatrix[i]![j]! - means[j]!) / stds[j]!)
+  );
+
+  // 2. Compute sample correlation matrix C = (Z^T * Z) / (n - 1)
+  const C: number[][] = Array.from({ length: k }, (_, r) =>
+    Array.from({ length: k }, (_, c) => {
+      if (r === c) return 1.0;
+      let dot = 0;
+      for (let i = 0; i < n; i++) {
+        dot += Z[i]![r]! * Z[i]![c]!;
+      }
+      const corr = dot / (n - 1);
+      return Math.min(0.9999, Math.max(-0.9999, corr));
+    })
+  );
+
+  // Symmetrize and regularize
+  const C_reg: number[][] = Array.from({ length: k }, (_, r) =>
+    Array.from({ length: k }, (_, c) => {
+      const sym = (C[r]![c]! + C[c]![r]!) / 2;
+      return (1 - ridgeLambda) * sym + (r === c ? ridgeLambda : 0);
+    })
+  );
+
+  // 3. Spectral Decomposition C_reg = V * Lambda * V^T
+  const { eigenvalues, eigenvectors } = symmetricJacobiEigenvalues(C_reg);
+  const minEig = Math.max(1e-6, eigenvalues[eigenvalues.length - 1]!);
+  const maxEig = Math.max(minEig, eigenvalues[0]!);
+  const conditionNumber = Number((maxEig / minEig).toFixed(2));
+
+  // 4. Compute C^(-1/2) = V * Lambda^(-1/2) * V^T
+  const invSqrtLambda = eigenvalues.map((ev) => 1 / Math.sqrt(Math.max(1e-6, ev)));
+  const C_inv_sqrt: number[][] = Array.from({ length: k }, () => new Array(k).fill(0));
+
+  for (let r = 0; r < k; r++) {
+    for (let c = 0; c < k; c++) {
+      let sum = 0;
+      for (let m = 0; m < k; m++) {
+        sum += eigenvectors[r]![m]! * invSqrtLambda[m]! * eigenvectors[c]![m]!;
+      }
+      C_inv_sqrt[r]![c] = sum;
+    }
+  }
+
+  // 5. Orthogonalized factors F_orth = Z * C^(-1/2)
+  const F_orth: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: k }, (_, j) => {
+      let dot = 0;
+      for (let m = 0; m < k; m++) {
+        dot += Z[i]![m]! * C_inv_sqrt[m]![j]!;
+      }
+      return Number(dot.toFixed(5));
+    })
+  );
+
+  // 6. Compute correlation matrix after orthogonalization
+  const C_after: number[][] = Array.from({ length: k }, (_, r) =>
+    Array.from({ length: k }, (_, c) => {
+      if (r === c) return 1.0;
+      let dot = 0;
+      for (let i = 0; i < n; i++) {
+        dot += F_orth[i]![r]! * F_orth[i]![c]!;
+      }
+      return Number((dot / (n - 1)).toFixed(5));
+    })
+  );
+
+  let maxAbsBefore = 0;
+  for (let r = 0; r < k; r++) {
+    for (let c = r + 1; c < k; c++) {
+      const a = Math.abs(C[r]![c]!);
+      if (a > maxAbsBefore) maxAbsBefore = a;
+    }
+  }
+
+  let maxAbsAfter = 0;
+  for (let r = 0; r < k; r++) {
+    for (let c = r + 1; c < k; c++) {
+      const a = Math.abs(C_after[r]![c]!);
+      if (a > maxAbsAfter) maxAbsAfter = a;
+    }
+  }
+
+  return {
+    orthogonalizedMatrix: F_orth,
+    correlationMatrixBefore: C.map((row) => row.map((v) => Number(v.toFixed(4)))),
+    correlationMatrixAfter: C_after,
+    conditionNumber,
+    maxAbsCrossCorrelationBefore: Number(maxAbsBefore.toFixed(4)),
+    maxAbsCrossCorrelationAfter: Number(maxAbsAfter.toFixed(5)),
+    eigenvalues: eigenvalues.map((ev) => Number(ev.toFixed(4))),
+    rationaleVi: `Trực giao hóa Löwdin: Giảm tương quan chéo tối đa từ ${(maxAbsBefore * 100).toFixed(1)}% xuống ${(maxAbsAfter * 100).toFixed(2)}% | Hệ số điều kiện Condition Number = ${conditionNumber}.`,
+  };
+}
+
+// ============================================================================
+// 11. Event-Driven Bayesian Macro Updating Engine
+// ============================================================================
+
+export type EventLifecyclePhase =
+  | "PRE_EVENT_COMPRESSION" // 15 - 60 mins before high impact event (co cụm biến động, giảm margin)
+  | "EVENT_SHOCK_FREEZE"    // -15 to +20 mins around event (đóng băng, hủy lệnh market, cấm giao dịch)
+  | "POST_EVENT_RECOVERY"   // 20 - 60 mins after (thanh khoản hồi phục, spread co hẹp)
+  | "POST_EVENT_DRIFT"      // 60 - 240 mins after (xu hướng vĩ mô mới hình thành rõ nét)
+  | "NORMAL_EXPANSION";     // Ngoài cửa sổ tin tức
+
+export interface MacroEventSurpriseInput {
+  eventId: string;
+  name: string;
+  currency: string;
+  importance: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  category?: "INTEREST_RATE" | "INFLATION" | "EMPLOYMENT" | "GROWTH" | "LIQUIDITY";
+  standardizedSurpriseScore: number; // (Actual - Forecast) / historical_std (z-score, e.g. +2.1, -1.8)
+  minutesToEvent: number; // âm là trước tin, dương là sau tin
+  actualStr?: string;
+  forecastStr?: string;
+}
+
+export interface BayesianScenarioUpdateResult {
+  updatedProbabilities: Record<CanonicalMarketScenarioId, number>;
+  dominantScenario: CanonicalMarketScenarioId;
+  shannonEntropy: number;
+  lifecyclePhase: EventLifecyclePhase;
+  isHardLockout: boolean;
+  recommendedKellyScale: number;
+  executionPolicy: "REJECT_MARKET_ORDERS" | "PASSIVE_LIMIT_ONLY" | "TWAP_ONLY" | "ALLOW_ALL";
+  eventRiskScore: number; // 0 - 100
+  rationaleVi: string;
+}
+
+/**
+ * Updates the 5-scenario market simplex vector using Bayesian likelihoods from macroeconomic news surprises.
+ * Preserves the exact simplex property: sum(P_k) === 1.0.
+ */
+export function updateScenarioVectorWithBayesianSurprise(
+  priorScenario: MarketScenarioVectorResult,
+  events: MacroEventSurpriseInput[] = []
+): BayesianScenarioUpdateResult {
+  const priors = priorScenario.probabilities;
+
+  if (!events || events.length === 0) {
+    return {
+      updatedProbabilities: { ...priors },
+      dominantScenario: priorScenario.dominantScenario,
+      shannonEntropy: priorScenario.shannonEntropy,
+      lifecyclePhase: "NORMAL_EXPANSION",
+      isHardLockout: priorScenario.isHardLockout,
+      recommendedKellyScale: priorScenario.recommendedKellyScale,
+      executionPolicy: priorScenario.isHardLockout ? "REJECT_MARKET_ORDERS" : "ALLOW_ALL",
+      eventRiskScore: 10,
+      rationaleVi: "Không có sự kiện vĩ mô trọng yếu trong vùng quan sát. Duy trì vector tiên nghiệm.",
+    };
+  }
+
+  // 1. Identify closest high/critical event and determine Event Lifecycle Phase
+  let minAbsTime = Infinity;
+  let activeEvent: MacroEventSurpriseInput | null = null;
+  let maxImpactScore = 0;
+
+  for (const ev of events) {
+    const isHighOrCrit = ev.importance === "CRITICAL" || ev.importance === "HIGH";
+    const absMin = Math.abs(ev.minutesToEvent);
+    const impactWeight = ev.importance === "CRITICAL" ? 1.0 : ev.importance === "HIGH" ? 0.75 : 0.4;
+    const impactScore = impactWeight * (1 + Math.min(3, Math.abs(ev.standardizedSurpriseScore)));
+
+    if (impactScore > maxImpactScore) {
+      maxImpactScore = impactScore;
+    }
+
+    if (isHighOrCrit && absMin < minAbsTime) {
+      minAbsTime = absMin;
+      activeEvent = ev;
+    }
+  }
+
+  const mins = activeEvent ? activeEvent.minutesToEvent : 999;
+  let lifecyclePhase: EventLifecyclePhase = "NORMAL_EXPANSION";
+
+  if (activeEvent) {
+    if (mins >= -60 && mins < -15) {
+      lifecyclePhase = "PRE_EVENT_COMPRESSION";
+    } else if (mins >= -15 && mins <= 20) {
+      lifecyclePhase = "EVENT_SHOCK_FREEZE";
+    } else if (mins > 20 && mins <= 60) {
+      lifecyclePhase = "POST_EVENT_RECOVERY";
+    } else if (mins > 60 && mins <= 240) {
+      lifecyclePhase = "POST_EVENT_DRIFT";
+    }
+  }
+
+  // 2. Compute Likelihood multiplier for each canonical scenario
+  // S1 (Trend), S2 (Mean Revert), S3 (Squeeze), S4 (Macro Shock), S5 (Tail Crisis)
+  let logL1 = 0;
+  let logL2 = 0;
+  let logL3 = 0;
+  let logL4 = 0;
+  let logL5 = 0;
+
+  for (const ev of events) {
+    const weight = ev.importance === "CRITICAL" ? 1.5 : ev.importance === "HIGH" ? 1.0 : 0.4;
+    const z = ev.standardizedSurpriseScore;
+    const absZ = Math.abs(z);
+
+    // If within shock window [-15, +20]
+    if (ev.minutesToEvent >= -15 && ev.minutesToEvent <= 20) {
+      logL4 += weight * (1.8 + Math.min(2.5, absZ * 0.8));
+      if (absZ >= 2.0 || ev.importance === "CRITICAL") {
+        logL5 += weight * (1.2 + Math.min(2.0, absZ * 0.6));
+      }
+      logL2 -= weight * 1.5; // Mean reversion fails during shock
+    } else if (ev.minutesToEvent > 20 && ev.minutesToEvent <= 240) {
+      // Post-event phase: directionality emerges
+      if (absZ >= 1.2) {
+        logL1 += weight * (0.8 + Math.min(1.5, absZ * 0.5)); // Directional drift
+        logL3 += weight * 0.5; // Squeeze continuation
+      } else {
+        logL2 += weight * 1.0; // In-line surprise returns to mean reversion
+      }
+    } else if (ev.minutesToEvent >= -60 && ev.minutesToEvent < -15) {
+      // Pre-event compression
+      logL4 += weight * 0.6;
+      logL1 -= weight * 0.5;
+    }
+  }
+
+  // 3. Compute Unnormalized Posteriors: P_post(k) ~ P_prior(k) * exp(logLk)
+  const l1 = Math.exp(Math.min(10, Math.max(-10, logL1)));
+  const l2 = Math.exp(Math.min(10, Math.max(-10, logL2)));
+  const l3 = Math.exp(Math.min(10, Math.max(-10, logL3)));
+  const l4 = Math.exp(Math.min(10, Math.max(-10, logL4)));
+  const l5 = Math.exp(Math.min(10, Math.max(-10, logL5)));
+
+  const rawP1 = (priors.S1_TREND_EXPANSION ?? 0.2) * l1;
+  const rawP2 = (priors.S2_MEAN_REVERT_RANGE ?? 0.2) * l2;
+  const rawP3 = (priors.S3_SQUEEZE_CASCADE ?? 0.2) * l3;
+  const rawP4 = (priors.S4_MACRO_EVENT_SHOCK ?? 0.2) * l4;
+  const rawP5 = (priors.S5_TAIL_CRISIS_LOCKOUT ?? 0.2) * l5;
+
+  const totalRaw = Math.max(1e-12, rawP1 + rawP2 + rawP3 + rawP4 + rawP5);
+
+  const scenarioIds: CanonicalMarketScenarioId[] = [
+    "S1_TREND_EXPANSION",
+    "S2_MEAN_REVERT_RANGE",
+    "S3_SQUEEZE_CASCADE",
+    "S4_MACRO_EVENT_SHOCK",
+    "S5_TAIL_CRISIS_LOCKOUT",
+  ];
+  const rawValues = [rawP1, rawP2, rawP3, rawP4, rawP5];
+
+  const updatedProbs: Record<CanonicalMarketScenarioId, number> = {
+    S1_TREND_EXPANSION: 0.2,
+    S2_MEAN_REVERT_RANGE: 0.2,
+    S3_SQUEEZE_CASCADE: 0.2,
+    S4_MACRO_EVENT_SHOCK: 0.2,
+    S5_TAIL_CRISIS_LOCKOUT: 0.2,
+  };
+
+  let sumProbs = 0;
+  let dominantScenario: CanonicalMarketScenarioId = "S1_TREND_EXPANSION";
+  let maxP = -1;
+
+  for (let i = 0; i < scenarioIds.length; i++) {
+    const sc = scenarioIds[i]!;
+    const p =
+      i < scenarioIds.length - 1
+        ? Number((rawValues[i]! / totalRaw).toFixed(4))
+        : Number(Math.max(0, 1 - sumProbs).toFixed(4));
+    if (i < scenarioIds.length - 1) sumProbs += p;
+    updatedProbs[sc] = p;
+
+    if (p > maxP) {
+      maxP = p;
+      dominantScenario = sc;
+    }
+  }
+
+  // 4. Compute Shannon Entropy on posterior distribution
+  let entropySum = 0;
+  for (const sc of scenarioIds) {
+    const p = updatedProbs[sc]!;
+    if (p > 1e-6) {
+      entropySum += p * (Math.log(p) / Math.LN2);
+    }
+  }
+  const maxPossibleEntropy = Math.log(scenarioIds.length) / Math.LN2; // log2(5) ~= 2.3219
+  const shannonEntropy = Number(Math.min(1.0, Math.max(0, -entropySum / maxPossibleEntropy)).toFixed(4));
+
+  // 5. Determine Hard Lockout & Execution Policy
+  const isHardLockout =
+    lifecyclePhase === "EVENT_SHOCK_FREEZE" ||
+    updatedProbs.S5_TAIL_CRISIS_LOCKOUT >= 0.40 ||
+    updatedProbs.S4_MACRO_EVENT_SHOCK >= 0.65;
+
+  let executionPolicy: BayesianScenarioUpdateResult["executionPolicy"] = "ALLOW_ALL";
+  let recommendedKellyScale = 1.0;
+
+  if (isHardLockout) {
+    executionPolicy = "REJECT_MARKET_ORDERS";
+    recommendedKellyScale = 0;
+  } else if (lifecyclePhase === "PRE_EVENT_COMPRESSION") {
+    executionPolicy = "PASSIVE_LIMIT_ONLY";
+    recommendedKellyScale = 0.5;
+  } else if (lifecyclePhase === "POST_EVENT_RECOVERY") {
+    executionPolicy = "TWAP_ONLY";
+    recommendedKellyScale = 0.65;
+  } else if (shannonEntropy > 0.85) {
+    executionPolicy = "PASSIVE_LIMIT_ONLY";
+    recommendedKellyScale = 0.4;
+  }
+
+  const eventRiskScore = Math.min(
+    100,
+    Math.round(
+      updatedProbs.S4_MACRO_EVENT_SHOCK * 50 +
+        updatedProbs.S5_TAIL_CRISIS_LOCKOUT * 60 +
+        (lifecyclePhase === "EVENT_SHOCK_FREEZE" ? 40 : 0)
+    )
+  );
+
+  return {
+    updatedProbabilities: updatedProbs,
+    dominantScenario,
+    shannonEntropy,
+    lifecyclePhase,
+    isHardLockout,
+    recommendedKellyScale,
+    executionPolicy,
+    eventRiskScore,
+    rationaleVi: `Bayesian Update: Pha sự kiện [${lifecyclePhase}], Kịch bản chiếm ưu thế [${dominantScenario}] (${(maxP * 100).toFixed(1)}%), Entropy=${shannonEntropy}. Chính sách khớp lệnh: ${executionPolicy}.`,
+  };
+}

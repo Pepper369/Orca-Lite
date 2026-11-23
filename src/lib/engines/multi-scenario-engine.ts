@@ -12,6 +12,15 @@
  * - Tỷ trọng phân bổ tài sản tối ưu (Recommended Equity / Cash Ratio)
  */
 
+import {
+  evaluateMarketScenarioVector,
+  updateScenarioVectorWithBayesianSurprise,
+  type CanonicalMarketScenarioId,
+  type EventLifecyclePhase,
+  type MacroEventSurpriseInput,
+  type MarketScenarioInput,
+} from "./advanced-quant-math";
+
 export type ScenarioType = "BULL" | "BASE" | "BEAR";
 export type TimeframeBias = "BULLISH" | "NEUTRAL" | "BEARISH";
 
@@ -707,4 +716,352 @@ export function getVnIndexMacroScenario(): MultiScenarioReport {
         "Ngắn hạn thị trường phân hóa giằng co trong hộp tích lũy (Neutral), tuy nhiên Trung và Dài hạn xu hướng Tăng trưởng (Bullish) vẫn đóng vai trò chủ đạo. Chiến lược phòng ngừa rủi ro biến động ngắn hạn bằng cách quản trị tỷ trọng tiền mặt hợp lý.",
     },
   });
+}
+
+// ============================================================================
+// UNIFIED INSTITUTIONAL MACRO-EVENT SCENARIO SYNTHESIZER
+// ============================================================================
+
+export interface UnifiedMacroScenarioInput {
+  symbol: string;
+  currentPrice: number;
+  asOfDate?: string;
+  portfolioValueVND?: number; // Giá trị danh mục cổ phiếu (VND), mặc định 500,000,000
+  portfolioBeta?: number; // Beta danh mục so với VN-Index, mặc định 1.0
+  vn30fIndexPrice?: number; // Điểm số hợp đồng tương lai VN30F, mặc định 1300
+  macroEvents?: MacroEventSurpriseInput[]; // Dữ liệu lịch kinh tế & bất ngờ vĩ mô
+  marketScenarioInput?: MarketScenarioInput; // Dữ liệu kỹ thuật, HMM, VPIN, HAR-RV
+  baseScenarios?: {
+    bullTarget: number;
+    baseTarget: number;
+    bearTarget: number;
+    bullDrivers?: string[];
+    baseDrivers?: string[];
+    bearDrivers?: string[];
+    bullCatalysts?: string[];
+    baseCatalysts?: string[];
+    bearCatalysts?: string[];
+    bullInvalidation?: number;
+    baseInvalidation?: number;
+    bearInvalidation?: number;
+  };
+  timeframeMatrix?: MultiTimeframeMatrix;
+}
+
+export interface UnifiedMacroScenarioReport {
+  symbol: string;
+  currentPrice: number;
+  asOfDate: string;
+  eventLifecycle: {
+    phase: EventLifecyclePhase;
+    isHardLockout: boolean;
+    eventRiskScore: number;
+    executionPolicy: "REJECT_MARKET_ORDERS" | "PASSIVE_LIMIT_ONLY" | "TWAP_ONLY" | "ALLOW_ALL";
+    lifecycleRationaleVi: string;
+  };
+  canonicalSimplex: {
+    probabilities: Record<CanonicalMarketScenarioId, number>;
+    dominantScenario: CanonicalMarketScenarioId;
+    shannonEntropy: number;
+  };
+  scenarios: {
+    bull: ScenarioDetail;
+    base: ScenarioDetail;
+    bear: ScenarioDetail;
+  };
+  metrics: {
+    rawExpectedReturnPct: number;
+    netExpectedReturnPct: number; // Đã khấu trừ rủi ro trượt giá kẹt sàn T+2.5
+    scenarioVariance: number;
+    scenarioVolatilityPct: number;
+    upsidePotentialPct: number;
+    downsideRiskPct: number;
+    riskRewardRatio: number;
+    verdict: ScenarioActionVerdict;
+    verdictVi: string;
+  };
+  tailRiskAndHedging: {
+    t2FloorLockRisk: "LOW" | "MEDIUM" | "HIGH" | "EXTREME";
+    estimatedFloorLockSlippagePct: number;
+    vn30fHedgeRequired: boolean;
+    recommendedShortContracts: number;
+    hedgeRationaleVi: string;
+  };
+  timeframeMatrix: MultiTimeframeMatrix;
+  allocation: PortfolioAllocationAdvice;
+  executiveSummaryVi: string;
+}
+
+/**
+ * Institutional Unified Macro & Event Multi-Scenario Synthesizer
+ * Merges the 5-Canonical-Scenario Simplex (S1..S5), Bayesian Macro Surprise updating,
+ * T+2.5 liquidity lock haircut, and VN30F delta-neutral tail hedge into a unified executive report.
+ */
+export function projectUnifiedMacroScenarioReport(
+  input: UnifiedMacroScenarioInput
+): UnifiedMacroScenarioReport {
+  const price = Math.max(0.1, input.currentPrice);
+  const asOfDate = input.asOfDate ?? new Date().toISOString().split("T")[0]!;
+
+  // 1. Prior Market Simplex via Advanced Quant Math
+  const priorSimplex = evaluateMarketScenarioVector(input.marketScenarioInput ?? {});
+
+  // 2. Bayesian Posterior Updating with Macroeconomic News Surprises
+  const bayesianResult = updateScenarioVectorWithBayesianSurprise(
+    priorSimplex,
+    input.macroEvents ?? []
+  );
+
+  const pS = bayesianResult.updatedProbabilities;
+
+  // 3. Synthesize Macro News Surprise Directionality
+  let netSurpriseScore = 0;
+  if (input.macroEvents && input.macroEvents.length > 0) {
+    for (const ev of input.macroEvents) {
+      const w = ev.importance === "CRITICAL" ? 1.5 : ev.importance === "HIGH" ? 1.0 : 0.5;
+      netSurpriseScore += w * ev.standardizedSurpriseScore;
+    }
+  }
+
+  // 4. Map 5 Canonical Posteriors to 3 Actionable Scenarios (Bull, Base, Bear)
+  const isNetBullishMacro = netSurpriseScore >= 0;
+  const pBullRaw =
+    pS.S1_TREND_EXPANSION * 1.1 +
+    (isNetBullishMacro ? pS.S3_SQUEEZE_CASCADE * 0.6 : 0) +
+    (netSurpriseScore > 0.8 ? pS.S4_MACRO_EVENT_SHOCK * 0.35 : 0.02);
+
+  const pBearRaw =
+    pS.S5_TAIL_CRISIS_LOCKOUT * 1.3 +
+    (!isNetBullishMacro ? pS.S3_SQUEEZE_CASCADE * 0.6 : 0) +
+    (netSurpriseScore < -0.5 ? pS.S4_MACRO_EVENT_SHOCK * 0.85 : pS.S4_MACRO_EVENT_SHOCK * 0.45) +
+    0.02;
+
+  const pBaseRaw =
+    pS.S2_MEAN_REVERT_RANGE * 1.1 +
+    (Math.abs(netSurpriseScore) <= 0.5 ? pS.S4_MACRO_EVENT_SHOCK * 0.3 : 0.05);
+
+  const rawSum = Math.max(1e-6, pBullRaw + pBaseRaw + pBearRaw);
+  const pBull = Number(Math.max(0.05, Math.min(0.85, pBullRaw / rawSum)).toFixed(4));
+  const pBear = Number(Math.max(0.05, Math.min(0.85, pBearRaw / rawSum)).toFixed(4));
+  const pBase = Number(Math.max(0.05, 1 - pBull - pBear).toFixed(4));
+
+  // 5. Scenario Targets and Return Estimations
+  const bullTarget =
+    input.baseScenarios?.bullTarget ?? Number((price * (1 + 0.16)).toFixed(1));
+  const baseTarget =
+    input.baseScenarios?.baseTarget ?? Number((price * (1 + 0.04)).toFixed(1));
+  const bearTarget =
+    input.baseScenarios?.bearTarget ?? Number((price * (1 - 0.12)).toFixed(1));
+
+  const rawMetrics = calculateScenarioMetrics(
+    price,
+    bullTarget,
+    pBull,
+    baseTarget,
+    pBase,
+    bearTarget,
+    pBear
+  );
+
+  // 6. T+2.5 Floor Lock Liquidity Haircut
+  let floorLockRisk: "LOW" | "MEDIUM" | "HIGH" | "EXTREME" = "LOW";
+  let estimatedFloorLockSlippagePct = 7.0; // 1 sàn (7%)
+
+  if (bayesianResult.isHardLockout || pS.S5_TAIL_CRISIS_LOCKOUT >= 0.35) {
+    floorLockRisk = "EXTREME";
+    estimatedFloorLockSlippagePct = 21.0; // 3 phiên sàn liên tiếp (-21%)
+  } else if (pBear >= 0.45 || pS.S4_MACRO_EVENT_SHOCK >= 0.5) {
+    floorLockRisk = "HIGH";
+    estimatedFloorLockSlippagePct = 14.0; // 2 phiên sàn (-14%)
+  } else if (pBear >= 0.3) {
+    floorLockRisk = "MEDIUM";
+    estimatedFloorLockSlippagePct = 10.5; // 1.5 phiên sàn
+  }
+
+  // Net Expected Return: E[R]_net = E[R] - P(Bear) * Slippage_floor
+  const netExpectedReturnPct = Number(
+    (rawMetrics.expectedReturnPct - pBear * (estimatedFloorLockSlippagePct * 0.4)).toFixed(2)
+  );
+
+  // 7. Dynamic Verdict and Allocation Adjustment
+  let finalVerdict = rawMetrics.verdict;
+  let finalVerdictVi = rawMetrics.verdictVi;
+
+  if (bayesianResult.isHardLockout || floorLockRisk === "EXTREME") {
+    finalVerdict = "DEFENSIVE_CASH";
+    finalVerdictVi = "Phòng thủ tuyệt đối: Khóa giao dịch do rủi ro sự kiện vĩ mô cực đoan (Hard Lockout).";
+  } else if (bayesianResult.lifecyclePhase === "PRE_EVENT_COMPRESSION") {
+    if (finalVerdict === "STRONG_ACCUMULATE") {
+      finalVerdict = "SELECTIVE_BUY";
+      finalVerdictVi = "Mua thăm dò giới hạn: Thu hẹp quy mô trước thềm công bố tin vĩ mô lớn.";
+    }
+  } else if (netExpectedReturnPct < 0 && finalVerdict !== "DEFENSIVE_CASH") {
+    finalVerdict = "TRIM_RISK";
+    finalVerdictVi = "Hạ tỷ trọng: Kỳ vọng lợi nhuận ròng âm sau khi chiết khấu rủi ro kẹt sàn T+2.5.";
+  }
+
+  const allocation = deriveOptimalAllocation(
+    finalVerdict,
+    rawMetrics.riskRewardRatio,
+    netExpectedReturnPct,
+    Math.abs(rawMetrics.returns.bearPct)
+  );
+
+  // If hard lockout, force cash allocation
+  if (bayesianResult.isHardLockout) {
+    allocation.equityPct = Math.min(allocation.equityPct, 15);
+    allocation.cashPct = Math.max(allocation.cashPct, 85);
+    allocation.marginAllowed = false;
+    allocation.maxLeverageRatio = 1.0;
+  }
+
+  // 8. VN30F Tail Hedge Calculation
+  const portfolioVal = input.portfolioValueVND ?? 500_000_000;
+  const beta = Math.max(0.2, input.portfolioBeta ?? 1.0);
+  const vn30fPrice = Math.max(100, input.vn30fIndexPrice ?? 1300);
+  const contractValue = vn30fPrice * 100_000; // 1 điểm = 100,000 VND
+
+  const vn30fHedgeRequired =
+    pBear >= 0.35 || pS.S5_TAIL_CRISIS_LOCKOUT >= 0.25 || bayesianResult.isHardLockout;
+
+  const recommendedShortContracts = vn30fHedgeRequired
+    ? Math.max(1, Math.ceil((portfolioVal * beta * pBear) / contractValue))
+    : 0;
+
+  const hedgeRationaleVi = vn30fHedgeRequired
+    ? `Kích hoạt phòng hộ danh mục: Khuyến nghị Mở Short ${recommendedShortContracts} HĐTL VN30F (Giá trị bảo vệ ~ ${(recommendedShortContracts * contractValue).toLocaleString("vi-VN")} VND) để triệt tiêu rủi ro giảm giá T+2.5 khi xác suất Bear đạt ${(pBear * 100).toFixed(1)}%.`
+    : "Rủi ro giảm giá nằm trong tầm kiểm soát an toàn; chưa cần kích hoạt lệnh phòng hộ phái sinh VN30F.";
+
+  // 9. Timeframe Matrix Construction
+  const timeframeMatrix = input.timeframeMatrix ?? {
+    shortTerm: {
+      timeframe: "T+2.5 / Ngắn hạn (1 - 10 phiên)",
+      focus: `Theo dõi phản ứng sau pha ${bayesianResult.lifecyclePhase} và biên độ kiểm định hỗ trợ.`,
+      bias: isNetBullishMacro ? "BULLISH" : pBear > 0.4 ? "BEARISH" : "NEUTRAL",
+      supportLevel: Number((price * 0.95).toFixed(1)),
+      resistanceLevel: Number((price * 1.06).toFixed(1)),
+      stopLossLevel: Number((price * 0.92).toFixed(1)),
+      actionVi: `Tuân thủ chính sách khớp lệnh [${bayesianResult.executionPolicy}]. Tránh mua đuổi giá trần.`,
+    },
+    mediumTerm: {
+      timeframe: "Trung hạn (1 - 2 Quý / Mùa BCTC)",
+      focus: "Động lực EPS forward, chính sách tiền tệ và hấp thụ sốc vĩ mô toàn cầu.",
+      bias: rawMetrics.returns.bullPct > 15 ? "BULLISH" : "NEUTRAL",
+      businessCyclePhase: "Phục hồi sang Mở rộng",
+      quarterlyCatalysts: input.baseScenarios?.bullCatalysts ?? [
+        "Kết quả kinh doanh quý tăng trưởng đồng thuận",
+        "Thanh khoản hệ thống ngân hàng dồi dào",
+      ],
+      quarterlyTargetPrice: baseTarget,
+    },
+    longTerm: {
+      timeframe: "Dài hạn (1 - 3 Năm / Chu kỳ kinh tế)",
+      focus: "Lợi thế cạnh tranh (Moat), biên an toàn định giá DCF và chu kỳ tăng trưởng vĩ mô.",
+      bias: "BULLISH",
+      fairValueDCF: Number((price * 1.25).toFixed(1)),
+      moatRating: "WIDE",
+      structuralDrivers: [
+        "Dòng vốn FDI và nâng hạng thị trường",
+        "Tăng trưởng lợi nhuận bền vững theo quy mô nền kinh tế",
+      ],
+    },
+    confluenceSummaryVi: `Hợp lưu đa khung: Ngắn hạn chịu chi phối bởi pha sự kiện [${bayesianResult.lifecyclePhase}], Trung và Dài hạn duy trì định giá hấp dẫn với biên an toàn cao.`,
+  };
+
+  const executiveSummaryVi = `Báo cáo Đa Kịch Bản Tích Hợp Vĩ Mô [${input.symbol}]: Pha sự kiện [${bayesianResult.lifecyclePhase}], Kịch bản chiếm ưu thế [${bayesianResult.dominantScenario}]. Xác suất phân bổ: Bull ${(pBull * 100).toFixed(1)}% | Base ${(pBase * 100).toFixed(1)}% | Bear ${(pBear * 100).toFixed(1)}%. Lợi suất kỳ vọng ròng E[R]_net=${netExpectedReturnPct}%, Khuyến nghị: ${finalVerdictVi}. ${hedgeRationaleVi}`;
+
+  return {
+    symbol: input.symbol,
+    currentPrice: price,
+    asOfDate,
+    eventLifecycle: {
+      phase: bayesianResult.lifecyclePhase,
+      isHardLockout: bayesianResult.isHardLockout,
+      eventRiskScore: bayesianResult.eventRiskScore,
+      executionPolicy: bayesianResult.executionPolicy,
+      lifecycleRationaleVi: bayesianResult.rationaleVi,
+    },
+    canonicalSimplex: {
+      probabilities: pS,
+      dominantScenario: bayesianResult.dominantScenario,
+      shannonEntropy: bayesianResult.shannonEntropy,
+    },
+    scenarios: {
+      bull: {
+        type: "BULL",
+        labelVi: "Kịch bản Tích cực (Bull Case)",
+        probability: pBull,
+        targetPrice: bullTarget,
+        returnPct: rawMetrics.returns.bullPct,
+        drivers: input.baseScenarios?.bullDrivers ?? [
+          "Dòng tiền tổ chức tham gia mạnh mẽ đón đầu chu kỳ tăng trưởng",
+          "Dữ liệu kinh tế vĩ mô tích cực vượt kỳ vọng",
+        ],
+        catalysts: input.baseScenarios?.bullCatalysts ?? [
+          "BCTC quý vượt dự phóng và chính sách tiền tệ nới lỏng",
+        ],
+        invalidationPoint: input.baseScenarios?.bullInvalidation ?? Number((price * 0.96).toFixed(1)),
+        invalidationCondition: "Thủng ngưỡng hỗ trợ gần nhất kèm thanh khoản bán chủ động đột biến.",
+        actionableTrigger: "Giải ngân chủ động từng phần khi giá vượt cản xác nhận xu hướng.",
+        maxDrawdownPct: 4.5,
+      },
+      base: {
+        type: "BASE",
+        labelVi: "Kịch bản Cơ sở (Base Case)",
+        probability: pBase,
+        targetPrice: baseTarget,
+        returnPct: rawMetrics.returns.basePct,
+        drivers: input.baseScenarios?.baseDrivers ?? [
+          "Thị trường tích lũy giằng co phản ánh thông tin vĩ mô",
+          "Biên độ dao động thu hẹp quanh các đường trung bình động MA20/MA50",
+        ],
+        catalysts: input.baseScenarios?.baseCatalysts ?? [
+          "Số liệu kinh tế công bố sát với mức dự báo đồng thuận",
+        ],
+        invalidationPoint: input.baseScenarios?.baseInvalidation ?? Number((price * 0.93).toFixed(1)),
+        invalidationCondition: "Phá vỡ biên dưới hộp tích lũy.",
+        actionableTrigger: "Giao dịch lướt sóng biên độ: Mua tại hỗ trợ cứng, chốt lời từng phần tại kháng cự.",
+        maxDrawdownPct: 6.0,
+      },
+      bear: {
+        type: "BEAR",
+        labelVi: "Kịch bản Phòng thủ (Bear Case)",
+        probability: pBear,
+        targetPrice: bearTarget,
+        returnPct: rawMetrics.returns.bearPct,
+        drivers: input.baseScenarios?.bearDrivers ?? [
+          "Cú sốc thông tin vĩ mô tiêu cực kích hoạt làn sóng bán tháo",
+          "Áp lực dãn spread và cạn kiệt thanh khoản bên mua",
+        ],
+        catalysts: input.baseScenarios?.bearCatalysts ?? [
+          "Lạm phát hoặc lãi suất tăng đột biến gây sức ép lên định giá",
+        ],
+        invalidationPoint: input.baseScenarios?.bearInvalidation ?? Number((price * 0.90).toFixed(1)),
+        invalidationCondition: "Xác nhận tín hiệu gãy xu hướng trung hạn.",
+        actionableTrigger: "Kích hoạt cắt lỗ cứng, nâng tối đa tỷ trọng tiền mặt và mở vị thế Short phái sinh bảo hiểm.",
+        maxDrawdownPct: 15.0,
+      },
+    },
+    metrics: {
+      rawExpectedReturnPct: rawMetrics.expectedReturnPct,
+      netExpectedReturnPct,
+      scenarioVariance: rawMetrics.variance,
+      scenarioVolatilityPct: rawMetrics.volatilityPct,
+      upsidePotentialPct: rawMetrics.returns.bullPct,
+      downsideRiskPct: Math.abs(rawMetrics.returns.bearPct),
+      riskRewardRatio: rawMetrics.riskRewardRatio,
+      verdict: finalVerdict,
+      verdictVi: finalVerdictVi,
+    },
+    tailRiskAndHedging: {
+      t2FloorLockRisk: floorLockRisk,
+      estimatedFloorLockSlippagePct,
+      vn30fHedgeRequired,
+      recommendedShortContracts,
+      hedgeRationaleVi,
+    },
+    timeframeMatrix,
+    allocation,
+    executiveSummaryVi,
+  };
 }

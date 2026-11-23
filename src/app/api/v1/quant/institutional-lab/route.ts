@@ -10,7 +10,10 @@ import {
   evaluateMarketScenarioVector,
   computeScenarioDynamicExitPolicy,
   computeAdaptiveStrategyWeights,
+  orthogonalizeFactorMatrix,
+  updateScenarioVectorWithBayesianSurprise,
 } from "@/lib/engines/advanced-quant-math";
+import { projectUnifiedMacroScenarioReport } from "@/lib/engines/multi-scenario-engine";
 import {
   runMultiScenarioPortfolioStressTest,
   type PortfolioStressPosition,
@@ -205,6 +208,9 @@ export async function GET(req?: NextRequest) {
             "Deflated Sharpe Ratio (DSR) & Combinatorial Purged PBO",
             "Triple-Barrier Method & Purged Isotonic Meta-Labeling",
             "Value-at-Risk (VaR), Expected Shortfall (CVaR) & Continuous Drawdown Governor",
+            "Löwdin Symmetric Factor Orthogonalization & Orthonormal Factor De-biasing",
+            "Event-Driven Bayesian Posterior Updating with News Surprise Integration",
+            "Unified Macro-Event Multi-Scenario Synthesizer with T+2.5 Liquidity Haircut & VN30F Tail Hedge",
           ],
         },
       });
@@ -474,6 +480,94 @@ export async function POST(req: NextRequest) {
         maxDailyLossUsd: clampFinite(body.maxDailyLossUsd, 500, 10, 1e12),
         currentDailyRealizedPnlUsd: clampFinite(body.currentDailyRealizedPnlUsd, 0, -1e12, 1e12),
         crisisProbability: clampFinite(body.crisisProbability, 0.25, 0, 1),
+      });
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "factor_orthogonalization") {
+      if (!Array.isArray(body.factorMatrix) || body.factorMatrix.length < 2) {
+        return NextResponse.json(
+          { success: false, error: "factorMatrix must be an array with at least 2 rows" },
+          { status: 400 }
+        );
+      }
+      const rawMatrix = body.factorMatrix as unknown[];
+      const k = Array.isArray(rawMatrix[0]) ? (rawMatrix[0] as unknown[]).length : 0;
+      if (k < 2 || k > 30 || rawMatrix.length > 500) {
+        return NextResponse.json(
+          { success: false, error: "factorMatrix dimensions must be 2..500 rows and 2..30 columns" },
+          { status: 400 }
+        );
+      }
+      const cleanMatrix: number[][] = [];
+      for (const row of rawMatrix) {
+        if (!Array.isArray(row) || row.length !== k) {
+          return NextResponse.json(
+            { success: false, error: "All rows in factorMatrix must have identical length" },
+            { status: 400 }
+          );
+        }
+        cleanMatrix.push(row.map((v) => clampFinite(v, 0, -1e9, 1e9)));
+      }
+      const ridgeLambda = clampFinite(body.ridgeLambda, 1e-4, 1e-8, 0.1);
+      const result = orthogonalizeFactorMatrix(cleanMatrix, ridgeLambda);
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "bayesian_macro_update") {
+      const priorVector = evaluateMarketScenarioVector(
+        body.marketScenarioInput && typeof body.marketScenarioInput === "object"
+          ? (body.marketScenarioInput as Parameters<typeof evaluateMarketScenarioVector>[0])
+          : {}
+      );
+      const rawEvents = Array.isArray(body.macroEvents) ? (body.macroEvents as unknown[]) : [];
+      const cleanEvents = rawEvents.slice(0, 20).map((ev, idx) => {
+        const item = (ev && typeof ev === "object" ? ev : {}) as Record<string, unknown>;
+        const importance: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" =
+          item.importance === "CRITICAL" || item.importance === "HIGH" || item.importance === "LOW"
+            ? item.importance
+            : "MEDIUM";
+        return {
+          eventId: typeof item.eventId === "string" ? item.eventId : `ev-${idx}`,
+          name: typeof item.name === "string" ? item.name : "Economic Release",
+          currency: typeof item.currency === "string" ? item.currency : "USD",
+          importance,
+          standardizedSurpriseScore: clampFinite(item.standardizedSurpriseScore, 0, -10, 10),
+          minutesToEvent: clampFinite(item.minutesToEvent, 0, -1440, 1440),
+        };
+      });
+      const result = updateScenarioVectorWithBayesianSurprise(priorVector, cleanEvents);
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "unified_macro_scenario") {
+      const symbol = isValidTradingSymbol(body.symbol)
+        ? (body.symbol as string).trim().toUpperCase()
+        : "VNINDEX";
+      const currentPrice = clampFinite(body.currentPrice, 1280, 0.1, 1e9);
+      const rawEvents = Array.isArray(body.macroEvents) ? (body.macroEvents as unknown[]) : [];
+      const cleanEvents = rawEvents.slice(0, 20).map((ev, idx) => {
+        const item = (ev && typeof ev === "object" ? ev : {}) as Record<string, unknown>;
+        const importance: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" =
+          item.importance === "CRITICAL" || item.importance === "HIGH" || item.importance === "LOW"
+            ? item.importance
+            : "MEDIUM";
+        return {
+          eventId: typeof item.eventId === "string" ? item.eventId : `ev-${idx}`,
+          name: typeof item.name === "string" ? item.name : "Economic Event",
+          currency: typeof item.currency === "string" ? item.currency : "VND",
+          importance,
+          standardizedSurpriseScore: clampFinite(item.standardizedSurpriseScore, 0, -10, 10),
+          minutesToEvent: clampFinite(item.minutesToEvent, 0, -1440, 1440),
+        };
+      });
+      const result = projectUnifiedMacroScenarioReport({
+        symbol,
+        currentPrice,
+        portfolioValueVND: optClampFinite(body.portfolioValueVND, 1e6, 1e12),
+        portfolioBeta: optClampFinite(body.portfolioBeta, 0.1, 5.0),
+        vn30fIndexPrice: optClampFinite(body.vn30fIndexPrice, 100, 1e6),
+        macroEvents: cleanEvents,
       });
       return NextResponse.json({ success: true, data: result });
     }
