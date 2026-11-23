@@ -29,6 +29,13 @@
  */
 
 import { normCdf } from "./advanced-quant-math";
+import type { OhlcvBar } from "../types";
+import {
+  extractQlibFormulaicAlphas,
+  evaluateFactorQualityQlib,
+  buildQlibCompositeAlpha,
+  computeForwardReturns,
+} from "./formulaic-alpha-qlib";
 
 export type MarketRegime =
   | "BULL_EXPANSION"
@@ -71,6 +78,8 @@ export interface MultiFactorInput {
   ouHalfLifeDays?: number | null; // Mean reversion half-life in days
   volume20Avg?: number | null; // 20-day average volume in shares
   atr14?: number | null;
+  qlibAlphaPercentileRank?: number | null; // Qlib formulaic alpha percentile rank (0 - 100)
+  rawOhlcvBars?: OhlcvBar[] | null; // Optional raw bars for auto-evaluating Qlib formulaic alphas
 
   // Fundamental & Forensic
   roe?: number | null; // % e.g. 24.5
@@ -228,6 +237,33 @@ export function scoreTechnicalPillar(input: MultiFactorInput): {
   if (input.ouHalfLifeDays != null && input.ouHalfLifeDays <= 20) {
     score += 5;
     signals.push(`Hồi quy nhanh (Half-life ${input.ouHalfLifeDays.toFixed(0)} ngày)`);
+  }
+
+  // 7. Microsoft Qlib Formulaic Alpha Composite Percentile Rank
+  let qlibRank = input.qlibAlphaPercentileRank;
+  if (qlibRank == null && input.rawOhlcvBars && input.rawOhlcvBars.length >= 25) {
+    try {
+      const alphas = extractQlibFormulaicAlphas(input.rawOhlcvBars);
+      const fwd = computeForwardReturns(input.rawOhlcvBars, 1);
+      const reports: Record<string, ReturnType<typeof evaluateFactorQualityQlib>> = {};
+      for (const [k, series] of Object.entries(alphas)) {
+        reports[k] = evaluateFactorQualityQlib(k, series, fwd);
+      }
+      const comp = buildQlibCompositeAlpha({ factors: alphas, reports, useOnlyAdmitted: false });
+      qlibRank = comp.latestPercentileRank;
+    } catch {
+      // Non-blocking fallback
+    }
+  }
+
+  if (qlibRank != null) {
+    if (qlibRank >= 80) {
+      score += 7;
+      signals.push(`Qlib Alpha Top ${(100 - qlibRank).toFixed(0)}% thị trường (ICIR cao)`);
+    } else if (qlibRank < 30) {
+      score -= 7;
+      signals.push(`Qlib Alpha yếu (Phân vị ${qlibRank.toFixed(0)}%)`);
+    }
   }
 
   return {

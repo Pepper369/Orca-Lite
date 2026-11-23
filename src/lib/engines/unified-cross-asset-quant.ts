@@ -15,6 +15,21 @@ import {
   calculateForexPositionSize,
   type CrossRateOverrides,
 } from "./forex-position-sizer";
+import type { OhlcvBar } from "../types";
+import {
+  extractQlibFormulaicAlphas,
+  evaluateFactorQualityQlib,
+  buildQlibCompositeAlpha,
+  computeForwardReturns,
+} from "./formulaic-alpha-qlib";
+import {
+  calculateOptionGreeks,
+  calibrateSviVolatilitySmile,
+  runGsQuantScenarioStressTest,
+  type PortfolioPosition,
+  type PortfolioStressTestResult,
+} from "./institutional-greeks-gsquant";
+import { globalArcticStore } from "./arctic-timeseries-engine";
 
 // ============================================================================
 // 1. Dynamic Fractional Kelly & Volatility Targeting
@@ -1284,3 +1299,107 @@ export function computeHrpPortfolioSignalMultipliers(
   }
   return out;
 }
+
+// ============================================================================
+// 7. UNIFIED FRONTIER QUANT SUITE INTEGRATION (Qlib, gs-quant, ArcticDB)
+// ============================================================================
+
+export interface UnifiedQlibAlphaRatingResult {
+  symbol: string;
+  latestScore: number;
+  percentileRank: number;
+  isAdmitted: boolean;
+  admittedFactorCount: number;
+  topAlphaFactors: { name: string; rankIc: number; icir: number }[];
+  rationaleVi: string;
+}
+
+/**
+ * Universal Qlib Formulaic Alpha & ICIR Gate for any asset class (Equities, Crypto, FX, Derivatives).
+ */
+export function evaluateUnifiedQlibAlphaRating(
+  symbol: string,
+  bars: OhlcvBar[],
+  horizon = 1
+): UnifiedQlibAlphaRatingResult {
+  if (!bars || bars.length < 25) {
+    return {
+      symbol,
+      latestScore: 0,
+      percentileRank: 50,
+      isAdmitted: false,
+      admittedFactorCount: 0,
+      topAlphaFactors: [],
+      rationaleVi: `Dữ liệu nến cho ${symbol} không đủ (N = ${bars?.length ?? 0} < 25) để khai phá alpha.`,
+    };
+  }
+
+  const alphas = extractQlibFormulaicAlphas(bars);
+  const forwardReturns = computeForwardReturns(bars, horizon);
+  const reports: Record<string, ReturnType<typeof evaluateFactorQualityQlib>> = {};
+
+  for (const [key, series] of Object.entries(alphas)) {
+    reports[key] = evaluateFactorQualityQlib(key, series, forwardReturns);
+  }
+
+  const composite = buildQlibCompositeAlpha({ factors: alphas, reports, useOnlyAdmitted: false });
+
+  // Extract top 3 alpha factors by absolute ICIR
+  const sortedReports = Object.values(reports)
+    .sort((a, b) => Math.abs(b.icir) - Math.abs(a.icir))
+    .slice(0, 3)
+    .map((r) => ({ name: r.factorName, rankIc: r.meanRankIc, icir: r.icir }));
+
+  return {
+    symbol,
+    latestScore: composite.latestScore,
+    percentileRank: composite.latestPercentileRank,
+    isAdmitted: composite.admittedFactorCount >= 2,
+    admittedFactorCount: composite.admittedFactorCount,
+    topAlphaFactors: sortedReports,
+    rationaleVi:
+      `Qlib Alpha Rating [${symbol}]: Điểm = ${composite.latestScore} (Phân vị ${composite.latestPercentileRank}%). ` +
+      `Đạt chuẩn Qlib: ${composite.admittedFactorCount}/${Object.keys(alphas).length} nhân tố.`,
+  };
+}
+
+/**
+ * Universal Institutional Derivatives Greeks & Macro Scenario Stress Engine (gs-quant parity).
+ */
+export function evaluateUnifiedDerivativesRisk(params: {
+  positions: PortfolioPosition[];
+  portfolioRiskBudgetPct?: number;
+  vn30IndexLevel?: number;
+}): PortfolioStressTestResult {
+  return runGsQuantScenarioStressTest(params);
+}
+
+/**
+ * Universal Zero-Lookahead Columnar Storage Engine (ArcticDB parity).
+ * Stores bars into partitioned columnar chunks and verifies Point-In-Time purity.
+ */
+export function storeAndAuditArcticBars(params: {
+  symbol: string;
+  bars: OhlcvBar[];
+  asOfTimestamp?: number;
+}): {
+  chunksWritten: number;
+  totalBars: number;
+  isPurityVerified: boolean;
+  leakedCount: number;
+  rationaleVi: string;
+} {
+  const { symbol, bars, asOfTimestamp = Infinity } = params;
+  const writeRes = globalArcticStore.writeBars(symbol, bars);
+  const readBack = globalArcticStore.readBars(symbol, { asOfTimestamp });
+  const audit = globalArcticStore.verifyZeroLookahead(symbol, asOfTimestamp, readBack);
+
+  return {
+    chunksWritten: writeRes.chunksWritten,
+    totalBars: writeRes.totalBars,
+    isPurityVerified: audit.isPure,
+    leakedCount: audit.leakedCount,
+    rationaleVi: audit.rationaleVi,
+  };
+}
+
