@@ -29,6 +29,10 @@ import {
 } from "@/lib/engines/bot-trade-lifecycle-engine";
 import { recordPairCooldown } from "@/lib/engines/bot-pairlist-governor";
 import {
+  evaluateSignalThesisState,
+  createDefaultThesisContext,
+} from "@/lib/engines/bot-signal-falsification-tracker";
+import {
   aggregateTierSummary,
   assignPoolNavShares,
   calculateAccountRoiPct,
@@ -994,6 +998,43 @@ export async function evaluateRealtimePositionExits(options?: {
           await saveBotExecutionOrder({ ...o, stopLossPrice: tightSl });
           trailedCount++;
           continue;
+        }
+      }
+    }
+
+    // 3b) AlphaEar Investment Thesis Falsification Emergency Exit & Stop Tightening
+    const holdMsThesis = Date.now() - o.timestamp;
+    if (holdMsThesis >= 300_000 || options?.forceEvaluate) {
+      const thesisCtx = createDefaultThesisContext(o, assetType);
+      const thesisEval = evaluateSignalThesisState(thesisCtx, {
+        currentPrice: markPrice,
+        holdingMinutes: Math.round(holdMsThesis / 60_000),
+        structureBroken: Boolean(options?.reversals?.has(cleanSym) && options?.reversals?.get(cleanSym) !== o.direction),
+        macroNewsShockDirection:
+          options?.reversals?.get(cleanSym) === "BUY"
+            ? "BULLISH"
+            : options?.reversals?.get(cleanSym) === "SELL"
+              ? "BEARISH"
+              : "NEUTRAL",
+      });
+
+      if (thesisEval.status === "FALSIFIED" && thesisEval.actionDirective === "EMERGENCY_EXIT") {
+        const reason = thesisEval.falsificationReasons[0] ?? "Luận điểm đầu tư bị phá vỡ";
+        const res = await closeTrackedBotPosition({
+          orderId: o.orderId,
+          reasonTag: `THESIS FALSIFIED -> ${reason.slice(0, 25)}`,
+          overrideClosePrice: markPrice,
+        });
+        if (res.ok) {
+          closedCount++;
+          continue;
+        }
+      } else if (thesisEval.status === "WEAKENED" && thesisEval.recommendedSlAdjustment != null) {
+        const tightSl = thesisEval.recommendedSlAdjustment;
+        const betterSl = isBuy ? tightSl > sl + pip : tightSl < sl - pip;
+        if (betterSl) {
+          await saveBotExecutionOrder({ ...o, stopLossPrice: tightSl });
+          trailedCount++;
         }
       }
     }
