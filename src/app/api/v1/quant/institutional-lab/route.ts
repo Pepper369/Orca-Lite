@@ -17,6 +17,9 @@ import {
   evaluateEngleGrangerCointegration,
   computeJohansenCointegrationTest,
   evaluateMultivariateHawkesContagion,
+  calculateContStoikovMicroPrice,
+  calculateConformalRiskBounds,
+  calculateObizhaevaWangExecution,
   type HawkesPointEvent,
 } from "@/lib/engines/advanced-quant-math";
 import {
@@ -664,6 +667,65 @@ export async function POST(req: NextRequest) {
       const result = evaluateMultivariateHawkesContagion({
         eventStream: cleanEvents,
         evaluationTimeMs: evalTime,
+      });
+
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "cont_stoikov_microprice") {
+      const rawBids = Array.isArray(body.bids) ? (body.bids as unknown[]) : [];
+      const rawAsks = Array.isArray(body.asks) ? (body.asks as unknown[]) : [];
+      const cleanBids = rawBids.slice(0, 10).map((b) => {
+        const obj = (b && typeof b === "object" ? b : {}) as Record<string, unknown>;
+        return { price: clampFinite(obj.price, 0, 0, 1e9), qty: clampFinite(obj.qty, 0, 0, 1e9) };
+      });
+      const cleanAsks = rawAsks.slice(0, 10).map((a) => {
+        const obj = (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
+        return { price: clampFinite(obj.price, 0, 0, 1e9), qty: clampFinite(obj.qty, 0, 0, 1e9) };
+      });
+
+      const tick = optClampFinite(body.tickSize, 0.0001, 100) ?? 0.1;
+      const takerBias = optClampFinite(body.takerImbalanceBias, -1.0, 1.0) ?? 0.0;
+      const result = calculateContStoikovMicroPrice({
+        bids: cleanBids,
+        asks: cleanAsks,
+        tickSize: tick,
+        takerImbalanceBias: takerBias,
+      });
+
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "conformal_risk_bounds") {
+      const rawReturns = Array.isArray(body.historicalReturnsPct) ? (body.historicalReturnsPct as number[]) : [];
+      const cleanReturns = rawReturns.slice(0, 500).map((r) => clampFinite(r, 0, -100, 100));
+      const alpha = optClampFinite(body.targetCoverageAlpha, 0.01, 0.5) ?? 0.05;
+      const horizon = optClampFinite(body.portfolioHorizonBars, 1, 60) ?? 1;
+
+      const result = calculateConformalRiskBounds({
+        historicalReturnsPct: cleanReturns,
+        targetCoverageAlpha: alpha,
+        portfolioHorizonBars: horizon,
+      });
+
+      return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "obizhaeva_wang_execution") {
+      const shares = clampFinite(body.totalShares, 1000, 1, 1e9);
+      const hours = clampFinite(body.totalTimeHours, 1.0, 0.01, 24);
+      const n = optClampFinite(body.intervalsCount, 2, 100) ?? 10;
+      const rho = optClampFinite(body.resilienceRatePerHour, 0.1, 20) ?? 1.8;
+      const currentP = clampFinite(body.currentPrice, 100, 0.001, 1e9);
+
+      const result = calculateObizhaevaWangExecution({
+        totalShares: shares,
+        totalTimeHours: hours,
+        intervalsCount: n,
+        resilienceRatePerHour: rho,
+        orderBookDepthPerDollar: 50_000,
+        instantaneousImpactParam: 1e-5,
+        currentPrice: currentP,
       });
 
       return NextResponse.json({ success: true, data: result });
