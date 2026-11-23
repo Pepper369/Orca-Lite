@@ -17,6 +17,10 @@ import {
   FireAntFactCheck,
   FireAntWorkspaceSource,
 } from "./fireant-ai";
+import {
+  conveneInvestmentCommittee,
+  type CommitteeConsensusReport,
+} from "@/lib/engines/ai-investment-committee";
 
 export type ConsensusVerdict =
   | "STRONG_BUY"
@@ -60,6 +64,7 @@ export interface DualAiConsensusReport {
   citations: DualAiCitations[];
   miquantOverview: MiquantOverviewData | null;
   fireantResult: FireAntAiResult | null;
+  committeeReport?: CommitteeConsensusReport;
   narrativeVi: string;
 }
 
@@ -259,6 +264,31 @@ export class DualAiConsensusEngine {
       citations.slice(0, 5).forEach((c, idx) => {
         narrativeLines.push(`[${idx + 1}] [${c.title}](${c.url})`);
       });
+      narrativeLines.push("");
+    }
+
+    // 5. Multi-Persona AI Investment Committee (AI Hedge Fund & TradingAgents Parity)
+    const committeeReport = conveneInvestmentCommittee({
+      symbol: sym,
+      price: currentPrice,
+      peRatio: overview?.pe,
+      pbRatio: overview?.pb,
+      roePct: overview?.roe,
+      roicPct: overview?.roic,
+      debtToEquity: overview?.debt_to_equity,
+      currentRatio: overview?.current_ratio,
+      revenueGrowthYoY: overview?.revenue_growth,
+      tailRiskScore: risks.length * 15,
+    });
+
+    if (committeeReport) {
+      narrativeLines.push(`#### 🏛️ 5. PHÁN QUYẾT HỘI ĐỒNG ĐẦU TƯ AI (MULTI-PERSONA COMMITTEE)`);
+      narrativeLines.push(`• **Phán quyết chung**: **${committeeReport.verdictLabelVi}** (Điểm: **${committeeReport.consensusScore}/100** | Độ nhất trí: **${(committeeReport.debateAgreementRatio * 100).toFixed(0)}%**)`);
+      narrativeLines.push(`• **Chỉ thị CRO**: *${committeeReport.chiefRiskOfficer.croDirectiveVi}*`);
+      for (const v of committeeReport.personaVotes) {
+        narrativeLines.push(`  - **${v.personaNameVi}** [${v.stance} (${v.convictionScore})]: ${v.thesisVi}`);
+      }
+      narrativeLines.push("");
     }
 
     return {
@@ -288,6 +318,7 @@ export class DualAiConsensusEngine {
       citations,
       miquantOverview: overview,
       fireantResult: fireantData,
+      committeeReport,
       narrativeVi: narrativeLines.join("\n"),
     };
   }

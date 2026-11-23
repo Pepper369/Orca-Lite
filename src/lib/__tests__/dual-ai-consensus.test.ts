@@ -14,7 +14,11 @@ test("DualAiConsensusEngine: Tạo báo cáo đồng thuận trí tuệ kép cho
   assert.ok(Array.isArray(report.risks));
   assert.ok(Array.isArray(report.factChecks));
   assert.ok(Array.isArray(report.citations));
+  assert.ok(report.committeeReport != null, "Committee report should be present");
+  assert.equal(report.committeeReport.symbol, "FPT");
+  assert.equal(report.committeeReport.personaVotes.length, 5);
   assert.ok(report.narrativeVi.includes("ORCA DUAL-AI CONSENSUS"));
+  assert.ok(report.narrativeVi.includes("MULTI-PERSONA COMMITTEE"));
   assert.ok(report.narrativeVi.includes("FPT"));
 });
 
