@@ -348,13 +348,13 @@ async function scanLivePrecisionSetups(params: {
             return null;
           }
 
-          const predBias = evaluatePredictionBiasAlignment(
-            pair,
-            "CRYPTO",
-            precision.direction,
-            predictionRadar,
-          );
-          if (predBias.isVetoed) return null;
+          const predBias = evaluatePredictionBiasAlignment({
+            symbol: pair,
+            assetType: "CRYPTO",
+            direction: precision.direction,
+            radar: predictionRadar,
+          });
+          if (predBias.recommendedSizeMultiplier <= 0) return null;
 
           const alphaDecayCr = monitorAlphaDecayAndRebalance({
             symbol: pair,
@@ -467,8 +467,8 @@ async function scanLivePrecisionSetups(params: {
               summaryVi:
                 alphaDecayCr.overallEdgeHealth !== "EDGE_STABLE"
                   ? `${precision.summaryVi} | [AlphaDecay: ${alphaDecayCr.overallEdgeHealth} x${alphaDecayCr.strategyThrottleMultiplier}]`
-                  : predBias.regimeState !== "NEUTRAL_TOLERANCE"
-                    ? `${precision.summaryVi} | [PredRadar] ${predBias.drivers[0] ?? predBias.regimeState} (x${predBias.recommendedSizeMultiplier})`
+                  : predBias.alignment !== "NEUTRAL_TOLERANCE"
+                    ? `${precision.summaryVi} | [PredRadar] ${predBias.keyProbabilityDrivers[0] ?? predBias.alignment} (x${predBias.recommendedSizeMultiplier})`
                     : precision.summaryVi,
               updatedAt: Date.now(),
             },
@@ -501,10 +501,13 @@ async function scanLivePrecisionSetups(params: {
       withTimeout(getForexMarkets().catch(() => null), 2_000, null),
       withTimeout(computeForexFactoryMacroBiasMap().catch(() => new Map()), 2_500, new Map()),
     ]);
-    const macroBiasMap = new Map<string, number>(ffMacroBiasMap);
+    const macroBiasMap = new Map<string, { biasScore: number }>();
+    for (const [curr, entry] of ffMacroBiasMap) {
+      macroBiasMap.set(curr, { biasScore: entry.biasScore });
+    }
     for (const [curr, pBias] of predictionRadar.currencyBiasOverrides) {
-      const currentVal = macroBiasMap.get(curr) ?? 0;
-      macroBiasMap.set(curr, Number((currentVal * 0.6 + pBias * 0.4).toFixed(2)));
+      const currentVal = macroBiasMap.get(curr)?.biasScore ?? 0;
+      macroBiasMap.set(curr, { biasScore: Number((currentVal * 0.6 + pBias * 0.4).toFixed(2)) });
     }
     const fxRows = marketsRes?.data?.rows ?? [];
     const csmScoreMap = new Map<string, number>();
@@ -623,13 +626,13 @@ async function scanLivePrecisionSetups(params: {
             return null;
           }
 
-          const predBiasFx = evaluatePredictionBiasAlignment(
-            pair,
-            "FOREX",
-            precision.direction,
-            predictionRadar,
-          );
-          if (predBiasFx.isVetoed) return null;
+          const predBiasFx = evaluatePredictionBiasAlignment({
+            symbol: pair,
+            assetType: "FOREX",
+            direction: precision.direction,
+            radar: predictionRadar,
+          });
+          if (predBiasFx.recommendedSizeMultiplier <= 0) return null;
 
           const alphaDecayFx = monitorAlphaDecayAndRebalance({
             symbol: pair,
@@ -732,8 +735,8 @@ async function scanLivePrecisionSetups(params: {
               summaryVi:
                 alphaDecayFx.overallEdgeHealth !== "EDGE_STABLE"
                   ? `${precision.summaryVi} | [AlphaDecay: ${alphaDecayFx.overallEdgeHealth} x${alphaDecayFx.strategyThrottleMultiplier}]`
-                  : predBiasFx.regimeState !== "NEUTRAL_TOLERANCE"
-                    ? `${precision.summaryVi} | [PredRadar] ${predBiasFx.drivers[0] ?? predBiasFx.regimeState} (x${predBiasFx.recommendedSizeMultiplier})`
+                  : predBiasFx.alignment !== "NEUTRAL_TOLERANCE"
+                    ? `${precision.summaryVi} | [PredRadar] ${predBiasFx.keyProbabilityDrivers[0] ?? predBiasFx.alignment} (x${predBiasFx.recommendedSizeMultiplier})`
                     : precision.summaryVi,
               updatedAt: Date.now(),
             },
@@ -858,13 +861,13 @@ export async function runAutoTradeTick(): Promise<{
         const sigId = `fx_${s.pair}_${s.direction}_${bucket5m}`;
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
-        const predBiasFxHub = evaluatePredictionBiasAlignment(
-          s.pair,
-          "FOREX",
-          s.direction as "BUY" | "SELL",
-          hubPredictionRadar,
-        );
-        if (predBiasFxHub.isVetoed) continue;
+        const predBiasFxHub = evaluatePredictionBiasAlignment({
+          symbol: s.pair,
+          assetType: "FOREX",
+          direction: s.direction as "BUY" | "SELL",
+          radar: hubPredictionRadar,
+        });
+        if (predBiasFxHub.recommendedSizeMultiplier <= 0) continue;
         const lots = Math.max(0.01, (s.recommendedLots || 0.2) * predBiasFxHub.recommendedSizeMultiplier);
         const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
         const isBuyFx = s.direction === "BUY";
@@ -962,13 +965,13 @@ export async function runAutoTradeTick(): Promise<{
 
       for (const s of crCandidates) {
         seenCrypto.add(s.pair);
-        const predBiasCrHub = evaluatePredictionBiasAlignment(
-          s.pair,
-          "CRYPTO",
-          s.direction as "BUY" | "SELL",
-          hubPredictionRadar,
-        );
-        if (predBiasCrHub.isVetoed) continue;
+        const predBiasCrHub = evaluatePredictionBiasAlignment({
+          symbol: s.pair,
+          assetType: "CRYPTO",
+          direction: s.direction as "BUY" | "SELL",
+          radar: hubPredictionRadar,
+        });
+        if (predBiasCrHub.recommendedSizeMultiplier <= 0) continue;
         const wsPrice =
           binanceWs.getMark(s.pair, 20_000)?.markPrice ?? binanceWs.getTicker(s.pair, 20_000)?.price;
         const marketPrice = wsPrice && wsPrice > 0 ? wsPrice : s.lastPrice || s.entryPrice!;

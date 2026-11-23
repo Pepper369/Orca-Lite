@@ -283,7 +283,7 @@ export function monitorAlphaDecayAndRebalance(params: {
     }
 
     rawProfiles.push({
-      factorName: key,
+      factorName: String(key),
       historicalRankIc: Number(historicalRankIc.toFixed(4)),
       recentRankIc: Number(recentRankIc.toFixed(4)),
       deltaRankIc,

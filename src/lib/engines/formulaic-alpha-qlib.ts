@@ -106,6 +106,7 @@ export function computeForwardReturns(bars: OhlcvBar[], horizon = 1): number[] {
 // ============================================================================
 
 export interface QlibAlphaSet {
+  [key: string]: number[];
   // Price / Return Momentum
   KMID: number[];
   KLEN: number[];

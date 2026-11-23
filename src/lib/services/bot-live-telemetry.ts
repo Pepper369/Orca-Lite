@@ -832,7 +832,7 @@ export async function evaluateRealtimePositionExits(options?: {
           closedCount++;
           recordBotActivity({
             level: "info",
-            category: "ORDER_EXECUTION",
+            category: "CLOSE",
             symbol: o.symbol,
             accountName: o.followerName,
             platform: o.platform,
