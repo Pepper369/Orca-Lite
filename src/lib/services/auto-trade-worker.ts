@@ -38,6 +38,7 @@ import {
   computePredictionMarketMacroRadar,
   evaluatePredictionBiasAlignment,
 } from "@/lib/engines/prediction-market-radar";
+import { monitorAlphaDecayAndRebalance } from "@/lib/engines/alpha-decay-monitor";
 import { getLiveTrainedMetaModel } from "@/lib/engines/meta-labeling-calibration";
 import {
   buildCryptoLiquidityContext,
@@ -355,6 +356,12 @@ async function scanLivePrecisionSetups(params: {
           );
           if (predBias.isVetoed) return null;
 
+          const alphaDecayCr = monitorAlphaDecayAndRebalance({
+            symbol: pair,
+            bars: execBars,
+          });
+          if (alphaDecayCr.overallEdgeHealth === "EDGE_EXHAUSTED") return null;
+
           const levGov = computeGarmanKlassLeverageCap(
             bars1h.length >= 5 ? bars1h : execBars.slice(-24),
             true,
@@ -382,7 +389,9 @@ async function scanLivePrecisionSetups(params: {
           });
           const baseQty = Math.max(
             0.001,
-            riskPlan.recommendedLotsOrQty * predBias.recommendedSizeMultiplier,
+            riskPlan.recommendedLotsOrQty *
+              predBias.recommendedSizeMultiplier *
+              alphaDecayCr.strategyThrottleMultiplier,
           );
 
           const roundedEntry = roundPrice(precision.entry ?? livePrice, pair, "CRYPTO");
@@ -456,9 +465,11 @@ async function scanLivePrecisionSetups(params: {
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
               summaryVi:
-                predBias.regimeState !== "NEUTRAL_TOLERANCE"
-                  ? `${precision.summaryVi} | [PredRadar] ${predBias.drivers[0] ?? predBias.regimeState} (x${predBias.recommendedSizeMultiplier})`
-                  : precision.summaryVi,
+                alphaDecayCr.overallEdgeHealth !== "EDGE_STABLE"
+                  ? `${precision.summaryVi} | [AlphaDecay: ${alphaDecayCr.overallEdgeHealth} x${alphaDecayCr.strategyThrottleMultiplier}]`
+                  : predBias.regimeState !== "NEUTRAL_TOLERANCE"
+                    ? `${precision.summaryVi} | [PredRadar] ${predBias.drivers[0] ?? predBias.regimeState} (x${predBias.recommendedSizeMultiplier})`
+                    : precision.summaryVi,
               updatedAt: Date.now(),
             },
           };
@@ -620,6 +631,12 @@ async function scanLivePrecisionSetups(params: {
           );
           if (predBiasFx.isVetoed) return null;
 
+          const alphaDecayFx = monitorAlphaDecayAndRebalance({
+            symbol: pair,
+            bars: execBars,
+          });
+          if (alphaDecayFx.overallEdgeHealth === "EDGE_EXHAUSTED") return null;
+
           const entryPrice = roundPrice(livePrice, pair, "FOREX");
           const stopLossPrice = roundPrice(precision.stopLoss, pair, "FOREX");
           const riskPlan = calculateUnifiedTradeRiskPlan({
@@ -644,7 +661,9 @@ async function scanLivePrecisionSetups(params: {
           const roundedTp3Fx = precision.tp3 != null ? roundPrice(precision.tp3, pair, "FOREX") : undefined;
           const lotsFx = Math.max(
             0.01,
-            riskPlan.recommendedLotsOrQty * predBiasFx.recommendedSizeMultiplier,
+            riskPlan.recommendedLotsOrQty *
+              predBiasFx.recommendedSizeMultiplier *
+              alphaDecayFx.strategyThrottleMultiplier,
           );
 
           // Hummingbot Avellaneda-Stoikov Inventory Skewing
@@ -711,9 +730,11 @@ async function scanLivePrecisionSetups(params: {
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
               summaryVi:
-                predBiasFx.regimeState !== "NEUTRAL_TOLERANCE"
-                  ? `${precision.summaryVi} | [PredRadar] ${predBiasFx.drivers[0] ?? predBiasFx.regimeState} (x${predBiasFx.recommendedSizeMultiplier})`
-                  : precision.summaryVi,
+                alphaDecayFx.overallEdgeHealth !== "EDGE_STABLE"
+                  ? `${precision.summaryVi} | [AlphaDecay: ${alphaDecayFx.overallEdgeHealth} x${alphaDecayFx.strategyThrottleMultiplier}]`
+                  : predBiasFx.regimeState !== "NEUTRAL_TOLERANCE"
+                    ? `${precision.summaryVi} | [PredRadar] ${predBiasFx.drivers[0] ?? predBiasFx.regimeState} (x${predBiasFx.recommendedSizeMultiplier})`
+                    : precision.summaryVi,
               updatedAt: Date.now(),
             },
           };
