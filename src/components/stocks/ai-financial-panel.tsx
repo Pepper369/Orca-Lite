@@ -2,8 +2,11 @@
 
 import { useCallback, useState } from "react";
 import { fmtCompact, Panel, ErrorState, EmptyState, Loading, Badge } from "@/components/ui";
-import { Sparkles, Activity, ShieldCheck, TrendingUp, AlertTriangle, CheckCircle2, ChevronRight, BarChart3, Layers } from "lucide-react";
+import { Sparkles, Activity, ShieldCheck, TrendingUp, AlertTriangle, CheckCircle2, ChevronRight, BarChart3, Layers, Users } from "lucide-react";
 import type { FourMScore } from "@/lib/engines/four-m";
+import type { CommitteeConsensusReport } from "@/lib/engines/ai-investment-committee";
+import type { InstitutionalValuationReport } from "@/lib/engines/institutional-valuation-suite";
+import { InstitutionalCommitteeValuationCards } from "@/components/stocks/institutional-committee-valuation-cards";
 
 interface AiAnalysisPayload {
   symbol: string;
@@ -69,20 +72,51 @@ function pct(v: number | null | undefined): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-type AuditTab = "audit" | "four_m" | "tcbs" | "forecast";
+type AuditTab = "audit" | "committee" | "four_m" | "tcbs" | "forecast";
+
+interface ConsensusBundle {
+  committeeReport?: CommitteeConsensusReport;
+  institutionalValuation?: InstitutionalValuationReport;
+}
 
 export function AiFinancialPanel({ symbol }: { symbol: string }) {
   const [loading, setLoading] = useState(false);
   const [loadingFc, setLoadingFc] = useState(false);
+  const [loadingCons, setLoadingCons] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<AiAnalysisPayload | null>(null);
   const [fc, setFc] = useState<ForecastPayload | null>(null);
+  const [consensus, setConsensus] = useState<ConsensusBundle | null>(null);
   const [activeTab, setActiveTab] = useState<AuditTab>("audit");
+
+  const runConsensus = useCallback(async (switchTab = true) => {
+    if (!symbol) return;
+    setLoadingCons(true);
+    try {
+      const res = await fetch(`/api/v1/ai-consensus?symbol=${encodeURIComponent(symbol)}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (json?.success && json.data) {
+        setConsensus({
+          committeeReport: json.data.committeeReport,
+          institutionalValuation: json.data.institutionalValuation,
+        });
+        if (switchTab) setActiveTab("committee");
+      }
+    } catch {
+      /* non-blocking */
+    } finally {
+      setLoadingCons(false);
+    }
+  }, [symbol]);
 
   const runAnalysis = useCallback(async () => {
     if (!symbol) return;
     setLoading(true);
     setErr(null);
+    void runConsensus(false);
     try {
       const res = await fetch(`/api/v1/stocks/${encodeURIComponent(symbol)}/ai-analysis`, {
         headers: { Accept: "application/json" },
@@ -164,6 +198,15 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
           </button>
           <button
             type="button"
+            onClick={() => void runConsensus(true)}
+            disabled={loadingCons || !symbol}
+            className="flex items-center gap-1 rounded-lg border border-accent-primary/30 bg-accent-primary/10 px-2.5 py-1.5 text-[11px] font-semibold text-accent-primary hover:bg-accent-primary/15 active:scale-95 disabled:opacity-50 transition-all"
+          >
+            <Users className="h-3 w-3" />
+            {loadingCons ? "Hội đồng…" : "Hội đồng AI & DCF"}
+          </button>
+          <button
+            type="button"
             onClick={() => void runForecast()}
             disabled={loadingFc || !symbol}
             className="flex items-center gap-1 rounded-lg border border-border-subtle bg-surface-elevated/80 px-2.5 py-1.5 text-[11px] font-medium text-text-secondary hover:bg-surface-elevated active:scale-95 disabled:opacity-50 transition-all"
@@ -174,15 +217,22 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
         </div>
       }
     >
-      {!data && !fc && !err && !loading && !loadingFc && (
+      {!data && !fc && !consensus && !err && !loading && !loadingFc && !loadingCons && (
         <EmptyState
           title={`Sẵn sàng Quick Audit cho ${symbol}`}
-          description="Bấm '1-Click AI Quick Audit' để mô hình quét toàn bộ BCTC (KQKD, CĐKT, LCTT), tính điểm 4M Phil Town, đánh giá 5 trụ cột Orca Health và đề xuất định giá an toàn."
+          description="Bấm '1-Click AI Quick Audit' hoặc 'Hội đồng AI & DCF' để quét BCTC, chạy 5 nhân cách Hội đồng Đầu tư AI + CRO và định giá tổ chức DCF/Multiples."
         />
       )}
 
-      {(loading || loadingFc) && (
+      {(loading || loadingFc || loadingCons) && !data && !consensus && (
         <Loading rows={4} label={`AI Gemini 2.0 Flash đang đọc BCTC và tính toán chỉ số cho ${symbol}…`} />
+      )}
+
+      {!data && consensus && (
+        <InstitutionalCommitteeValuationCards
+          committee={consensus.committeeReport}
+          valuation={consensus.institutionalValuation}
+        />
       )}
 
       {err && (
@@ -270,6 +320,21 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setActiveTab("committee");
+                if (!consensus && !loadingCons) void runConsensus(true);
+              }}
+              className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-medium transition-colors ${
+                activeTab === "committee"
+                  ? "border-accent-primary text-accent-primary font-semibold"
+                  : "border-transparent text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" />
+              Hội đồng AI &amp; DCF ({consensus?.committeeReport?.consensusScore ?? "—"}/100)
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab("four_m")}
               className={`flex items-center gap-1.5 border-b-2 px-3 py-2 font-medium transition-colors ${
                 activeTab === "four_m"
@@ -307,6 +372,18 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
               </button>
             )}
           </div>
+
+          {/* TAB 1b: MULTI-PERSONA COMMITTEE & INSTITUTIONAL VALUATION */}
+          {activeTab === "committee" && (
+            loadingCons && !consensus ? (
+              <Loading rows={4} label={`Đang triệu tập Hội đồng Đầu tư AI & mô hình DCF cho ${symbol}…`} />
+            ) : (
+              <InstitutionalCommitteeValuationCards
+                committee={consensus?.committeeReport}
+                valuation={consensus?.institutionalValuation}
+              />
+            )
+          )}
 
           {/* TAB 1: AI GEMINI AUDIT */}
           {activeTab === "audit" && (

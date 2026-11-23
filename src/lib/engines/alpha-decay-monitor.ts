@@ -183,6 +183,28 @@ export function getCachedAlphaDecayWeightMap(symbol: string): Record<string, num
   return latestAlphaWeightMapBySymbol.get(symbol.toUpperCase()) ?? null;
 }
 
+export function getAlphaDecayCacheSummary(): {
+  trackedSymbols: number;
+  topEmergingFactors: string[];
+  prunedDecayedFactors: string[];
+} {
+  const emerging = new Set<string>();
+  const pruned = new Set<string>();
+  const now = Date.now();
+  let tracked = 0;
+  for (const entry of alphaDecayCache.values()) {
+    if (entry.expiresAt <= now) continue;
+    tracked++;
+    for (const f of entry.report.topEmergingFactors) emerging.add(f);
+    for (const f of entry.report.prunedDecayedFactors) pruned.add(f);
+  }
+  return {
+    trackedSymbols: tracked,
+    topEmergingFactors: Array.from(emerging).slice(0, 5),
+    prunedDecayedFactors: Array.from(pruned).slice(0, 5),
+  };
+}
+
 export function monitorAlphaDecayAndRebalance(params: {
   symbol: string;
   bars: OhlcvBar[];

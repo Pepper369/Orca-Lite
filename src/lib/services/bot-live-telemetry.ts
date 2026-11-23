@@ -32,6 +32,8 @@ import {
   evaluateSignalThesisState,
   createDefaultThesisContext,
 } from "@/lib/engines/bot-signal-falsification-tracker";
+import { computePredictionMarketMacroRadar } from "@/lib/engines/prediction-market-radar";
+import { getAlphaDecayCacheSummary } from "@/lib/engines/alpha-decay-monitor";
 import {
   aggregateTierSummary,
   assignPoolNavShares,
@@ -1347,6 +1349,10 @@ export async function buildBotLiveTelemetrySnapshot(
   const demoNav = aggregateTierSummary(demoAccounts, "DEMO");
   const w = getAutoTradeWorkerStatus();
   const timeline = evaluateBotTradingTimeline(now);
+  const predRadar = computePredictionMarketMacroRadar();
+  const alphaDecaySummary = getAlphaDecayCacheSummary();
+  const thesisEventsCount = ACTIVITY_RING.filter((e) => e.message.includes("ALPHAEAR THESIS")).length;
+  const roiDecayExitsCount = ACTIVITY_RING.filter((e) => e.message.includes("FREQTRADE ROI EXIT")).length;
 
   return {
     generatedAt: now,
@@ -1367,5 +1373,20 @@ export async function buildBotLiveTelemetrySnapshot(
     },
     quantFeed: getLiveQuantEngineFeed(),
     timeline,
+    quantIntelligence: {
+      predictionRadar: {
+        dataSource: predRadar.dataSource,
+        riskRegime: predRadar.riskRegime,
+        fedRateCutOdds: predRadar.fedRateCutOdds,
+        inflationSurpriseOdds: predRadar.inflationSurpriseOdds,
+        cryptoBullishRangeOdds: predRadar.cryptoBullishRangeOdds,
+        geopoliticalStressOdds: predRadar.geopoliticalStressOdds,
+        cryptoLeadingBiasScore: predRadar.cryptoLeadingBiasScore,
+        summaryVi: predRadar.summaryVi,
+      },
+      alphaDecaySummary,
+      thesisEventsCount,
+      roiDecayExitsCount,
+    },
   };
 }

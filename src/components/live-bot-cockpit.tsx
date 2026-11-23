@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
+import { QuantIntelligenceStrip } from "@/components/quant/quant-intelligence-strip";
 import type {
   AccountEnvironment,
   AccountPnlTelemetry,
@@ -673,6 +674,9 @@ export function LiveBotCockpit({
 
   return (
     <div className="space-y-3.5">
+      {/* 0. Quant Intelligence Strip: Prediction Market Radar + Alpha Decay Sentinel */}
+      <QuantIntelligenceStrip intel={snap.quantIntelligence} />
+
       {/* 1. Real-Time Engine Header + Strictly Split REAL NAV vs DEMO NAV Hero Panels */}
       <div className="rounded-xl border border-accent-primary/35 bg-surface-primary p-3.5 sm:p-4 shadow-sm space-y-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2.5">

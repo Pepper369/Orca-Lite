@@ -319,6 +319,26 @@ export interface BotWorkerTelemetry {
   quantFeed?: QuantEngineFeedItem[];
 }
 
+export interface BotQuantIntelligenceSummary {
+  predictionRadar: {
+    dataSource: "LIVE_POLYMARKET" | "BASELINE_FALLBACK" | "CUSTOM_INPUT";
+    riskRegime: "RISK_ON" | "RISK_OFF" | "NEUTRAL_CHOP";
+    fedRateCutOdds: number;
+    inflationSurpriseOdds: number;
+    cryptoBullishRangeOdds: number;
+    geopoliticalStressOdds: number;
+    cryptoLeadingBiasScore: number;
+    summaryVi: string;
+  };
+  alphaDecaySummary: {
+    trackedSymbols: number;
+    topEmergingFactors: string[];
+    prunedDecayedFactors: string[];
+  };
+  thesisEventsCount: number;
+  roiDecayExitsCount: number;
+}
+
 export interface BotLiveTelemetrySnapshot {
   generatedAt: number;
   streamIntervalMs: number;
@@ -342,6 +362,7 @@ export interface BotLiveTelemetrySnapshot {
   worker: BotWorkerTelemetry;
   quantFeed?: QuantEngineFeedItem[];
   timeline?: BotTradingTimelineStatus;
+  quantIntelligence?: BotQuantIntelligenceSummary;
 }
 
 const VN_DAY_NAMES: Record<number, string> = {
