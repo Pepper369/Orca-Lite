@@ -729,6 +729,7 @@ export interface UnifiedMacroScenarioInput {
   portfolioValueVND?: number; // Giá trị danh mục cổ phiếu (VND), mặc định 500,000,000
   portfolioBeta?: number; // Beta danh mục so với VN-Index, mặc định 1.0
   vn30fIndexPrice?: number; // Điểm số hợp đồng tương lai VN30F, mặc định 1300
+  vn30fBasisPoints?: number; // Độ lệch Basis (VN30F - VN30 Cash Index, vd: -8.5 hoặc +2.0)
   macroEvents?: MacroEventSurpriseInput[]; // Dữ liệu lịch kinh tế & bất ngờ vĩ mô
   marketScenarioInput?: MarketScenarioInput; // Dữ liệu kỹ thuật, HMM, VPIN, HAR-RV
   baseScenarios?: {
@@ -785,6 +786,8 @@ export interface UnifiedMacroScenarioReport {
     estimatedFloorLockSlippagePct: number;
     vn30fHedgeRequired: boolean;
     recommendedShortContracts: number;
+    basisPoints: number;
+    estimatedBasisDragVnd: number;
     hedgeRationaleVi: string;
   };
   timeframeMatrix: MultiTimeframeMatrix;
@@ -920,16 +923,26 @@ export function projectUnifiedMacroScenarioReport(
   const beta = Math.max(0.2, input.portfolioBeta ?? 1.0);
   const vn30fPrice = Math.max(100, input.vn30fIndexPrice ?? 1300);
   const contractValue = vn30fPrice * 100_000; // 1 điểm = 100,000 VND
+  const basisPoints = input.vn30fBasisPoints ?? 0;
 
   const vn30fHedgeRequired =
     pBear >= 0.35 || pS.S5_TAIL_CRISIS_LOCKOUT >= 0.25 || bayesianResult.isHardLockout;
 
-  const recommendedShortContracts = vn30fHedgeRequired
-    ? Math.max(1, Math.ceil((portfolioVal * beta * pBear) / contractValue))
+  // Basis damping: if basis is in deep discount (< -12 pts), shorting incurs roll drag
+  const basisDamping = basisPoints < -15 ? 0.85 : basisPoints < -8 ? 0.92 : 1.0;
+  const rawHedgeContracts = vn30fHedgeRequired
+    ? Math.max(1, Math.ceil(((portfolioVal * beta * pBear) / contractValue) * basisDamping))
     : 0;
+  const recommendedShortContracts = rawHedgeContracts;
+  const estimatedBasisDragVnd = recommendedShortContracts * Math.abs(Math.min(0, basisPoints)) * 100_000;
+
+  const basisNote =
+    basisPoints < -8
+      ? ` (Cảnh báo Basis Discount ${basisPoints} pts -> Đã áp dụng hệ số giảm chấn ${(basisDamping * 100).toFixed(0)}%, chi phí roll Basis ước tính ~ ${estimatedBasisDragVnd.toLocaleString("vi-VN")} VND)`
+      : "";
 
   const hedgeRationaleVi = vn30fHedgeRequired
-    ? `Kích hoạt phòng hộ danh mục: Khuyến nghị Mở Short ${recommendedShortContracts} HĐTL VN30F (Giá trị bảo vệ ~ ${(recommendedShortContracts * contractValue).toLocaleString("vi-VN")} VND) để triệt tiêu rủi ro giảm giá T+2.5 khi xác suất Bear đạt ${(pBear * 100).toFixed(1)}%.`
+    ? `Kích hoạt phòng hộ danh mục: Khuyến nghị Mở Short ${recommendedShortContracts} HĐTL VN30F (Giá trị bảo vệ ~ ${(recommendedShortContracts * contractValue).toLocaleString("vi-VN")} VND) để triệt tiêu rủi ro giảm giá T+2.5 khi xác suất Bear đạt ${(pBear * 100).toFixed(1)}%.${basisNote}`
     : "Rủi ro giảm giá nằm trong tầm kiểm soát an toàn; chưa cần kích hoạt lệnh phòng hộ phái sinh VN30F.";
 
   // 9. Timeframe Matrix Construction
@@ -1058,6 +1071,8 @@ export function projectUnifiedMacroScenarioReport(
       estimatedFloorLockSlippagePct,
       vn30fHedgeRequired,
       recommendedShortContracts,
+      basisPoints,
+      estimatedBasisDragVnd,
       hedgeRationaleVi,
     },
     timeframeMatrix,

@@ -7,9 +7,13 @@ import {
   orthogonalizeFactorMatrix,
   symmetricJacobiEigenvalues,
   updateScenarioVectorWithBayesianSurprise,
+  computeVarianceInflationFactors,
+  filterHighVifFactors,
+  computeAssetMacroSensitivity,
 } from "@/lib/engines/advanced-quant-math";
 import { evaluateFullEventLifecycle } from "@/lib/engines/forex-news-shield";
 import { projectUnifiedMacroScenarioReport } from "@/lib/engines/multi-scenario-engine";
+import { computeVn30fScenarioTailHedge } from "@/lib/engines/derivatives-arbitrage-engine";
 
 describe("Phase 5: Event-Driven Multi-Scenario Quant Engine & Factor Orthogonalization", () => {
   it("P5-01: Löwdin Symmetric Factor Orthogonalization eliminates cross-collinearity and preserves matrix dimensions", () => {
@@ -67,17 +71,21 @@ describe("Phase 5: Event-Driven Multi-Scenario Quant Engine & Factor Orthogonali
     });
 
     // Case A: CPI inflation shock (+2.8 sigma surprise) arriving in 5 minutes
-    const cpiShockResult = updateScenarioVectorWithBayesianSurprise(priorSimplex, [
-      {
-        eventId: "us-cpi-yoy",
-        name: "US CPI YoY",
-        currency: "USD",
-        importance: "CRITICAL",
-        category: "INFLATION",
-        standardizedSurpriseScore: 2.8,
-        minutesToEvent: -5, // 5 minutes before news
-      },
-    ]);
+    const cpiShockResult = updateScenarioVectorWithBayesianSurprise(
+      priorSimplex,
+      [
+        {
+          eventId: "us-cpi-yoy",
+          name: "US CPI YoY",
+          currency: "USD",
+          importance: "CRITICAL",
+          category: "INFLATION",
+          standardizedSurpriseScore: 2.8,
+          minutesToEvent: -5, // 5 minutes before news
+        },
+      ],
+      { targetAsset: "EURUSD" }
+    );
 
     const sumA = Object.values(cpiShockResult.updatedProbabilities).reduce((a, b) => a + b, 0);
     assert.ok(Math.abs(sumA - 1.0) < 1e-3, `Expected simplex sum 1.0, got ${sumA}`);
@@ -301,5 +309,175 @@ describe("Phase 5: Event-Driven Multi-Scenario Quant Engine & Factor Orthogonali
     assert.equal(reportData.data.symbol, "FPT");
     assert.ok(reportData.data.scenarios.bull.targetPrice > 135_000);
     assert.ok(reportData.data.scenarios.bear.targetPrice < 135_000);
+  });
+
+  it("P5-06: Variance Inflation Factors (VIF) and automated multicollinearity factor pruning filterHighVifFactors", () => {
+    // Construct N=100 observations of 4 factors: F0, F1, F2, F3
+    // where F1 is an almost exact linear replica of F0 (rho > 0.98), causing extreme VIF
+    const n = 100;
+    const factorMatrix: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const f0 = Math.sin(i * 0.2) + (i % 5) * 0.3;
+      const f1 = f0 * 1.02 + ((i % 3) * 0.005); // Collinear with f0!
+      const f2 = Math.cos(i * 0.15) * 2.0;
+      const f3 = ((i * 7) % 13) * 0.25 - 1.5;
+      factorMatrix.push([f0, f1, f2, f3]);
+    }
+
+    const factorNames = ["MOMENTUM_FAST", "MOMENTUM_REPLICA", "VOLATILITY_HAR", "OFI_IMBALANCE"];
+    const pruningResult = filterHighVifFactors(factorMatrix, factorNames, 10.0);
+
+    assert.equal(pruningResult.isPruned, true);
+    assert.ok(pruningResult.removedFactorNames.length >= 1);
+    // Either MOMENTUM_FAST or MOMENTUM_REPLICA should be pruned
+    assert.ok(
+      pruningResult.removedFactorNames.includes("MOMENTUM_REPLICA") ||
+        pruningResult.removedFactorNames.includes("MOMENTUM_FAST")
+    );
+    assert.ok(pruningResult.maxVifAfter <= 10.0);
+    assert.equal(pruningResult.cleanedMatrix[0]!.length, 3);
+  });
+
+  it("P5-07: Macro Cross-Asset Sensitivity and Hawkes Exponential Shock Dissipation", () => {
+    // 1. Verify cross-asset sensitivity mapping
+    assert.equal(computeAssetMacroSensitivity("VNINDEX", "VND"), 1.0);
+    assert.equal(computeAssetMacroSensitivity("VNINDEX", "USD"), 0.70);
+    assert.equal(computeAssetMacroSensitivity("EURUSD", "EUR"), 1.0);
+    assert.equal(computeAssetMacroSensitivity("BTCUSDT", "USD"), 1.0); // USD pegged pair
+    assert.equal(computeAssetMacroSensitivity("BTCUSDT", "EUR"), 0.45); // Cross-currency crypto
+    assert.equal(computeAssetMacroSensitivity("XAUUSD", "USD"), 1.0);
+
+    // 2. Verify Hawkes shock dissipation: shock at t=0 vs shock at t=180 minutes
+    const priorSimplex = evaluateMarketScenarioVector({
+      hmmProbabilities: { trendExpansion: 0.30, meanRevertLowVol: 0.50, crisisHighVol: 0.20 },
+    });
+
+    const immediateShock = updateScenarioVectorWithBayesianSurprise(
+      priorSimplex,
+      [
+        {
+          eventId: "us-cpi",
+          name: "US CPI",
+          currency: "USD",
+          importance: "CRITICAL",
+          standardizedSurpriseScore: 2.5,
+          minutesToEvent: 0,
+        },
+      ],
+      { targetAsset: "VNINDEX", hawkesDecayHalfLifeMins: 90 }
+    );
+
+    const dissipatedShock = updateScenarioVectorWithBayesianSurprise(
+      priorSimplex,
+      [
+        {
+          eventId: "us-cpi",
+          name: "US CPI",
+          currency: "USD",
+          importance: "CRITICAL",
+          standardizedSurpriseScore: 2.5,
+          minutesToEvent: 180, // 2 half-lives later (25% residual strength)
+        },
+      ],
+      { targetAsset: "VNINDEX", hawkesDecayHalfLifeMins: 90 }
+    );
+
+    // Immediate shock triggers hard lockout, while 180m dissipated shock allows trading
+    assert.equal(immediateShock.isHardLockout, true);
+    assert.equal(dissipatedShock.isHardLockout, false);
+    assert.ok(
+      immediateShock.updatedProbabilities.S4_MACRO_EVENT_SHOCK >
+        dissipatedShock.updatedProbabilities.S4_MACRO_EVENT_SHOCK
+    );
+  });
+
+  it("P5-08: Merged Cascade Blackout Windows & Real-time Spread Filter in evaluateFullEventLifecycle", () => {
+    const baseTime = Date.now();
+    // Two high-impact events separated by 25 minutes (overlapping freeze intervals)
+    const cascadeEvents = [
+      {
+        name: "US Non-Farm Payrolls",
+        time: new Date(baseTime + 10 * 60 * 1000).toISOString(), // in 10 mins
+        currency: "USD",
+        importance: "CRITICAL",
+      },
+      {
+        name: "Fed Chair Powell Speech",
+        time: new Date(baseTime + 35 * 60 * 1000).toISOString(), // in 35 mins (overlaps with post-NFP)
+        currency: "USD",
+        importance: "CRITICAL",
+      },
+    ];
+
+    const cascadeResult = evaluateFullEventLifecycle("EURUSD", baseTime, cascadeEvents);
+    assert.equal(cascadeResult.phase, "EVENT_SHOCK_FREEZE");
+    assert.equal(cascadeResult.isLockout, true);
+    assert.equal(cascadeResult.hasCascadeMerge, true);
+    assert.equal(cascadeResult.executionRule, "REJECT_MARKET_ORDERS");
+
+    // Real-time spread expansion check: event finished 30m ago, but spread is 5.5 pips (> max 2.8 pips)
+    const singlePastEvent = [
+      {
+        name: "US CPI",
+        time: new Date(baseTime - 30 * 60 * 1000).toISOString(),
+        currency: "USD",
+        importance: "HIGH",
+      },
+    ];
+    const spreadBlownResult = evaluateFullEventLifecycle("GBPUSD", baseTime, singlePastEvent, {
+      currentSpreadPips: 5.5,
+      maxAllowedSpreadPips: 2.8,
+    });
+    assert.equal(spreadBlownResult.phase, "POST_EVENT_RECOVERY");
+    assert.equal(spreadBlownResult.isSpreadExpanded, true);
+    assert.equal(spreadBlownResult.executionRule, "PASSIVE_LIMIT_ONLY");
+    assert.ok(spreadBlownResult.rationaleVi.includes("Cảnh báo dãn spread"));
+  });
+
+  it("P5-09: VN30F Basis Discount Cost Drag and Basis Damping in Tail Hedge Calculation", () => {
+    // 1. Direct engine test in computeVn30fScenarioTailHedge
+    const normalHedge = computeVn30fScenarioTailHedge({
+      equityPortfolioVnd: 1_000_000_000,
+      vn30FuturesPrice: 1300,
+      macroAndCrisisProb: 0.65,
+      vn30fBasisPoints: 0,
+    });
+
+    const discountedHedge = computeVn30fScenarioTailHedge({
+      equityPortfolioVnd: 1_000_000_000,
+      vn30FuturesPrice: 1300,
+      macroAndCrisisProb: 0.65,
+      vn30fBasisPoints: -18.0, // Deep discount of -18 points
+    });
+
+    assert.equal(normalHedge.isHedgeTriggered, true);
+    assert.equal(discountedHedge.isHedgeTriggered, true);
+    assert.ok(discountedHedge.basisDampingRatio! < 1.0);
+    assert.ok(discountedHedge.estimatedBasisDragVnd! > 0);
+    assert.ok(discountedHedge.recommendedShortContracts <= normalHedge.recommendedShortContracts);
+
+    // 2. Report synthesizer integration in projectUnifiedMacroScenarioReport
+    const report = projectUnifiedMacroScenarioReport({
+      symbol: "VNINDEX",
+      currentPrice: 1285,
+      portfolioValueVND: 1_000_000_000,
+      vn30fIndexPrice: 1290,
+      vn30fBasisPoints: -14.5,
+      macroEvents: [
+        {
+          eventId: "shock-1",
+          name: "Emergency Rate Hike",
+          currency: "VND",
+          importance: "CRITICAL",
+          standardizedSurpriseScore: -2.8,
+          minutesToEvent: 0,
+        },
+      ],
+    });
+
+    assert.equal(report.tailRiskAndHedging.vn30fHedgeRequired, true);
+    assert.equal(report.tailRiskAndHedging.basisPoints, -14.5);
+    assert.ok(report.tailRiskAndHedging.estimatedBasisDragVnd > 0);
+    assert.ok(report.tailRiskAndHedging.hedgeRationaleVi.includes("Basis Discount"));
   });
 });

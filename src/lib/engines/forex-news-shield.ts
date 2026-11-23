@@ -151,15 +151,12 @@ export function evaluateNewsCircuitBreaker(
   };
 }
 
-/**
- * Institutional 3-Phase Event Lifecycle Evaluator
- * Maps temporal proximity of high-impact events to execution rules and volatility buffers.
- */
-export function evaluateFullEventLifecycle(
-  pair: string,
-  nowMs = Date.now(),
-  calendarEvents: { name?: string; time?: string; currency?: string; importance?: string }[] = []
-): {
+export interface EventLifecycleOptions {
+  currentSpreadPips?: number;
+  maxAllowedSpreadPips?: number;
+}
+
+export interface EventLifecycleResult {
   phase: "PRE_EVENT_COMPRESSION" | "EVENT_SHOCK_FREEZE" | "POST_EVENT_RECOVERY" | "POST_EVENT_DRIFT" | "NORMAL_EXPANSION";
   isLockout: boolean;
   minutesToEvent: number | null;
@@ -167,11 +164,90 @@ export function evaluateFullEventLifecycle(
   executionRule: "REJECT_MARKET_ORDERS" | "PASSIVE_LIMIT_ONLY" | "TWAP_ONLY" | "ALLOW_ALL";
   spreadMultiplier: number;
   slippageBufferPips: number;
+  isSpreadExpanded: boolean;
+  hasCascadeMerge: boolean;
   rationaleVi: string;
-} {
+}
+
+/**
+ * Institutional 3-Phase Event Lifecycle Evaluator
+ * Maps temporal proximity of high-impact events to execution rules and volatility buffers.
+ * Features Merged Cascade Windows for back-to-back news and empirical spread filter.
+ */
+export function evaluateFullEventLifecycle(
+  pair: string,
+  nowMs = Date.now(),
+  calendarEvents: { name?: string; time?: string; currency?: string; importance?: string }[] = [],
+  options?: EventLifecycleOptions
+): EventLifecycleResult {
+  const cleanPair = pair.toUpperCase().replace("/", "").replace("-", "");
+  const PRE_NEWS_FREEZE_MS = 15 * 60 * 1000;
+  const POST_NEWS_COOLDOWN_MS = 20 * 60 * 1000;
+
+  // Filter relevant events
+  const relevantEvents: HighImpactNewsEvent[] = [];
+  for (const ev of calendarEvents) {
+    if (!ev.name || !ev.time) continue;
+    const evTime = Date.parse(ev.time);
+    if (!Number.isFinite(evTime)) continue;
+
+    const isHigh =
+      ev.importance === "high" ||
+      ev.importance === "CRITICAL" ||
+      isCriticalNewsEvent(ev.name);
+
+    const curr = (ev.currency ?? "USD").toUpperCase();
+    if (isHigh && isPairAffectedByCurrency(cleanPair, curr)) {
+      relevantEvents.push({
+        id: `news-${evTime}-${curr}`,
+        name: ev.name,
+        currency: curr,
+        scheduledTime: evTime,
+        importance: isCriticalNewsEvent(ev.name) ? "CRITICAL" : "HIGH",
+        typicalVolatilityPips: ev.name.toUpperCase().includes("NFP") ? 80 : 45,
+      });
+    }
+  }
+
+  relevantEvents.sort((a, b) => a.scheduledTime - b.scheduledTime);
+
+  // 1. Detect Merged Cascade Blackout Windows
+  // If two consecutive events have overlapping freeze intervals, merge them
+  let isCascadeLockout = false;
+  let cascadeActiveEvent: HighImpactNewsEvent | null = null;
+  let hasCascadeMerge = false;
+
+  for (let i = 0; i < relevantEvents.length; i++) {
+    const e1 = relevantEvents[i]!;
+    const start1 = e1.scheduledTime - PRE_NEWS_FREEZE_MS;
+    let end1 = e1.scheduledTime + POST_NEWS_COOLDOWN_MS;
+
+    // Check overlap with next event
+    if (i < relevantEvents.length - 1) {
+      const e2 = relevantEvents[i + 1]!;
+      const start2 = e2.scheduledTime - PRE_NEWS_FREEZE_MS;
+      if (start2 <= end1) {
+        // Windows overlap! Merge
+        end1 = Math.max(end1, e2.scheduledTime + POST_NEWS_COOLDOWN_MS);
+        hasCascadeMerge = true;
+      }
+    }
+
+    if (nowMs >= start1 && nowMs <= end1) {
+      isCascadeLockout = true;
+      cascadeActiveEvent = e1;
+      break;
+    }
+  }
+
+  // Fallback to standard circuit breaker
   const cb = evaluateNewsCircuitBreaker(pair, nowMs, calendarEvents);
-  const ev = cb.relevantEvent;
+  const ev = cascadeActiveEvent ?? cb.relevantEvent;
   const mins = cb.minutesToEvent;
+
+  const currentSpread = options?.currentSpreadPips ?? 0;
+  const maxAllowedSpread = options?.maxAllowedSpreadPips ?? 2.8;
+  const isSpreadExpanded = currentSpread > maxAllowedSpread;
 
   if (!ev || mins === null || Math.abs(mins) > 240) {
     return {
@@ -182,12 +258,17 @@ export function evaluateFullEventLifecycle(
       executionRule: "ALLOW_ALL",
       spreadMultiplier: 1.0,
       slippageBufferPips: 1.5,
+      isSpreadExpanded: false,
+      hasCascadeMerge: false,
       rationaleVi: "Ngoài phạm vi ảnh hưởng của tin vĩ mô. Giao dịch bình thường theo chiến lược cơ sở.",
     };
   }
 
-  // Event Shock Freeze: -15 mins to +20 mins (mins > 0 means before event, mins <= 0 means after event in evaluateNewsCircuitBreaker)
-  if (cb.isLockout) {
+  // Event Shock Freeze: -15 mins to +20 mins or inside merged cascade window
+  if (cb.isLockout || isCascadeLockout) {
+    const cascadeNote = hasCascadeMerge
+      ? " [Chuỗi sự kiện gối đầu - Merged Cascade Lockout]"
+      : "";
     return {
       phase: "EVENT_SHOCK_FREEZE",
       isLockout: true,
@@ -195,12 +276,14 @@ export function evaluateFullEventLifecycle(
       activeEvent: ev,
       executionRule: "REJECT_MARKET_ORDERS",
       spreadMultiplier: 3.0,
-      slippageBufferPips: cb.slippageBufferPips,
-      rationaleVi: cb.warningMessage ?? "Vùng đóng băng giao dịch khẩn cấp (Event Shock Freeze).",
+      slippageBufferPips: Math.max(8.0, cb.slippageBufferPips),
+      isSpreadExpanded,
+      hasCascadeMerge,
+      rationaleVi: (cb.warningMessage ?? "Vùng đóng băng giao dịch khẩn cấp (Event Shock Freeze).") + cascadeNote,
     };
   }
 
-  // Pre-event Compression: 15 to 60 mins before event (mins > 0 in evaluateNewsCircuitBreaker is pre-event)
+  // Pre-event Compression: 15 to 60 mins before event
   if (mins > 15 && mins <= 60) {
     return {
       phase: "PRE_EVENT_COMPRESSION",
@@ -210,11 +293,29 @@ export function evaluateFullEventLifecycle(
       executionRule: "PASSIVE_LIMIT_ONLY",
       spreadMultiplier: 1.6,
       slippageBufferPips: 3.5,
+      isSpreadExpanded,
+      hasCascadeMerge,
       rationaleVi: `Co cụm biến động trước tin [${ev.name}] (${mins} phút trước giờ G). Giảm 50% đòn bẩy và chỉ dùng lệnh Limit thụ động.`,
     };
   }
 
-  // Post-event Recovery: 20 to 60 mins after event (mins < 0, between -20 and -60)
+  // Spread Gate: if spread is still abnormal (> maxAllowedSpread), force into POST_EVENT_RECOVERY with PASSIVE_LIMIT_ONLY
+  if (isSpreadExpanded && mins < -20) {
+    return {
+      phase: "POST_EVENT_RECOVERY",
+      isLockout: false,
+      minutesToEvent: mins,
+      activeEvent: ev,
+      executionRule: "PASSIVE_LIMIT_ONLY",
+      spreadMultiplier: 2.0,
+      slippageBufferPips: 4.5,
+      isSpreadExpanded: true,
+      hasCascadeMerge,
+      rationaleVi: `Cảnh báo dãn spread (${currentSpread.toFixed(1)} > ${maxAllowedSpread.toFixed(1)} pips). Giữ trạng thái phục hồi thanh khoản, từ chối lệnh thị trường.`,
+    };
+  }
+
+  // Post-event Recovery: 20 to 60 mins after event
   if (mins < -20 && mins >= -60) {
     return {
       phase: "POST_EVENT_RECOVERY",
@@ -224,11 +325,13 @@ export function evaluateFullEventLifecycle(
       executionRule: "TWAP_ONLY",
       spreadMultiplier: 1.4,
       slippageBufferPips: 2.8,
+      isSpreadExpanded: false,
+      hasCascadeMerge,
       rationaleVi: `Thanh khoản đang hồi phục sau tin [${ev.name}] (${Math.abs(mins)} phút sau giờ G). Ưu tiên giải ngân theo TWAP.`,
     };
   }
 
-  // Post-event Drift: 60 to 240 mins after event (mins between -60 and -240)
+  // Post-event Drift: 60 to 240 mins after event
   if (mins < -60 && mins >= -240) {
     return {
       phase: "POST_EVENT_DRIFT",
@@ -238,6 +341,8 @@ export function evaluateFullEventLifecycle(
       executionRule: "ALLOW_ALL",
       spreadMultiplier: 1.1,
       slippageBufferPips: 2.0,
+      isSpreadExpanded: false,
+      hasCascadeMerge,
       rationaleVi: `Xu hướng vĩ mô mới đã thiết lập (Post-Event Drift sau [${ev.name}]). Kích hoạt chiến lược Trend-Following theo hướng phản ứng.`,
     };
   }
@@ -250,6 +355,8 @@ export function evaluateFullEventLifecycle(
     executionRule: "ALLOW_ALL",
     spreadMultiplier: 1.0,
     slippageBufferPips: 1.5,
+    isSpreadExpanded: false,
+    hasCascadeMerge: false,
     rationaleVi: "Biến động bình thường.",
   };
 }

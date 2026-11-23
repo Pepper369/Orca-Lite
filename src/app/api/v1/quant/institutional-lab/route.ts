@@ -12,6 +12,8 @@ import {
   computeAdaptiveStrategyWeights,
   orthogonalizeFactorMatrix,
   updateScenarioVectorWithBayesianSurprise,
+  filterHighVifFactors,
+  computeVarianceInflationFactors,
 } from "@/lib/engines/advanced-quant-math";
 import { projectUnifiedMacroScenarioReport } from "@/lib/engines/multi-scenario-engine";
 import {
@@ -510,8 +512,24 @@ export async function POST(req: NextRequest) {
         cleanMatrix.push(row.map((v) => clampFinite(v, 0, -1e9, 1e9)));
       }
       const ridgeLambda = clampFinite(body.ridgeLambda, 1e-4, 1e-8, 0.1);
-      const result = orthogonalizeFactorMatrix(cleanMatrix, ridgeLambda);
-      return NextResponse.json({ success: true, data: result });
+      const orthoResult = orthogonalizeFactorMatrix(cleanMatrix, ridgeLambda);
+
+      let pruningResult = null;
+      if (body.pruneHighVif === true) {
+        const factorNames = Array.isArray(body.factorNames)
+          ? (body.factorNames as string[]).slice(0, k)
+          : undefined;
+        const maxVif = clampFinite(body.maxVif, 10.0, 1.5, 100);
+        pruningResult = filterHighVifFactors(cleanMatrix, factorNames, maxVif);
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...orthoResult,
+          pruning: pruningResult,
+        },
+      });
     }
 
     if (type === "bayesian_macro_update") {
@@ -536,7 +554,13 @@ export async function POST(req: NextRequest) {
           minutesToEvent: clampFinite(item.minutesToEvent, 0, -1440, 1440),
         };
       });
-      const result = updateScenarioVectorWithBayesianSurprise(priorVector, cleanEvents);
+      const targetAsset =
+        typeof body.targetAsset === "string" && isValidTradingSymbol(body.targetAsset)
+          ? body.targetAsset.trim().toUpperCase()
+          : "VNINDEX";
+      const result = updateScenarioVectorWithBayesianSurprise(priorVector, cleanEvents, {
+        targetAsset,
+      });
       return NextResponse.json({ success: true, data: result });
     }
 
@@ -567,6 +591,7 @@ export async function POST(req: NextRequest) {
         portfolioValueVND: optClampFinite(body.portfolioValueVND, 1e6, 1e12),
         portfolioBeta: optClampFinite(body.portfolioBeta, 0.1, 5.0),
         vn30fIndexPrice: optClampFinite(body.vn30fIndexPrice, 100, 1e6),
+        vn30fBasisPoints: optClampFinite(body.vn30fBasisPoints, -500, 500),
         macroEvents: cleanEvents,
       });
       return NextResponse.json({ success: true, data: result });

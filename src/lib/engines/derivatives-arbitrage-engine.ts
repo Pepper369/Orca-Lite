@@ -643,6 +643,9 @@ export interface Vn30fScenarioTailHedgeResult {
   contractNotionalVnd: number;
   effectiveHedgeBeta: number;
   isHedgeTriggered: boolean;
+  basisPoints?: number;
+  basisDampingRatio?: number;
+  estimatedBasisDragVnd?: number;
   rationaleVi: string;
 }
 
@@ -652,6 +655,7 @@ export interface Vn30fScenarioTailHedgeResult {
  * probability rises above the protection threshold.
  * - Uses the official HNX VN30F contract multiplier: 100,000 VND per index point.
  * - Scales hedge coverage smoothly by Kalman Dynamic Hedge Ratio & tail scenario probability.
+ * - Compensates for negative basis discount roll drag via dynamic basis damping.
  */
 export function computeVn30fScenarioTailHedge(params: {
   equityPortfolioVnd: number;
@@ -660,6 +664,7 @@ export function computeVn30fScenarioTailHedge(params: {
   vn30FuturesPrice: number; // e.g. 1320.5 points
   kalmanHedgeRatio?: number; // from estimateKalmanDynamicHedgeRatio, default 1.0
   macroAndCrisisProb: number; // p(S4) + p(S5) in [0, 1]
+  vn30fBasisPoints?: number; // e.g. -12.5 or +3.2 points
 }): Vn30fScenarioTailHedgeResult {
   const CONTRACT_MULTIPLIER_VND = 100_000;
   const safeEquityVnd =
@@ -690,6 +695,10 @@ export function computeVn30fScenarioTailHedge(params: {
     typeof params.macroAndCrisisProb === "number" && Number.isFinite(params.macroAndCrisisProb)
       ? Math.min(1, Math.max(0, params.macroAndCrisisProb))
       : 0;
+  const basis =
+    typeof params.vn30fBasisPoints === "number" && Number.isFinite(params.vn30fBasisPoints)
+      ? params.vn30fBasisPoints
+      : 0;
 
   const contractNotionalVnd = Math.round(safeFuturesPrice * CONTRACT_MULTIPLIER_VND);
   const effectiveHedgeBeta = Number((beta * kalmanRatio).toFixed(3));
@@ -702,15 +711,27 @@ export function computeVn30fScenarioTailHedge(params: {
       contractNotionalVnd,
       effectiveHedgeBeta,
       isHedgeTriggered: false,
+      basisPoints: basis,
+      basisDampingRatio: 1.0,
+      estimatedBasisDragVnd: 0,
       rationaleVi: `Rủi ro kịch bản đuôi (${(tailProb * 100).toFixed(1)}%) dưới ngưỡng 35% -> Không cần mở hợp đồng Short VN30F phòng hộ.`,
     };
   }
 
   // Smoothly scale coverage from 35% up to 100% of T+2.5 locked equity as tailProb rises from 0.35 to 0.80
   const rawCoverage = Math.min(1.0, 0.35 + ((tailProb - 0.35) / 0.45) * 0.65) * t2Locked;
-  const hedgeCoverageRatio = Number(rawCoverage.toFixed(3));
+
+  // Basis damping: if basis is severely negative (Discount > 10 pts), hedge shorting incurs roll drag
+  const basisDampingRatio = basis < -15 ? 0.85 : basis < -8 ? 0.92 : 1.0;
+  const hedgeCoverageRatio = Number((rawCoverage * basisDampingRatio).toFixed(3));
   const hedgedEquityVnd = safeEquityVnd * hedgeCoverageRatio * effectiveHedgeBeta;
   const recommendedShortContracts = Math.max(0, Math.round(hedgedEquityVnd / contractNotionalVnd));
+  const estimatedBasisDragVnd = recommendedShortContracts * Math.abs(Math.min(0, basis)) * CONTRACT_MULTIPLIER_VND;
+
+  const basisNote =
+    basis < -8
+      ? ` (Cảnh báo Basis Discount ${basis} pts -> Hệ số giảm chấn ${(basisDampingRatio * 100).toFixed(0)}%, chi phí roll Basis ước tính ~ ${estimatedBasisDragVnd.toLocaleString("vi-VN")} VND)`
+      : "";
 
   return {
     recommendedShortContracts,
@@ -719,8 +740,11 @@ export function computeVn30fScenarioTailHedge(params: {
     contractNotionalVnd,
     effectiveHedgeBeta,
     isHedgeTriggered: recommendedShortContracts > 0,
+    basisPoints: basis,
+    basisDampingRatio,
+    estimatedBasisDragVnd,
     rationaleVi:
       `Phòng hộ T+2.5 VN30F: Xác suất sốc vĩ mô/khủng hoảng ${(tailProb * 100).toFixed(1)}% -> ` +
-      `Khuyến nghị SHORT ${recommendedShortContracts} HĐ VN30F1M (Beta hiệu dụng ${effectiveHedgeBeta}, bảo vệ ${(hedgeCoverageRatio * 100).toFixed(0)}% danh mục cơ sở).`,
+      `Khuyến nghị SHORT ${recommendedShortContracts} HĐ VN30F1M (Beta hiệu dụng ${effectiveHedgeBeta}, bảo vệ ${(hedgeCoverageRatio * 100).toFixed(0)}% danh mục cơ sở).${basisNote}`,
   };
 }

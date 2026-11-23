@@ -2318,7 +2318,150 @@ export interface FactorOrthogonalizationResult {
   maxAbsCrossCorrelationBefore: number;
   maxAbsCrossCorrelationAfter: number;
   eigenvalues: number[];
+  vifScoresBefore: number[]; // Variance Inflation Factors before
+  vifScoresAfter: number[]; // Variance Inflation Factors after (~1.0 for orthonormal)
   rationaleVi: string;
+}
+
+/**
+ * Computes Variance Inflation Factors (VIF) for each factor column given a correlation matrix.
+ * VIF_j = [C^(-1)]_{j,j}.
+ * Benchmark: VIF > 5 indicates moderate multicollinearity, VIF > 10 indicates severe multicollinearity.
+ */
+export function computeVarianceInflationFactors(
+  corrMatrix: number[][],
+  ridgeLambda = 1e-4
+): number[] {
+  const k = corrMatrix.length;
+  if (k < 2) return [1.0];
+
+  const C_reg: number[][] = Array.from({ length: k }, (_, r) =>
+    Array.from({ length: k }, (_, c) => {
+      const sym = (corrMatrix[r]![c]! + corrMatrix[c]![r]!) / 2;
+      return (1 - ridgeLambda) * sym + (r === c ? ridgeLambda : 0);
+    })
+  );
+
+  const { eigenvalues, eigenvectors } = symmetricJacobiEigenvalues(C_reg);
+  const invLambda = eigenvalues.map((ev) => 1 / Math.max(1e-6, ev));
+
+  const vifs: number[] = [];
+  for (let j = 0; j < k; j++) {
+    let diagInv = 0;
+    for (let m = 0; m < k; m++) {
+      diagInv += eigenvectors[j]![m]! * invLambda[m]! * eigenvectors[j]![m]!;
+    }
+    vifs.push(Number(Math.max(1.0, diagInv).toFixed(2)));
+  }
+  return vifs;
+}
+
+export interface FactorPruningResult {
+  cleanedMatrix: number[][];
+  remainingFactorNames: string[];
+  removedFactorNames: string[];
+  removedFactorIndices: number[];
+  vifBefore: number[];
+  vifAfter: number[];
+  maxVifAfter: number;
+  isPruned: boolean;
+  rationaleVi: string;
+}
+
+/**
+ * Iteratively prunes redundant factors with VIF exceeding maxThreshold (default 10.0)
+ * to ensure linear independence before optimization.
+ */
+export function filterHighVifFactors(
+  factorMatrix: number[][],
+  factorNames?: string[],
+  maxVif = 10.0
+): FactorPruningResult {
+  if (!Array.isArray(factorMatrix) || factorMatrix.length < 2) {
+    throw new Error("filterHighVifFactors requires at least 2 rows");
+  }
+  let currentMatrix: number[][] = factorMatrix.map((r) => [...r]);
+  const initialK = currentMatrix[0]?.length ?? 0;
+  let currentNames: string[] =
+    factorNames && factorNames.length === initialK
+      ? [...factorNames]
+      : Array.from({ length: initialK }, (_, i) => `Factor_${i}`);
+  const removedNames: string[] = [];
+  const removedIndices: number[] = [];
+
+  // Compute initial VIF
+  const n = currentMatrix.length;
+  const computeSampleCorr = (mat: number[][]): number[][] => {
+    const k = mat[0]!.length;
+    const stdCols: number[][] = [];
+    for (let j = 0; j < k; j++) {
+      let sum = 0;
+      for (let i = 0; i < n; i++) sum += mat[i]![j]!;
+      const mean = sum / n;
+      let varSum = 0;
+      for (let i = 0; i < n; i++) varSum += (mat[i]![j]! - mean) ** 2;
+      const std = Math.sqrt(Math.max(1e-8, varSum / (n - 1)));
+      stdCols.push(mat.map((r) => (r[j]! - mean) / std));
+    }
+    return Array.from({ length: k }, (_, r) =>
+      Array.from({ length: k }, (_, c) => {
+        if (r === c) return 1.0;
+        let dot = 0;
+        for (let i = 0; i < n; i++) dot += stdCols[r]![i]! * stdCols[c]![i]!;
+        return Math.min(0.9999, Math.max(-0.9999, dot / (n - 1)));
+      })
+    );
+  };
+
+  const initialCorr = computeSampleCorr(currentMatrix);
+  const initialVifs = computeVarianceInflationFactors(initialCorr);
+
+  let currentCorr = initialCorr;
+  let currentVifs = [...initialVifs];
+
+  while (currentMatrix[0]!.length > 1) {
+    let worstIdx = -1;
+    let worstVif = -1;
+    for (let j = 0; j < currentVifs.length; j++) {
+      if (currentVifs[j]! > worstVif) {
+        worstVif = currentVifs[j]!;
+        worstIdx = j;
+      }
+    }
+
+    if (worstVif <= maxVif || worstIdx === -1) {
+      break; // All remaining factors are below VIF threshold
+    }
+
+    // Prune worst factor
+    const factorNameToRemove = currentNames[worstIdx]!;
+    removedNames.push(factorNameToRemove);
+    removedIndices.push(worstIdx);
+
+    currentMatrix = currentMatrix.map((r) => r.filter((_, idx) => idx !== worstIdx));
+    currentNames = currentNames.filter((_, idx) => idx !== worstIdx);
+
+    currentCorr = computeSampleCorr(currentMatrix);
+    currentVifs = computeVarianceInflationFactors(currentCorr);
+  }
+
+  const maxVifAfter = currentVifs.length > 0 ? Math.max(...currentVifs) : 1.0;
+  const isPruned = removedNames.length > 0;
+  const rationaleVi = isPruned
+    ? `Đã lọc bỏ ${removedNames.length} factor có VIF > ${maxVif} (${removedNames.join(", ")}). VIF tối đa sau lọc = ${maxVifAfter}.`
+    : `Tất cả các factor đều đạt chuẩn độc lập tuyến tính (VIF tối đa = ${maxVifAfter} <= ${maxVif}). Không cần loại bỏ.`;
+
+  return {
+    cleanedMatrix: currentMatrix,
+    remainingFactorNames: currentNames,
+    removedFactorNames: removedNames,
+    removedFactorIndices: removedIndices,
+    vifBefore: initialVifs,
+    vifAfter: currentVifs,
+    maxVifAfter,
+    isPruned,
+    rationaleVi,
+  };
 }
 
 /**
@@ -2529,6 +2672,9 @@ export function orthogonalizeFactorMatrix(
     }
   }
 
+  const vifBefore = computeVarianceInflationFactors(C, ridgeLambda);
+  const vifAfter = computeVarianceInflationFactors(C_after, ridgeLambda);
+
   return {
     orthogonalizedMatrix: F_orth,
     correlationMatrixBefore: C.map((row) => row.map((v) => Number(v.toFixed(4)))),
@@ -2537,7 +2683,9 @@ export function orthogonalizeFactorMatrix(
     maxAbsCrossCorrelationBefore: Number(maxAbsBefore.toFixed(4)),
     maxAbsCrossCorrelationAfter: Number(maxAbsAfter.toFixed(5)),
     eigenvalues: eigenvalues.map((ev) => Number(ev.toFixed(4))),
-    rationaleVi: `Trực giao hóa Löwdin: Giảm tương quan chéo tối đa từ ${(maxAbsBefore * 100).toFixed(1)}% xuống ${(maxAbsAfter * 100).toFixed(2)}% | Hệ số điều kiện Condition Number = ${conditionNumber}.`,
+    vifScoresBefore: vifBefore,
+    vifScoresAfter: vifAfter,
+    rationaleVi: `Trực giao hóa Löwdin: Giảm tương quan chéo tối đa từ ${(maxAbsBefore * 100).toFixed(1)}% xuống ${(maxAbsAfter * 100).toFixed(2)}% | VIF tối đa từ ${Math.max(...vifBefore).toFixed(1)} về ${Math.max(...vifAfter).toFixed(2)} | Condition Number = ${conditionNumber}.`,
   };
 }
 
@@ -2576,13 +2724,69 @@ export interface BayesianScenarioUpdateResult {
   rationaleVi: string;
 }
 
+export interface BayesianUpdateOptions {
+  targetAsset?: string; // e.g. "VNINDEX", "EURUSD", "BTCUSDT", "XAUUSD"
+  hawkesDecayHalfLifeMins?: number; // Half-life of macro surprise shock in minutes, default 90m
+}
+
+/**
+ * Evaluates the empirical cross-asset sensitivity of a target asset class to a macro event currency.
+ * Accounts for FX pass-through, foreign fund outflows, and commodity trade channels.
+ */
+export function computeAssetMacroSensitivity(targetAsset = "VNINDEX", eventCurrency = "USD"): number {
+  const cleanAsset = targetAsset.toUpperCase().replace("/", "").replace("-", "").trim();
+  const curr = eventCurrency.toUpperCase().trim();
+
+  if (curr === "ALL") return 0.85;
+  if (cleanAsset.includes(curr)) return 1.0;
+
+  // Vietnam Equities (VNINDEX, VN30, VN30F, or 3-character stock codes like FPT, HPG, VNM)
+  const isVnAsset =
+    cleanAsset.includes("VN") ||
+    cleanAsset === "VNINDEX" ||
+    cleanAsset === "VN30" ||
+    cleanAsset === "VN30F" ||
+    cleanAsset.length === 3;
+
+  if (isVnAsset) {
+    if (curr === "VND") return 1.0;
+    if (curr === "USD") return 0.70; // Fed rates, DXY, and SBV exchange-rate pass-through
+    if (curr === "CNY") return 0.55; // Regional trade linkage
+    if (curr === "EUR") return 0.40;
+    if (curr === "JPY") return 0.35;
+    return 0.25;
+  }
+
+  // Crypto perpetuals / spot
+  if (
+    cleanAsset.includes("BTC") ||
+    cleanAsset.includes("ETH") ||
+    cleanAsset.includes("SOL") ||
+    cleanAsset.includes("USDT")
+  ) {
+    if (curr === "USD") return 0.95;
+    return 0.45;
+  }
+
+  // Precious metals & energy commodities
+  if (cleanAsset.includes("XAU") || cleanAsset.includes("XAG") || cleanAsset.includes("OIL")) {
+    if (curr === "USD") return 1.0;
+    if (curr === "CNY" || curr === "EUR") return 0.50;
+    return 0.30;
+  }
+
+  return 0.50;
+}
+
 /**
  * Updates the 5-scenario market simplex vector using Bayesian likelihoods from macroeconomic news surprises.
  * Preserves the exact simplex property: sum(P_k) === 1.0.
+ * Incorporates Cross-Asset Sensitivity mapping and Hawkes exponential shock dissipation.
  */
 export function updateScenarioVectorWithBayesianSurprise(
   priorScenario: MarketScenarioVectorResult,
-  events: MacroEventSurpriseInput[] = []
+  events: MacroEventSurpriseInput[] = [],
+  options?: BayesianUpdateOptions
 ): BayesianScenarioUpdateResult {
   const priors = priorScenario.probabilities;
 
@@ -2644,9 +2848,20 @@ export function updateScenarioVectorWithBayesianSurprise(
   let logL4 = 0;
   let logL5 = 0;
 
+  const targetAsset = options?.targetAsset ?? "VNINDEX";
+  const halfLifeMins = options?.hawkesDecayHalfLifeMins ?? 90;
+
   for (const ev of events) {
-    const weight = ev.importance === "CRITICAL" ? 1.5 : ev.importance === "HIGH" ? 1.0 : 0.4;
-    const z = ev.standardizedSurpriseScore;
+    const assetSens = computeAssetMacroSensitivity(targetAsset, ev.currency);
+    const baseWeight = ev.importance === "CRITICAL" ? 1.5 : ev.importance === "HIGH" ? 1.0 : 0.4;
+    const weight = baseWeight * assetSens;
+
+    // Hawkes exponential shock decay: dissipates shock over time once event is released
+    const timeDecay =
+      ev.minutesToEvent > 0
+        ? Math.exp(-((Math.LN2 * Math.min(360, ev.minutesToEvent)) / halfLifeMins))
+        : 1.0;
+    const z = ev.standardizedSurpriseScore * timeDecay;
     const absZ = Math.abs(z);
 
     // If within shock window [-15, +20]
