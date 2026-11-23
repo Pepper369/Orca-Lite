@@ -1,7 +1,7 @@
 # Orca Financial (Full Option)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Pepper369/Orca-Lite/main/public/icon.png" alt="Orca Financial Logo" width="100" height="100" style="border-radius: 20%;" onerror="this.style.display='none'"/>
+  <img src="https://raw.githubusercontent.com/duyanhphan13579dz-dot/Orca-Financial/main/public/icon.png" alt="Orca Financial Logo" width="100" height="100" style="border-radius: 20%;" onerror="this.style.display='none'"/>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 ## Mục lục
 
 1. [Giới thiệu](#giới-thiệu)
-2. [Điểm nổi bật của bản Lite](#điểm-nổi-bật-của-bản-lite)
+2. [Điểm nổi bật của nền tảng](#điểm-nổi-bật-của-nền-tảng)
 3. [Tính năng cốt lõi](#tính-năng-cốt-lõi)
    - [Thị trường Cổ phiếu Việt Nam (Equities)](#1-thị-trường-cổ-phiếu-việt-nam-equities)
    - [Định lượng & Bộ lọc Cổ phiếu (Quant & Screeners)](#2-định-lượng--bộ-lọc-cổ-phiếu-quant--screeners)
@@ -43,11 +43,11 @@
 
 ## Giới thiệu
 
-**Orca Financial Lite** là phiên bản kiến trúc siêu nhẹ, tối giản và hiệu năng cao của hệ sinh thái **Orca Financial Platform**. Hệ thống được xây dựng nhằm cung cấp giải pháp toàn diện cho nhà đầu tư cá nhân và tổ chức: từ theo dõi dữ liệu thị trường trực tiếp, phân tích kỹ thuật định lượng, nhận diện mô hình sóng - giá - khối lượng, lọc cổ phiếu đa tiêu chí, đến lập kế hoạch tài chính cá nhân độc lập và paper trading.
+**Orca Financial** là nền tảng phân tích tài chính toàn diện, định lượng và trợ lý trí tuệ nhân tạo chuyên sâu. Hệ thống được xây dựng nhằm cung cấp giải pháp toàn diện cho nhà đầu tư cá nhân và tổ chức: từ theo dõi dữ liệu thị trường trực tiếp, phân tích kỹ thuật định lượng, nhận diện mô hình sóng - giá - khối lượng, lọc cổ phiếu đa tiêu chí, đến lập kế hoạch tài chính cá nhân độc lập và bot trading tự động.
 
 ---
 
-## Điểm nổi bật của bản Lite
+## Điểm nổi bật của nền tảng
 
 - **Siêu gọn nhẹ (-85% dung lượng):** Tinh giản toàn bộ các module cồng kềnh, tập trung vào web runtime Next.js 16 (App Router + Turbopack).
 - **Google AI Studio Ready:** Tích hợp trực tiếp `GEMINI_API_KEY` (Gemini 2.0 Flash / Pro) với chi phí tối ưu, độ trễ cực thấp.
@@ -164,7 +164,7 @@ Orca-Lite/
 
 ## Hệ thống Dữ liệu & Nhà cung cấp
 
-Orca-Lite hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ liệu khác nhau:
+Orca Financial hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ liệu khác nhau:
 
 | Nhà cung cấp | Loại dữ liệu cung cấp | Chế độ mặc định |
 | :--- | :--- | :--- |
@@ -200,8 +200,8 @@ Orca-Lite hỗ trợ kết nối linh hoạt tới nhiều nguồn cấp dữ li
 
 ### 1. Clone repository
 ```bash
-git clone https://github.com/Pepper369/Orca-Lite.git
-cd Orca-Lite
+git clone https://github.com/duyanhphan13579dz-dot/Orca-Financial.git
+cd Orca-Financial
 ```
 
 ### 2. Cài đặt các gói phụ thuộc

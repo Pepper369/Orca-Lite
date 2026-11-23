@@ -1,5 +1,5 @@
 /**
- * TradingView JS API Datafeed Adapter for Orca-Lite
+ * TradingView JS API Datafeed Adapter for Orca-Financial
  * Enables integration with TradingView Advanced Charts / Charting Library widget.
  */
 

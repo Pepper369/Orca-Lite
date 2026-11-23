@@ -1,7 +1,7 @@
 import { CopyTradePanel } from "@/components/copy-trade-panel";
 
 export const metadata = {
-  title: "Auto-Trade & Kết Nối API Sàn (Binance, OKX, Exness, XM) — Orca-Lite",
+  title: "Auto-Trade & Kết Nối API Sàn (Binance, OKX, Exness, XM) — Orca-Financial",
   description:
     "Gắn API Key Binance Futures, OKX Swap v5 và kết nối Forex Exness / XM (MetaApi Cloud hoặc MT5 EA) để hệ thống định lượng Orca tự động khớp lệnh với 5 lớp bảo vệ vốn.",
 };

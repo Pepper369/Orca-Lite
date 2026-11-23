@@ -207,7 +207,7 @@ async function auditRoute(page: Page, route: string, viewportLabel: string): Pro
   };
 }
 
-test.describe("Orca-Lite Full UI & Layout Audit (All Pages)", () => {
+test.describe("Orca-Financial Full UI & Layout Audit (All Pages)", () => {
   test("Desktop 1440x900 — Audit all 34 routes", async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });

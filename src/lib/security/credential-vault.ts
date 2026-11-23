@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { env, isProd } from "../env";
 
-const DEV_ONLY_VAULT_SECRET = "orca-lite-dev-vault-key-do-not-use-in-prod-32bytes";
+const DEV_ONLY_VAULT_SECRET = "orca-financial-dev-vault-key-do-not-use-in-prod-32bytes";
 const VAULT_PREFIX = "v1";
 const IV_BYTES = 12;
 const TAG_BYTES = 16;

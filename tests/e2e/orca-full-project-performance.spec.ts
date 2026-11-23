@@ -64,7 +64,7 @@ async function measureRoutePerformance(
   };
 }
 
-test.describe("Orca-Lite Project-Wide Dynamic Performance & E2E Verification Suite", () => {
+test.describe("Orca-Financial Project-Wide Dynamic Performance & E2E Verification Suite", () => {
   test("1. Core Quantitative & Multi-Horizon Sector Flow APIs Benchmark & Contract Audit", async ({ request }) => {
     // 1.1 Health Endpoint Latency
     const tHealth0 = performance.now();

@@ -248,7 +248,7 @@ export function PaperTradingBoard() {
   const stockPct = metrics.nav > 0 ? (metrics.stockValue / metrics.nav) * 100 : 0;
 
   const handleSharePerformance = () => {
-    const text = `Orca-Lite Paper Trading (500M)
+    const text = `Orca-Financial Paper Trading (500M)
 • NAV: ${fmtVnd(metrics.nav)} (${fmtPct(metrics.totalPnlPct)})
 • Tiền mặt: ${fmtVnd(account.availableCash)}
 • Cổ phiếu: ${fmtVnd(metrics.stockValue)} (${metrics.holdings.length} mã)

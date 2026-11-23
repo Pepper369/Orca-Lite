@@ -1,5 +1,5 @@
 /**
- * Fundamental Quant Matrix Engine (Orca-Lite FA 2.0)
+ * Fundamental Quant Matrix Engine (Orca-Financial FA 2.0)
  *
  * Deterministic, Truth-in-Data quantitative fundamental analysis:
  * 1. Earnings Quality & Accruals Analysis (CFO / Net Profit, FCF Yield, Cash Realization OCF/EBITDA)

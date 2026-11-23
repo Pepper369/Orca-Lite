@@ -1,5 +1,5 @@
 /**
- * TradingView UDF (Universal Data Feed) Protocol Helpers for Orca-Lite
+ * TradingView UDF (Universal Data Feed) Protocol Helpers for Orca-Financial
  * Translates between TradingView UDF conventions and Orca internal data engines.
  */
 
@@ -47,7 +47,7 @@ export interface UdfHistoryResponse {
 
 /**
  * Maps TradingView resolution (e.g. "1", "5", "60", "D", "1D", "W", "M")
- * to Orca-Lite timeframe ("1m", "5m", "15m", "30m", "1h", "1d", "1w", "1M").
+ * to Orca-Financial timeframe ("1m", "5m", "15m", "30m", "1h", "1d", "1w", "1M").
  */
 export function tvResolutionToOrcaTimeframe(resolution: string): string {
   const res = resolution.toUpperCase();

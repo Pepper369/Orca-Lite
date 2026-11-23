@@ -151,7 +151,7 @@ Bạn có thể mở ngay tab **"👑 Chân Sóng Apex"** tại trang **/screene
 
 **LỜI KHUYÊN TỪ ORCA:**
 1. Hãy so sánh **Dividend Yield** của cổ phiếu với lãi suất gửi tiết kiệm 12 tháng (hiện quanh mức ~5.0%/năm).
-2. Kiểm tra xem doanh nghiệp có trả cổ tức từ lợi nhuận kinh doanh cốt lõi (Payout Ratio an toàn < 70-80%) hay không tại trang chi tiết mã CP trên Orca-Lite.
+2. Kiểm tra xem doanh nghiệp có trả cổ tức từ lợi nhuận kinh doanh cốt lõi (Payout Ratio an toàn < 70-80%) hay không tại trang chi tiết mã CP trên Orca-Financial.
 3. Bạn có thể mở tab **"Phân tích Cổ tức & Tỷ suất sinh lời"** ngay trong trang chi tiết mã cổ phiếu để xem lịch sử 5 năm và lịch chốt quyền sắp tới.`;
     }
 
@@ -165,16 +165,16 @@ Bạn có thể mở ngay tab **"👑 Chân Sóng Apex"** tại trang **/screene
 • **TCB / MBB:** Định giá P/B < 1.2 trong khi ROE > 18-20%, tín hiệu Golden Cross EMA20 cắt lên EMA50 xác nhận đà hồi phục.
 
 **CÔNG CỤ KIỂM NGHIỆM CHIẾN LƯỢC (BACKTEST SIMULATOR):**
-Bạn có thể vào thẳng thanh điều hướng **/screener** trên Orca-Lite và bấm nút **"Backtest Mô Phỏng (OQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động.`;
+Bạn có thể vào thẳng thanh điều hướng **/screener** trên Orca-Financial và bấm nút **"Backtest Mô Phỏng (OQuant)"** để kiểm tra tỷ lệ thắng (Win Rate), Profit Factor và đường cong vốn (Equity Curve) 9 tháng gần nhất của các bộ lọc Breakout và CANSLIM hoàn toàn tự động.`;
     }
 
-    return `Chào bạn! Dưới đây là 3 nhóm phong cách đầu tư được tối ưu nhất trên Orca-Lite hiện nay:
+    return `Chào bạn! Dưới đây là 3 nhóm phong cách đầu tư được tối ưu nhất trên Orca-Financial hiện nay:
 
 1. **Cổ tức tiền mặt phòng thủ:** Tìm các mã có Dividend Yield > 6% (cao hơn gửi ngân hàng), lịch sử trả tiền mặt 5 năm liên tiếp (VNM, VEA, MBB, DPM).
 2. **Tăng trưởng & Vượt đỉnh (CANSLIM / Breakout):** Lọc các mã có RSI > 52, nến ngày vượt đỉnh 20 phiên kèm Volume đột biến gấp 1.3x - 1.5x (FPT, SSI, MWG, DGC).
 3. **Giá trị chiết khấu sâu (Value Dip-Buying):** P/E < 12, P/B hấp dẫn và ROE > 15% đang có dấu hiệu đảo chiều dòng tiền (TCB, ACB, HPG).
 
-Bạn hãy ghé thăm trang **/screener** của Orca-Lite với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, OQuant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng**.`;
+Bạn hãy ghé thăm trang **/screener** của Orca-Financial với hơn 17 bộ lọc chuyên sâu (Vòng xoay RRG Ngành, OQuant Studio, 4M Phil Town, MA Cross) và chạy thử tính năng **Backtest Mô Phỏng**.`;
   }
 
   // 1. Phân bổ lương 50/30/20 & Biến thể linh hoạt cho hoàn cảnh thực tế

@@ -16,7 +16,7 @@ export interface PineExecutionResult {
 }
 
 /**
- * Lightweight Pine Script v5 Engine for Orca-Lite
+ * Lightweight Pine Script v5 Engine for Orca-Financial
  * Executes custom Pine Script indicator calculations against OHLCV series.
  */
 export function executePineScript(script: string, bars: OhlcvBar[]): PineExecutionResult {
