@@ -24,6 +24,10 @@ import {
 } from "@/lib/engines/exchange-execution-client";
 import { getBrokerMeta, isCryptoPlatform, isForexPlatform } from "@/lib/engines/broker-registry";
 import {
+  evaluateDynamicTimeDecayRoiExit,
+  evaluatePositiveTrailingStop,
+} from "@/lib/engines/bot-trade-lifecycle-engine";
+import {
   aggregateTierSummary,
   assignPoolNavShares,
   calculateAccountRoiPct,
@@ -798,6 +802,41 @@ export async function evaluateRealtimePositionExits(options?: {
     const initialQty =
       o.initialLotsOrQty && o.initialLotsOrQty > 0 ? o.initialLotsOrQty : o.copiedLotsOrQty;
     const minViableQty = assetType === "FOREX" ? 0.01 : Math.max(0.0001, initialQty * 0.08);
+
+    // 0) Dynamic Time-Decay ROI Exit (Freqtrade Parity for mature/stagnant trades that haven't reached TP1)
+    const holdDurationMs = Date.now() - o.timestamp;
+    const hasReachedTp1 = tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1));
+    const isMatureForRoiDecay = holdDurationMs >= 20 * 60_000;
+
+    if (!hasReachedTp1 && isMatureForRoiDecay) {
+      const roiEval = evaluateDynamicTimeDecayRoiExit({
+        direction: o.direction,
+        entryPrice: entry,
+        markPrice,
+        stopLossPrice: sl,
+        openedTimestampMs: o.timestamp,
+      });
+
+      if (roiEval.shouldExit && roiEval.currentProfitR >= 0.25) {
+        const res = await closeTrackedBotPosition({
+          orderId: o.orderId,
+          reasonTag: `ROI DECAY EXIT: ${roiEval.exitReason}`,
+          overrideClosePrice: markPrice,
+        });
+        if (res.ok) {
+          closedCount++;
+          recordBotActivity({
+            level: "info",
+            category: "ORDER_EXECUTION",
+            symbol: o.symbol,
+            accountName: o.followerName,
+            platform: o.platform,
+            message: `[FREQTRADE ROI EXIT] Đóng lệnh ${o.direction} ${o.symbol} chốt lãi +${roiEval.currentProfitR}R sau ${roiEval.holdingMinutes} phút nắm giữ.`,
+          });
+          continue;
+        }
+      }
+    }
 
     // 1) Multi-Tier Take-Profit State Machine (Scenario-Conditioned TP1/TP2/TP3 Scaling)
     const tp1Pct = o.tp1ClosePct && o.tp1ClosePct >= 20 && o.tp1ClosePct <= 80 ? o.tp1ClosePct / 100 : 0.5;
