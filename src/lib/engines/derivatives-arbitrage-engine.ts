@@ -8,6 +8,12 @@ import {
   type OUBasisCalibration,
 } from "./unified-cross-asset-quant";
 import { classifyDerivFlow } from "./derivatives-flow";
+import {
+  evaluateEngleGrangerCointegration,
+  computeJohansenCointegrationTest,
+  type EngleGrangerCointegrationResult,
+  type JohansenEigenResult,
+} from "./advanced-quant-math";
 
 export interface ScheduledVn30Dividend {
   symbol: string;
@@ -748,3 +754,198 @@ export function computeVn30fScenarioTailHedge(params: {
       `Khuyến nghị SHORT ${recommendedShortContracts} HĐ VN30F1M (Beta hiệu dụng ${effectiveHedgeBeta}, bảo vệ ${(hedgeCoverageRatio * 100).toFixed(0)}% danh mục cơ sở).${basisNote}`,
   };
 }
+
+// ============================================================================
+// STATISTICAL ARBITRAGE & COINTEGRATION PAIRS TRADING ENGINE
+// ============================================================================
+
+export interface CointegratedPairAnalysis {
+  pairKey: string;
+  symbolA: string;
+  symbolB: string;
+  cointegration: EngleGrangerCointegrationResult;
+  recommendedPositions: {
+    assetA: { action: "BUY" | "SELL" | "HOLD"; sizeVnd: number };
+    assetB: { action: "BUY" | "SELL" | "HOLD"; sizeVnd: number };
+  };
+  expectedPnLPerSpreadPtVnd: number;
+  stopLossZScore: number;
+  takeProfitZScore: number;
+}
+
+export interface SyntheticBasisBasketArbitrageResult {
+  basketSymbols: string[];
+  johansenResult: JohansenEigenResult;
+  optimalWeights: Record<string, number>;
+  syntheticSpotPrice: number;
+  futuresPrice: number;
+  syntheticBasisPoints: number;
+  isStationaryBasis: boolean;
+  actionRecommendation: "LONG_SYNTHETIC_SHORT_FUTURES" | "SHORT_SYNTHETIC_LONG_FUTURES" | "NEUTRAL";
+  rationaleVi: string;
+}
+
+/**
+ * High-precision Pair Trading Arbitrage Analyzer using Engle-Granger Cointegration & OU Mean-Reversion.
+ */
+export function analyzeCointegratedPairTrade(params: {
+  symbolA: string;
+  seriesA: number[];
+  symbolB: string;
+  seriesB: number[];
+  portfolioCapitalVnd?: number;
+  entryZScore?: number;
+  stopLossZScore?: number;
+}): CointegratedPairAnalysis {
+  const {
+    symbolA,
+    seriesA,
+    symbolB,
+    seriesB,
+    portfolioCapitalVnd = 100_000_000,
+    entryZScore = 2.0,
+    stopLossZScore = 3.5,
+  } = params;
+
+  const eg = evaluateEngleGrangerCointegration(seriesA, seriesB, {
+    zScoreThreshold: entryZScore,
+    symbolA,
+    symbolB,
+  });
+
+  const pairKey = `${symbolA}_vs_${symbolB}`;
+  const halfCapital = portfolioCapitalVnd * 0.5;
+
+  let posA: "BUY" | "SELL" | "HOLD" = "HOLD";
+  let posB: "BUY" | "SELL" | "HOLD" = "HOLD";
+
+  if (eg.isCointegrated && !eg.hasStructuralBreak) {
+    if (Math.abs(eg.currentZScore) > stopLossZScore) {
+      // Emergency stop-loss due to extreme divergence
+      posA = "HOLD";
+      posB = "HOLD";
+    } else if (eg.signal === "SELL_A_BUY_B") {
+      posA = "SELL";
+      posB = "BUY";
+    } else if (eg.signal === "BUY_A_SELL_B") {
+      posA = "BUY";
+      posB = "SELL";
+    }
+  }
+
+  // Weight B based on hedge ratio beta: Size_B = Size_A * beta (scaled to hedge volatility)
+  const sizeA = posA !== "HOLD" ? Math.round(halfCapital) : 0;
+  const sizeB = posB !== "HOLD" ? Math.round(halfCapital * Math.min(2.0, Math.max(0.5, eg.hedgeRatio))) : 0;
+
+  return {
+    pairKey,
+    symbolA,
+    symbolB,
+    cointegration: eg,
+    recommendedPositions: {
+      assetA: { action: posA, sizeVnd: sizeA },
+      assetB: { action: posB, sizeVnd: sizeB },
+    },
+    expectedPnLPerSpreadPtVnd: Math.round(sizeA * 0.01),
+    stopLossZScore,
+    takeProfitZScore: 0.5,
+  };
+}
+
+/**
+ * Synthetic Basis Arbitrage using Multivariate Johansen Cointegration on VN30 Top Holdings & VN30F.
+ */
+export function analyzeSyntheticBasisBasketArbitrage(params: {
+  futuresPrices: number[];
+  basketMatrix: { symbol: string; prices: number[] }[];
+}): SyntheticBasisBasketArbitrageResult {
+  const { futuresPrices, basketMatrix } = params;
+  const K = basketMatrix.length + 1; // Basket stocks + Futures contract
+  const minLen = Math.min(futuresPrices.length, ...basketMatrix.map((b) => b.prices.length));
+
+  if (minLen < 30 || basketMatrix.length < 2) {
+    return {
+      basketSymbols: basketMatrix.map((b) => b.symbol),
+      johansenResult: {
+        rank: 0,
+        traceStatistics: [],
+        criticalValues95Pct: [],
+        eigenvalues: [],
+        cointegratingVectors: [],
+        hasCointegration: false,
+        modelType: "RESTRICTED_CONSTANT",
+      },
+      optimalWeights: {},
+      syntheticSpotPrice: 0,
+      futuresPrice: futuresPrices[futuresPrices.length - 1] ?? 0,
+      syntheticBasisPoints: 0,
+      isStationaryBasis: false,
+      actionRecommendation: "NEUTRAL",
+      rationaleVi: "Số lượng quan sát hoặc số lượng cổ phiếu trong rổ không đủ để chạy Johansen Cointegration.",
+    };
+  }
+
+  // Build T x K matrix: Column 0 = Futures, Columns 1..K-1 = Basket stocks
+  const dataMatrix: number[][] = [];
+  const startIdx = futuresPrices.length - minLen;
+  for (let i = 0; i < minLen; i++) {
+    const row = new Array(K);
+    row[0] = futuresPrices[startIdx + i];
+    for (let j = 0; j < basketMatrix.length; j++) {
+      const bStart = basketMatrix[j].prices.length - minLen;
+      row[j + 1] = basketMatrix[j].prices[bStart + i];
+    }
+    dataMatrix.push(row);
+  }
+
+  const johansen = computeJohansenCointegrationTest(dataMatrix, 1);
+  const bestVector = johansen.cointegratingVectors[0] ?? new Array(K).fill(0);
+
+  // Extract weights: Normalize stock weights relative to Futures (-bestVector[0])
+  const optimalWeights: Record<string, number> = {};
+  let syntheticSpot = 0;
+  const latestFutures = futuresPrices[futuresPrices.length - 1] ?? 1250;
+
+  for (let j = 0; j < basketMatrix.length; j++) {
+    const sym = basketMatrix[j].symbol;
+    const w = -bestVector[j + 1]; // opposite sign of cointegration vector
+    optimalWeights[sym] = Number(w.toFixed(4));
+    const p = basketMatrix[j].prices[basketMatrix[j].prices.length - 1] ?? 0;
+    syntheticSpot += w * p;
+  }
+
+  const syntheticBasis = Number((latestFutures - syntheticSpot).toFixed(2));
+  const isStationaryBasis = johansen.hasCointegration;
+
+  let action: "LONG_SYNTHETIC_SHORT_FUTURES" | "SHORT_SYNTHETIC_LONG_FUTURES" | "NEUTRAL" = "NEUTRAL";
+  let rationaleVi = "";
+
+  if (!isStationaryBasis) {
+    action = "NEUTRAL";
+    rationaleVi = `Rổ cổ phiếu và HĐTL không tồn tại quan hệ đồng tích hợp Johansen (Rank = 0). Không thực hiện Basis Arbitrage.`;
+  } else if (syntheticBasis > 12.0) {
+    // Futures is significantly above synthetic spot -> Short Futures, Long Synthetic Basket
+    action = "LONG_SYNTHETIC_SHORT_FUTURES";
+    rationaleVi = `Synthetic Basis vượt ngưỡng (+${syntheticBasis} pts, Johansen Rank=${johansen.rank}): Short HĐTL VN30F & Mua rổ tổng hợp thu lời khi Basis thu hẹp.`;
+  } else if (syntheticBasis < -12.0) {
+    // Futures is significantly below synthetic spot -> Long Futures, Short Synthetic Basket
+    action = "SHORT_SYNTHETIC_LONG_FUTURES";
+    rationaleVi = `Synthetic Basis chiết khấu sâu (${syntheticBasis} pts, Johansen Rank=${johansen.rank}): Long HĐTL VN30F & Bán rổ tổng hợp chờ Basis phục hồi.`;
+  } else {
+    action = "NEUTRAL";
+    rationaleVi = `Synthetic Basis ở trạng thái cân bằng (${syntheticBasis} pts, Johansen Rank=${johansen.rank}).`;
+  }
+
+  return {
+    basketSymbols: basketMatrix.map((b) => b.symbol),
+    johansenResult: johansen,
+    optimalWeights,
+    syntheticSpotPrice: Number(syntheticSpot.toFixed(2)),
+    futuresPrice: Number(latestFutures.toFixed(2)),
+    syntheticBasisPoints: syntheticBasis,
+    isStationaryBasis,
+    actionRecommendation: action,
+    rationaleVi,
+  };
+}
+

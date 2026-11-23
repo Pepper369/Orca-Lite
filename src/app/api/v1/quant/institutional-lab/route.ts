@@ -14,7 +14,13 @@ import {
   updateScenarioVectorWithBayesianSurprise,
   filterHighVifFactors,
   computeVarianceInflationFactors,
+  evaluateEngleGrangerCointegration,
+  computeJohansenCointegrationTest,
 } from "@/lib/engines/advanced-quant-math";
+import {
+  analyzeCointegratedPairTrade,
+  analyzeSyntheticBasisBasketArbitrage,
+} from "@/lib/engines/derivatives-arbitrage-engine";
 import { projectUnifiedMacroScenarioReport } from "@/lib/engines/multi-scenario-engine";
 import {
   runMultiScenarioPortfolioStressTest,
@@ -595,6 +601,51 @@ export async function POST(req: NextRequest) {
         macroEvents: cleanEvents,
       });
       return NextResponse.json({ success: true, data: result });
+    }
+
+    if (type === "cointegration_pair_trade") {
+      const symA = isValidTradingSymbol(body.symbolA) ? (body.symbolA as string).trim().toUpperCase() : "VCB";
+      const symB = isValidTradingSymbol(body.symbolB) ? (body.symbolB as string).trim().toUpperCase() : "BID";
+      const rawA = Array.isArray(body.seriesA) ? (body.seriesA as number[]) : [];
+      const rawB = Array.isArray(body.seriesB) ? (body.seriesB as number[]) : [];
+      const cleanA = rawA.map((v) => clampFinite(v, 0, -1e10, 1e10));
+      const cleanB = rawB.map((v) => clampFinite(v, 0, -1e10, 1e10));
+
+      const capital = optClampFinite(body.portfolioCapitalVnd, 1e6, 1e12) ?? 100_000_000;
+      const entryZ = optClampFinite(body.entryZScore, 1.0, 5.0) ?? 2.0;
+      const stopZ = optClampFinite(body.stopLossZScore, 2.5, 8.0) ?? 3.5;
+
+      const analysis = analyzeCointegratedPairTrade({
+        symbolA: symA,
+        seriesA: cleanA,
+        symbolB: symB,
+        seriesB: cleanB,
+        portfolioCapitalVnd: capital,
+        entryZScore: entryZ,
+        stopLossZScore: stopZ,
+      });
+
+      return NextResponse.json({ success: true, data: analysis });
+    }
+
+    if (type === "johansen_basket_arbitrage") {
+      const rawFutures = Array.isArray(body.futuresPrices) ? (body.futuresPrices as number[]) : [];
+      const cleanFutures = rawFutures.map((v) => clampFinite(v, 0, -1e10, 1e10));
+
+      const rawBasket = Array.isArray(body.basketMatrix) ? (body.basketMatrix as unknown[]) : [];
+      const cleanBasket = rawBasket.slice(0, 5).map((item, idx) => {
+        const obj = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        const sym = isValidTradingSymbol(obj.symbol) ? (obj.symbol as string).trim().toUpperCase() : `STOCK_${idx}`;
+        const prices = Array.isArray(obj.prices) ? (obj.prices as number[]).map((v) => clampFinite(v, 0, -1e10, 1e10)) : [];
+        return { symbol: sym, prices };
+      });
+
+      const analysis = analyzeSyntheticBasisBasketArbitrage({
+        futuresPrices: cleanFutures,
+        basketMatrix: cleanBasket,
+      });
+
+      return NextResponse.json({ success: true, data: analysis });
     }
 
     return NextResponse.json(

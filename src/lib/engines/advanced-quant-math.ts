@@ -2992,3 +2992,641 @@ export function updateScenarioVectorWithBayesianSurprise(
     rationaleVi: `Bayesian Update: Pha sự kiện [${lifecyclePhase}], Kịch bản chiếm ưu thế [${dominantScenario}] (${(maxP * 100).toFixed(1)}%), Entropy=${shannonEntropy}. Chính sách khớp lệnh: ${executionPolicy}.`,
   };
 }
+
+// ============================================================================
+// SECTION 13: HIGH-DIMENSIONAL COINTEGRATION & STATISTICAL ARBITRAGE (JOHANSEN / VECM)
+// ============================================================================
+
+export interface EngleGrangerCointegrationResult {
+  isCointegrated: boolean;
+  adfStat: number;
+  criticalValue5Pct: number;
+  criticalValue1Pct: number;
+  pValEstimate: number;
+  hedgeRatio: number; // Beta (OLS slope)
+  alphaIntercept: number;
+  halfLifeBars: number;
+  meanReversionPace: number; // Theta in OU process
+  currentSpread: number;
+  spreadMean: number;
+  spreadStd: number;
+  currentZScore: number;
+  structuralStabilityChowF: number; // Chow F-stat for structural break test
+  hasStructuralBreak: boolean;
+  signal: "BUY_A_SELL_B" | "SELL_A_BUY_B" | "EXIT_SPREAD" | "NO_SIGNAL";
+  rationaleVi: string;
+}
+
+export interface JohansenEigenResult {
+  rank: number; // Number of cointegrating vectors (r in [0..K])
+  traceStatistics: number[];
+  criticalValues95Pct: number[];
+  eigenvalues: number[];
+  cointegratingVectors: number[][]; // K x r normalized eigenvectors
+  hasCointegration: boolean;
+  modelType: "NO_CONSTANT" | "RESTRICTED_CONSTANT" | "UNRESTRICTED_CONSTANT";
+}
+
+export interface VecmMeanReversionState {
+  cointegrationRank: number;
+  spreadSeries: number[];
+  currentSpread: number;
+  zScore: number;
+  halfLife: number;
+  speedOfAdjustmentAlpha: number[]; // Speed of adjustment vector alpha_i
+  equilibriumTarget: number;
+  isStationarySpread: boolean;
+  hedgedWeights: Record<string, number>;
+}
+
+/**
+ * Perform Augmented Dickey-Fuller (ADF) test on a single univariate series.
+ * Tests H0: Unit root present (gamma = 0) vs H1: Stationary (gamma < 0).
+ * Model: Delta y_t = alpha + gamma * y_{t-1} + sum_{p=1}^lags beta_p * Delta y_{t-p} + eps_t
+ */
+export function computeAugmentedDickeyFuller(
+  series: number[],
+  lags: number = 1
+): { adfStat: number; pValueApprox: number; isStationary: boolean } {
+  const clean = series.filter((v) => Number.isFinite(v));
+  const n = clean.length;
+  if (n < 15) {
+    return { adfStat: 0, pValueApprox: 1.0, isStationary: false };
+  }
+
+  const p = Math.max(1, Math.min(lags, Math.floor((n - 2) / 3)));
+  // Delta series
+  const dy: number[] = new Array(n - 1);
+  for (let t = 1; t < n; t++) {
+    dy[t - 1] = clean[t] - clean[t - 1];
+  }
+
+  // Construct regression matrix: Y = dy[p .. end], X = [const, y_{t-1}, dy_{t-1}, ..., dy_{t-p}]
+  const k = 2 + p; // const + lagged_level + p lagged_differences
+  const validRows = dy.length - p;
+  if (validRows < k + 5) {
+    return { adfStat: 0, pValueApprox: 1.0, isStationary: false };
+  }
+
+  const X: number[][] = [];
+  const Y: number[] = [];
+
+  for (let i = p; i < dy.length; i++) {
+    const row: number[] = new Array(k);
+    row[0] = 1.0; // Constant intercept
+    row[1] = clean[i]; // y_{t-1} level
+    for (let j = 1; j <= p; j++) {
+      row[1 + j] = dy[i - j]; // dy_{t-j}
+    }
+    X.push(row);
+    Y.push(dy[i]);
+  }
+
+  // OLS: Beta = (X^T X)^{-1} X^T Y
+  const m = X.length;
+  const XtX: number[][] = Array.from({ length: k }, () => new Array(k).fill(0));
+  const XtY: number[] = new Array(k).fill(0);
+
+  for (let r = 0; r < m; r++) {
+    const row = X[r];
+    const yVal = Y[r];
+    for (let c1 = 0; c1 < k; c1++) {
+      XtY[c1] += row[c1] * yVal;
+      for (let c2 = 0; c2 < k; c2++) {
+        XtX[c1][c2] += row[c1] * row[c2];
+      }
+    }
+  }
+
+  // Invert XtX using Gaussian elimination with partial pivoting
+  const invXtX = invertMatrixNxN(XtX, k);
+  if (!invXtX) {
+    return { adfStat: 0, pValueApprox: 1.0, isStationary: false };
+  }
+
+  const beta: number[] = new Array(k).fill(0);
+  for (let r = 0; r < k; r++) {
+    for (let c = 0; c < k; c++) {
+      beta[r] += invXtX[r][c] * XtY[c];
+    }
+  }
+
+  // Residual variance s^2
+  let sse = 0;
+  for (let r = 0; r < m; r++) {
+    let fitted = 0;
+    for (let c = 0; c < k; c++) {
+      fitted += X[r][c] * beta[c];
+    }
+    const res = Y[r] - fitted;
+    sse += res * res;
+  }
+
+  const df = m - k;
+  const s2 = df > 0 ? sse / df : 1e-6;
+  const seGamma = Math.sqrt(Math.max(1e-12, s2 * invXtX[1][1])); // Variance of y_{t-1} coefficient
+
+  const adfStat = seGamma > 0 ? beta[1] / seGamma : 0;
+
+  // MacKinnon approximate p-value interpolation for ADF with constant (no trend)
+  // 1% critical ~ -3.45, 5% ~ -2.88, 10% ~ -2.57
+  let pVal = 0.5;
+  if (adfStat < -3.45) pVal = 0.01;
+  else if (adfStat < -2.88) pVal = 0.05;
+  else if (adfStat < -2.57) pVal = 0.1;
+  else if (adfStat < -1.95) pVal = 0.25;
+  else pVal = 0.6;
+
+  return {
+    adfStat: Number(adfStat.toFixed(4)),
+    pValueApprox: pVal,
+    isStationary: adfStat < -2.88,
+  };
+}
+
+/**
+ * Invert an N x N matrix using Gauss-Jordan with partial pivoting.
+ */
+function invertMatrixNxN(matrix: number[][], n: number): number[][] | null {
+  const aug: number[][] = Array.from({ length: n }, (_, r) => {
+    const row = new Array(2 * n).fill(0);
+    for (let c = 0; c < n; c++) row[c] = matrix[r][c];
+    row[n + r] = 1.0;
+    return row;
+  });
+
+  for (let i = 0; i < n; i++) {
+    // Find pivot
+    let maxRow = i;
+    let maxVal = Math.abs(aug[i][i]);
+    for (let r = i + 1; r < n; r++) {
+      if (Math.abs(aug[r][i]) > maxVal) {
+        maxVal = Math.abs(aug[r][i]);
+        maxRow = r;
+      }
+    }
+
+    if (maxVal < 1e-12) return null; // Singular matrix
+
+    // Swap
+    if (maxRow !== i) {
+      const temp = aug[i];
+      aug[i] = aug[maxRow];
+      aug[maxRow] = temp;
+    }
+
+    // Scale pivot row
+    const pivot = aug[i][i];
+    for (let c = 0; c < 2 * n; c++) {
+      aug[i][c] /= pivot;
+    }
+
+    // Eliminate other rows
+    for (let r = 0; r < n; r++) {
+      if (r !== i) {
+        const factor = aug[r][i];
+        if (Math.abs(factor) > 1e-12) {
+          for (let c = 0; c < 2 * n; c++) {
+            aug[r][c] -= factor * aug[i][c];
+          }
+        }
+      }
+    }
+  }
+
+  const inv: number[][] = Array.from({ length: n }, (_, r) => aug[r].slice(n));
+  return inv;
+}
+
+/**
+ * Chow Test for Structural Break at midpoint T/2.
+ * Tests if the relationship Y = a + b * X shifted significantly between sub-periods.
+ */
+export function computeChowStructuralBreakTest(
+  seriesY: number[],
+  seriesX: number[],
+  splitIndex?: number
+): { fStat: number; pValueApprox: number; hasBreak: boolean } {
+  const n = Math.min(seriesY.length, seriesX.length);
+  if (n < 20) return { fStat: 0, pValueApprox: 1.0, hasBreak: false };
+
+  const split = splitIndex ?? Math.floor(n / 2);
+  if (split < 8 || n - split < 8) {
+    return { fStat: 0, pValueApprox: 1.0, hasBreak: false };
+  }
+
+  const olsResidualSum = (y: number[], x: number[]): { sse: number; k: number } => {
+    const len = y.length;
+    let sx = 0, sy = 0, sxy = 0, sx2 = 0;
+    for (let i = 0; i < len; i++) {
+      sx += x[i];
+      sy += y[i];
+      sxy += x[i] * y[i];
+      sx2 += x[i] * x[i];
+    }
+    const denom = len * sx2 - sx * sx;
+    const b = Math.abs(denom) > 1e-12 ? (len * sxy - sx * sy) / denom : 0;
+    const a = (sy - b * sx) / len;
+    let sse = 0;
+    for (let i = 0; i < len; i++) {
+      const e = y[i] - (a + b * x[i]);
+      sse += e * e;
+    }
+    return { sse, k: 2 };
+  };
+
+  const pool = olsResidualSum(seriesY, seriesX);
+  const part1 = olsResidualSum(seriesY.slice(0, split), seriesX.slice(0, split));
+  const part2 = olsResidualSum(seriesY.slice(split), seriesX.slice(split));
+
+  const ssePool = pool.sse;
+  const sseUnconstrained = part1.sse + part2.sse;
+  const k = 2; // number of parameters [a, b]
+  const df1 = k;
+  const df2 = n - 2 * k;
+
+  if (df2 <= 0 || sseUnconstrained <= 1e-12) {
+    return { fStat: 0, pValueApprox: 1.0, hasBreak: false };
+  }
+
+  const fStat = ((ssePool - sseUnconstrained) / df1) / (sseUnconstrained / df2);
+  // F(2, >16) critical value at 5% is approx 3.63
+  const hasBreak = fStat > 3.63;
+  const pValApprox = hasBreak ? 0.02 : 0.3;
+
+  return {
+    fStat: Number(Math.max(0, fStat).toFixed(3)),
+    pValueApprox: pValApprox,
+    hasBreak,
+  };
+}
+
+/**
+ * 2-Step Engle-Granger Cointegration Engine for Statistical Arbitrage:
+ * Step 1: OLS Regression Y_t = alpha + beta * X_t + epsilon_t
+ * Step 2: ADF Unit Root Test on Residuals epsilon_t (with Engle-Yoo critical values)
+ * Step 3: Ornstein-Uhlenbeck Calibration on Residual Spread to extract Half-Life
+ * Step 4: Chow Test for Structural Regime Shift
+ */
+export function evaluateEngleGrangerCointegration(
+  seriesY: number[],
+  seriesX: number[],
+  options?: {
+    zScoreThreshold?: number;
+    maxHalfLifeBars?: number;
+    symbolA?: string;
+    symbolB?: string;
+  }
+): EngleGrangerCointegrationResult {
+  const zScoreThresh = options?.zScoreThreshold ?? 2.0;
+  const maxHalfLife = options?.maxHalfLifeBars ?? 60; // Max 60 bars for mean-reversion
+  const symA = options?.symbolA ?? "AssetA";
+  const symB = options?.symbolB ?? "AssetB";
+
+  const n = Math.min(seriesY.length, seriesX.length);
+  if (n < 25) {
+    return {
+      isCointegrated: false,
+      adfStat: 0,
+      criticalValue5Pct: -3.37,
+      criticalValue1Pct: -3.96,
+      pValEstimate: 1.0,
+      hedgeRatio: 1.0,
+      alphaIntercept: 0,
+      halfLifeBars: Infinity,
+      meanReversionPace: 0,
+      currentSpread: 0,
+      spreadMean: 0,
+      spreadStd: 1.0,
+      currentZScore: 0,
+      structuralStabilityChowF: 0,
+      hasStructuralBreak: false,
+      signal: "NO_SIGNAL",
+      rationaleVi: "Chuỗi giá quá ngắn (< 25 quan sát) để kiểm định đồng tích hợp.",
+    };
+  }
+
+  // Step 1: OLS regression Y on X
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = seriesX[i];
+    const y = seriesY[i];
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumX2 += x * x;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  const beta = Math.abs(denom) > 1e-12 ? (n * sumXY - sumX * sumY) / denom : 1.0;
+  const alpha = (sumY - beta * sumX) / n;
+
+  // Construct residuals (spread series)
+  const spread: number[] = new Array(n);
+  let spreadSum = 0;
+  for (let i = 0; i < n; i++) {
+    spread[i] = seriesY[i] - (alpha + beta * seriesX[i]);
+    spreadSum += spread[i];
+  }
+  const spreadMean = spreadSum / n;
+  let spreadVar = 0;
+  for (let i = 0; i < n; i++) {
+    const diff = spread[i] - spreadMean;
+    spreadVar += diff * diff;
+  }
+  const spreadStd = Math.sqrt(Math.max(1e-10, spreadVar / (n - 1)));
+
+  // Step 2: ADF test on residuals (Note: Engle-Yoo critical values for 2 variables: 5% ~ -3.37, 1% ~ -3.96)
+  const adfRes = computeAugmentedDickeyFuller(spread, 1);
+  const isCointegrated = adfRes.adfStat <= -3.37;
+
+  // Step 3: Ornstein-Uhlenbeck on spread
+  const ou = estimateOrnsteinUhlenbeck(spread, 1.0);
+  const halfLife = Number.isFinite(ou.halfLife) ? Math.max(0.1, ou.halfLife) : Infinity;
+
+  // Current Z-score
+  const currentSpread = spread[n - 1];
+  const currentZScore = spreadStd > 0 ? (currentSpread - spreadMean) / spreadStd : 0;
+
+  // Step 4: Chow test for structural break
+  const chow = computeChowStructuralBreakTest(seriesY, seriesX);
+
+  // Trading Signal Determination
+  let signal: "BUY_A_SELL_B" | "SELL_A_BUY_B" | "EXIT_SPREAD" | "NO_SIGNAL" = "NO_SIGNAL";
+  let rationaleVi = "";
+
+  if (!isCointegrated) {
+    signal = "NO_SIGNAL";
+    rationaleVi = `Cặp [${symA}/${symB}] KHÔNG đồng tích hợp (ADF Stat = ${adfRes.adfStat.toFixed(2)} > -3.37). Rủi ro tương quan ảo (spurious correlation).`;
+  } else if (chow.hasBreak) {
+    signal = "EXIT_SPREAD";
+    rationaleVi = `Phát hiện vỡ cấu trúc quan hệ giá (Chow F = ${chow.fStat.toFixed(2)} > 3.63). Cấm mở lệnh đảo chiều phân kỳ.`;
+  } else if (halfLife > maxHalfLife) {
+    signal = "NO_SIGNAL";
+    rationaleVi = `Tốc độ hội tụ quá chậm (Half-Life = ${halfLife.toFixed(1)} nến > ${maxHalfLife}). Vốn bị om quá lâu.`;
+  } else {
+    // Stat-arb logic
+    if (currentZScore > zScoreThresh) {
+      // Y is overpriced relative to X -> Sell Y, Buy X
+      signal = "SELL_A_BUY_B";
+      rationaleVi = `Spread Z-Score cực đại (+${currentZScore.toFixed(2)}): Bán [${symA}], Mua [${symB}] với Hedge Ratio ${beta.toFixed(3)}. Half-Life = ${halfLife.toFixed(1)} nến.`;
+    } else if (currentZScore < -zScoreThresh) {
+      // Y is underpriced relative to X -> Buy Y, Sell X
+      signal = "BUY_A_SELL_B";
+      rationaleVi = `Spread Z-Score cực tiểu (${currentZScore.toFixed(2)}): Mua [${symA}], Bán [${symB}] với Hedge Ratio ${beta.toFixed(3)}. Half-Life = ${halfLife.toFixed(1)} nến.`;
+    } else if (Math.abs(currentZScore) < 0.5) {
+      signal = "EXIT_SPREAD";
+      rationaleVi = `Spread đã hội tụ về vùng cân bằng (Z-Score = ${currentZScore.toFixed(2)}). Chốt lời/Đóng vị thế cặp.`;
+    } else {
+      signal = "NO_SIGNAL";
+      rationaleVi = `Spread dao động bình thường (Z-Score = ${currentZScore.toFixed(2)}). Chờ điểm cực trị.`;
+    }
+  }
+
+  return {
+    isCointegrated,
+    adfStat: adfRes.adfStat,
+    criticalValue5Pct: -3.37,
+    criticalValue1Pct: -3.96,
+    pValEstimate: adfRes.pValueApprox,
+    hedgeRatio: Number(beta.toFixed(4)),
+    alphaIntercept: Number(alpha.toFixed(4)),
+    halfLifeBars: Number(halfLife.toFixed(1)),
+    meanReversionPace: Number(ou.theta.toFixed(4)),
+    currentSpread: Number(currentSpread.toFixed(4)),
+    spreadMean: Number(spreadMean.toFixed(4)),
+    spreadStd: Number(spreadStd.toFixed(4)),
+    currentZScore: Number(currentZScore.toFixed(2)),
+    structuralStabilityChowF: chow.fStat,
+    hasStructuralBreak: chow.hasBreak,
+    signal,
+    rationaleVi,
+  };
+}
+
+/**
+ * Multivariate Johansen Cointegration Trace Test (K >= 2 time series).
+ * Solves generalized eigenvalue problem: |lambda * S11 - S10 * S00^{-1} * S01| = 0
+ * to determine cointegrating rank r and cointegrating vectors beta.
+ */
+export function computeJohansenCointegrationTest(
+  dataMatrix: number[][], // T rows x K columns (time series of K assets)
+  lags: number = 1
+): JohansenEigenResult {
+  const T = dataMatrix.length;
+  if (T < 30 || !dataMatrix[0]) {
+    return {
+      rank: 0,
+      traceStatistics: [],
+      criticalValues95Pct: [],
+      eigenvalues: [],
+      cointegratingVectors: [],
+      hasCointegration: false,
+      modelType: "RESTRICTED_CONSTANT",
+    };
+  }
+
+  const K = dataMatrix[0].length;
+  if (K < 2 || K > 6) {
+    // Restrict K to 2..6 for institutional numerical stability
+    return {
+      rank: 0,
+      traceStatistics: [],
+      criticalValues95Pct: [],
+      eigenvalues: [],
+      cointegratingVectors: [],
+      hasCointegration: false,
+      modelType: "RESTRICTED_CONSTANT",
+    };
+  }
+
+  // 1. Compute delta matrix dX (T-1 x K) and lagged level X_{-1} (T-1 x K)
+  const dX: number[][] = [];
+  const X_lag: number[][] = [];
+  for (let t = 1; t < T; t++) {
+    const dRow: number[] = new Array(K);
+    const lagRow: number[] = new Array(K);
+    for (let j = 0; j < K; j++) {
+      dRow[j] = dataMatrix[t][j] - dataMatrix[t - 1][j];
+      lagRow[j] = dataMatrix[t - 1][j];
+    }
+    dX.push(dRow);
+    X_lag.push(lagRow);
+  }
+
+  const effT = dX.length;
+
+  // 2. Auxiliary regressions of dX and X_lag on lagged differences (if lags > 1, or demean if lags = 1)
+  // For standard VECM with constant: center dX and X_lag
+  const R0: number[][] = [];
+  const R1: number[][] = [];
+
+  const mean0: number[] = new Array(K).fill(0);
+  const mean1: number[] = new Array(K).fill(0);
+  for (let t = 0; t < effT; t++) {
+    for (let j = 0; j < K; j++) {
+      mean0[j] += dX[t][j];
+      mean1[j] += X_lag[t][j];
+    }
+  }
+  for (let j = 0; j < K; j++) {
+    mean0[j] /= effT;
+    mean1[j] /= effT;
+  }
+
+  for (let t = 0; t < effT; t++) {
+    const r0Row: number[] = new Array(K);
+    const r1Row: number[] = new Array(K);
+    for (let j = 0; j < K; j++) {
+      r0Row[j] = dX[t][j] - mean0[j];
+      r1Row[j] = X_lag[t][j] - mean1[j];
+    }
+    R0.push(r0Row);
+    R1.push(r1Row);
+  }
+
+  // 3. Compute cross-product moment matrices: S00, S01, S10, S11
+  const S00 = computeCrossProductMoment(R0, R0, effT, K, K);
+  const S01 = computeCrossProductMoment(R0, R1, effT, K, K);
+  const S10 = computeCrossProductMoment(R1, R0, effT, K, K);
+  const S11 = computeCrossProductMoment(R1, R1, effT, K, K);
+
+  const invS00 = invertMatrixNxN(S00, K);
+  const invS11 = invertMatrixNxN(S11, K);
+
+  if (!invS00 || !invS11) {
+    return {
+      rank: 0,
+      traceStatistics: [],
+      criticalValues95Pct: [],
+      eigenvalues: [],
+      cointegratingVectors: [],
+      hasCointegration: false,
+      modelType: "RESTRICTED_CONSTANT",
+    };
+  }
+
+  // Target matrix for generalized eigenvalue problem: M = S11^{-1} * S10 * S00^{-1} * S01
+  const S00inv_S01 = multiplyMatricesNxN(invS00, S01, K, K, K);
+  const S10_S00inv_S01 = multiplyMatricesNxN(S10, S00inv_S01, K, K, K);
+  const M = multiplyMatricesNxN(invS11, S10_S00inv_S01, K, K, K);
+
+  // Symmetrize M for stable eigenvalue extraction: M_sym = 0.5 * (M + M^T)
+  const Msym: number[][] = Array.from({ length: K }, (_, r) => {
+    const row = new Array(K);
+    for (let c = 0; c < K; c++) {
+      row[c] = 0.5 * (M[r][c] + M[c][r]);
+    }
+    return row;
+  });
+
+  const eigen = symmetricJacobiEigenvalues(Msym);
+
+  // Sort eigenvalues descending
+  const paired: { val: number; vec: number[] }[] = [];
+  for (let j = 0; j < K; j++) {
+    const val = Math.max(0, Math.min(0.9999, eigen.eigenvalues[j]));
+    const vec: number[] = new Array(K);
+    for (let r = 0; r < K; r++) {
+      vec[r] = eigen.eigenvectors[r][j];
+    }
+    paired.push({ val, vec });
+  }
+  paired.sort((a, b) => b.val - a.val);
+
+  const sortedEigenvals = paired.map((p) => p.val);
+
+  // Compute Johansen Trace Statistics: Trace(r) = -T * sum_{i=r+1}^K ln(1 - lambda_i)
+  const traceStats: number[] = new Array(K);
+  for (let r = 0; r < K; r++) {
+    let sumLog = 0;
+    for (let i = r; i < K; i++) {
+      sumLog += Math.log(1 - sortedEigenvals[i]);
+    }
+    traceStats[r] = Number((-effT * sumLog).toFixed(3));
+  }
+
+  // Osterwald-Lenum (1992) asymptotic critical values for Case 3 (unrestricted constant)
+  // For K - r = 1..6
+  const osterwaldCrit95: Record<number, number> = {
+    1: 9.24,
+    2: 19.96,
+    3: 34.91,
+    4: 53.12,
+    5: 76.07,
+    6: 102.14,
+  };
+
+  const critValues: number[] = new Array(K);
+  let rank = 0;
+  for (let r = 0; r < K; r++) {
+    const remainingDim = K - r;
+    const crit = osterwaldCrit95[remainingDim] ?? 15.0;
+    critValues[r] = crit;
+    if (traceStats[r] > crit && rank === r) {
+      rank = r + 1;
+    }
+  }
+
+  // Extract normalized cointegrating vectors (normalized to 1.0 on first asset)
+  const cointegratingVectors: number[][] = [];
+  for (let r = 0; r < Math.max(1, rank); r++) {
+    const rawVec = paired[r].vec;
+    const normFactor = Math.abs(rawVec[0]) > 1e-6 ? rawVec[0] : 1.0;
+    const normalized = rawVec.map((v) => Number((v / normFactor).toFixed(4)));
+    cointegratingVectors.push(normalized);
+  }
+
+  return {
+    rank,
+    traceStatistics: traceStats,
+    criticalValues95Pct: critValues,
+    eigenvalues: sortedEigenvals.map((v) => Number(v.toFixed(5))),
+    cointegratingVectors,
+    hasCointegration: rank > 0,
+    modelType: "UNRESTRICTED_CONSTANT",
+  };
+}
+
+function computeCrossProductMoment(
+  A: number[][],
+  B: number[][],
+  rows: number,
+  colsA: number,
+  colsB: number
+): number[][] {
+  const result: number[][] = Array.from({ length: colsA }, () => new Array(colsB).fill(0));
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < colsA; i++) {
+      for (let j = 0; j < colsB; j++) {
+        result[i][j] += A[r][i] * B[r][j];
+      }
+    }
+  }
+  for (let i = 0; i < colsA; i++) {
+    for (let j = 0; j < colsB; j++) {
+      result[i][j] /= rows;
+    }
+  }
+  return result;
+}
+
+function multiplyMatricesNxN(
+  A: number[][],
+  B: number[][],
+  rowsA: number,
+  colsA: number,
+  colsB: number
+): number[][] {
+  const res: number[][] = Array.from({ length: rowsA }, () => new Array(colsB).fill(0));
+  for (let i = 0; i < rowsA; i++) {
+    for (let j = 0; j < colsB; j++) {
+      let sum = 0;
+      for (let k = 0; k < colsA; k++) {
+        sum += A[i][k] * B[k][j];
+      }
+      res[i][j] = sum;
+    }
+  }
+  return res;
+}
+
