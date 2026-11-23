@@ -15,10 +15,13 @@
 import {
   evaluateMarketScenarioVector,
   updateScenarioVectorWithBayesianSurprise,
+  evaluateMultivariateHawkesContagion,
   type CanonicalMarketScenarioId,
   type EventLifecyclePhase,
   type MacroEventSurpriseInput,
   type MarketScenarioInput,
+  type HawkesPointEvent,
+  type MultivariateHawkesNetworkState,
 } from "./advanced-quant-math";
 
 export type ScenarioType = "BULL" | "BASE" | "BEAR";
@@ -731,6 +734,7 @@ export interface UnifiedMacroScenarioInput {
   vn30fIndexPrice?: number; // Điểm số hợp đồng tương lai VN30F, mặc định 1300
   vn30fBasisPoints?: number; // Độ lệch Basis (VN30F - VN30 Cash Index, vd: -8.5 hoặc +2.0)
   macroEvents?: MacroEventSurpriseInput[]; // Dữ liệu lịch kinh tế & bất ngờ vĩ mô
+  hawkesEvents?: HawkesPointEvent[]; // Dòng sự kiện xung lực vi mô / thanh lý liên thị trường
   marketScenarioInput?: MarketScenarioInput; // Dữ liệu kỹ thuật, HMM, VPIN, HAR-RV
   baseScenarios?: {
     bullTarget: number;
@@ -790,6 +794,7 @@ export interface UnifiedMacroScenarioReport {
     estimatedBasisDragVnd: number;
     hedgeRationaleVi: string;
   };
+  hawkesContagion?: MultivariateHawkesNetworkState;
   timeframeMatrix: MultiTimeframeMatrix;
   allocation: PortfolioAllocationAdvice;
   executiveSummaryVi: string;
@@ -816,6 +821,16 @@ export function projectUnifiedMacroScenarioReport(
   );
 
   const pS = bayesianResult.updatedProbabilities;
+
+  // Optional: Evaluate Multivariate Hawkes Contagion Network if event stream is provided
+  let hawkesContagion: MultivariateHawkesNetworkState | undefined = undefined;
+  if (input.hawkesEvents && input.hawkesEvents.length > 0) {
+    const latestEventTime = Math.max(...input.hawkesEvents.map((e) => e.timestampMs));
+    hawkesContagion = evaluateMultivariateHawkesContagion({
+      eventStream: input.hawkesEvents,
+      evaluationTimeMs: latestEventTime,
+    });
+  }
 
   // 3. Synthesize Macro News Surprise Directionality
   let netSurpriseScore = 0;
@@ -1075,6 +1090,7 @@ export function projectUnifiedMacroScenarioReport(
       estimatedBasisDragVnd,
       hedgeRationaleVi,
     },
+    hawkesContagion,
     timeframeMatrix,
     allocation,
     executiveSummaryVi,

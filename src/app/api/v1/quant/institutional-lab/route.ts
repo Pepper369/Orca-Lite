@@ -16,6 +16,8 @@ import {
   computeVarianceInflationFactors,
   evaluateEngleGrangerCointegration,
   computeJohansenCointegrationTest,
+  evaluateMultivariateHawkesContagion,
+  type HawkesPointEvent,
 } from "@/lib/engines/advanced-quant-math";
 import {
   analyzeCointegratedPairTrade,
@@ -646,6 +648,25 @@ export async function POST(req: NextRequest) {
       });
 
       return NextResponse.json({ success: true, data: analysis });
+    }
+
+    if (type === "multivariate_hawkes_contagion") {
+      const rawEvents = Array.isArray(body.eventStream) ? (body.eventStream as unknown[]) : [];
+      const cleanEvents: HawkesPointEvent[] = rawEvents.slice(0, 50).map((item, idx) => {
+        const obj = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        const node = typeof obj.nodeId === "string" ? obj.nodeId.trim().toUpperCase() : `NODE_${idx}`;
+        const ts = clampFinite(obj.timestampMs, Date.now(), 0, 4e12);
+        const mag = clampFinite(obj.magnitude, 1.0, 0.01, 100);
+        return { nodeId: node, timestampMs: ts, magnitude: mag };
+      });
+
+      const evalTime = optClampFinite(body.evaluationTimeMs, 0, 4e12) ?? Date.now();
+      const result = evaluateMultivariateHawkesContagion({
+        eventStream: cleanEvents,
+        evaluationTimeMs: evalTime,
+      });
+
+      return NextResponse.json({ success: true, data: result });
     }
 
     return NextResponse.json(
