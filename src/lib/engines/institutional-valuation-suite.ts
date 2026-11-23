@@ -110,9 +110,15 @@ export interface RelativeMultiplesScorecardOutput {
   upsidePct: number;
 }
 
+export type DcfApplicabilityStatus =
+  | "REAL_FCF"
+  | "EXEMPT_FINANCIAL"
+  | "UNAVAILABLE_NO_FCF";
+
 export interface InstitutionalValuationInput {
   symbol: string;
   currentPrice: number;
+  isFinancialSector?: boolean;
   sharesOutstanding?: number;
   freeCashFlowTtm?: number;
   netDebt?: number;
@@ -143,7 +149,8 @@ export interface InstitutionalValuationInput {
 export interface InstitutionalValuationReport {
   symbol: string;
   currentPrice: number;
-  dcf: DcfValuationOutput;
+  dcfStatus: DcfApplicabilityStatus;
+  dcf: DcfValuationOutput | null;
   sotp: SotpValuationOutput | null;
   multiplesScorecard: RelativeMultiplesScorecardOutput;
   blendedFairValue: number;
@@ -563,88 +570,105 @@ export function runInstitutionalValuationSuite(
   input: InstitutionalValuationInput,
 ): InstitutionalValuationReport {
   const currentPrice = input.currentPrice;
-  const sharesOutstanding = input.sharesOutstanding ?? 1_000_000_000;
-  const netDebt = input.netDebt ?? 0;
-  const initialFcf = input.freeCashFlowTtm ?? currentPrice * sharesOutstanding * 0.06; // Default 6% FCF yield
+  const hasRealShares =
+    input.sharesOutstanding != null &&
+    Number.isFinite(input.sharesOutstanding) &&
+    input.sharesOutstanding > 0;
+  const hasRealFcf =
+    input.freeCashFlowTtm != null &&
+    Number.isFinite(input.freeCashFlowTtm) &&
+    input.freeCashFlowTtm > 0;
+  const sharesOutstanding = hasRealShares ? input.sharesOutstanding! : 0;
+  const netDebt = input.netDebt != null && Number.isFinite(input.netDebt) ? input.netDebt : 0;
 
-  // 1. WACC & Growth Rates
-  const baseWacc =
-    input.baseWacc ??
-    calculateWaccFromComponents({
-      costOfDebtPreTax: input.costOfDebtPreTax,
-      taxRate: input.taxRate,
-      debtWeight: input.debtWeight,
+  let dcfStatus: DcfApplicabilityStatus = "REAL_FCF";
+  let dcfOutput: DcfValuationOutput | null = null;
+
+  if (input.isFinancialSector) {
+    dcfStatus = "EXEMPT_FINANCIAL";
+  } else if (!hasRealFcf || !hasRealShares) {
+    dcfStatus = "UNAVAILABLE_NO_FCF";
+  } else {
+    const initialFcf = input.freeCashFlowTtm!;
+    // 1. WACC & Growth Rates
+    const baseWacc =
+      input.baseWacc ??
+      calculateWaccFromComponents({
+        costOfDebtPreTax: input.costOfDebtPreTax,
+        taxRate: input.taxRate,
+        debtWeight: input.debtWeight,
+      });
+    const baseTerminalGrowth = input.terminalGrowthRate ?? 0.025;
+    const baseExitMultiple = input.exitMultipleEvEbitda ?? 8.5;
+
+    const baseGrowthRates = input.fcfGrowthRatesY1to5 ?? [0.12, 0.10, 0.08, 0.06, 0.05];
+    const bearGrowthRates = baseGrowthRates.map((g) => Math.max(0.01, g - 0.05));
+    const bullGrowthRates = baseGrowthRates.map((g) => g + 0.05);
+
+    // 2. DCF Multi-Scenario (Strictly grounded in real BCTC FCF)
+    const bearDcf = computeScenarioDcf("BEAR", {
+      currentPrice,
+      sharesOutstanding,
+      initialFcf: initialFcf * 0.85,
+      netDebt,
+      growthRates: bearGrowthRates,
+      wacc: baseWacc + 0.015,
+      terminalGrowth: Math.max(0.01, baseTerminalGrowth - 0.01),
+      exitMultiple: Math.max(4.0, baseExitMultiple - 2.0),
     });
-  const baseTerminalGrowth = input.terminalGrowthRate ?? 0.025;
-  const baseExitMultiple = input.exitMultipleEvEbitda ?? 8.5;
 
-  const baseGrowthRates = input.fcfGrowthRatesY1to5 ?? [0.12, 0.10, 0.08, 0.06, 0.05];
-  const bearGrowthRates = baseGrowthRates.map((g) => Math.max(0.01, g - 0.05));
-  const bullGrowthRates = baseGrowthRates.map((g) => g + 0.05);
+    const baseDcf = computeScenarioDcf("BASE", {
+      currentPrice,
+      sharesOutstanding,
+      initialFcf,
+      netDebt,
+      growthRates: baseGrowthRates,
+      wacc: baseWacc,
+      terminalGrowth: baseTerminalGrowth,
+      exitMultiple: baseExitMultiple,
+    });
 
-  // 2. DCF Multi-Scenario
-  const bearDcf = computeScenarioDcf("BEAR", {
-    currentPrice,
-    sharesOutstanding,
-    initialFcf: initialFcf * 0.85,
-    netDebt,
-    growthRates: bearGrowthRates,
-    wacc: baseWacc + 0.015,
-    terminalGrowth: Math.max(0.01, baseTerminalGrowth - 0.01),
-    exitMultiple: Math.max(4.0, baseExitMultiple - 2.0),
-  });
+    const bullDcf = computeScenarioDcf("BULL", {
+      currentPrice,
+      sharesOutstanding,
+      initialFcf: initialFcf * 1.15,
+      netDebt,
+      growthRates: bullGrowthRates,
+      wacc: Math.max(0.06, baseWacc - 0.01),
+      terminalGrowth: baseTerminalGrowth + 0.01,
+      exitMultiple: baseExitMultiple + 2.0,
+    });
 
-  const baseDcf = computeScenarioDcf("BASE", {
-    currentPrice,
-    sharesOutstanding,
-    initialFcf,
-    netDebt,
-    growthRates: baseGrowthRates,
-    wacc: baseWacc,
-    terminalGrowth: baseTerminalGrowth,
-    exitMultiple: baseExitMultiple,
-  });
+    const sensitivityMatrix = generateDcfSensitivityMatrix({
+      currentPrice,
+      sharesOutstanding,
+      initialFcf,
+      netDebt,
+      baseGrowthRates,
+      baseWacc,
+      baseTerminalGrowth,
+      exitMultiple: baseExitMultiple,
+    });
 
-  const bullDcf = computeScenarioDcf("BULL", {
-    currentPrice,
-    sharesOutstanding,
-    initialFcf: initialFcf * 1.15,
-    netDebt,
-    growthRates: bullGrowthRates,
-    wacc: Math.max(0.06, baseWacc - 0.01),
-    terminalGrowth: baseTerminalGrowth + 0.01,
-    exitMultiple: baseExitMultiple + 2.0,
-  });
-
-  const sensitivityMatrix = generateDcfSensitivityMatrix({
-    currentPrice,
-    sharesOutstanding,
-    initialFcf,
-    netDebt,
-    baseGrowthRates,
-    baseWacc,
-    baseTerminalGrowth,
-    exitMultiple: baseExitMultiple,
-  });
-
-  const dcfOutput: DcfValuationOutput = {
-    baseWacc: Number((baseWacc * 100).toFixed(2)),
-    baseTerminalGrowth: Number((baseTerminalGrowth * 100).toFixed(2)),
-    baseExitMultiple,
-    scenarios: {
-      bear: bearDcf,
-      base: baseDcf,
-      bull: bullDcf,
-    },
-    sensitivityMatrix,
-    fairValuePerShare: baseDcf.fairValuePerShare,
-    upsidePct: baseDcf.upsidePct,
-    marginOfSafetyPct: baseDcf.marginOfSafetyPct,
-  };
+    dcfOutput = {
+      baseWacc: Number((baseWacc * 100).toFixed(2)),
+      baseTerminalGrowth: Number((baseTerminalGrowth * 100).toFixed(2)),
+      baseExitMultiple,
+      scenarios: {
+        bear: bearDcf,
+        base: baseDcf,
+        bull: bullDcf,
+      },
+      sensitivityMatrix,
+      fairValuePerShare: baseDcf.fairValuePerShare,
+      upsidePct: baseDcf.upsidePct,
+      marginOfSafetyPct: baseDcf.marginOfSafetyPct,
+    };
+  }
 
   // 3. SOTP Valuation (Optional)
   let sotpOutput: SotpValuationOutput | null = null;
-  if (input.sotpSegments && input.sotpSegments.length > 0) {
+  if (input.sotpSegments && input.sotpSegments.length > 0 && hasRealShares) {
     sotpOutput = computeSotpValuation({
       segments: input.sotpSegments,
       netDebt,
@@ -659,9 +683,9 @@ export function runInstitutionalValuationSuite(
     currentPrice,
     pe: input.peRatio,
     pb: input.pbRatio,
-    evEbitda: input.evEbitdaRatio,
-    evSales: input.evSalesRatio,
-    fcfYieldPct: input.fcfYieldPct,
+    evEbitda: input.isFinancialSector ? undefined : input.evEbitdaRatio,
+    evSales: input.isFinancialSector ? undefined : input.evSalesRatio,
+    fcfYieldPct: input.isFinancialSector ? undefined : input.fcfYieldPct,
     sectorPe: input.sectorPe,
     sectorPb: input.sectorPb,
     sectorEvEbitda: input.sectorEvEbitda,
@@ -669,19 +693,27 @@ export function runInstitutionalValuationSuite(
     sectorFcfYieldPct: input.sectorFcfYieldPct,
   });
 
-  // 5. Blended Institutional Fair Value
+  // 5. Blended Institutional Fair Value (Redistribute weights when DCF/SOTP unavailable)
   let blendedFairValue = 0;
-  if (sotpOutput) {
+  if (dcfOutput && sotpOutput) {
     // 40% DCF + 30% SOTP + 30% Multiples
     blendedFairValue =
       dcfOutput.fairValuePerShare * 0.4 +
       sotpOutput.sotpFairValuePerShare * 0.3 +
       multiplesScorecard.impliedFairValuePerShare * 0.3;
-  } else {
+  } else if (dcfOutput) {
     // 60% DCF + 40% Multiples
     blendedFairValue =
       dcfOutput.fairValuePerShare * 0.6 +
       multiplesScorecard.impliedFairValuePerShare * 0.4;
+  } else if (sotpOutput) {
+    // 50% SOTP + 50% Multiples
+    blendedFairValue =
+      sotpOutput.sotpFairValuePerShare * 0.5 +
+      multiplesScorecard.impliedFairValuePerShare * 0.5;
+  } else {
+    // 100% Relative Multiples (e.g., Banks/Financials or missing FCF)
+    blendedFairValue = multiplesScorecard.impliedFairValuePerShare;
   }
   blendedFairValue = Number(blendedFairValue.toFixed(2));
 
@@ -708,11 +740,25 @@ export function runInstitutionalValuationSuite(
     convictionGradeVi = "HẠ TỶ TRỌNG (Định giá đã phản ánh quá đà vào thị giá)";
   }
 
-  const valuationDriversVi: string[] = [
-    `Mô hình DCF Base-Case (WACC ${dcfOutput.baseWacc}%, Terminal Growth ${dcfOutput.baseTerminalGrowth}%): Giá trị nội tại ${dcfOutput.fairValuePerShare.toLocaleString("vi-VN")} ₫ (${dcfOutput.upsidePct > 0 ? "+" : ""}${dcfOutput.upsidePct}% upside).`,
-    `Phổ độ nhạy WACC/g dao động từ ${bearDcf.fairValuePerShare.toLocaleString("vi-VN")} ₫ (Bear) đến ${bullDcf.fairValuePerShare.toLocaleString("vi-VN")} ₫ (Bull).`,
+  const valuationDriversVi: string[] = [];
+  if (dcfOutput) {
+    valuationDriversVi.push(
+      `Mô hình DCF Base-Case (WACC ${dcfOutput.baseWacc}%, Terminal Growth ${dcfOutput.baseTerminalGrowth}%): Giá trị nội tại ${dcfOutput.fairValuePerShare.toLocaleString("vi-VN")} ₫ (${dcfOutput.upsidePct > 0 ? "+" : ""}${dcfOutput.upsidePct}% upside).`,
+      `Phổ độ nhạy WACC/g dao động từ ${dcfOutput.scenarios.bear.fairValuePerShare.toLocaleString("vi-VN")} ₫ (Bear) đến ${dcfOutput.scenarios.bull.fairValuePerShare.toLocaleString("vi-VN")} ₫ (Bull).`,
+    );
+  } else if (dcfStatus === "EXEMPT_FINANCIAL") {
+    valuationDriversVi.push(
+      `Nhóm Tài chính/Ngân hàng (EXEMPT_FINANCIAL): Miễn trừ mô hình FCFF DCF, tái phân bổ 100% trọng số sang bội số P/B & P/E chuẩn ngành.`,
+    );
+  } else {
+    valuationDriversVi.push(
+      `Thiếu dữ liệu FCF dương hoặc số lượng cổ phiếu từ BCTC (UNAVAILABLE_NO_FCF): Không ngụy tạo DCF, tái phân bổ trọng số sang Bội số Tương đối.`,
+    );
+  }
+
+  valuationDriversVi.push(
     `Hệ số định giá tương đối: Điểm định giá ${multiplesScorecard.overallScore}/100, xếp loại [${multiplesScorecard.valuationGrade}].`,
-  ];
+  );
 
   if (sotpOutput) {
     valuationDriversVi.push(
@@ -725,6 +771,7 @@ export function runInstitutionalValuationSuite(
   return {
     symbol: input.symbol,
     currentPrice,
+    dcfStatus,
     dcf: dcfOutput,
     sotp: sotpOutput,
     multiplesScorecard,

@@ -37,6 +37,7 @@ import { adjustTradeSetupWithInventorySkew } from "@/lib/engines/bot-inventory-s
 import {
   computePredictionMarketMacroRadar,
   evaluatePredictionBiasAlignment,
+  refreshPredictionMarketRadarLive,
 } from "@/lib/engines/prediction-market-radar";
 import { monitorAlphaDecayAndRebalance } from "@/lib/engines/alpha-decay-monitor";
 import { getLiveTrainedMetaModel } from "@/lib/engines/meta-labeling-calibration";
@@ -70,7 +71,7 @@ import {
   recordBotActivity,
   updateLivePriceReference,
 } from "@/lib/services/bot-live-telemetry";
-import { listBrokerConnections } from "@/lib/services/broker-vault-store";
+import { listBotExecutionOrders, listBrokerConnections } from "@/lib/services/broker-vault-store";
 import { getCryptoSignalsHubData } from "@/lib/services/crypto-signals-hub";
 import { getForexDetail, getForexMarkets } from "@/lib/services/forex";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
@@ -212,8 +213,21 @@ async function scanLivePrecisionSetups(params: {
 }): Promise<Array<{ signal: DispatchableSignalInput; marketPrice: number; feedItem: QuantEngineFeedItem }>> {
   const out: Array<{ signal: DispatchableSignalInput; marketPrice: number; feedItem: QuantEngineFeedItem }> = [];
   const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
-  const calendarEvents = await withTimeout(getGlobalMacroShieldEvents().catch(() => []), 2_000, []);
-  const predictionRadar = computePredictionMarketMacroRadar();
+  const [calendarEvents, predictionRadar, openOrders] = await Promise.all([
+    withTimeout(getGlobalMacroShieldEvents().catch(() => []), 2_000, []),
+    IS_TEST_RUNNER
+      ? Promise.resolve(computePredictionMarketMacroRadar())
+      : withTimeout(refreshPredictionMarketRadarLive(), 2_600, computePredictionMarketMacroRadar()),
+    withTimeout(listBotExecutionOrders(120).catch(() => []), 1_500, []),
+  ]);
+
+  const netInventoryBySymbol = new Map<string, number>();
+  for (const ord of openOrders) {
+    if (ord.status !== "EXECUTED") continue;
+    const sym = ord.symbol.toUpperCase();
+    const signedQty = ord.direction === "BUY" ? ord.copiedLotsOrQty : -ord.copiedLotsOrQty;
+    netInventoryBySymbol.set(sym, (netInventoryBySymbol.get(sym) ?? 0) + signedQty);
+  }
 
   if (params.needCryptoCount > 0) {
     const unownedCrypto = CORE_REALTIME_CRYPTO_PAIRS.filter(
@@ -409,7 +423,7 @@ async function scanLivePrecisionSetups(params: {
             stopLossPrice: roundedSl,
             takeProfit1: roundedTp1,
             baseLotsOrQty: baseQty,
-            netInventory: 0,
+            netInventory: netInventoryBySymbol.get(pair.toUpperCase()) ?? 0,
             maxInventoryCapacity: 10,
             atr: prelimAtr,
             orderBookImbalance: blendedImbalance / 100,
@@ -678,7 +692,7 @@ async function scanLivePrecisionSetups(params: {
             stopLossPrice,
             takeProfit1: roundedTp1Fx,
             baseLotsOrQty: lotsFx,
-            netInventory: 0,
+            netInventory: netInventoryBySymbol.get(pair.toUpperCase()) ?? 0,
             maxInventoryCapacity: 5,
             atr: calcAtr(execBars, 14) ?? undefined,
           });
@@ -810,7 +824,9 @@ export async function runAutoTradeTick(): Promise<{
     const seenCrypto = new Set<string>();
     const seenForex = new Set<string>();
     const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
-    const hubPredictionRadar = computePredictionMarketMacroRadar();
+    const hubPredictionRadar = IS_TEST_RUNNER
+      ? computePredictionMarketMacroRadar()
+      : await withTimeout(refreshPredictionMarketRadarLive(), 2_600, computePredictionMarketMacroRadar());
 
     if (fxRes.status === "fulfilled" && fxRes.value) {
       const fxMarketClosed = isForexWeekendClosedUtc();

@@ -52,8 +52,14 @@ export interface PredictionMarketContract {
   lastUpdatedTimestamp: number;
 }
 
+export type PredictionRadarDataSource =
+  | "LIVE_POLYMARKET"
+  | "BASELINE_FALLBACK"
+  | "CUSTOM_INPUT";
+
 export interface MacroRadarSnapshot {
   timestamp: number;
+  dataSource: PredictionRadarDataSource;
   riskRegime: "RISK_ON" | "RISK_OFF" | "NEUTRAL_CHOP";
   fedRateCutOdds: number; // [0, 1]
   inflationSurpriseOdds: number; // [0, 1]
@@ -143,12 +149,16 @@ export const DEFAULT_PREDICTION_CONTRACTS: PredictionMarketContract[] = [
 export function computePredictionMarketMacroRadar(
   contracts: PredictionMarketContract[] = DEFAULT_PREDICTION_CONTRACTS,
   nowMs: number = Date.now(),
+  dataSource?: PredictionRadarDataSource,
 ): MacroRadarSnapshot {
+  const resolvedSource: PredictionRadarDataSource =
+    dataSource ?? (contracts === DEFAULT_PREDICTION_CONTRACTS ? "BASELINE_FALLBACK" : "CUSTOM_INPUT");
+
   if (
     cachedRadarSnapshot &&
     cachedRadarSnapshot.expiresAt > nowMs &&
     contracts === DEFAULT_PREDICTION_CONTRACTS &&
-    cachedRadarSnapshot.snapshot.contracts === DEFAULT_PREDICTION_CONTRACTS
+    !dataSource
   ) {
     return cachedRadarSnapshot.snapshot;
   }
@@ -216,6 +226,7 @@ export function computePredictionMarketMacroRadar(
 
   const snapshot: MacroRadarSnapshot = {
     timestamp: nowMs,
+    dataSource: resolvedSource,
     riskRegime,
     fedRateCutOdds,
     inflationSurpriseOdds,
@@ -227,10 +238,122 @@ export function computePredictionMarketMacroRadar(
     summaryVi,
   };
 
-  if (contracts === DEFAULT_PREDICTION_CONTRACTS) {
+  if (contracts === DEFAULT_PREDICTION_CONTRACTS || resolvedSource === "LIVE_POLYMARKET") {
     cachedRadarSnapshot = { snapshot, expiresAt: nowMs + CACHE_TTL_MS };
   }
   return snapshot;
+}
+
+// ============================================================================
+// 2b. Live Polymarket Gamma API Fetcher (Public, Zero API Key, TTL-Cached)
+// ============================================================================
+
+const POLYMARKET_GAMMA_URL =
+  "https://gamma-api.polymarket.com/markets?closed=false&active=true&order=volume24hr&ascending=false&limit=50";
+
+/**
+ * Parses raw Polymarket Gamma API market objects into categorized macro contracts.
+ * Pure function for deterministic unit testing and live ingestion.
+ */
+export function parsePolymarketGammaMarkets(rawMarkets: unknown[]): PredictionMarketContract[] {
+  if (!Array.isArray(rawMarkets)) return [];
+  const nowMs = Date.now();
+  const out: PredictionMarketContract[] = [];
+
+  for (const item of rawMarkets) {
+    if (!item || typeof item !== "object") continue;
+    const m = item as Record<string, unknown>;
+    const title = typeof m.question === "string" ? m.question.trim() : "";
+    if (!title) continue;
+
+    // Parse outcomePrices (Polymarket returns JSON string like '["0.65", "0.35"]' or array)
+    let yesProb: number | null = null;
+    try {
+      const rawPrices =
+        typeof m.outcomePrices === "string" ? JSON.parse(m.outcomePrices) : m.outcomePrices;
+      if (Array.isArray(rawPrices) && rawPrices.length >= 1) {
+        const p = Number(rawPrices[0]);
+        if (Number.isFinite(p) && p > 0 && p < 1) yesProb = p;
+      }
+    } catch {
+      continue;
+    }
+    if (yesProb == null) continue;
+
+    let category: PredictionCategory | null = null;
+    if (/\b(fed|fomc|rate cut|interest rate|basis points|bps)\b/i.test(title) && /\b(cut|lower|decrease|reduce)\b/i.test(title)) {
+      category = "FED_RATES";
+    } else if (/\b(cpi|inflation|pce)\b/i.test(title) && /\b(above|exceed|higher|over|beat|hot)\b/i.test(title)) {
+      category = "INFLATION_CPI";
+    } else if (/\b(bitcoin|btc|ethereum|eth|crypto)\b/i.test(title) && /\b(above|hit|reach|exceed|ath|higher|over)\b/i.test(title)) {
+      category = "CRYPTO_RANGE";
+    } else if (/\b(war|invasion|strike|conflict|ceasefire|missile|iran|israel|ukraine|taiwan|nato)\b/i.test(title)) {
+      // Invert probability if market is about peace/ceasefire
+      if (/\b(ceasefire|peace|truce|deal)\b/i.test(title)) {
+        yesProb = Number((1 - yesProb).toFixed(3));
+      }
+      category = "GEOPOLITICS";
+    }
+
+    if (!category) continue;
+    const vol = Number(m.volume24hr ?? m.volumeNum ?? m.volume ?? 0);
+    out.push({
+      id: `poly_live_${String(m.id ?? out.length)}`,
+      platform: "POLYMARKET",
+      title,
+      category,
+      impliedProbability: Number(yesProb.toFixed(3)),
+      volume24hUsd: Number.isFinite(vol) && vol > 0 ? Math.round(vol) : 500_000,
+      lastUpdatedTimestamp: nowMs,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Fetches live macro probabilities from Polymarket Gamma API with 10-minute TTL cache.
+ * Falls back transparently to BASELINE_FALLBACK if offline or timeout occurs.
+ */
+export async function refreshPredictionMarketRadarLive(opts?: {
+  force?: boolean;
+  timeoutMs?: number;
+}): Promise<MacroRadarSnapshot> {
+  const nowMs = Date.now();
+  if (!opts?.force && cachedRadarSnapshot && cachedRadarSnapshot.expiresAt > nowMs) {
+    return cachedRadarSnapshot.snapshot;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), opts?.timeoutMs ?? 2_500);
+    timer.unref?.();
+    const res = await fetch(POLYMARKET_GAMMA_URL, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    }).finally(() => clearTimeout(timer));
+
+    if (!res.ok) {
+      return computePredictionMarketMacroRadar(DEFAULT_PREDICTION_CONTRACTS, nowMs, "BASELINE_FALLBACK");
+    }
+
+    const raw = (await res.json()) as unknown[];
+    const liveContracts = parsePolymarketGammaMarkets(raw);
+    if (liveContracts.length === 0) {
+      return computePredictionMarketMacroRadar(DEFAULT_PREDICTION_CONTRACTS, nowMs, "BASELINE_FALLBACK");
+    }
+
+    // Backfill any unrepresented macro category from baseline so all 4 pillars remain populated
+    const coveredCategories = new Set(liveContracts.map((c) => c.category));
+    const merged = [
+      ...liveContracts,
+      ...DEFAULT_PREDICTION_CONTRACTS.filter((d) => !coveredCategories.has(d.category)),
+    ];
+
+    return computePredictionMarketMacroRadar(merged, nowMs, "LIVE_POLYMARKET");
+  } catch {
+    return computePredictionMarketMacroRadar(DEFAULT_PREDICTION_CONTRACTS, nowMs, "BASELINE_FALLBACK");
+  }
 }
 
 // ============================================================================

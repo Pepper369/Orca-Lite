@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   computePredictionMarketMacroRadar,
   evaluatePredictionBiasAlignment,
+  parsePolymarketGammaMarkets,
   type PredictionMarketContract,
 } from "../engines/prediction-market-radar";
 
@@ -89,5 +90,23 @@ describe("Prediction Market Leading Macro Radar Engine (agiprolabs Parity)", () 
     });
     assert.ok(goldBuy.alignmentScore > 0);
     assert.ok(goldBuy.recommendedSizeMultiplier >= 1.0);
+  });
+
+  it("parsePolymarketGammaMarkets: classifies live Polymarket markets and inverts peace odds", () => {
+    const raw = [
+      { id: "m1", question: "Will the Fed cut interest rates by 25 bps at next FOMC?", outcomePrices: '["0.74","0.26"]', volume24hr: 9_000_000 },
+      { id: "m2", question: "Will US CPI inflation come in above 3.0%?", outcomePrices: '["0.28","0.72"]', volume24hr: 2_500_000 },
+      { id: "m3", question: "Will Bitcoin hit above $120,000 this quarter?", outcomePrices: '["0.66","0.34"]', volume24hr: 12_000_000 },
+      { id: "m4", question: "Russia-Ukraine ceasefire deal before July?", outcomePrices: '["0.30","0.70"]', volume24hr: 4_000_000 },
+      { id: "m5", question: "Who wins Best Picture at the Oscars?", outcomePrices: '["0.50","0.50"]', volume24hr: 1_000_000 },
+    ];
+    const parsed = parsePolymarketGammaMarkets(raw);
+    assert.equal(parsed.length, 4);
+    assert.equal(parsed.find((c) => c.category === "FED_RATES")?.impliedProbability, 0.74);
+    assert.equal(parsed.find((c) => c.category === "GEOPOLITICS")?.impliedProbability, 0.70);
+
+    const liveRadar = computePredictionMarketMacroRadar(parsed, Date.now(), "LIVE_POLYMARKET");
+    assert.equal(liveRadar.dataSource, "LIVE_POLYMARKET");
+    assert.equal(liveRadar.riskRegime, "RISK_OFF"); // 70% geo stress -> RISK_OFF
   });
 });

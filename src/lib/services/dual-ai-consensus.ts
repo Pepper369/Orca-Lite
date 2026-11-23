@@ -25,6 +25,8 @@ import {
   runInstitutionalValuationSuite,
   type InstitutionalValuationReport,
 } from "@/lib/engines/institutional-valuation-suite";
+import { hubFinancialPackage } from "@/lib/data-engine/hub";
+import { priceQuoteToVndSafe, resolveIndustryEvalTrack } from "@/lib/financial/fa-core";
 
 export type ConsensusVerdict =
   | "STRONG_BUY"
@@ -80,8 +82,30 @@ export class DualAiConsensusEngine {
   static async getConsensus(symbol: string, userQuestion?: string): Promise<DualAiConsensusReport> {
     const sym = symbol.toUpperCase().trim();
 
-    // 1. Chạy song song cả hai AI engine để tối ưu thời gian phản hồi
-    const [miquantData, fireantData] = await Promise.all([
+    const isTestRunner =
+      process.argv.includes("--test") ||
+      Boolean(process.env.NODE_TEST_CONTEXT) ||
+      process.env.NODE_ENV === "test";
+
+    const fetchFinPkgBounded = () => {
+      if (isTestRunner) return Promise.resolve(null);
+      return new Promise<Awaited<ReturnType<typeof hubFinancialPackage>> | null>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 2_500);
+        timer.unref?.();
+        hubFinancialPackage(sym)
+          .then((res) => {
+            clearTimeout(timer);
+            resolve(res);
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            resolve(null);
+          });
+      });
+    };
+
+    // 1. Chạy song song cả hai AI engine + BCTC thật từ Data Hub để tối ưu thời gian phản hồi
+    const [miquantData, fireantData, finPkg] = await Promise.all([
       MiquantFinancialIntelligence.generateMiquantAiAnswer(sym).catch((err) => {
         console.warn(`[Dual AI Consensus] Lỗi từ MIQuant AI cho ${sym}:`, err);
         return null;
@@ -90,6 +114,7 @@ export class DualAiConsensusEngine {
         console.warn(`[Dual AI Consensus] Lỗi từ FireAnt AI cho ${sym}:`, err);
         return null;
       }),
+      fetchFinPkgBounded(),
     ]);
 
     const overview = miquantData?.overview ?? null;
@@ -272,11 +297,44 @@ export class DualAiConsensusEngine {
       narrativeLines.push("");
     }
 
-    // 5. Institutional Valuation Skill Suite (himself65/finance-skills Parity)
-    const effectivePrice = currentPrice > 0 ? currentPrice : targetPrice ?? 25_000;
+    // 5. Institutional Valuation Skill Suite (himself65/finance-skills Parity — Truth-in-Data & Industry-Aware)
+    const rawPrice = currentPrice > 0 ? currentPrice : targetPrice ?? 0;
+    const effectivePriceVnd = priceQuoteToVndSafe(rawPrice) ?? rawPrice;
+    const industryTrack = resolveIndustryEvalTrack(sym);
+    const isFinancialSector = industryTrack === "FINANCIAL_BANK_SEC_INS";
+
+    const latestMetrics = finPkg?.pkg?.ttm?.metrics ?? finPkg?.pkg?.annual?.[0]?.metrics ?? null;
+    const realFcf =
+      latestMetrics?.freeCashFlow ??
+      (latestMetrics?.operatingCashFlow != null && latestMetrics?.capex != null
+        ? latestMetrics.operatingCashFlow - Math.abs(latestMetrics.capex)
+        : undefined);
+    const realNetDebt =
+      latestMetrics &&
+      (latestMetrics.shortTermDebt != null ||
+        latestMetrics.longTermDebt != null ||
+        latestMetrics.cash != null)
+        ? (latestMetrics.shortTermDebt ?? 0) +
+          (latestMetrics.longTermDebt ?? 0) -
+          (latestMetrics.cash ?? 0) -
+          (latestMetrics.shortTermInvestments ?? 0)
+        : undefined;
+    const derivedShares =
+      latestMetrics?.equity != null &&
+      latestMetrics.equity > 0 &&
+      overview?.pb != null &&
+      overview.pb > 0 &&
+      effectivePriceVnd > 0
+        ? (latestMetrics.equity * overview.pb) / effectivePriceVnd
+        : undefined;
+
     const institutionalValuation = runInstitutionalValuationSuite({
       symbol: sym,
-      currentPrice: effectivePrice,
+      currentPrice: effectivePriceVnd,
+      isFinancialSector,
+      freeCashFlowTtm: realFcf,
+      netDebt: realNetDebt,
+      sharesOutstanding: derivedShares,
       peRatio: overview?.pe,
       pbRatio: overview?.pb,
     });
@@ -284,10 +342,16 @@ export class DualAiConsensusEngine {
     narrativeLines.push(`#### 📊 5. BÁO CÁO ĐỊNH GIÁ TỔ CHỨC (DCF, SOTP & MULTIPLES SCORECARD)`);
     narrativeLines.push(`• **Giá trị hợp lý đồng thuận (Blended Fair Value)**: **${institutionalValuation.blendedFairValue.toLocaleString("vi-VN")} ₫** (Upside: **${institutionalValuation.blendedUpsidePct > 0 ? "+" : ""}${institutionalValuation.blendedUpsidePct}%** | Biên an toàn MOS: **${institutionalValuation.marginOfSafetyPct}%**)`);
     narrativeLines.push(`• **Xếp hạng định giá**: **【${institutionalValuation.convictionGradeVi}】**`);
-    narrativeLines.push(`• **Mô hình DCF 3 Kịch bản (WACC ${institutionalValuation.dcf.baseWacc}% | g ${institutionalValuation.dcf.baseTerminalGrowth}%)**:`);
-    narrativeLines.push(`  - 🐻 *Bear Case (Thận trọng)*: **${institutionalValuation.dcf.scenarios.bear.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
-    narrativeLines.push(`  - ⚖️ *Base Case (Cơ sở)*: **${institutionalValuation.dcf.scenarios.base.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
-    narrativeLines.push(`  - 🐂 *Bull Case (Lạc quan)*: **${institutionalValuation.dcf.scenarios.bull.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+    if (institutionalValuation.dcf) {
+      narrativeLines.push(`• **Mô hình DCF 3 Kịch bản (WACC ${institutionalValuation.dcf.baseWacc}% | g ${institutionalValuation.dcf.baseTerminalGrowth}%)**:`);
+      narrativeLines.push(`  - 🐻 *Bear Case (Thận trọng)*: **${institutionalValuation.dcf.scenarios.bear.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+      narrativeLines.push(`  - ⚖️ *Base Case (Cơ sở)*: **${institutionalValuation.dcf.scenarios.base.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+      narrativeLines.push(`  - 🐂 *Bull Case (Lạc quan)*: **${institutionalValuation.dcf.scenarios.bull.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+    } else {
+      narrativeLines.push(
+        `• **Mô hình DCF**: *${institutionalValuation.dcfStatus === "EXEMPT_FINANCIAL" ? "Miễn trừ cho nhóm Tài chính/Ngân hàng (dùng P/B & P/E chuẩn ngành)" : "Không khả dụng do thiếu FCF dương từ BCTC — tái phân bổ trọng số sang Bội số Tương đối"}*`,
+      );
+    }
     narrativeLines.push(`• **Scorecard Bội số Tương đối**: Điểm định giá **${institutionalValuation.multiplesScorecard.overallScore}/100** [${institutionalValuation.multiplesScorecard.valuationGrade}]`);
     for (const m of institutionalValuation.multiplesScorecard.multiples) {
       narrativeLines.push(`  - **${m.metric}**: ${m.companyValue} (Ngành: ${m.sectorMedian}) $\\rightarrow$ *${m.verdictVi}*`);
@@ -295,15 +359,36 @@ export class DualAiConsensusEngine {
     narrativeLines.push("");
 
     // 6. Multi-Persona AI Investment Committee (AI Hedge Fund & TradingAgents Parity)
+    const derivedDebtToEquity =
+      !isFinancialSector &&
+      latestMetrics?.totalLiabilities != null &&
+      latestMetrics?.equity != null &&
+      latestMetrics.equity > 0
+        ? latestMetrics.totalLiabilities / latestMetrics.equity
+        : undefined;
+    const derivedCurrentRatio =
+      !isFinancialSector &&
+      latestMetrics?.currentAssets != null &&
+      latestMetrics?.currentLiabilities != null &&
+      latestMetrics.currentLiabilities > 0
+        ? latestMetrics.currentAssets / latestMetrics.currentLiabilities
+        : undefined;
+    const derivedRoePct =
+      latestMetrics?.netIncome != null &&
+      latestMetrics?.equity != null &&
+      latestMetrics.equity > 0
+        ? (latestMetrics.netIncome / latestMetrics.equity) * 100
+        : undefined;
+
     const committeeReport = conveneInvestmentCommittee({
       symbol: sym,
-      price: currentPrice,
+      price: effectivePriceVnd,
       peRatio: overview?.pe,
       pbRatio: overview?.pb,
-      roePct: overview?.roe,
+      roePct: overview?.roe ?? derivedRoePct,
       roicPct: overview?.roic,
-      debtToEquity: overview?.debt_to_equity,
-      currentRatio: overview?.current_ratio,
+      debtToEquity: overview?.debt_to_equity ?? derivedDebtToEquity,
+      currentRatio: overview?.current_ratio ?? derivedCurrentRatio,
       revenueGrowthYoY: overview?.revenue_growth,
       tailRiskScore: risks.length * 15,
       institutionalValuation,

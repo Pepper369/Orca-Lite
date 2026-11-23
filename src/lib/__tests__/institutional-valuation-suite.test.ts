@@ -176,9 +176,44 @@ test("Institutional Valuation Skill Suite (himself65 Parity)", async (t) => {
     });
 
     assert.equal(report.symbol, "HPG");
+    assert.equal(report.dcfStatus, "REAL_FCF");
+    assert.ok(report.dcf !== null, "Real FCF should populate DCF output");
     assert.ok(report.blendedFairValue > 0, "Blended fair value must be positive");
     assert.ok(typeof report.marginOfSafetyPct === "number");
     assert.ok(report.valuationDriversVi.length >= 3, "Should provide at least 3 analytical driver statements");
     assert.ok(report.executiveSummaryVi.includes("HPG"));
+  });
+
+  await t.test("runInstitutionalValuationSuite: enforces Truth-in-Data (EXEMPT_FINANCIAL & UNAVAILABLE_NO_FCF)", () => {
+    const bankReport = runInstitutionalValuationSuite({
+      symbol: "VCB",
+      currentPrice: 92_000,
+      isFinancialSector: true,
+      peRatio: 14.0,
+      pbRatio: 2.2,
+      evEbitdaRatio: 10.0,
+      sectorPe: 12.0,
+      sectorPb: 1.7,
+    });
+    assert.equal(bankReport.dcfStatus, "EXEMPT_FINANCIAL");
+    assert.equal(bankReport.dcf, null, "Banks must never run corporate FCFF DCF");
+    assert.ok(
+      bankReport.multiplesScorecard.multiples.every((m) => m.metric !== "EV/EBITDA"),
+      "Banks must exclude EV/EBITDA multiple",
+    );
+
+    const noFcfReport = runInstitutionalValuationSuite({
+      symbol: "HAG",
+      currentPrice: 12_000,
+      peRatio: 10.0,
+      pbRatio: 1.3,
+    });
+    assert.equal(noFcfReport.dcfStatus, "UNAVAILABLE_NO_FCF");
+    assert.equal(noFcfReport.dcf, null, "Missing FCF must never fabricate synthetic 6% FCF");
+    assert.equal(
+      noFcfReport.blendedFairValue,
+      noFcfReport.multiplesScorecard.impliedFairValuePerShare,
+      "Weight must redistribute 100% to Relative Multiples when DCF/SOTP unavailable",
+    );
   });
 });
