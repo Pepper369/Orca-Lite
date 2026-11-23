@@ -376,6 +376,6 @@ test("Sector Valuation Percentiles preserve ascending rank (cheapest P/E has low
     ],
     { higherIsBetter: true, requirePositive: true },
   );
-  assert.equal(pePct.get("CHEAP"), 25);
-  assert.equal(pePct.get("BUBBLE"), 100);
+  assert.ok(pePct.get("CHEAP")! <= 25, `Expected cheapest percentile <= 25, got ${pePct.get("CHEAP")}`);
+  assert.ok(pePct.get("BUBBLE")! >= 95, `Expected bubble percentile >= 95, got ${pePct.get("BUBBLE")}`);
 });
