@@ -33,6 +33,7 @@ import {
   DEFAULT_PAIRLIST_CONFIG,
   type PairMarketSnapshot,
 } from "@/lib/engines/bot-pairlist-governor";
+import { adjustTradeSetupWithInventorySkew } from "@/lib/engines/bot-inventory-skew-engine";
 import { getLiveTrainedMetaModel } from "@/lib/engines/meta-labeling-calibration";
 import {
   buildCryptoLiquidityContext,
@@ -373,6 +374,22 @@ async function scanLivePrecisionSetups(params: {
           const roundedTp1 = roundPrice(precision.tp1, pair, "CRYPTO");
           const roundedTp2 = precision.tp2 != null ? roundPrice(precision.tp2, pair, "CRYPTO") : undefined;
           const roundedTp3 = precision.tp3 != null ? roundPrice(precision.tp3, pair, "CRYPTO") : undefined;
+
+          // Hummingbot Avellaneda-Stoikov Inventory Skewing
+          const skewed = adjustTradeSetupWithInventorySkew({
+            symbol: pair,
+            assetType: "CRYPTO",
+            direction: precision.direction,
+            entryPrice: roundedEntry,
+            stopLossPrice: roundedSl,
+            takeProfit1: roundedTp1,
+            baseLotsOrQty: baseQty,
+            netInventory: 0,
+            maxInventoryCapacity: 10,
+            atr: prelimAtr,
+            orderBookImbalance: blendedImbalance / 100,
+          });
+
           const sigId = `rt_cr_${pair}_${precision.direction}_${bucket5m}`;
 
           return {
@@ -381,12 +398,12 @@ async function scanLivePrecisionSetups(params: {
               symbol: pair,
               assetType: "CRYPTO" as const,
               direction: precision.direction,
-              entryPrice: roundedEntry,
+              entryPrice: skewed.skewedEntryPrice,
               stopLossPrice: roundedSl,
-              takeProfit1: roundedTp1,
+              takeProfit1: skewed.asymmetricTakeProfit1,
               takeProfit2: roundedTp2,
               takeProfit3: roundedTp3,
-              masterLotsOrQty: Number(baseQty.toFixed(4)),
+              masterLotsOrQty: Number(skewed.adjustedLotsOrQty.toFixed(4)),
               masterCapitalUsd: 10_000,
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,
@@ -594,6 +611,21 @@ async function scanLivePrecisionSetups(params: {
           const roundedTp2Fx = precision.tp2 != null ? roundPrice(precision.tp2, pair, "FOREX") : undefined;
           const roundedTp3Fx = precision.tp3 != null ? roundPrice(precision.tp3, pair, "FOREX") : undefined;
           const lotsFx = Math.max(0.01, riskPlan.recommendedLotsOrQty);
+
+          // Hummingbot Avellaneda-Stoikov Inventory Skewing
+          const skewedFx = adjustTradeSetupWithInventorySkew({
+            symbol: pair,
+            assetType: "FOREX",
+            direction: precision.direction,
+            entryPrice: roundedEntryFx,
+            stopLossPrice,
+            takeProfit1: roundedTp1Fx,
+            baseLotsOrQty: lotsFx,
+            netInventory: 0,
+            maxInventoryCapacity: 5,
+            atr: calcAtr(execBars, 14) ?? undefined,
+          });
+
           const sigIdFx = `rt_fx_${pair}_${precision.direction}_${bucket5m}`;
 
           return {
@@ -602,12 +634,12 @@ async function scanLivePrecisionSetups(params: {
               symbol: pair,
               assetType: "FOREX" as const,
               direction: precision.direction,
-              entryPrice: roundedEntryFx,
+              entryPrice: skewedFx.skewedEntryPrice,
               stopLossPrice,
-              takeProfit1: roundedTp1Fx,
+              takeProfit1: skewedFx.asymmetricTakeProfit1,
               takeProfit2: roundedTp2Fx,
               takeProfit3: roundedTp3Fx,
-              masterLotsOrQty: lotsFx,
+              masterLotsOrQty: skewedFx.adjustedLotsOrQty,
               masterCapitalUsd: 10_000,
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,

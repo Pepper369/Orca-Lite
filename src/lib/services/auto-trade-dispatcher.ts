@@ -10,6 +10,7 @@ import {
   runMultiScenarioPortfolioStressTest,
   type PortfolioStressPosition,
 } from "@/lib/engines/unified-cross-asset-quant";
+import { calculateInventorySizingMultiplier } from "@/lib/engines/bot-inventory-skew-engine";
 import { getAssetPipSize, roundPrice } from "@/lib/engines/asset-precision";
 import {
   calculateProportionalCopySize,
@@ -197,10 +198,11 @@ function checkSlippage(
   return { passed: guard.allowed, slippagePips: guard.slippagePips };
 }
 
-function computeOrderSize(
+export function computeOrderSize(
   signal: DispatchableSignalInput,
   acct: FollowerAccount,
   factorSizeMultiplier = 1.0,
+  netInventory = 0,
 ): { qtyOrLots: number; leverage: number } {
   const rawLevCap =
     Number.isFinite(acct.leverageCap) && (acct.leverageCap ?? 0) > 0 ? Math.round(acct.leverageCap!) : 5;
@@ -271,7 +273,21 @@ function computeOrderSize(
                 combinedScale,
             ).toFixed(4),
           );
-    return { qtyOrLots: Number.isFinite(qty) && qty > 0 ? qty : 0, leverage };
+    const rawCryptoQty = Number.isFinite(qty) && qty > 0 ? qty : 0;
+    if (netInventory !== 0 && rawCryptoQty > 0) {
+      const maxCapacity = Math.max(1, acct.maxOpenPositions ?? 3);
+      const invSizing = calculateInventorySizingMultiplier({
+        direction: signal.direction,
+        baseLotsOrQty: rawCryptoQty,
+        netInventory,
+        maxInventoryCapacity: maxCapacity,
+      });
+      if (invSizing.isBlockedByCapacity) {
+        return { qtyOrLots: 0, leverage };
+      }
+      return { qtyOrLots: invSizing.adjustedLotsOrQty, leverage };
+    }
+    return { qtyOrLots: rawCryptoQty, leverage };
   }
 
   const lots = calculateProportionalCopySize({
@@ -281,7 +297,21 @@ function computeOrderSize(
     riskMultiplier: safeRiskMultiplier * combinedScale,
     assetType: "FOREX",
   });
-  return { qtyOrLots: Number.isFinite(lots) && lots > 0 ? lots : 0, leverage: 1 };
+  const rawFxLots = Number.isFinite(lots) && lots > 0 ? lots : 0;
+  if (netInventory !== 0 && rawFxLots > 0) {
+    const maxCapacity = Math.max(1, acct.maxOpenPositions ?? 3);
+    const invSizing = calculateInventorySizingMultiplier({
+      direction: signal.direction,
+      baseLotsOrQty: rawFxLots,
+      netInventory,
+      maxInventoryCapacity: maxCapacity,
+    });
+    if (invSizing.isBlockedByCapacity) {
+      return { qtyOrLots: 0, leverage: 1 };
+    }
+    return { qtyOrLots: invSizing.adjustedLotsOrQty, leverage: 1 };
+  }
+  return { qtyOrLots: rawFxLots, leverage: 1 };
 }
 
 export async function executePlatformOrder(
@@ -935,7 +965,12 @@ export async function dispatchSignalWithVault(opts: VaultDispatchOptions): Promi
     INFLIGHT_IDEMPOTENCY_LOCKS.add(idempotencyKey);
     let executed: CopyExecutionOrder;
     try {
-      const { qtyOrLots, leverage } = computeOrderSize(signal, acct, factorSizeMultiplier);
+      const cleanSym = signal.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const acctOpenPositions = openPositionsByAccount.get(acct.id) ?? [];
+      const netInv = acctOpenPositions
+        .filter((p) => p.symbol === cleanSym)
+        .reduce((sum, p) => sum + (p.direction === "BUY" ? 1 : -1), 0);
+      const { qtyOrLots, leverage } = computeOrderSize(signal, acct, factorSizeMultiplier, netInv);
       executed = await executor(
         acct,
         signal,
