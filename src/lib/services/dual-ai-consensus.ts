@@ -21,6 +21,10 @@ import {
   conveneInvestmentCommittee,
   type CommitteeConsensusReport,
 } from "@/lib/engines/ai-investment-committee";
+import {
+  runInstitutionalValuationSuite,
+  type InstitutionalValuationReport,
+} from "@/lib/engines/institutional-valuation-suite";
 
 export type ConsensusVerdict =
   | "STRONG_BUY"
@@ -65,6 +69,7 @@ export interface DualAiConsensusReport {
   miquantOverview: MiquantOverviewData | null;
   fireantResult: FireAntAiResult | null;
   committeeReport?: CommitteeConsensusReport;
+  institutionalValuation?: InstitutionalValuationReport;
   narrativeVi: string;
 }
 
@@ -267,7 +272,29 @@ export class DualAiConsensusEngine {
       narrativeLines.push("");
     }
 
-    // 5. Multi-Persona AI Investment Committee (AI Hedge Fund & TradingAgents Parity)
+    // 5. Institutional Valuation Skill Suite (himself65/finance-skills Parity)
+    const effectivePrice = currentPrice > 0 ? currentPrice : targetPrice ?? 25_000;
+    const institutionalValuation = runInstitutionalValuationSuite({
+      symbol: sym,
+      currentPrice: effectivePrice,
+      peRatio: overview?.pe,
+      pbRatio: overview?.pb,
+    });
+
+    narrativeLines.push(`#### 📊 5. BÁO CÁO ĐỊNH GIÁ TỔ CHỨC (DCF, SOTP & MULTIPLES SCORECARD)`);
+    narrativeLines.push(`• **Giá trị hợp lý đồng thuận (Blended Fair Value)**: **${institutionalValuation.blendedFairValue.toLocaleString("vi-VN")} ₫** (Upside: **${institutionalValuation.blendedUpsidePct > 0 ? "+" : ""}${institutionalValuation.blendedUpsidePct}%** | Biên an toàn MOS: **${institutionalValuation.marginOfSafetyPct}%**)`);
+    narrativeLines.push(`• **Xếp hạng định giá**: **【${institutionalValuation.convictionGradeVi}】**`);
+    narrativeLines.push(`• **Mô hình DCF 3 Kịch bản (WACC ${institutionalValuation.dcf.baseWacc}% | g ${institutionalValuation.dcf.baseTerminalGrowth}%)**:`);
+    narrativeLines.push(`  - 🐻 *Bear Case (Thận trọng)*: **${institutionalValuation.dcf.scenarios.bear.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+    narrativeLines.push(`  - ⚖️ *Base Case (Cơ sở)*: **${institutionalValuation.dcf.scenarios.base.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+    narrativeLines.push(`  - 🐂 *Bull Case (Lạc quan)*: **${institutionalValuation.dcf.scenarios.bull.fairValuePerShare.toLocaleString("vi-VN")} ₫**`);
+    narrativeLines.push(`• **Scorecard Bội số Tương đối**: Điểm định giá **${institutionalValuation.multiplesScorecard.overallScore}/100** [${institutionalValuation.multiplesScorecard.valuationGrade}]`);
+    for (const m of institutionalValuation.multiplesScorecard.multiples) {
+      narrativeLines.push(`  - **${m.metric}**: ${m.companyValue} (Ngành: ${m.sectorMedian}) $\\rightarrow$ *${m.verdictVi}*`);
+    }
+    narrativeLines.push("");
+
+    // 6. Multi-Persona AI Investment Committee (AI Hedge Fund & TradingAgents Parity)
     const committeeReport = conveneInvestmentCommittee({
       symbol: sym,
       price: currentPrice,
@@ -279,10 +306,12 @@ export class DualAiConsensusEngine {
       currentRatio: overview?.current_ratio,
       revenueGrowthYoY: overview?.revenue_growth,
       tailRiskScore: risks.length * 15,
+      institutionalValuation,
+      marginOfSafetyPct: institutionalValuation.marginOfSafetyPct,
     });
 
     if (committeeReport) {
-      narrativeLines.push(`#### 🏛️ 5. PHÁN QUYẾT HỘI ĐỒNG ĐẦU TƯ AI (MULTI-PERSONA COMMITTEE)`);
+      narrativeLines.push(`#### 🏛️ 6. PHÁN QUYẾT HỘI ĐỒNG ĐẦU TƯ AI (MULTI-PERSONA COMMITTEE)`);
       narrativeLines.push(`• **Phán quyết chung**: **${committeeReport.verdictLabelVi}** (Điểm: **${committeeReport.consensusScore}/100** | Độ nhất trí: **${(committeeReport.debateAgreementRatio * 100).toFixed(0)}%**)`);
       narrativeLines.push(`• **Chỉ thị CRO**: *${committeeReport.chiefRiskOfficer.croDirectiveVi}*`);
       for (const v of committeeReport.personaVotes) {
@@ -319,6 +348,7 @@ export class DualAiConsensusEngine {
       miquantOverview: overview,
       fireantResult: fireantData,
       committeeReport,
+      institutionalValuation,
       narrativeVi: narrativeLines.join("\n"),
     };
   }

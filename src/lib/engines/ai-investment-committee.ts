@@ -21,6 +21,7 @@
  */
 
 import { type PrecisionAssetType } from "./asset-precision";
+import { type InstitutionalValuationReport } from "./institutional-valuation-suite";
 
 // ============================================================================
 // Types & Interfaces
@@ -85,6 +86,10 @@ export interface InvestmentCommitteeInput {
   tailRiskScore?: number;
   /** Momentum / 24h change percent */
   priceChangePct?: number;
+  /** Institutional Valuation Suite report (DCF, SOTP, Multiples Scorecard) */
+  institutionalValuation?: InstitutionalValuationReport;
+  /** Explicit DCF Margin of Safety percentage */
+  marginOfSafetyPct?: number;
 }
 
 export interface ChiefRiskOfficerAssessment {
@@ -213,6 +218,21 @@ export function evaluateBuffettPersona(input: InvestmentCommitteeInput, weight: 
     }
   }
 
+  // Institutional DCF Margin of Safety (Warren Buffett's North Star)
+  const mosBuffett = input.institutionalValuation?.marginOfSafetyPct ?? input.marginOfSafetyPct;
+  if (mosBuffett != null) {
+    if (mosBuffett >= 25) {
+      score += 30;
+      keyFactors.push(`Biên an toàn Margin of Safety DCF vượt trội (+${mosBuffett.toFixed(1)}%)`);
+    } else if (mosBuffett >= 10) {
+      score += 15;
+      keyFactors.push(`Biên an toàn định giá chiết khấu khả quan (+${mosBuffett.toFixed(1)}%)`);
+    } else if (mosBuffett <= -20) {
+      score -= 30;
+      keyFactors.push(`Thị giá cao hơn giá trị nội tại DCF (${mosBuffett.toFixed(1)}% - Âm biên an toàn)`);
+    }
+  }
+
   score = Math.max(-100, Math.min(100, Math.round(score)));
   const stance = score >= 25 ? "BULLISH" : score <= -25 ? "BEARISH" : "NEUTRAL";
 
@@ -270,6 +290,18 @@ export function evaluateGrahamPersona(input: InvestmentCommitteeInput, weight: n
   if (debtToEquity != null && debtToEquity > 1.5) {
     score -= 25;
     keyFactors.push(`Nợ vay vượt vốn chủ sở hữu: D/E = ${debtToEquity.toFixed(2)}`);
+  }
+
+  // Graham Deep Margin of Safety from Institutional Valuation
+  const mosGraham = input.institutionalValuation?.marginOfSafetyPct ?? input.marginOfSafetyPct;
+  if (mosGraham != null) {
+    if (mosGraham >= 30) {
+      score += 35;
+      keyFactors.push(`Đạt chuẩn biên an toàn khắt khe của Benjamin Graham (DCF MOS ${mosGraham.toFixed(1)}% >= 30%)`);
+    } else if (mosGraham <= -15) {
+      score -= 30;
+      keyFactors.push(`Không có biên an toàn bảo vệ vốn (MOS âm ${mosGraham.toFixed(1)}%)`);
+    }
   }
 
   score = Math.max(-100, Math.min(100, Math.round(score)));
