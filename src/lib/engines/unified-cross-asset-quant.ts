@@ -1117,17 +1117,21 @@ export function calculateUnifiedTradeRiskPlan(
     };
   }
 
+  // Cautious Fractional Kelly (Quarter-Kelly) with hard sanity limit on winRate <= 60%
+  const safeWinRate = Math.max(0.35, Math.min(0.60, input.winRatePct / 100));
   const kelly = calculateCrossAssetKelly({
-    winRate: Math.max(0.05, Math.min(0.95, input.winRatePct / 100)),
+    winRate: safeWinRate,
     payoffRatio: Math.max(1.0, Number.isFinite(input.payoffRatio) ? input.payoffRatio : 1.8),
     isCrypto: input.assetType === "CRYPTO",
-    maxCapitalPerTrade: 0.02,
+    maxCapitalPerTrade: 0.015, // Max 1.5% capital cap
   });
 
-  const effectiveRiskPct =
+  // Strict Institutional Risk Cap: Never risk more than 0.75% - 1.0% of balance per single trade
+  const rawRiskPct =
     kelly.recommendedAllocation > 0
-      ? Number((Math.min(1.5, Math.max(0.25, kelly.recommendedAllocation * 100)) * sizeMult).toFixed(2))
-      : Number((1.0 * sizeMult).toFixed(2));
+      ? Math.min(1.0, Math.max(0.20, kelly.recommendedAllocation * 100)) * sizeMult
+      : 0.5 * sizeMult;
+  const effectiveRiskPct = Number(Math.min(0.85, rawRiskPct).toFixed(2));
   const riskAmountUsd = Number(((balance * effectiveRiskPct) / 100).toFixed(2));
 
   if (input.assetType === "CRYPTO") {

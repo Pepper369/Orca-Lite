@@ -445,14 +445,15 @@ export function evaluateHighWinrateGate(params: {
           ? "A"
           : "B";
 
-  const pWin = Math.min(0.84, Math.max(0.38, 0.32 + (winrateScore / 100) * 0.56));
+  // Realistic empirical win probability cap [0.38 .. 0.62] to prevent deceptive marketing inflation
+  const pWin = Math.min(0.62, Math.max(0.38, 0.35 + (winrateScore / 100) * 0.27));
   const expectancyR = Number((pWin * 1.65 - (1 - pWin) * 1.0 - 0.06).toFixed(2));
   const recommendedSizeMultiplier =
     setupGrade === "A+" ? 1.0 : setupGrade === "A" ? 0.85 : setupGrade === "B" ? 0.5 : 0;
 
   const commentary = isHighWinrateVerified
-    ? `🎯 SIÊU TÍN HIỆU WINRATE CAO (${winrateScore}% · Grade ${setupGrade}): Đạt trọn vẹn các cổng định lượng. Xu hướng HTF ${htfTrend}, quét thanh khoản ${sweptSide}, OTE Fib ${(rangePosition * 100).toFixed(0)}% và bảo chứng tốc độ Reversal Pace.`
-    : `⚠️ TÍN HIỆU ${setupGrade} (${winrateScore}%): Chưa đạt chuẩn Winrate cao tối đa do [${failedGates[0] ?? "cần thêm hội tụ"}]. ${setupGrade === "NO_TRADE" ? "Khuyến nghị ĐỨNG NGOÀI." : "Khuyến nghị giảm khối lượng giao dịch."}`;
+    ? `🎯 TÍN HIỆU HỘI TỤ MẠNH (Confluence Score ${winrateScore}/100 · Grade ${setupGrade} · P(Win) ~${Math.round(pWin * 100)}%): Đạt trọn vẹn các cổng định lượng. Xu hướng HTF ${htfTrend}, quét thanh khoản ${sweptSide}, OTE Fib ${(rangePosition * 100).toFixed(0)}% và bảo chứng tốc độ Reversal Pace.`
+    : `⚠️ TÍN HIỆU ${setupGrade} (Score ${winrateScore}/100): Chưa đạt chuẩn Winrate cao tối đa do [${failedGates[0] ?? "cần thêm hội tụ"}]. ${setupGrade === "NO_TRADE" ? "Khuyến nghị ĐỨNG NGOÀI." : "Khuyến nghị giảm khối lượng giao dịch."}`;
 
   return {
     isHighWinrateVerified,

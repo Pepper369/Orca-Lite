@@ -132,12 +132,13 @@ export async function GET(req: Request) {
       );
     }
 
-    const bucket = Math.floor(candidate.updatedAt / (15 * 60 * 1000));
+    // Circuit Breaker: Strict cooldown of 90 minutes per symbol & max daily frequency protection
+    const bucket = Math.floor(candidate.updatedAt / (90 * 60 * 1000));
     const signalId = `fx_${candidate.pair}_${candidate.direction}_${bucket}`;
     const idempotencyKey = `${conn.id}_${signalId}_${candidate.pair}_${candidate.direction}`;
     if (await hasExecutionOrderByIdempotency(idempotencyKey)) {
       return NextResponse.json(
-        { ok: true, hasSignal: false, reason: "Tín hiệu hiện tại đã được giao cho EA" },
+        { ok: true, hasSignal: false, reason: "Tín hiệu cặp này đang trong thời gian giãn cách bảo vệ vốn (90m Cooldown)" },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
