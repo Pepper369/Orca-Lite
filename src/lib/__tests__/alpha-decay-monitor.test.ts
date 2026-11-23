@@ -5,6 +5,8 @@ import {
   computeRollingRankIcSeries,
   rebalanceFactorWeights,
   monitorAlphaDecayAndRebalance,
+  clearAlphaDecayCache,
+  getCachedAlphaDecayWeightMap,
 } from "../engines/alpha-decay-monitor";
 import type { OhlcvBar } from "../../types";
 
@@ -138,5 +140,19 @@ test("Edge Discovery & Alpha Decay Monitor Engine (mphinance Parity)", async (t)
     assert.ok(report.factorProfiles.length > 0, "Should have evaluated factor profiles");
     assert.ok(report.cockpitTelemetryVi.includes("BTCUSDT"));
     assert.ok(report.actionableRecommendationVi.length > 10);
+
+    // Verify bar-keyed TTL cache hit returns exact cached reference and populates weight map
+    const cachedHit = monitorAlphaDecayAndRebalance({
+      symbol: "BTCUSDT",
+      bars,
+      horizon: 1,
+      recentWindow: 30,
+      historicalWindow: 60,
+    });
+    assert.strictEqual(cachedHit, report, "Repeated calls on same candle must hit O(1) cache");
+    const weights = getCachedAlphaDecayWeightMap("BTCUSDT");
+    assert.ok(weights !== null && Object.keys(weights).length > 0, "Weight map should be cached per symbol");
+    clearAlphaDecayCache();
+    assert.equal(getCachedAlphaDecayWeightMap("BTCUSDT"), null);
   });
 });

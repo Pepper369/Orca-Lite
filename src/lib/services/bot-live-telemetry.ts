@@ -1006,9 +1006,23 @@ export async function evaluateRealtimePositionExits(options?: {
     const holdMsThesis = Date.now() - o.timestamp;
     if (holdMsThesis >= 300_000 || options?.forceEvaluate) {
       const thesisCtx = createDefaultThesisContext(o, assetType);
+      const wsMicro = assetType === "CRYPTO" ? binanceWs.getMicroFlow(cleanSym) : null;
+      const orderBookImbalance =
+        wsMicro != null ? Math.max(-1, Math.min(1, wsMicro.tickImbalancePct / 100)) : undefined;
+      const recentReturnPct =
+        entry > 0 ? Number((((markPrice - entry) / entry) * 100).toFixed(2)) : undefined;
+      const adverseSweepDetected =
+        wsMicro != null &&
+        (isBuy
+          ? wsMicro.tickImbalancePct <= -55 && wsMicro.velocityPct10s <= -0.35
+          : wsMicro.tickImbalancePct >= 55 && wsMicro.velocityPct10s >= 0.35);
+
       const thesisEval = evaluateSignalThesisState(thesisCtx, {
         currentPrice: markPrice,
         holdingMinutes: Math.round(holdMsThesis / 60_000),
+        orderBookImbalance,
+        recentReturnPct,
+        adverseSweepDetected,
         structureBroken: Boolean(options?.reversals?.has(cleanSym) && options?.reversals?.get(cleanSym) !== o.direction),
         macroNewsShockDirection:
           options?.reversals?.get(cleanSym) === "BUY"
@@ -1027,6 +1041,14 @@ export async function evaluateRealtimePositionExits(options?: {
         });
         if (res.ok) {
           closedCount++;
+          recordBotActivity({
+            level: "warn",
+            category: "CLOSE",
+            symbol: o.symbol,
+            accountName: o.followerName,
+            platform: o.platform,
+            message: `[ALPHAEAR THESIS FALSIFIED] Thoát khẩn cấp ${o.direction} ${o.symbol} — ${reason}`,
+          });
           continue;
         }
       } else if (thesisEval.status === "WEAKENED" && thesisEval.recommendedSlAdjustment != null) {
@@ -1035,6 +1057,14 @@ export async function evaluateRealtimePositionExits(options?: {
         if (betterSl) {
           await saveBotExecutionOrder({ ...o, stopLossPrice: tightSl });
           trailedCount++;
+          recordBotActivity({
+            level: "info",
+            category: "GUARDRAIL",
+            symbol: o.symbol,
+            accountName: o.followerName,
+            platform: o.platform,
+            message: `[ALPHAEAR THESIS WEAKENED] Siết Stop-Loss ${o.symbol} về ${tightSl} (Conviction ${thesisEval.convictionScore}/100).`,
+          });
         }
       }
     }

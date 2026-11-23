@@ -36,6 +36,7 @@ import {
   buildQlibCompositeAlpha,
   computeForwardReturns,
 } from "./formulaic-alpha-qlib";
+import { monitorAlphaDecayAndRebalance } from "./alpha-decay-monitor";
 
 export type MarketRegime =
   | "BULL_EXPANSION"
@@ -239,15 +240,31 @@ export function scoreTechnicalPillar(input: MultiFactorInput): {
     signals.push(`Hồi quy nhanh (Half-life ${input.ouHalfLifeDays.toFixed(0)} ngày)`);
   }
 
-  // 7. Microsoft Qlib Formulaic Alpha Composite Percentile Rank
+  // 7. Microsoft Qlib Formulaic Alpha Composite Percentile Rank (with Alpha Decay Adaptive Weights)
   let qlibRank = input.qlibAlphaPercentileRank;
   if (qlibRank == null && input.rawOhlcvBars && input.rawOhlcvBars.length >= 25) {
     try {
       const alphas = extractQlibFormulaicAlphas(input.rawOhlcvBars);
       const fwd = computeForwardReturns(input.rawOhlcvBars, 1);
       const reports: Record<string, ReturnType<typeof evaluateFactorQualityQlib>> = {};
+      const decayReport =
+        input.rawOhlcvBars.length >= 40
+          ? monitorAlphaDecayAndRebalance({ symbol: input.symbol, bars: input.rawOhlcvBars })
+          : null;
+      const decayWeightByFactor = new Map<string, number>();
+      if (decayReport) {
+        for (const p of decayReport.factorProfiles) {
+          decayWeightByFactor.set(p.factorName, p.rebalancedWeight);
+        }
+      }
       for (const [k, series] of Object.entries(alphas)) {
-        reports[k] = evaluateFactorQualityQlib(k, series, fwd);
+        const rep = evaluateFactorQualityQlib(k, series, fwd);
+        if (decayWeightByFactor.has(k)) {
+          const w = decayWeightByFactor.get(k)!;
+          // Prune decayed/exhausted factors (w === 0) and scale surviving factors by adaptive weight
+          rep.icir = w <= 0 ? 0 : Number((rep.icir * (0.5 + w * 2.0)).toFixed(3));
+        }
+        reports[k] = rep;
       }
       const comp = buildQlibCompositeAlpha({ factors: alphas, reports, useOnlyAdmitted: false });
       qlibRank = comp.latestPercentileRank;

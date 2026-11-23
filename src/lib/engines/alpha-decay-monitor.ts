@@ -166,8 +166,22 @@ export function rebalanceFactorWeights(
 }
 
 // ============================================================================
-// 3. Master Edge Surveillance & Alpha Decay Analysis
+// 3. Bar-Keyed TTL Cache & Master Edge Surveillance
 // ============================================================================
+
+const ALPHA_DECAY_CACHE_TTL_MS = 5 * 60 * 1000;
+const ALPHA_DECAY_CACHE_MAX = 128;
+const alphaDecayCache = new Map<string, { report: AlphaDecayMonitoringReport; expiresAt: number }>();
+const latestAlphaWeightMapBySymbol = new Map<string, Record<string, number>>();
+
+export function clearAlphaDecayCache(): void {
+  alphaDecayCache.clear();
+  latestAlphaWeightMapBySymbol.clear();
+}
+
+export function getCachedAlphaDecayWeightMap(symbol: string): Record<string, number> | null {
+  return latestAlphaWeightMapBySymbol.get(symbol.toUpperCase()) ?? null;
+}
 
 export function monitorAlphaDecayAndRebalance(params: {
   symbol: string;
@@ -185,6 +199,13 @@ export function monitorAlphaDecayAndRebalance(params: {
   } = params;
 
   const n = bars.length;
+  const lastBar = n > 0 ? bars[n - 1]! : null;
+  const cacheKey = `${symbol.toUpperCase()}_${n}_${lastBar?.time ?? 0}_${lastBar?.close ?? 0}_${horizon}_${recentWindow}_${historicalWindow}`;
+  const nowMs = Date.now();
+  const cached = alphaDecayCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.report;
+  }
   if (n < 40) {
     // Insufficient history fallback
     return {
@@ -357,7 +378,7 @@ export function monitorAlphaDecayAndRebalance(params: {
           ? `Lợi thế Alpha kiệt quệ nghiêm trọng. Kích hoạt Sentinel bảo vệ vốn, siết chặt khối lượng còn x${strategyThrottleMultiplier} để tránh overtrading.`
           : `Lợi thế ổn định ở mức tiêu chuẩn. Duy trì khối lượng chuẩn x${strategyThrottleMultiplier}.`;
 
-  return {
+  const report: AlphaDecayMonitoringReport = {
     symbol,
     evaluatedBarsCount: n,
     evaluatedAt: new Date().toISOString(),
@@ -372,4 +393,18 @@ export function monitorAlphaDecayAndRebalance(params: {
     cockpitTelemetryVi,
     actionableRecommendationVi,
   };
+
+  if (alphaDecayCache.size >= ALPHA_DECAY_CACHE_MAX) {
+    const oldestKey = alphaDecayCache.keys().next().value;
+    if (oldestKey) alphaDecayCache.delete(oldestKey);
+  }
+  alphaDecayCache.set(cacheKey, { report, expiresAt: nowMs + ALPHA_DECAY_CACHE_TTL_MS });
+
+  const weightMap: Record<string, number> = {};
+  for (const p of factorProfiles) {
+    weightMap[p.factorName] = p.rebalancedWeight;
+  }
+  latestAlphaWeightMapBySymbol.set(symbol.toUpperCase(), weightMap);
+
+  return report;
 }
