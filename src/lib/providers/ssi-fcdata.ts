@@ -462,8 +462,18 @@ async function loadDayBoard(fromDate: string, toDate: string): Promise<{
       }),
     );
 
+    const now = Date.now();
+    if (dayBoardCache.size >= 16) {
+      for (const [k, v] of dayBoardCache) {
+        if (v.expiresAt <= now) dayBoardCache.delete(k);
+      }
+      if (dayBoardCache.size >= 16) {
+        const oldestKey = dayBoardCache.keys().next().value;
+        if (oldestKey) dayBoardCache.delete(oldestKey);
+      }
+    }
     dayBoardCache.set(key, {
-      expiresAt: Date.now() + 12_000,
+      expiresAt: now + 12_000,
       bySym,
       sourceTs: newest,
     });

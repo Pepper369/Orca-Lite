@@ -100,16 +100,64 @@ export async function ensureLlamaServerRunning(): Promise<boolean> {
   return false;
 }
 
+const MAX_LLM_PROXY_BODY_BYTES = 256 * 1024;
+
+/**
+ * Validates that an incoming OpenAI-compatible proxy path stays strictly under `/v1/`
+ * with no traversal, backslashes, or control characters.
+ */
+export function isSafeLlamaProxyPath(rawPath: string): boolean {
+  if (!rawPath || !rawPath.startsWith("/v1/")) return false;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return false;
+  }
+  if (!decoded.startsWith("/v1/")) return false;
+  if (
+    decoded.includes("..") ||
+    decoded.includes("\\") ||
+    decoded.includes("\0") ||
+    /[\x00-\x1f\x7f]/.test(decoded)
+  ) {
+    return false;
+  }
+  return /^\/v1\/[a-zA-Z0-9/_-]+$/.test(decoded);
+}
+
 /**
  * Proxy handler to forward OpenAI /v1 requests from Port 3000 directly to the internal llama-server.
  */
 export async function proxyToLlamaServer(c: Context) {
   const targetPath = c.req.path; // e.g. /v1/chat/completions or /v1/models
+  if (!isSafeLlamaProxyPath(targetPath)) {
+    return c.json(
+      { error: { message: "Invalid /v1 proxy path", type: "invalid_request_error" } },
+      400,
+    );
+  }
   const targetUrl = `${GGUF_BASE_URL}${targetPath}`;
 
   try {
     const isStream = c.req.method === "POST" && (c.req.header("accept") || "").includes("text/event-stream");
-    const body = c.req.method === "POST" || c.req.method === "PUT" ? await c.req.raw.arrayBuffer() : undefined;
+    let body: ArrayBuffer | undefined;
+    if (c.req.method === "POST" || c.req.method === "PUT") {
+      const contentLen = Number(c.req.header("content-length") ?? "0");
+      if (Number.isFinite(contentLen) && contentLen > MAX_LLM_PROXY_BODY_BYTES) {
+        return c.json(
+          { error: { message: "Request payload too large", type: "invalid_request_error" } },
+          413,
+        );
+      }
+      body = await c.req.raw.arrayBuffer();
+      if (body.byteLength > MAX_LLM_PROXY_BODY_BYTES) {
+        return c.json(
+          { error: { message: "Request payload too large", type: "invalid_request_error" } },
+          413,
+        );
+      }
+    }
 
     const res = await fetch(targetUrl, {
       method: c.req.method,
@@ -118,6 +166,7 @@ export async function proxyToLlamaServer(c: Context) {
         "Accept": c.req.header("accept") || "*/*",
       },
       body,
+      redirect: "error",
       signal: c.req.raw.signal,
     });
 
@@ -139,11 +188,15 @@ export async function proxyToLlamaServer(c: Context) {
         "Content-Type": res.headers.get("content-type") || "application/json",
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const detail =
+      process.env.NODE_ENV !== "production" && err instanceof Error
+        ? `: ${err.message}`
+        : "";
     return c.json(
       {
         error: {
-          message: `Local AI Server unreachable on loopback: ${err.message}`,
+          message: `Local AI Server unreachable on loopback${detail}`,
           type: "local_runtime_error",
         },
       },

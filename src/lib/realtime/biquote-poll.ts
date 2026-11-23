@@ -2,7 +2,7 @@ import "server-only";
 import { eventBus } from "../events";
 import type { OhlcvBar } from "../types";
 import { getBiquotePublicQuotes, type BiquoteTick } from "../providers/forex";
-import { isServerlessRuntime } from "./ws-policy";
+import { isServerlessRuntime, isTestRunnerRuntime } from "./ws-policy";
 
 /**
  * Shared Biquote public tick cache + poll loop (Workers-safe REST poll).
@@ -55,8 +55,35 @@ const ALIASES: Record<string, string> = {
 };
 
 const POLL_MS = 1_000;
+const POLL_TIMEOUT_MS = 6_000;
 const STALE_MS = 45_000;
+const PRUNE_STALE_MS = 10 * 60_000;
 const MAX_BATCH = 24;
+const MAX_TICKS_CACHE = 256;
+const MAX_WATCHERS = 128;
+
+function pruneBiquoteCaches(now: number): void {
+  if (ticks.size > MAX_TICKS_CACHE) {
+    for (const [k, v] of ticks) {
+      if (now - v.ts > PRUNE_STALE_MS) ticks.delete(k);
+    }
+    while (ticks.size > MAX_TICKS_CACHE) {
+      const oldest = ticks.keys().next().value;
+      if (oldest === undefined) break;
+      ticks.delete(oldest);
+    }
+  }
+  if (prevPrices.size > MAX_TICKS_CACHE) {
+    for (const [k, v] of prevPrices) {
+      if (now - v.ts > PRUNE_STALE_MS) prevPrices.delete(k);
+    }
+    while (prevPrices.size > MAX_TICKS_CACHE) {
+      const oldest = prevPrices.keys().next().value;
+      if (oldest === undefined) break;
+      prevPrices.delete(oldest);
+    }
+  }
+}
 
 const ticks = new Map<string, BiquoteLiveTick>();
 const prevPrices = new Map<string, { price: number; ts: number; lastEmitAt: number }>();
@@ -94,8 +121,17 @@ async function pollOnce(): Promise<void> {
     .slice(0, MAX_BATCH);
   if (!symbols.length) return;
   inflight = true;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   try {
-    const { ticks: batch } = await getBiquotePublicQuotes(symbols);
+    const batchResult = await Promise.race([
+      getBiquotePublicQuotes(symbols),
+      new Promise<null>((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), POLL_TIMEOUT_MS);
+        timeoutId.unref?.();
+      }),
+    ]);
+    if (!batchResult) return;
+    const { ticks: batch } = batchResult;
     const now = Date.now();
     for (const [sym, t] of Object.entries(batch)) {
       const live = toLive(t);
@@ -133,19 +169,21 @@ async function pollOnce(): Promise<void> {
         degraded: false,
       });
     }
+    pruneBiquoteCaches(now);
   } catch {
     /* keep last known */
   } finally {
+    if (timeoutId) clearTimeout(timeoutId);
     inflight = false;
   }
 }
 
 function ensureLoop(): void {
   if (pollTimer) return;
-  if (
-    isServerlessRuntime() ||
-    process.env.BIQUOTE_POLL_DISABLED === "true"
-  ) {
+  if (isTestRunnerRuntime() || process.env.BIQUOTE_POLL_DISABLED === "true") {
+    return;
+  }
+  if (isServerlessRuntime()) {
     // Serverless (Vercel, Cloudflare Workers, Lambda): avoid persistent setInterval in serverless functions
     void pollOnce();
     return;
@@ -182,6 +220,9 @@ export function ensureBiquoteCoreWatch(): void {
 export function watchBiquoteSymbol(symbol: string): () => void {
   const sym = canon(symbol);
   if (!sym) return () => {};
+  if (!watchers.has(sym) && watchers.size >= MAX_WATCHERS) {
+    return () => {};
+  }
   watchers.set(sym, (watchers.get(sym) ?? 0) + 1);
   ensureBiquotePollStarted();
   ensureLoop();
@@ -237,6 +278,7 @@ export function registerBrokerLiveTick(
     marketState: "regular",
     source: "biquote-public",
   });
+  pruneBiquoteCaches(Date.now());
 }
 
 /**

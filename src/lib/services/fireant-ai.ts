@@ -173,6 +173,7 @@ export class FireAntAnswerClient {
             resolve(this.generateSimulatedResponse(query));
           }
         }, timeoutMs);
+        timer.unref?.();
 
         socket.onopen = () => {
           socket.send(JSON.stringify({ type: "authenticate", token: this.token }));

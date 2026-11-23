@@ -8,7 +8,20 @@ import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = await rateLimit(req, {
+    name: "copytrade-worker-get",
+    binding: "RL_AUTH",
+    limit: 60,
+    windowSec: 60,
+  });
+  if (limited) return limited;
+
+  const session = await getSessionUser(req);
+  if (process.env.NODE_ENV === "production" && !session && cronUnauthorized(req) !== null) {
+    return fail("UNAUTHENTICATED", "Đăng nhập hoặc cung cấp CRON_SECRET để xem trạng thái worker", 401);
+  }
+
   return ok(
     {
       worker: getAutoTradeWorkerStatus(),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtCompact, Panel, ErrorState, EmptyState, Loading, Badge } from "@/components/ui";
 import { Sparkles, Activity, ShieldCheck, TrendingUp, AlertTriangle, CheckCircle2, ChevronRight, BarChart3, Layers, Users } from "lucide-react";
 import type { FourMScore } from "@/lib/engines/four-m";
@@ -88,16 +88,40 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
   const [fc, setFc] = useState<ForecastPayload | null>(null);
   const [consensus, setConsensus] = useState<ConsensusBundle | null>(null);
   const [activeTab, setActiveTab] = useState<AuditTab>("audit");
+  const consAbortRef = useRef<AbortController | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const forecastAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // Cancel in-flight fetches and clear stale symbol data when symbol changes or unmounts
+    consAbortRef.current?.abort();
+    analysisAbortRef.current?.abort();
+    forecastAbortRef.current?.abort();
+    setData(null);
+    setFc(null);
+    setConsensus(null);
+    setErr(null);
+    return () => {
+      consAbortRef.current?.abort();
+      analysisAbortRef.current?.abort();
+      forecastAbortRef.current?.abort();
+    };
+  }, [symbol]);
 
   const runConsensus = useCallback(async (switchTab = true) => {
     if (!symbol) return;
+    consAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    consAbortRef.current = ctrl;
     setLoadingCons(true);
     try {
       const res = await fetch(`/api/v1/ai-consensus?symbol=${encodeURIComponent(symbol)}`, {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal: ctrl.signal,
       });
       const json = await res.json();
+      if (ctrl.signal.aborted) return;
       if (json?.success && json.data) {
         setConsensus({
           committeeReport: json.data.committeeReport,
@@ -106,14 +130,17 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
         if (switchTab) setActiveTab("committee");
       }
     } catch {
-      /* non-blocking */
+      /* non-blocking or aborted */
     } finally {
-      setLoadingCons(false);
+      if (consAbortRef.current === ctrl) setLoadingCons(false);
     }
   }, [symbol]);
 
   const runAnalysis = useCallback(async () => {
     if (!symbol) return;
+    analysisAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    analysisAbortRef.current = ctrl;
     setLoading(true);
     setErr(null);
     void runConsensus(false);
@@ -121,8 +148,10 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
       const res = await fetch(`/api/v1/stocks/${encodeURIComponent(symbol)}/ai-analysis`, {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal: ctrl.signal,
       });
       const json = await res.json();
+      if (ctrl.signal.aborted) return;
       if (!json?.success) {
         setErr(json?.error?.message ?? "Không hoàn thành phân tích AI");
         setData(null);
@@ -130,22 +159,28 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
         setData(json.data as AiAnalysisPayload);
       }
     } catch (e) {
+      if (ctrl.signal.aborted) return;
       setErr(e instanceof Error ? e.message : "Lỗi mạng khi gọi AI Quick Audit");
     } finally {
-      setLoading(false);
+      if (analysisAbortRef.current === ctrl) setLoading(false);
     }
-  }, [symbol]);
+  }, [symbol, runConsensus]);
 
   const runForecast = useCallback(async () => {
     if (!symbol) return;
+    forecastAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    forecastAbortRef.current = ctrl;
     setLoadingFc(true);
     setErr(null);
     try {
       const res = await fetch(`/api/v1/stocks/${encodeURIComponent(symbol)}/revenue-forecast?horizons=4`, {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal: ctrl.signal,
       });
       const json = await res.json();
+      if (ctrl.signal.aborted) return;
       if (!json?.success) {
         setErr(json?.error?.message ?? "Không dự báo được doanh thu");
         setFc(null);
@@ -154,9 +189,10 @@ export function AiFinancialPanel({ symbol }: { symbol: string }) {
         setActiveTab("forecast");
       }
     } catch (e) {
+      if (ctrl.signal.aborted) return;
       setErr(e instanceof Error ? e.message : "Lỗi mạng khi dự báo doanh thu");
     } finally {
-      setLoadingFc(false);
+      if (forecastAbortRef.current === ctrl) setLoadingFc(false);
     }
   }, [symbol]);
 

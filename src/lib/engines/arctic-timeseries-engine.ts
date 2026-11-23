@@ -85,8 +85,9 @@ export class ArcticTimeSeriesEngine {
     }
 
     const chunkSize = Math.max(10, options?.chunkSize ?? 1000);
-    const sorted = [...bars].sort((a, b) => a.time - b.time);
-    const n = sorted.length;
+    const n = bars.length;
+    const order = Array.from({ length: n }, (_, idx) => idx).sort((a, b) => bars[a]!.time - bars[b]!.time);
+    const sorted = order.map((idx) => bars[idx]!);
 
     const existingChunkIds = this.symbolIndex.get(symbol) ?? [];
     const newChunkIds: string[] = [];
@@ -94,6 +95,7 @@ export class ArcticTimeSeriesEngine {
     let offset = 0;
     while (offset < n) {
       const slice = sorted.slice(offset, offset + chunkSize);
+      const sliceOrder = order.slice(offset, offset + chunkSize);
       const count = slice.length;
       const startTime = slice[0]!.time;
       const endTime = slice[count - 1]!.time;
@@ -116,12 +118,12 @@ export class ArcticTimeSeriesEngine {
         volumes[i] = b.volume;
       }
 
-      // Populate custom extensible columns if provided
+      // Populate custom extensible columns aligned with the sorted bar permutation
       const custom: Record<string, number[]> = {};
       if (options?.customColumns) {
         for (const [colName, colValues] of Object.entries(options.customColumns)) {
           if (Array.isArray(colValues)) {
-            custom[colName] = colValues.slice(offset, offset + count);
+            custom[colName] = sliceOrder.map((origIdx) => colValues[origIdx] ?? Number.NaN);
           }
         }
       }
@@ -274,6 +276,9 @@ export class ArcticTimeSeriesEngine {
     };
 
     this.snapshots.push(snapshot);
+    if (this.snapshots.length > 200) {
+      this.snapshots.shift();
+    }
     return snapshot;
   }
 

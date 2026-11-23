@@ -286,3 +286,133 @@ test("Security Audit: Hono App End-to-End Security Headers, CSRF & Non-Reflected
   });
   assert.equal(traversalRes.status, 403);
 });
+
+test("Security Audit: Production CORS Loopback Isolation & LLM Proxy Path/CSRF/Auth Guards", async () => {
+  const { resolveCorsOrigin } = await import("../../../server/security");
+  const { isSafeLlamaProxyPath } = await import("../../../server/ai-runtime");
+
+  // Production CORS must NOT allow arbitrary localhost ports against a remote production host
+  assert.equal(
+    resolveCorsOrigin("http://localhost:9999", "orca.production.com", { allowedOrigins: [], isProd: true }),
+    null,
+  );
+  // Same-host localhost production still allowed via reqHost match
+  assert.equal(
+    resolveCorsOrigin("http://localhost:3000", "localhost:3000", { allowedOrigins: [], isProd: true }),
+    "http://localhost:3000",
+  );
+  // Dev mode still allows loopback Vite origins
+  assert.equal(
+    resolveCorsOrigin("http://localhost:5173", "localhost:3000", { allowedOrigins: [], isProd: false }),
+    "http://localhost:5173",
+  );
+
+  // LLM proxy path guard
+  assert.equal(isSafeLlamaProxyPath("/v1/chat/completions"), true);
+  assert.equal(isSafeLlamaProxyPath("/v1/models"), true);
+  assert.equal(isSafeLlamaProxyPath("/v1/../health"), false);
+  assert.equal(isSafeLlamaProxyPath("/v1/%2e%2e/health"), false);
+  assert.equal(isSafeLlamaProxyPath("/v1/foo\\bar"), false);
+  assert.equal(isSafeLlamaProxyPath("/health"), false);
+
+  process.env.ORCA_SKIP_SERVER_BOOT = "true";
+  const { default: app } = await import("../../../server/index");
+
+  const crossSiteLlm = await app.request("http://localhost:3000/v1/models", {
+    method: "GET",
+    headers: { host: "localhost:3000", "sec-fetch-site": "cross-site" },
+  });
+  assert.equal(crossSiteLlm.status, 403);
+
+  const prevEnv = process.env.NODE_ENV;
+  try {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    const unauthLlm = await app.request("http://localhost:3000/v1/models", {
+      method: "GET",
+      headers: { host: "localhost:3000" },
+    });
+    assert.equal(unauthLlm.status, 401);
+  } finally {
+    (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+  }
+});
+
+test("Security Audit: Copytrade Telemetry/Stream/Worker & Derivatives Poll Require Auth in Production", async () => {
+  const { GET: telemetryGet } = await import("../../app/api/v1/copytrade/telemetry/route");
+  const { GET: streamGet } = await import("../../app/api/v1/copytrade/stream/route");
+  const { GET: workerGet } = await import("../../app/api/v1/copytrade/worker/route");
+  const { POST: derivativesPost } = await import("../../app/api/v1/derivatives/poll/route");
+
+  const prevEnv = process.env.NODE_ENV;
+  try {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+
+    const r1 = await telemetryGet(new Request("https://orca.local/api/v1/copytrade/telemetry", { headers: { "x-forwarded-for": "198.51.100.10" } }));
+    assert.equal(r1.status, 401);
+
+    const r2 = await streamGet(new Request("https://orca.local/api/v1/copytrade/stream", { headers: { "x-forwarded-for": "198.51.100.11" } }));
+    assert.equal(r2.status, 401);
+
+    const r3 = await workerGet(new Request("https://orca.local/api/v1/copytrade/worker", { headers: { "x-forwarded-for": "198.51.100.12" } }));
+    assert.equal(r3.status, 401);
+
+    const r4 = await derivativesPost(new Request("https://orca.local/api/v1/derivatives/poll", { method: "POST", headers: { "x-forwarded-for": "198.51.100.13" } }));
+    assert.equal(r4.status, 401);
+  } finally {
+    (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+  }
+});
+
+test("Security Audit: AI Route Input Validation & Length Bounds (ai-consensus, agent/verify, bctc-quality)", async () => {
+  const { GET: consensusGet, POST: consensusPost } = await import("../../app/api/v1/ai-consensus/route");
+  const { POST: verifyPost } = await import("../../app/api/v1/agent/verify/route");
+  const { GET: bctcGet } = await import("../../app/api/v1/ai/bctc-quality/route");
+
+  const badSym = await consensusGet(
+    new Request("https://orca.local/api/v1/ai-consensus?symbol=%3Cscript%3E", { headers: { "x-forwarded-for": "198.51.100.20" } }),
+  );
+  assert.equal(badSym.status, 400);
+
+  const hugeQuestion = await consensusPost(
+    new Request("https://orca.local/api/v1/ai-consensus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.21" },
+      body: JSON.stringify({ symbol: "FPT", question: "a".repeat(900) }),
+    }),
+  );
+  assert.equal(hugeQuestion.status, 400);
+
+  const hugeVerifyText = await verifyPost(
+    new Request("https://orca.local/api/v1/agent/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-forwarded-for": "198.51.100.22" },
+      body: JSON.stringify({ symbol: "HPG", text: "x".repeat(4500) }),
+    }),
+  );
+  assert.equal(hugeVerifyText.status, 400);
+
+  const hugeHeadline = await bctcGet(
+    new Request(`https://orca.local/api/v1/ai/bctc-quality?headline=${"a".repeat(600)}`, {
+      headers: { "x-forwarded-for": "198.51.100.23" },
+    }),
+  );
+  assert.equal(hugeHeadline.status, 400);
+});
+
+test("Security Audit: Credential Vault AES-256-GCM Integrity & Masking", async () => {
+  const { encryptSecret, decryptSecret, maskSecret, timingSafeTokenEqual } = await import("../security/credential-vault");
+
+  const enc = encryptSecret("sk_live_super_secret_123456", "test-vault-master-key-32-bytes-long");
+  assert.equal(enc.includes("sk_live"), false);
+  assert.equal(decryptSecret(enc, "test-vault-master-key-32-bytes-long"), "sk_live_super_secret_123456");
+
+  // Tampered ciphertext must throw
+  const parts = enc.split(":");
+  parts[3] = parts[3]!.slice(0, -2) + "AA";
+  assert.throws(() => decryptSecret(parts.join(":"), "test-vault-master-key-32-bytes-long"));
+
+  assert.equal(maskSecret("sk_live_super_secret_123456"), "sk_l****3456");
+  assert.equal(timingSafeTokenEqual("abc123", "abc123"), true);
+  assert.equal(timingSafeTokenEqual("abc123", "abc124"), false);
+  assert.equal(timingSafeTokenEqual("short", "much-longer-token"), false);
+});

@@ -170,8 +170,10 @@ export function computePredictionMarketMacroRadar(
     let totalVol = 0;
     let weightedSum = 0;
     for (const c of matching) {
-      const vol = c.volume24hUsd && c.volume24hUsd > 0 ? c.volume24hUsd : 1_000_000;
-      weightedSum += c.impliedProbability * vol;
+      if (!Number.isFinite(c.impliedProbability)) continue;
+      const prob = Math.max(0, Math.min(1, c.impliedProbability));
+      const vol = c.volume24hUsd && Number.isFinite(c.volume24hUsd) && c.volume24hUsd > 0 ? c.volume24hUsd : 1_000_000;
+      weightedSum += prob * vol;
       totalVol += vol;
     }
     return totalVol > 0 ? Number((weightedSum / totalVol).toFixed(3)) : defaultVal;

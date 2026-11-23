@@ -86,16 +86,17 @@ export function computeSpearmanRankCorr(x: number[], y: number[]): number {
  */
 export function computeForwardReturns(bars: OhlcvBar[], horizon = 1): number[] {
   const n = bars.length;
-  const returns: number[] = new Array(n).fill(0);
-  const h = Math.max(1, Math.min(horizon, n - 1));
+  const returns: number[] = new Array(n).fill(Number.NaN);
+  if (n === 0) return returns;
+  const h = Math.max(1, Math.min(horizon, n));
 
   for (let i = 0; i < n; i++) {
     if (i + h < n) {
-      const pCurrent = Math.max(1e-8, bars[i]!.close);
+      const pCurrent = bars[i]!.close;
       const pFuture = bars[i + h]!.close;
-      returns[i] = Number(((pFuture - pCurrent) / pCurrent).toFixed(6));
-    } else {
-      returns[i] = 0;
+      if (Number.isFinite(pCurrent) && pCurrent > 0 && Number.isFinite(pFuture)) {
+        returns[i] = Number(((pFuture - pCurrent) / pCurrent).toFixed(6));
+      }
     }
   }
   return returns;

@@ -3,18 +3,36 @@ import type { NextRequest } from "next/server";
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
-// Public endpoints that legitimately accept external webhooks or cross-origin callbacks
+// Public / token-authenticated endpoints that legitimately accept external callbacks
 const CSRF_EXEMPT_PATHS = [
   "/api/v1/auth/firebase",
+  "/api/v1/copytrade/ea-",
 ];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // CSRF Origin/Referer verification on state-mutating API requests
+  // CSRF Origin/Referer/Sec-Fetch-Site verification on state-mutating API requests
   if (pathname.startsWith("/api/") && MUTATION_METHODS.has(req.method)) {
     const isExempt = CSRF_EXEMPT_PATHS.some((p) => pathname.startsWith(p));
     if (!isExempt) {
+      const secFetchSite = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
+      if (secFetchSite === "cross-site") {
+        return new NextResponse(
+          JSON.stringify({
+            success: false,
+            error: {
+              code: "CROSS_ORIGIN_FORBIDDEN",
+              message: "Yêu cầu cross-site bị từ chối vì lý do an toàn bảo mật.",
+            },
+          }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
       const origin = req.headers.get("origin");
       const referer = req.headers.get("referer");
       const host = req.headers.get("host") || req.nextUrl.host;
@@ -33,10 +51,25 @@ export function middleware(req: NextRequest) {
       const isHostMatch = (targetHost: string) =>
         allowedHosts.has(targetHost.toLowerCase());
 
-      if (origin) {
+      if (origin !== null) {
+        if (!origin || origin === "null") {
+          return new NextResponse(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: "INVALID_ORIGIN",
+                message: "Header Origin không hợp lệ.",
+              },
+            }),
+            {
+              status: 403,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
         try {
-          const originHost = new URL(origin).host;
-          if (!isHostMatch(originHost)) {
+          const originUrl = new URL(origin);
+          if ((originUrl.protocol !== "http:" && originUrl.protocol !== "https:") || !isHostMatch(originUrl.host)) {
             return new NextResponse(
               JSON.stringify({
                 success: false,
@@ -66,10 +99,10 @@ export function middleware(req: NextRequest) {
             },
           );
         }
-      } else if (referer) {
+      } else if (referer !== null) {
         try {
-          const refererHost = new URL(referer).host;
-          if (!isHostMatch(refererHost)) {
+          const refererUrl = new URL(referer);
+          if ((refererUrl.protocol !== "http:" && refererUrl.protocol !== "https:") || !isHostMatch(refererUrl.host)) {
             return new NextResponse(
               JSON.stringify({
                 success: false,

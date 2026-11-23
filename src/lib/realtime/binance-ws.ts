@@ -268,8 +268,17 @@ class BinanceRealtimeEngine {
     this.klineDesired = desired;
   }
 
+  private detachAndClose(ws: WsLike | null) {
+    if (!ws) return;
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    try { ws.close(); } catch { /* */ }
+  }
+
   private openKlineSocket(WSImpl: new (url: string) => WsLike, desired: Set<string>) {
-    try { this.klineWs?.close(); } catch { /* */ }
+    this.detachAndClose(this.klineWs);
     this.klineWs = null;
     this.klineDesired = new Set();
     try {
@@ -371,6 +380,7 @@ class BinanceRealtimeEngine {
     if (!WSImpl) return;
     try {
       st.state = "connecting";
+      this.detachAndClose(kind === "spot" ? this.spotWs : this.futWs);
       const ws = new WSImpl(url);
       if (kind === "spot") this.spotWs = ws;
       else this.futWs = ws;
@@ -419,7 +429,13 @@ class BinanceRealtimeEngine {
           : 45_000;
     const delay = base + Math.random() * (n <= 2 ? 120 : 800);
     st.state = "retrying";
-    const timer = setTimeout(() => this.connect(kind, url), delay);
+    const prevTimer = kind === "spot" ? this.spotTimer : this.futTimer;
+    if (prevTimer) clearTimeout(prevTimer);
+    const timer = setTimeout(() => {
+      if (kind === "spot") this.spotTimer = null;
+      else this.futTimer = null;
+      this.connect(kind, url);
+    }, delay);
     timer.unref?.();
     if (kind === "spot") this.spotTimer = timer;
     else this.futTimer = timer;
@@ -456,6 +472,16 @@ class BinanceRealtimeEngine {
     }
     for (const [k, v] of this.marks) {
       if (now - v.eventTime > 300_000) this.marks.delete(k);
+    }
+    for (const [k, v] of this.microFlowState) {
+      if (now - v.updatedAt > 300_000) this.microFlowState.delete(k);
+    }
+    if (this.microFlowState.size > 2_000) {
+      let excess = this.microFlowState.size - 2_000;
+      for (const k of this.microFlowState.keys()) {
+        this.microFlowState.delete(k);
+        if (--excess <= 0) break;
+      }
     }
   }
 

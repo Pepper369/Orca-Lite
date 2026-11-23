@@ -1,5 +1,6 @@
 import "server-only";
 import { getVnSession } from "../vn/sessions";
+import { isTestRunnerRuntime } from "./ws-policy";
 
 /**
  * Session-aware market data poller — keeps VN board/indices/liquid quotes warm
@@ -44,7 +45,7 @@ class SessionPoller {
 
   start() {
     if (this.timer) return;
-    if (process.env.ORCA_SESSION_POLLER_DISABLED === "true") return;
+    if (isTestRunnerRuntime() || process.env.ORCA_SESSION_POLLER_DISABLED === "true") return;
     // Serverless (Vercel, Workers, Lambda): không có tiến trình sống lâu — dùng cron ngoài.
     if (
       process.env.VERCEL === "1" ||

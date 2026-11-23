@@ -1,4 +1,5 @@
 import { ok, badRequest } from "@/lib/envelope";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   VN_SYSTEMIC_EXPOSURE_MAP,
   getContagionExposureForTicker,
@@ -15,6 +16,8 @@ export const runtime = "nodejs";
  * GET /api/v1/ai/systemic-risk?symbol=NVL
  */
 export async function GET(req: Request) {
+  const limited = await rateLimit(req, { name: "systemic_risk_get", binding: "RL_AI", limit: 60, windowSec: 60 });
+  if (limited) return limited;
   const { searchParams } = new URL(req.url);
   const rawSymbol = searchParams.get("symbol");
   const symbol = rawSymbol?.toUpperCase().trim();

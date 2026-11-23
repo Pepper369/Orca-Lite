@@ -73,16 +73,20 @@ export interface OptionGreeksResult {
 export function calculateOptionGreeks(params: OptionPricingParams): OptionGreeksResult {
   const {
     optionType,
-    underlyingPrice: S,
-    strikePrice: K,
+    underlyingPrice: S_raw,
+    strikePrice: K_raw,
     timeToMaturityYears: T_raw,
     volatility: sigma_raw,
-    riskFreeRate: r = 0.04,
-    dividendYield: q = 0.0,
+    riskFreeRate: r_raw = 0.04,
+    dividendYield: q_raw = 0.0,
   } = params;
 
-  const T = Math.max(1e-4, T_raw);
-  const sigma = Math.max(1e-4, sigma_raw);
+  const S = Number.isFinite(S_raw) && S_raw > 0 ? S_raw : 1e-8;
+  const K = Number.isFinite(K_raw) && K_raw > 0 ? K_raw : 1e-8;
+  const r = Number.isFinite(r_raw) ? r_raw : 0.04;
+  const q = Number.isFinite(q_raw) ? q_raw : 0.0;
+  const T = Number.isFinite(T_raw) ? Math.max(1e-4, T_raw) : 1e-4;
+  const sigma = Number.isFinite(sigma_raw) ? Math.max(1e-4, sigma_raw) : 1e-4;
   const sqrtT = Math.sqrt(T);
 
   const discountRate = Math.exp(-r * T);

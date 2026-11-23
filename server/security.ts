@@ -189,7 +189,7 @@ export function resolveCorsOrigin(
     return isLoopback ? normalizedOrigin : null;
   }
 
-  return isLoopback ? normalizedOrigin : null;
+  return null;
 }
 
 export interface CsrfCheckResult {

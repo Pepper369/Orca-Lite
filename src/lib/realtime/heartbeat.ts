@@ -2,6 +2,7 @@ import "server-only";
 import { probeNetworkLatency } from "../network-latency";
 import { getVnSession } from "../vn/sessions";
 import { ensureSessionPollerStarted } from "./session-poller";
+import { isTestRunnerRuntime } from "./ws-policy";
 
 /**
  * Process-level heartbeat orchestrator.
@@ -29,7 +30,7 @@ class Heartbeat {
 
   start() {
     if (this.timer) return;
-    if (process.env.ORCA_HEARTBEAT_DISABLED === "true") return;
+    if (isTestRunnerRuntime() || process.env.ORCA_HEARTBEAT_DISABLED === "true") return;
     // Serverless (Vercel, Workers, Lambda): không có tiến trình sống lâu — dùng cron ngoài.
     if (
       process.env.VERCEL === "1" ||

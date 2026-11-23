@@ -389,7 +389,7 @@ export async function PATCH(req: Request) {
     notifyBotTelemetryChanged("account_updated");
     return ok({ account: updated });
   } catch (err) {
-    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PATCH payload", 400);
+    return fail("BAD_REQUEST", safeInternalErrorMessage(err, "Invalid PATCH payload"), 400);
   }
 }
 
@@ -470,7 +470,7 @@ export async function PUT(req: Request) {
     notifyBotTelemetryChanged("credentials_rotated");
     return ok({ account: finalAccount, verification, oneTimeEaToken });
   } catch (err) {
-    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Invalid PUT payload", 400);
+    return fail("BAD_REQUEST", safeInternalErrorMessage(err, "Invalid PUT payload"), 400);
   }
 }
 
@@ -517,6 +517,6 @@ export async function DELETE(req: Request) {
     notifyBotTelemetryChanged("account_deleted");
     return ok({ deletedId: id });
   } catch (err) {
-    return fail("BAD_REQUEST", err instanceof Error ? err.message : "Không thể xóa kết nối", 400);
+    return fail("BAD_REQUEST", safeInternalErrorMessage(err, "Không thể xóa kết nối"), 400);
   }
 }

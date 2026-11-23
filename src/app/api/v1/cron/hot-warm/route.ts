@@ -36,8 +36,22 @@ export async function GET(req: Request) {
   // Optional single-domain trigger only (never all-at-once)
   if (trigger === "board" || trigger === "forex" || trigger === "crypto" || trigger === "global") {
     try {
-      const origin = new URL(req.url).origin;
-      const secret = url.searchParams.get("secret") ?? "";
+      // Never trust req.url origin (spoofable Host header -> SSRF + secret exfiltration)
+      const configuredOrigin = (process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "").trim();
+      let safeOrigin = `http://127.0.0.1:${Number(process.env.PORT || 3000)}`;
+      if (configuredOrigin) {
+        try {
+          const parsed = new URL(configuredOrigin);
+          if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+            safeOrigin = parsed.origin;
+          }
+        } catch {
+          // Fallback to loopback
+        }
+      }
+      const authHeader = req.headers.get("authorization") ?? "";
+      const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+      const secret = bearer || (process.env.CRON_SECRET?.trim() ?? "");
       const pathMap: Record<string, string> = {
         board: "/api/v1/cron/board-warm",
         forex: "/api/v1/cron/forex-warm",
@@ -46,7 +60,13 @@ export async function GET(req: Request) {
       };
       const path = pathMap[trigger];
       const s = Date.now();
-      const res = await fetch(`${origin}${path}?secret=${encodeURIComponent(secret)}`, {
+      const headers: Record<string, string> = {};
+      if (secret) {
+        headers["Authorization"] = `Bearer ${secret}`;
+      }
+      const res = await fetch(`${safeOrigin}${path}`, {
+        headers,
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       results[trigger] = {
@@ -54,11 +74,11 @@ export async function GET(req: Request) {
         ms: Date.now() - s,
         note: `proxy ${res.status}`,
       };
-    } catch (e) {
+    } catch {
       results[trigger] = {
         ok: false,
         ms: Date.now() - t0,
-        note: e instanceof Error ? e.message : "err",
+        note: "proxy_error",
       };
     }
   }

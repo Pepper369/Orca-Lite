@@ -5,6 +5,7 @@ import {
   resetDemoAccountsAndRestartTrading,
 } from "@/lib/services/bot-live-telemetry";
 import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
   } catch (err) {
     return fail(
       "CLOSE_ERROR",
-      err instanceof Error ? err.message : "Lỗi khi đóng vị thế",
+      safeInternalErrorMessage(err, "Lỗi khi đóng vị thế"),
       500,
     );
   }

@@ -1,10 +1,11 @@
 "use client";
 
+import { memo } from "react";
 import { Activity, Radar, ShieldAlert, TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui";
 import type { BotQuantIntelligenceSummary } from "@/lib/engines/bot-telemetry-types";
 
-export function QuantIntelligenceStrip({
+export const QuantIntelligenceStrip = memo(function QuantIntelligenceStrip({
   intel,
 }: {
   intel?: BotQuantIntelligenceSummary | null;
@@ -120,4 +121,4 @@ export function QuantIntelligenceStrip({
       </div>
     </div>
   );
-}
+});

@@ -87,33 +87,50 @@ export class DualAiConsensusEngine {
       Boolean(process.env.NODE_TEST_CONTEXT) ||
       process.env.NODE_ENV === "test";
 
-    const fetchFinPkgBounded = () => {
-      if (isTestRunner) return Promise.resolve(null);
-      return new Promise<Awaited<ReturnType<typeof hubFinancialPackage>> | null>((resolve) => {
-        const timer = setTimeout(() => resolve(null), 2_500);
+    const withBoundedTimeout = <T>(
+      promise: Promise<T>,
+      ms: number,
+      fallback: T,
+    ): Promise<T> =>
+      new Promise<T>((resolve) => {
+        const timer = setTimeout(() => resolve(fallback), ms);
         timer.unref?.();
-        hubFinancialPackage(sym)
+        promise
           .then((res) => {
             clearTimeout(timer);
             resolve(res);
           })
           .catch(() => {
             clearTimeout(timer);
-            resolve(null);
+            resolve(fallback);
           });
       });
+
+    const fetchFinPkgBounded = () => {
+      if (isTestRunner) return Promise.resolve(null);
+      return withBoundedTimeout(hubFinancialPackage(sym), 2_500, null);
     };
 
-    // 1. Chạy song song cả hai AI engine + BCTC thật từ Data Hub để tối ưu thời gian phản hồi
+    const aiTimeoutMs = isTestRunner ? 3_500 : 8_000;
+
+    // 1. Chạy song song cả hai AI engine (có timeout guard + unref) + BCTC thật từ Data Hub
     const [miquantData, fireantData, finPkg] = await Promise.all([
-      MiquantFinancialIntelligence.generateMiquantAiAnswer(sym).catch((err) => {
-        console.warn(`[Dual AI Consensus] Lỗi từ MIQuant AI cho ${sym}:`, err);
-        return null;
-      }),
-      FireAntAnswerClient.generateFireAntAiAnswer(sym, userQuestion).catch((err) => {
-        console.warn(`[Dual AI Consensus] Lỗi từ FireAnt AI cho ${sym}:`, err);
-        return null;
-      }),
+      withBoundedTimeout(
+        MiquantFinancialIntelligence.generateMiquantAiAnswer(sym).catch((err) => {
+          console.warn(`[Dual AI Consensus] Lỗi từ MIQuant AI cho ${sym}:`, err);
+          return null;
+        }),
+        aiTimeoutMs,
+        null,
+      ),
+      withBoundedTimeout(
+        FireAntAnswerClient.generateFireAntAiAnswer(sym, userQuestion).catch((err) => {
+          console.warn(`[Dual AI Consensus] Lỗi từ FireAnt AI cho ${sym}:`, err);
+          return null;
+        }),
+        aiTimeoutMs,
+        null,
+      ),
       fetchFinPkgBounded(),
     ]);
 

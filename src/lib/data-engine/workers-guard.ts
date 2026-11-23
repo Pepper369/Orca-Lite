@@ -177,14 +177,24 @@ function overloadBuckets(): Map<string, OverloadBucket> {
 /** Per-label cooldown (6s) so one route overload does not lock down the whole isolate. */
 export function markIsolateOverload(label = "global") {
   const map = overloadBuckets();
+  const now = Date.now();
   let b = map.get(label);
   if (!b) {
+    if (map.size >= 128) {
+      for (const [k, v] of map) {
+        if (now - v.until > 30_000) map.delete(k);
+      }
+      if (map.size >= 128) {
+        const oldestKey = map.keys().next().value;
+        if (oldestKey) map.delete(oldestKey);
+      }
+    }
     b = { count: 0, until: 0 };
     map.set(label, b);
   }
   b.count += 1;
   if (b.count >= 3) {
-    b.until = Date.now() + 6_000;
+    b.until = now + 6_000;
     b.count = 0;
   }
 }

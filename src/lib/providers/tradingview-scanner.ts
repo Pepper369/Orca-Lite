@@ -87,6 +87,7 @@ export async function fetchTradingViewScanner(options?: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8_000),
       next: { revalidate: 60 },
     });
 

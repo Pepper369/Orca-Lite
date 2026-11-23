@@ -1,10 +1,13 @@
 import { ok, badRequest, fail } from "@/lib/envelope";
 import { verifyFinancialClaims } from "@/lib/ai/fact-check-engine";
 import { rateLimit } from "@/lib/rate-limit";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 45;
+
+const MAX_VERIFY_TEXT_CHARS = 4_000;
 
 /**
  * POST /api/v1/agent/verify
@@ -28,6 +31,9 @@ export async function POST(req: Request) {
     if (!text || text.length < 10) {
       return badRequest("Nội dung bài đăng cần thẩm định quá ngắn (tối thiểu 10 ký tự)");
     }
+    if (text.length > MAX_VERIFY_TEXT_CHARS) {
+      return badRequest(`Nội dung bài đăng quá dài (tối đa ${MAX_VERIFY_TEXT_CHARS} ký tự)`);
+    }
 
     const report = await verifyFinancialClaims({ symbol, text });
     if (!report) {
@@ -41,6 +47,6 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     console.error("[agent-verify-api]", e);
-    return fail("AGENT_VERIFY_ERROR", e instanceof Error ? e.message : "Thẩm định thất bại", 500);
+    return fail("AGENT_VERIFY_ERROR", safeInternalErrorMessage(e, "Thẩm định thất bại"), 500);
   }
 }

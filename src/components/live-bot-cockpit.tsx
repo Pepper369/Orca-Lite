@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useApi } from "@/lib/hooks";
 import { Badge } from "@/components/ui";
@@ -111,7 +111,7 @@ const DEMO_BAR_COLORS = [
   "bg-violet-400",
 ];
 
-function NavPoolHeroCard({
+const NavPoolHeroCard = memo(function NavPoolHeroCard({
   environment,
   pool,
   accounts,
@@ -279,9 +279,9 @@ function NavPoolHeroCard({
       </div>
     </div>
   );
-}
+});
 
-function AccountNavGroupTable({
+const AccountNavGroupTable = memo(function AccountNavGroupTable({
   environment,
   pool,
   accounts,
@@ -484,7 +484,7 @@ function AccountNavGroupTable({
       </div>
     </div>
   );
-}
+});
 
 export function LiveBotCockpit({
   variant = "full",
@@ -493,13 +493,16 @@ export function LiveBotCockpit({
   variant?: "full" | "compact";
   onAfterAction?: () => void;
 }) {
-  const { data: initialData, mutate: mutateRest } = useApi<BotLiveTelemetrySnapshot>(
-    "/api/v1/copytrade/telemetry",
-    { refreshInterval: 15_000, keepPreviousData: true },
-  );
-
   const [liveSnap, setLiveSnap] = useState<BotLiveTelemetrySnapshot | null>(null);
   const [sseState, setSseState] = useState<"connecting" | "live" | "polling">("connecting");
+  const { data: initialData, mutate: mutateRest } = useApi<BotLiveTelemetrySnapshot>(
+    "/api/v1/copytrade/telemetry",
+    {
+      // Disable redundant 15s REST polling while SSE stream is actively pushing frames
+      refreshInterval: sseState === "live" ? 0 : 15_000,
+      keepPreviousData: true,
+    },
+  );
   const [envFilter, setEnvFilter] = useState<"SPLIT" | "REAL" | "DEMO">("SPLIT");
   const [closingOrderId, setClosingOrderId] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
@@ -514,17 +517,38 @@ export function LiveBotCockpit({
 
     let es: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
+    let pendingSnap: BotLiveTelemetrySnapshot | null = null;
+    let retryAttempt = 0;
     let disposed = false;
+
+    const flushPendingSnap = () => {
+      rafId = null;
+      if (disposed || !pendingSnap) return;
+      const next = pendingSnap;
+      pendingSnap = null;
+      setLiveSnap(next);
+      setSseState("live");
+    };
 
     const connect = () => {
       if (disposed) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      es?.close();
       setSseState("connecting");
       es = new EventSource("/api/v1/copytrade/stream");
       es.addEventListener("telemetry", (ev) => {
         try {
           const parsed = JSON.parse((ev as MessageEvent).data) as BotLiveTelemetrySnapshot;
-          setLiveSnap(parsed);
-          setSseState("live");
+          retryAttempt = 0;
+          pendingSnap = parsed;
+          if (rafId == null) {
+            rafId = window.requestAnimationFrame(flushPendingSnap);
+          }
         } catch {
           /* ignore malformed frame */
         }
@@ -532,16 +556,39 @@ export function LiveBotCockpit({
       es.onerror = () => {
         setSseState("polling");
         es?.close();
-        if (!disposed) {
-          reconnectTimer = setTimeout(connect, 5_000);
-        }
+        es = null;
+        if (disposed) return;
+        if (typeof document !== "undefined" && document.hidden) return;
+        retryAttempt += 1;
+        const backoffMs = Math.min(30_000, 3_000 * 2 ** Math.min(retryAttempt - 1, 4));
+        const jitterMs = Math.floor(Math.random() * 800);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, backoffMs + jitterMs);
       };
     };
 
+    const onVisibilityChange = () => {
+      if (disposed) return;
+      if (document.hidden) {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        es?.close();
+        es = null;
+      } else if (!es) {
+        retryAttempt = 0;
+        connect();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
     connect();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (rafId != null) window.cancelAnimationFrame(rafId);
       es?.close();
     };
   }, []);

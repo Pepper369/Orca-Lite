@@ -116,6 +116,7 @@ interface WorkerGlobalState {
   lastQuantFeed: QuantEngineFeedItem[];
   metaModelCalibrated: boolean;
   timer: ReturnType<typeof setInterval> | null;
+  microBreakoutUnsub?: (() => void) | null;
   latestTickFn?: () => Promise<unknown>;
 }
 
@@ -140,11 +141,19 @@ const STATE: WorkerGlobalState =
     timer: null,
   });
 
-// Hot-reload (HMR) Guard: always kill stale interval closures from older module evaluations
+// Hot-reload (HMR) Guard: always kill stale interval closures & eventBus listeners from older module evaluations
 if (STATE.version !== WORKER_CODE_VERSION) {
   if (STATE.timer) {
     clearInterval(STATE.timer);
     STATE.timer = null;
+  }
+  if (STATE.microBreakoutUnsub) {
+    try {
+      STATE.microBreakoutUnsub();
+    } catch {
+      /* ignore */
+    }
+    STATE.microBreakoutUnsub = null;
   }
   STATE.started = false;
   STATE.isTickRunning = false;
@@ -1107,9 +1116,11 @@ export async function runAutoTradeTick(): Promise<{
     );
 
     // Apply Per-Pair Empirical Real-State Winrate Throttle & Portfolio-Level HRP sizing
+    // Pre-fetch recent orders ONCE per tick instead of N+1 DB queries per signal
     if (signalsToDispatch.length > 0) {
+      const recentOrders = await listBotExecutionOrders(150).catch(() => []);
       const empMods = await Promise.all(
-        signalsToDispatch.map((item) => getPairEmpiricalWinrateModifier(item.signal.symbol)),
+        signalsToDispatch.map((item) => getPairEmpiricalWinrateModifier(item.signal.symbol, recentOrders)),
       );
       const filteredByEmpirical: typeof signalsToDispatch = [];
       for (let i = 0; i < signalsToDispatch.length; i++) {
@@ -1265,9 +1276,11 @@ export function initAutoTradeWorker(): void {
   ensureBinanceWsStarted();
   ensureBiquoteCoreWatch();
 
-  eventBus.on("quant:micro-breakout", () => {
-    triggerImmediateAutoTradeScan();
-  });
+  if (!STATE.microBreakoutUnsub) {
+    STATE.microBreakoutUnsub = eventBus.on("quant:micro-breakout", () => {
+      triggerImmediateAutoTradeScan();
+    });
+  }
 
   // Trigger initial real-time quant scan immediately on startup
   const bootTimer = setTimeout(() => {

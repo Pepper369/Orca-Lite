@@ -12,12 +12,22 @@ import "server-only";
  */
 export type WsDisableEnv = "VNDIRECT_WS_DISABLED" | "SSI_WS_DISABLED" | "BINANCE_WS_DISABLED";
 
+export function isTestRunnerRuntime(): boolean {
+  return (
+    process.argv.includes("--test") ||
+    process.execArgv.some((arg) => arg.includes("test")) ||
+    Boolean(process.env.NODE_TEST_CONTEXT) ||
+    process.env.NODE_ENV === "test" ||
+    process.env.ORCA_DISABLE_REALTIME_WS === "1"
+  );
+}
+
 export function isRealtimeWsDisabled(envKey: WsDisableEnv): boolean {
   const raw = process.env[envKey]?.trim().toLowerCase();
   if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") return true;
   if (raw === "false" || raw === "0" || raw === "no" || raw === "off") return false;
-  // Unset → disable on serverless runtimes (Vercel, Cloudflare Workers, Lambda)
-  return isServerlessRuntime();
+  // Unset → disable in test runners (prevents open WS handles hanging node:test) and serverless runtimes
+  return isTestRunnerRuntime() || isServerlessRuntime();
 }
 
 /** True when running inside Vercel, Cloudflare Workers, AWS Lambda (or similar) serverless. */

@@ -100,7 +100,7 @@ app.use("/api/*", async (c, next) => {
 app.get("/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 app.get("/api/health", (c) => c.json({ status: "ok", engine: "Hono Ultra-Fast Engine", timestamp: Date.now() }));
 
-// Bounded per-IP limiter for local LLM proxy
+// Bounded per-IP limiter, path guard & production auth for local LLM proxy
 const llmHits = new Map<string, { count: number; resetAt: number }>();
 const MAX_LLM_HITS_KEYS = 5_000;
 app.use("/v1/*", async (c, next) => {
@@ -126,6 +126,27 @@ app.use("/v1/*", async (c, next) => {
       return c.json({ success: false, error: { code: "RATE_LIMITED", message: "Too many LLM proxy requests" } }, 429);
     }
   }
+
+  // Block cross-site browser requests to local LLM proxy
+  const secFetchSite = c.req.header("sec-fetch-site")?.trim().toLowerCase();
+  if (secFetchSite === "cross-site") {
+    return c.json({ success: false, error: { code: "CROSS_ORIGIN_FORBIDDEN", message: "Cross-site LLM proxy request forbidden" } }, 403);
+  }
+
+  // In production, require either an authenticated session or a valid Bearer API key
+  if (process.env.NODE_ENV === "production") {
+    const { getSessionUser } = await import("@/lib/auth");
+    const { timingSafeTokenEqual } = await import("@/lib/security/credential-vault");
+    const session = await getSessionUser(c.req.raw);
+    const authHeader = c.req.header("authorization") ?? "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const expectedKey = (process.env.LOCAL_LLM_API_KEY || process.env.CRON_SECRET || "").trim();
+    const hasValidBearer = Boolean(expectedKey && bearer && timingSafeTokenEqual(bearer, expectedKey));
+    if (!session && !hasValidBearer) {
+      return c.json({ success: false, error: { code: "UNAUTHORIZED", message: "Authentication required for LLM gateway" } }, 401);
+    }
+  }
+
   return next();
 });
 

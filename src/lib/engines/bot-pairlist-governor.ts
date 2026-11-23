@@ -95,6 +95,7 @@ interface CooldownEntry {
   consecutiveTriggers: number;
 }
 
+const MAX_COOLDOWN_ENTRIES = 512;
 const activeCooldownRegistry = new Map<string, CooldownEntry>();
 
 /**
@@ -122,6 +123,15 @@ export function recordPairCooldown(
     consecutiveTriggers,
   };
 
+  if (!activeCooldownRegistry.has(clean) && activeCooldownRegistry.size >= MAX_COOLDOWN_ENTRIES) {
+    for (const [k, v] of activeCooldownRegistry.entries()) {
+      if (v.untilTimestampMs <= nowMs) activeCooldownRegistry.delete(k);
+    }
+    if (activeCooldownRegistry.size >= MAX_COOLDOWN_ENTRIES) {
+      const oldestKey = activeCooldownRegistry.keys().next().value;
+      if (oldestKey) activeCooldownRegistry.delete(oldestKey);
+    }
+  }
   activeCooldownRegistry.set(clean, entry);
   return entry;
 }

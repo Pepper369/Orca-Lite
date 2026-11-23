@@ -62,6 +62,10 @@ import { getAutoTradeWorkerStatus, getLiveQuantEngineFeed } from "@/lib/services
 export const BOT_TELEMETRY_CHANNEL = "bot:telemetry";
 const EXCHANGE_SYNC_TTL_MS = 4_500;
 const MAX_ACTIVITY_EVENTS = 60;
+const MAX_CLOSED_ORDER_IDS = 1_000;
+const MAX_LIVE_PRICE_REFS = 500;
+const MAX_EXCHANGE_CACHE = 200;
+const MAX_WATCHED_BIQUOTE_SYMBOLS = 128;
 
 interface CachedExchangeTelemetry {
   data: LiveExchangeTelemetryResult;
@@ -73,6 +77,7 @@ const g = globalThis as typeof globalThis & {
   __orcaExchangeTelemetryCache?: Map<string, CachedExchangeTelemetry>;
   __orcaClosedOrderIds?: Set<string>;
   __orcaLivePriceRefMap?: Map<string, { price: number; ts: number }>;
+  __orcaWatchedBiquoteSymbols?: Set<string>;
   __orcaLastQuoteRefreshAt?: number;
 };
 
@@ -83,12 +88,29 @@ const CLOSED_ORDER_IDS =
   g.__orcaClosedOrderIds ?? (g.__orcaClosedOrderIds = new Set());
 const LIVE_PRICE_REF_MAP =
   g.__orcaLivePriceRefMap ?? (g.__orcaLivePriceRefMap = new Map());
+const WATCHED_BIQUOTE_SYMBOLS =
+  g.__orcaWatchedBiquoteSymbols ?? (g.__orcaWatchedBiquoteSymbols = new Set());
+
+function markOrderClosedBounded(orderId: string): void {
+  CLOSED_ORDER_IDS.add(orderId);
+  while (CLOSED_ORDER_IDS.size > MAX_CLOSED_ORDER_IDS) {
+    const oldest = CLOSED_ORDER_IDS.values().next().value;
+    if (oldest === undefined) break;
+    CLOSED_ORDER_IDS.delete(oldest);
+  }
+}
 
 export function updateLivePriceReference(symbol: string, price: number): void {
   if (!Number.isFinite(price) || price <= 0) return;
   const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!clean) return;
+  if (LIVE_PRICE_REF_MAP.has(clean)) LIVE_PRICE_REF_MAP.delete(clean);
   LIVE_PRICE_REF_MAP.set(clean, { price, ts: Date.now() });
+  while (LIVE_PRICE_REF_MAP.size > MAX_LIVE_PRICE_REFS) {
+    const oldest = LIVE_PRICE_REF_MAP.keys().next().value;
+    if (oldest === undefined) break;
+    LIVE_PRICE_REF_MAP.delete(oldest);
+  }
 }
 
 export function getLivePriceReference(symbol: string, maxAgeMs = 120_000): number | null {
@@ -159,7 +181,10 @@ function resolveLiveMarkPrice(symbol: string, assetType: "CRYPTO" | "FOREX", fal
 
   if (!IS_TEST_RUNNER) {
     ensureBiquotePollStarted();
-    watchBiquoteSymbol(clean);
+    if (!WATCHED_BIQUOTE_SYMBOLS.has(clean) && WATCHED_BIQUOTE_SYMBOLS.size < MAX_WATCHED_BIQUOTE_SYMBOLS) {
+      WATCHED_BIQUOTE_SYMBOLS.add(clean);
+      watchBiquoteSymbol(clean);
+    }
   }
   const fxTick = getBiquoteLiveTick(clean);
   if (fxTick && fxTick.price > 0) {
@@ -247,10 +272,21 @@ async function fetchAccountExchangeTelemetryCached(
   const res = await fetchBrokerLiveTelemetry(acct.platform, secrets);
   if (!res) return null;
 
+  const now = Date.now();
   EXCHANGE_CACHE.set(acct.id, {
     data: res,
-    expiresAt: Date.now() + EXCHANGE_SYNC_TTL_MS,
+    expiresAt: now + EXCHANGE_SYNC_TTL_MS,
   });
+  if (EXCHANGE_CACHE.size > MAX_EXCHANGE_CACHE) {
+    for (const [k, v] of EXCHANGE_CACHE) {
+      if (v.expiresAt <= now) EXCHANGE_CACHE.delete(k);
+    }
+    while (EXCHANGE_CACHE.size > MAX_EXCHANGE_CACHE) {
+      const oldest = EXCHANGE_CACHE.keys().next().value;
+      if (oldest === undefined) break;
+      EXCHANGE_CACHE.delete(oldest);
+    }
+  }
 
   if (res.ok && res.walletBalanceUsd !== null && res.walletBalanceUsd > 0) {
     if (Math.abs(res.walletBalanceUsd - acct.balanceUsd) >= 0.05) {
@@ -396,10 +432,11 @@ export interface PairEmpiricalWinrateModifier {
  */
 export async function getPairEmpiricalWinrateModifier(
   symbolRaw: string,
+  prefetchedOrders?: CopyExecutionOrder[],
 ): Promise<PairEmpiricalWinrateModifier> {
   const clean = symbolRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
   try {
-    const orders = await listBotExecutionOrders(150);
+    const orders = prefetchedOrders ?? (await listBotExecutionOrders(150));
     const pairResolved = orders
       .filter(
         (o) =>
@@ -555,21 +592,24 @@ export async function closeTrackedBotPosition(params: {
   });
   const totalRealizedTradePnl = Number(((order.realizedPnlUsd ?? 0) + chunkRealizedPnlUsd).toFixed(2));
 
-  CLOSED_ORDER_IDS.add(order.orderId);
+  markOrderClosedBounded(order.orderId);
   const pnlSign = totalRealizedTradePnl >= 0 ? "+" : "";
   const tag = params.reasonTag ? ` [${params.reasonTag}]` : "";
-  await saveBotExecutionOrder({
+  const closedOrder: CopyExecutionOrder = {
     ...order,
     status: "CANCELLED",
     positionStage: "CLOSED",
     realizedPnlUsd: totalRealizedTradePnl,
     message: `[ĐÃ ĐÓNG]${tag} Chốt phần còn lại tại ${closePrice} · PnL ${pnlSign}$${totalRealizedTradePnl.toFixed(2)}`,
-  });
+  };
+  await saveBotExecutionOrder(closedOrder);
 
   const nextTotalPnl = Number((acct.totalPnlUsd + chunkRealizedPnlUsd).toFixed(2));
   const nextDailyPnl = Number(((acct.dailyRealizedPnlUsd ?? 0) + chunkRealizedPnlUsd).toFixed(2));
   const nextBalance = Number(Math.max(0, acct.balanceUsd + chunkRealizedPnlUsd).toFixed(2));
-  const acctOrdersNow = (await listBotExecutionOrders(150)).filter((o) => o.followerId === acct.id);
+  const acctOrdersNow = orders
+    .filter((o) => o.followerId === acct.id)
+    .map((o) => (o.orderId === order.orderId ? closedOrder : o));
   const wrStats = computeAccountWinrateStats(acctOrdersNow, acct.winratePct, acct.totalCopiedTrades);
   await updateBrokerConnectionState(acct.id, {
     balanceUsd: nextBalance,

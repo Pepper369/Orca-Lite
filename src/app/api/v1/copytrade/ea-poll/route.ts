@@ -12,7 +12,7 @@ import {
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
 import { registerBrokerLiveTick } from "@/lib/realtime/biquote-poll";
 import { rateLimit } from "@/lib/rate-limit";
-import { safeInternalErrorMessage } from "@/app/api/_security";
+import { isValidTradingSymbol, safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 
@@ -63,17 +63,17 @@ export async function GET(req: Request) {
       const sym = parts[0]?.trim();
       const bid = parseFloat(parts[1]?.trim() ?? "0");
       const ask = parseFloat(parts[2]?.trim() ?? "0");
-      if (sym && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+      if (isValidTradingSymbol(sym) && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
         registerBrokerLiveTick(sym, bid, ask, `mt5-${conn.platform}`);
       }
     }
   } else {
     try {
       const { searchParams } = new URL(req.url);
-      const sym = searchParams.get("sym");
+      const sym = searchParams.get("sym")?.trim();
       const bid = parseFloat(searchParams.get("bid") ?? "0");
       const ask = parseFloat(searchParams.get("ask") ?? "0");
-      if (sym && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+      if (isValidTradingSymbol(sym) && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
         registerBrokerLiveTick(sym, bid, ask, `mt5-${conn.platform}`);
       }
     } catch {

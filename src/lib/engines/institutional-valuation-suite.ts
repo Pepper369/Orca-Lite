@@ -185,12 +185,17 @@ export function calculateWaccFromComponents(params: {
   const taxRate = params.taxRate ?? 0.20; // 20% CIT in Vietnam
   const kdAfterTax = kdPreTax * (1 - taxRate);
 
-  const we = params.equityWeight ?? 0.75;
-  const wd = params.debtWeight ?? 0.25;
-  const totalW = we + wd;
+  const rawWe = params.equityWeight ?? 0.75;
+  const rawWd = params.debtWeight ?? 0.25;
+  const safeWe = Number.isFinite(rawWe) && rawWe >= 0 ? rawWe : 0.75;
+  const safeWd = Number.isFinite(rawWd) && rawWd >= 0 ? rawWd : 0.25;
+  const totalW = safeWe + safeWd;
+  const we = totalW > 0 ? safeWe : 0.75;
+  const wd = totalW > 0 ? safeWd : 0.25;
+  const denomW = we + wd;
 
-  const wacc = (we / totalW) * costOfEquity + (wd / totalW) * kdAfterTax;
-  return Number(Math.max(0.06, Math.min(0.25, wacc)).toFixed(4));
+  const wacc = (we / denomW) * costOfEquity + (wd / denomW) * kdAfterTax;
+  return Number(Math.max(0.06, Math.min(0.25, Number.isFinite(wacc) ? wacc : 0.105)).toFixed(4));
 }
 
 export function computeScenarioDcf(
@@ -405,8 +410,11 @@ export function computeRelativeMultiplesScorecard(params: {
   let impliedPriceAccumulator = 0;
 
   // 1. P/E Multiple
-  if (params.pe != null && params.pe > 0) {
-    const sectorPe = params.sectorPe ?? 14.5;
+  if (params.pe != null && Number.isFinite(params.pe) && params.pe > 0) {
+    const sectorPe =
+      params.sectorPe != null && Number.isFinite(params.sectorPe) && params.sectorPe > 0
+        ? params.sectorPe
+        : 14.5;
     const diffPct = ((params.pe - sectorPe) / sectorPe) * 100;
     const percentileRank = Math.min(99, Math.max(1, Math.round(50 + diffPct * 1.5)));
     const verdict = diffPct <= -15 ? "UNDERVALUED" : diffPct >= 20 ? "OVERVALUED" : "FAIR";
@@ -434,8 +442,11 @@ export function computeRelativeMultiplesScorecard(params: {
   }
 
   // 2. P/B Multiple
-  if (params.pb != null && params.pb > 0) {
-    const sectorPb = params.sectorPb ?? 1.8;
+  if (params.pb != null && Number.isFinite(params.pb) && params.pb > 0) {
+    const sectorPb =
+      params.sectorPb != null && Number.isFinite(params.sectorPb) && params.sectorPb > 0
+        ? params.sectorPb
+        : 1.8;
     const diffPct = ((params.pb - sectorPb) / sectorPb) * 100;
     const percentileRank = Math.min(99, Math.max(1, Math.round(50 + diffPct * 1.5)));
     const verdict = diffPct <= -15 ? "UNDERVALUED" : diffPct >= 25 ? "OVERVALUED" : "FAIR";
@@ -463,8 +474,11 @@ export function computeRelativeMultiplesScorecard(params: {
   }
 
   // 3. EV/EBITDA
-  if (params.evEbitda != null && params.evEbitda > 0) {
-    const sectorEvEbitda = params.sectorEvEbitda ?? 9.0;
+  if (params.evEbitda != null && Number.isFinite(params.evEbitda) && params.evEbitda > 0) {
+    const sectorEvEbitda =
+      params.sectorEvEbitda != null && Number.isFinite(params.sectorEvEbitda) && params.sectorEvEbitda > 0
+        ? params.sectorEvEbitda
+        : 9.0;
     const diffPct = ((params.evEbitda - sectorEvEbitda) / sectorEvEbitda) * 100;
     const percentileRank = Math.min(99, Math.max(1, Math.round(50 + diffPct * 1.5)));
     const verdict = diffPct <= -15 ? "UNDERVALUED" : diffPct >= 20 ? "OVERVALUED" : "FAIR";
@@ -492,8 +506,11 @@ export function computeRelativeMultiplesScorecard(params: {
   }
 
   // 4. EV/Sales
-  if (params.evSales != null && params.evSales > 0) {
-    const sectorEvSales = params.sectorEvSales ?? 1.6;
+  if (params.evSales != null && Number.isFinite(params.evSales) && params.evSales > 0) {
+    const sectorEvSales =
+      params.sectorEvSales != null && Number.isFinite(params.sectorEvSales) && params.sectorEvSales > 0
+        ? params.sectorEvSales
+        : 1.6;
     const diffPct = ((params.evSales - sectorEvSales) / sectorEvSales) * 100;
     const percentileRank = Math.min(99, Math.max(1, Math.round(50 + diffPct * 1.5)));
     const verdict = diffPct <= -15 ? "UNDERVALUED" : diffPct >= 25 ? "OVERVALUED" : "FAIR";
@@ -515,8 +532,11 @@ export function computeRelativeMultiplesScorecard(params: {
   }
 
   // 5. FCF Yield
-  if (params.fcfYieldPct != null) {
-    const sectorFcfYield = params.sectorFcfYieldPct ?? 5.5; // 5.5% sector FCF yield
+  if (params.fcfYieldPct != null && Number.isFinite(params.fcfYieldPct)) {
+    const sectorFcfYield =
+      params.sectorFcfYieldPct != null && Number.isFinite(params.sectorFcfYieldPct)
+        ? params.sectorFcfYieldPct
+        : 5.5; // 5.5% sector FCF yield
     const diffPct = params.fcfYieldPct - sectorFcfYield;
     const verdict = diffPct >= 2.0 ? "UNDERVALUED" : diffPct <= -2.0 ? "OVERVALUED" : "FAIR";
 

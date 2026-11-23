@@ -7,7 +7,7 @@
  * 3. Stagnant Trade Timeout Guard (frees up margin and capital from dormant trades)
  */
 
-import { roundPrice } from "./asset-precision";
+import { getAssetPipSize, roundPrice } from "./asset-precision";
 
 // ============================================================================
 // 1. Dynamic Time-Decay ROI (Minimal ROI Table)
@@ -83,7 +83,8 @@ export function evaluateDynamicTimeDecayRoiExit(params: EvaluateRoiDecayParams):
   const currentProfitR = Number((rawProfitPts / Math.max(1e-8, riskDist)).toFixed(3));
 
   // Match current holding duration against ROI schedule (sorted descending by afterMinutes)
-  const sorted = [...customSchedule].sort((a, b) => b.afterMinutes - a.afterMinutes);
+  const effectiveSchedule = customSchedule.length > 0 ? customSchedule : DEFAULT_ROI_SCHEDULE;
+  const sorted = [...effectiveSchedule].sort((a, b) => b.afterMinutes - a.afterMinutes);
   let matchedTier: RoiDecayTier = sorted[sorted.length - 1]!;
 
   for (const tier of sorted) {
@@ -163,8 +164,13 @@ export function evaluatePositiveTrailingStop(params: PositiveTrailingStopParams)
     peakPrice,
     activationOffsetR = 1.0,
     trailingDistanceR = 0.35,
-    pipSize = 0.0001,
+    pipSize: rawPipSize,
   } = params;
+
+  const pipSize =
+    rawPipSize != null && Number.isFinite(rawPipSize) && rawPipSize > 0
+      ? rawPipSize
+      : getAssetPipSize(symbol, assetType, entryPrice);
 
   const isBuy = direction === "BUY";
   const currentMovePts = isBuy ? markPrice - entryPrice : entryPrice - markPrice;

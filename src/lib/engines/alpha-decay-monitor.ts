@@ -67,14 +67,15 @@ export interface AlphaDecayMonitoringReport {
  * Half-life t_1/2 = -ln(2) / lambda = ln(2) / (-ln(rho)) where rho = lag-1 autocorrelation.
  */
 export function estimateAlphaHalfLife(factorValues: number[]): number {
-  const n = factorValues.length;
+  const finiteVals = factorValues.filter((v) => Number.isFinite(v));
+  const n = finiteVals.length;
   if (n < 10) return 20; // default 20 periods
 
   let sum1 = 0;
   let sum2 = 0;
   for (let i = 0; i < n - 1; i++) {
-    sum1 += factorValues[i]!;
-    sum2 += factorValues[i + 1]!;
+    sum1 += finiteVals[i]!;
+    sum2 += finiteVals[i + 1]!;
   }
   const mean1 = sum1 / (n - 1);
   const mean2 = sum2 / (n - 1);
@@ -83,8 +84,8 @@ export function estimateAlphaHalfLife(factorValues: number[]): number {
   let var1 = 0;
   let var2 = 0;
   for (let i = 0; i < n - 1; i++) {
-    const d1 = factorValues[i]! - mean1;
-    const d2 = factorValues[i + 1]! - mean2;
+    const d1 = finiteVals[i]! - mean1;
+    const d2 = finiteVals[i + 1]! - mean2;
     cov += d1 * d2;
     var1 += d1 * d1;
     var2 += d2 * d2;
@@ -139,7 +140,14 @@ export function rebalanceFactorWeights(
   const scores: number[] = [];
 
   for (const p of rawProfiles) {
-    if (p.recentIcir < 0.20 || p.recentRankIc <= 0 || p.status === "EXHAUSTED") {
+    if (
+      !Number.isFinite(p.recentIcir) ||
+      !Number.isFinite(p.recentRankIc) ||
+      !Number.isFinite(p.deltaRankIc) ||
+      p.recentIcir < 0.20 ||
+      p.recentRankIc <= 0 ||
+      p.status === "EXHAUSTED"
+    ) {
       scores.push(0);
     } else {
       // Reward high ICIR and positive delta momentum
@@ -426,7 +434,12 @@ export function monitorAlphaDecayAndRebalance(params: {
   for (const p of factorProfiles) {
     weightMap[p.factorName] = p.rebalancedWeight;
   }
-  latestAlphaWeightMapBySymbol.set(symbol.toUpperCase(), weightMap);
+  const upperSym = symbol.toUpperCase();
+  if (!latestAlphaWeightMapBySymbol.has(upperSym) && latestAlphaWeightMapBySymbol.size >= ALPHA_DECAY_CACHE_MAX) {
+    const oldestSym = latestAlphaWeightMapBySymbol.keys().next().value;
+    if (oldestSym) latestAlphaWeightMapBySymbol.delete(oldestSym);
+  }
+  latestAlphaWeightMapBySymbol.set(upperSym, weightMap);
 
   return report;
 }

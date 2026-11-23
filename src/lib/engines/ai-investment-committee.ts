@@ -90,6 +90,8 @@ export interface InvestmentCommitteeInput {
   institutionalValuation?: InstitutionalValuationReport;
   /** Explicit DCF Margin of Safety percentage */
   marginOfSafetyPct?: number;
+  /** Financial/Bank/Insurance/Securities sector flag (exempts non-financial D/E and Current Ratio penalties) */
+  isFinancialSector?: boolean;
 }
 
 export interface ChiefRiskOfficerAssessment {
@@ -193,8 +195,10 @@ export function evaluateBuffettPersona(input: InvestmentCommitteeInput, weight: 
     score += (input.alphaScore ?? 0) * 0.2;
   }
 
-  // Debt conservatism
-  if (debtToEquity != null) {
+  // Debt conservatism (exempt financial/bank sector where customer deposits are liabilities)
+  const isFinancial =
+    input.isFinancialSector === true || input.institutionalValuation?.dcfStatus === "EXEMPT_FINANCIAL";
+  if (debtToEquity != null && !isFinancial) {
     if (debtToEquity <= 0.6) {
       score += 25;
       keyFactors.push(`Cơ cấu nợ rất an toàn: D/E ${debtToEquity.toFixed(2)} <= 0.6`);
@@ -274,8 +278,10 @@ export function evaluateGrahamPersona(input: InvestmentCommitteeInput, weight: n
     }
   }
 
-  // Working Capital & Liquidity test (Current Ratio >= 1.5)
-  if (currentRatio != null) {
+  // Working Capital & Liquidity test (exempt financial/bank sector)
+  const isFinancial =
+    input.isFinancialSector === true || input.institutionalValuation?.dcfStatus === "EXEMPT_FINANCIAL";
+  if (currentRatio != null && !isFinancial) {
     if (currentRatio >= 2.0) {
       score += 30;
       keyFactors.push(`Thanh khoản dồi dào: Current Ratio ${currentRatio.toFixed(2)} >= 2.0`);
@@ -286,8 +292,8 @@ export function evaluateGrahamPersona(input: InvestmentCommitteeInput, weight: n
     }
   }
 
-  // Total debt vs Net current assets
-  if (debtToEquity != null && debtToEquity > 1.5) {
+  // Total debt vs Net current assets (exempt financial/bank sector)
+  if (debtToEquity != null && !isFinancial && debtToEquity > 1.5) {
     score -= 25;
     keyFactors.push(`Nợ vay vượt vốn chủ sở hữu: D/E = ${debtToEquity.toFixed(2)}`);
   }
@@ -347,8 +353,10 @@ export function evaluateBurryPersona(input: InvestmentCommitteeInput, weight: nu
     keyFactors.push(`Áp lực rủi ro đuôi vĩ mô thấp (${tailRisk}/100)`);
   }
 
-  // Debt & Insolvency stress
-  if (debtToEquity != null && debtToEquity >= 2.5) {
+  // Debt & Insolvency stress (exempt financial/bank sector)
+  const isFinancial =
+    input.isFinancialSector === true || input.institutionalValuation?.dcfStatus === "EXEMPT_FINANCIAL";
+  if (debtToEquity != null && !isFinancial && debtToEquity >= 2.5) {
     score -= 45;
     keyFactors.push(`Cấu trúc vốn dễ vỡ trong môi trường lãi suất cao: D/E ${debtToEquity.toFixed(2)}`);
   }

@@ -156,7 +156,7 @@ export async function GET(req: Request) {
       { "Cache-Control": "no-store" },
     );
   } catch (err) {
-    return fail("COPYTRADE_ERROR", err instanceof Error ? err.message : "Failed to fetch copytrade signals", 500);
+    return fail("COPYTRADE_ERROR", safeInternalErrorMessage(err, "Failed to fetch copytrade signals"), 500);
   }
 }
 

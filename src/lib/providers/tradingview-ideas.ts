@@ -34,6 +34,7 @@ export async function fetchTradingViewIdeas(symbol: string): Promise<TradingView
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         Accept: "application/rss+xml, application/xml, text/xml",
       },
+      signal: AbortSignal.timeout(8_000),
       next: { revalidate: 300 },
     });
 

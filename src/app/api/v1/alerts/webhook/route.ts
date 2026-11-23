@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
       if (!upstream.ok) {
         return fail(
           "WEBHOOK_UPSTREAM",
-          "Telegram " + upstream.status + ": " + text.slice(0, 200),
+          "Telegram " + upstream.status + ": " + sanitizePlainText(text, 200),
           502,
         );
       }
@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
     if (!upstream.ok) {
       return fail(
         "WEBHOOK_UPSTREAM",
-        "Webhook responded " + upstream.status + ": " + text.slice(0, 200),
+        "Webhook responded " + upstream.status + ": " + sanitizePlainText(text, 200),
         502,
       );
     }

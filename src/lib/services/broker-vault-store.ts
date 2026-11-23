@@ -139,6 +139,27 @@ const DEV_CONNECTIONS_STORE: StoredConnectionInternal[] = createDefaultDemoConne
 const DEV_ORDERS_STORE: CopyExecutionOrder[] = [];
 const SEEDED_DEMO_USERS = new Set<string>();
 const INFLIGHT_SEED_PROMISES = new Map<string, Promise<void>>();
+const MAX_SEEDED_DEMO_USERS = 2_000;
+const MAX_DEV_CONNECTIONS = 500;
+
+function markDemoUserSeeded(userId: string): void {
+  SEEDED_DEMO_USERS.add(userId);
+  while (SEEDED_DEMO_USERS.size > MAX_SEEDED_DEMO_USERS) {
+    const oldest = SEEDED_DEMO_USERS.values().next().value;
+    if (oldest === undefined) break;
+    SEEDED_DEMO_USERS.delete(oldest);
+  }
+}
+
+function pruneDevConnectionsStore(): void {
+  if (DEV_CONNECTIONS_STORE.length <= MAX_DEV_CONNECTIONS) return;
+  // Evict oldest non-guest connections first so guest sandbox accounts stay intact
+  for (let i = DEV_CONNECTIONS_STORE.length - 1; i >= 0 && DEV_CONNECTIONS_STORE.length > MAX_DEV_CONNECTIONS; i--) {
+    if (DEV_CONNECTIONS_STORE[i]?.userId) {
+      DEV_CONNECTIONS_STORE.splice(i, 1);
+    }
+  }
+}
 
 function isForeignKeyUserError(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code;
@@ -248,10 +269,11 @@ export async function recordVaultAuditLog(
 
 function seedUserDemoInMemory(userId: string): void {
   if (SEEDED_DEMO_USERS.has(userId)) return;
-  SEEDED_DEMO_USERS.add(userId);
+  markDemoUserSeeded(userId);
   if (DEV_CONNECTIONS_STORE.some((c) => c.userId === userId)) return;
   const defaults = createDefaultDemoConnections(userId);
   DEV_CONNECTIONS_STORE.push(...defaults);
+  pruneDevConnectionsStore();
 }
 
 async function ensureDefaultDemoConnectionsForUser(userId: string): Promise<void> {
@@ -277,7 +299,7 @@ async function ensureDefaultDemoConnectionsForUser(userId: string): Promise<void
           .limit(1);
 
         if (priorLogs.length > 0) {
-          SEEDED_DEMO_USERS.add(userId);
+          markDemoUserSeeded(userId);
           return;
         }
 
@@ -315,7 +337,7 @@ async function ensureDefaultDemoConnectionsForUser(userId: string): Promise<void
         await recordVaultAuditLog(userId, "PAPER_DEMO_SEEDED", {
           connectionIds: defaults.map((d) => d.id),
         });
-        SEEDED_DEMO_USERS.add(userId);
+        markDemoUserSeeded(userId);
         return;
       } catch (err) {
         if (!isForeignKeyUserError(err)) {

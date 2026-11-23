@@ -1,4 +1,5 @@
 import "server-only";
+import { isTestRunnerRuntime } from "./ws-policy";
 
 /**
  * REPORT SCHEDULER — timezone-aware (Asia/Ho_Chi_Minh), config-driven.
@@ -27,6 +28,7 @@ class Scheduler {
 
   start() {
     if (this.timer) return;
+    if (isTestRunnerRuntime()) return;
     // Serverless (Vercel, Workers, Lambda): isolate memory + setInterval are unreliable/waste CPU.
     // External cron (cron-job.org → /api/v1/cron/reports) owns the schedule.
     const isServerless =

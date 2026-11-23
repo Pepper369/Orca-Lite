@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Badge } from "@/components/ui";
 import { AlertTriangle, CheckCircle2, Scale, ShieldAlert, ShieldCheck, Users } from "lucide-react";
 import type { CommitteeConsensusReport } from "@/lib/engines/ai-investment-committee";
@@ -10,7 +11,7 @@ function fmtVnd(v: number | null | undefined): string {
   return `${Math.round(v).toLocaleString("vi-VN")} ₫`;
 }
 
-export function InstitutionalCommitteeValuationCards({
+export const InstitutionalCommitteeValuationCards = memo(function InstitutionalCommitteeValuationCards({
   committee,
   valuation,
 }: {
@@ -333,4 +334,4 @@ export function InstitutionalCommitteeValuationCards({
       )}
     </div>
   );
-}
+});

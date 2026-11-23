@@ -1,9 +1,12 @@
 import { getSessionUser } from "@/lib/auth";
+import { fail } from "@/lib/envelope";
 import { eventBus } from "@/lib/events";
+import { rateLimit } from "@/lib/rate-limit";
 import {
   BOT_TELEMETRY_CHANNEL,
   buildBotLiveTelemetrySnapshot,
 } from "@/lib/services/bot-live-telemetry";
+import { safeInternalErrorMessage } from "@/app/api/_security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,7 +17,18 @@ export const runtime = "nodejs";
  * plus immediate push on any execution, worker tick, account toggle, or position close.
  */
 export async function GET(req: Request) {
+  const limited = await rateLimit(req, {
+    name: "copytrade-stream-get",
+    binding: "RL_AUTH",
+    limit: 20,
+    windowSec: 60,
+  });
+  if (limited) return limited;
+
   const session = await getSessionUser(req);
+  if (!session && process.env.NODE_ENV === "production") {
+    return fail("UNAUTHENTICATED", "Đăng nhập để kết nối luồng Bot Live Telemetry", 401);
+  }
   const userId = session?.id ?? null;
   const encoder = new TextEncoder();
 
@@ -49,7 +63,7 @@ export async function GET(req: Request) {
           sendEvent("telemetry", snapshot);
         } catch (err) {
           sendEvent("error", {
-            message: err instanceof Error ? err.message : "Telemetry sync error",
+            message: safeInternalErrorMessage(err, "Telemetry sync error"),
             ts: Date.now(),
           });
         } finally {

@@ -21,16 +21,15 @@ async function fetchWithCache<T>(url: string, ttlSeconds = 60): Promise<T | null
     return cached.data as T;
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  timeout.unref?.();
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
     const res = await fetch(url, {
       headers: DEFAULT_HEADERS,
       signal: controller.signal,
       next: { revalidate: ttlSeconds },
     });
-    clearTimeout(timeout);
 
     if (!res.ok) {
       return null;
@@ -51,6 +50,8 @@ async function fetchWithCache<T>(url: string, ttlSeconds = 60): Promise<T | null
   } catch (err) {
     console.warn(`[MiQuant Provider] Fetch failed for ${url}:`, err);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
