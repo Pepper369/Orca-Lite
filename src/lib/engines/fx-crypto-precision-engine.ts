@@ -1166,7 +1166,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push("Session Warning: Đang trong khung ROLLOVER giãn spread");
   }
 
-  // GATE 5: Direction-Aligned Reversal Pace (0x50f7)
+  // GATE 5: Direction-Aligned Reversal Pace (0x50f7) & Toxic Flow Adverse Selection Filter
   const avgRange = Math.max(pip * 2, medianRange);
   const microVol = Math.max(1e-10, avgRange / Math.sqrt(Math.max(30, timeframeSec)));
   const pace = calculateRequiredSpeedPace({
@@ -1177,6 +1177,14 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     assetType,
     pipSize: pip,
   });
+
+  // ROOT-CAUSE TOXIC VELOCITY VETO: If opposing adverse velocity exceeds 2.2 sigma, veto falling knife/rocket
+  const lastBarOpposingRange = isBuy ? (lastBar.open - lastBar.close) : (lastBar.close - lastBar.open);
+  const isToxicAdverseImpulse = lastBarOpposingRange >= atr14 * 1.65;
+  if (isToxicAdverseImpulse) {
+    vetoReasons.push(`Toxic Adverse Flow: Cây nến đang lao dốc/bùng nổ ngược chiều cực mạnh (${(lastBarOpposingRange / atr14).toFixed(1)}x ATR) — cấm bắt dao rơi`);
+    gatesFailed.push("Gate 5b (Toxic Flow Veto): Xung lực bán tháo/mua tháo ngược chiều vượt ngưỡng an toàn");
+  }
 
   if (pace.isIrreversibleLock) {
     const lockMatch =
@@ -1195,34 +1203,32 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   // ------------------------------------------------------------------
   // 5. STRUCTURAL ENTRY, STOP LOSS, MULTI-TIER TP & FRICTION COST CHECK
   // ------------------------------------------------------------------
-  let entryMode: PrecisionTradeSetup["entryMode"] = "MARKET_CONFIRMED";
+  // ROOT-CAUSE RE-ARCHITECTING: Default to LIMIT_PULLBACK on retail venues to eliminate spread/slippage chase bleed
+  let entryMode: PrecisionTradeSetup["entryMode"] = "LIMIT_PULLBACK";
   let rawEntry = candidateEntry != null && Number.isFinite(candidateEntry) && candidateEntry > 0
     ? candidateEntry
     : currentPrice;
 
-  // Prefer pullback limit entry inside OTE/FVG when close (<= 0.28x ATR, or <= 0.38x ATR under high friction) and NOT a fast expansion/breakout/sweep bar
+  // Prefer pullback limit entry inside OTE/FVG or 50% equilibrium of signal candle
   const oteEntry = ict.optimalTradeSetup.direction === finalDir ? ict.optimalTradeSetup.entryOptimal : null;
-  const strongDisplacementCandle = Math.abs(lastBar.close - lastBar.open) >= atr14 * 0.45;
-  const oteProximityAtr = (spreadPipsOrPct != null && spreadPipsOrPct > 0.0006) ? 0.38 : 0.28;
-  if (
-    oteEntry != null &&
-    Math.abs(currentPrice - oteEntry) <= atr14 * oteProximityAtr &&
-    !hasBreakout &&
-    !pace.isIrreversibleLock &&
-    !(hasSweep && strongDisplacementCandle)
-  ) {
-    const betterPrice = isBuy ? oteEntry < currentPrice : oteEntry > currentPrice;
-    if (betterPrice) {
-      rawEntry = oteEntry;
-      entryMode = "LIMIT_PULLBACK";
-    }
+  const signalBarMidpoint = (lastBar.open + lastBar.close) / 2;
+  const defaultPullbackPrice = isBuy
+    ? Math.min(currentPrice, signalBarMidpoint)
+    : Math.max(currentPrice, signalBarMidpoint);
+
+  if (oteEntry != null && (isBuy ? oteEntry < currentPrice : oteEntry > currentPrice)) {
+    rawEntry = oteEntry;
+    entryMode = "LIMIT_PULLBACK";
+  } else {
+    rawEntry = defaultPullbackPrice;
+    entryMode = "LIMIT_PULLBACK";
   }
 
   // Entry Optimization: Proximal boundary of Fair Value Gap
   // When price displaced away from an active FVG, anchor entry at the proximal boundary (top of bullish FVG, bottom of bearish FVG)
   // to ensure near 100% fill rate while securing tighter stop loss and higher net R:R.
   const activeFvgs = ict.activeFvgList ?? [];
-  if (entryMode === "MARKET_CONFIRMED" && !hasBreakout && !pace.isIrreversibleLock && activeFvgs.length > 0) {
+  if (!hasBreakout && !pace.isIrreversibleLock && activeFvgs.length > 0) {
     const matchingFvgs = activeFvgs.filter(
       (g) =>
         (isBuy && g.direction === "BULLISH_FVG" && g.bottom <= currentPrice && g.top >= currentPrice - atr14 * 0.35) ||
@@ -1234,7 +1240,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       const queuePenetrationOffset = Math.min(fvgDepth * 0.12, atr14 * 0.04);
       const proximalPrice = isBuy ? fvg.top - queuePenetrationOffset : fvg.bottom + queuePenetrationOffset;
       const isBetterPrice = isBuy ? proximalPrice < currentPrice : proximalPrice > currentPrice;
-      if (isBetterPrice && Math.abs(currentPrice - proximalPrice) <= atr14 * 0.22) {
+      if (isBetterPrice && Math.abs(currentPrice - proximalPrice) <= atr14 * 0.35) {
         rawEntry = proximalPrice;
         entryMode = "LIMIT_PULLBACK";
       }
@@ -1518,7 +1524,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   );
 
   // Enforce LIMIT_PULLBACK when scenario requires strict maker entry (S3 Squeeze / S4 Macro Shock)
-  if (scenarioVector.requireLimitEntryOnly && entryMode === "MARKET_CONFIRMED") {
+  if (scenarioVector.requireLimitEntryOnly) {
     entryMode = "LIMIT_PULLBACK";
   }
 

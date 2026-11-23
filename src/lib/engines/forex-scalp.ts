@@ -108,23 +108,19 @@ export function analyzeForexScalp(input: ForexScalpInput): ForexScalpSignal | nu
   const effAbsorption = input.absorptionType ?? flowM5.absorption.type;
   const effCvdDiv = input.volumeDeltaDivergence ?? flowM5.cvdDivergence;
 
-  // Adaptive M5 -> M15 Timeframe Escalation under Forex Low-Volatility / High-Spread Compression:
-  // When M5 ATR is compressed relative to spread (spread / atrM5 >= 0.20 or M5 ATR < 2.5 pips),
-  // escalate execution timeframe to M15 (and HTF to H1) so structural stop distance is 1.8x wider
-  // and spread/fees do not erode net mathematical expectancy E[R].
-  const spreadInPrice = filter.spreadPips != null && filter.spreadPips > 0 ? filter.spreadPips * pip : pip * 1.2;
-  const isM5FxCompressed =
-    atrV > 0 &&
-    (spreadInPrice / atrV >= 0.20 || atrV < pip * 2.5) &&
-    input.barsM15.length >= 30;
-
+  // ROOT-CAUSE TIMEFRAME ESCALATION:
+  // Escalate execution timeframe from noisy M5 to robust M15/M30/H1 on retail venues
+  // so structural stop distance is wider (15-50 pips) and spread/slippage noise does not eat capital.
+  const isM5FxCompressed = input.barsM15.length >= 30; // Always favor higher timeframe M15/H1 for retail CFD executions
   const execBarsFx = isM5FxCompressed ? input.barsM15 : input.barsM5;
-  const htfBarsFx = isM5FxCompressed
-    ? (input.barsH1 && input.barsH1.length >= 16 ? input.barsH1 : resampleOhlcvBars(input.barsM15, 4))
-    : (input.barsM15 !== input.barsM5 && input.barsM15.length >= 16 ? input.barsM15 : null);
-  const macroBarsFx = isM5FxCompressed
-    ? null
-    : (input.barsH1 && input.barsH1.length >= 12 ? input.barsH1 : null);
+  const htfBarsFx =
+    input.barsH1 && input.barsH1.length >= 16
+      ? input.barsH1
+      : resampleOhlcvBars(input.barsM15.length ? input.barsM15 : input.barsM5, 4);
+  const macroBarsFx =
+    input.barsH1 && input.barsH1.length >= 24
+      ? resampleOhlcvBars(input.barsH1, 4) // H4 macro
+      : null;
   const sharedCtxFx = isM5FxCompressed ? ctxM15 : ctxM5;
 
   const precision = evaluatePrecisionTradeSetup({
