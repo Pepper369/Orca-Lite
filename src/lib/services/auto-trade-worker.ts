@@ -34,6 +34,10 @@ import {
   type PairMarketSnapshot,
 } from "@/lib/engines/bot-pairlist-governor";
 import { adjustTradeSetupWithInventorySkew } from "@/lib/engines/bot-inventory-skew-engine";
+import {
+  computePredictionMarketMacroRadar,
+  evaluatePredictionBiasAlignment,
+} from "@/lib/engines/prediction-market-radar";
 import { getLiveTrainedMetaModel } from "@/lib/engines/meta-labeling-calibration";
 import {
   buildCryptoLiquidityContext,
@@ -208,6 +212,7 @@ async function scanLivePrecisionSetups(params: {
   const out: Array<{ signal: DispatchableSignalInput; marketPrice: number; feedItem: QuantEngineFeedItem }> = [];
   const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
   const calendarEvents = await withTimeout(getGlobalMacroShieldEvents().catch(() => []), 2_000, []);
+  const predictionRadar = computePredictionMarketMacroRadar();
 
   if (params.needCryptoCount > 0) {
     const unownedCrypto = CORE_REALTIME_CRYPTO_PAIRS.filter(
@@ -342,6 +347,14 @@ async function scanLivePrecisionSetups(params: {
             return null;
           }
 
+          const predBias = evaluatePredictionBiasAlignment(
+            pair,
+            "CRYPTO",
+            precision.direction,
+            predictionRadar,
+          );
+          if (predBias.isVetoed) return null;
+
           const levGov = computeGarmanKlassLeverageCap(
             bars1h.length >= 5 ? bars1h : execBars.slice(-24),
             true,
@@ -367,7 +380,10 @@ async function scanLivePrecisionSetups(params: {
             accountBalanceUsd: 10_000,
             leverage: recommendedLeverage,
           });
-          const baseQty = Math.max(0.001, riskPlan.recommendedLotsOrQty);
+          const baseQty = Math.max(
+            0.001,
+            riskPlan.recommendedLotsOrQty * predBias.recommendedSizeMultiplier,
+          );
 
           const roundedEntry = roundPrice(precision.entry ?? livePrice, pair, "CRYPTO");
           const roundedSl = roundPrice(precision.stopLoss, pair, "CRYPTO");
@@ -439,7 +455,10 @@ async function scanLivePrecisionSetups(params: {
               ictSetup: precision.liquiditySweepDetected ? "ICT Sweep + MSS + OTE" : "SMC Order Flow + FVG/BPR",
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
-              summaryVi: precision.summaryVi,
+              summaryVi:
+                predBias.regimeState !== "NEUTRAL_TOLERANCE"
+                  ? `${precision.summaryVi} | [PredRadar] ${predBias.drivers[0] ?? predBias.regimeState} (x${predBias.recommendedSizeMultiplier})`
+                  : precision.summaryVi,
               updatedAt: Date.now(),
             },
           };
@@ -467,10 +486,15 @@ async function scanLivePrecisionSetups(params: {
     });
     const fxCandidates = fxGov.eligiblePairs.slice(0, params.needForexCount + 2);
 
-    const [marketsRes, macroBiasMap] = await Promise.all([
+    const [marketsRes, ffMacroBiasMap] = await Promise.all([
       withTimeout(getForexMarkets().catch(() => null), 2_000, null),
       withTimeout(computeForexFactoryMacroBiasMap().catch(() => new Map()), 2_500, new Map()),
     ]);
+    const macroBiasMap = new Map<string, number>(ffMacroBiasMap);
+    for (const [curr, pBias] of predictionRadar.currencyBiasOverrides) {
+      const currentVal = macroBiasMap.get(curr) ?? 0;
+      macroBiasMap.set(curr, Number((currentVal * 0.6 + pBias * 0.4).toFixed(2)));
+    }
     const fxRows = marketsRes?.data?.rows ?? [];
     const csmScoreMap = new Map<string, number>();
     let csmInputs: PairPriceInput[] = [];
@@ -588,6 +612,14 @@ async function scanLivePrecisionSetups(params: {
             return null;
           }
 
+          const predBiasFx = evaluatePredictionBiasAlignment(
+            pair,
+            "FOREX",
+            precision.direction,
+            predictionRadar,
+          );
+          if (predBiasFx.isVetoed) return null;
+
           const entryPrice = roundPrice(livePrice, pair, "FOREX");
           const stopLossPrice = roundPrice(precision.stopLoss, pair, "FOREX");
           const riskPlan = calculateUnifiedTradeRiskPlan({
@@ -610,7 +642,10 @@ async function scanLivePrecisionSetups(params: {
           const roundedTp1Fx = roundPrice(precision.tp1, pair, "FOREX");
           const roundedTp2Fx = precision.tp2 != null ? roundPrice(precision.tp2, pair, "FOREX") : undefined;
           const roundedTp3Fx = precision.tp3 != null ? roundPrice(precision.tp3, pair, "FOREX") : undefined;
-          const lotsFx = Math.max(0.01, riskPlan.recommendedLotsOrQty);
+          const lotsFx = Math.max(
+            0.01,
+            riskPlan.recommendedLotsOrQty * predBiasFx.recommendedSizeMultiplier,
+          );
 
           // Hummingbot Avellaneda-Stoikov Inventory Skewing
           const skewedFx = adjustTradeSetupWithInventorySkew({
@@ -675,7 +710,10 @@ async function scanLivePrecisionSetups(params: {
               ictSetup: precision.liquiditySweepDetected ? "ICT Judas/Turtle Sweep + OTE" : "SMC Deep Flow + FVG/BPR",
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
-              summaryVi: precision.summaryVi,
+              summaryVi:
+                predBiasFx.regimeState !== "NEUTRAL_TOLERANCE"
+                  ? `${precision.summaryVi} | [PredRadar] ${predBiasFx.drivers[0] ?? predBiasFx.regimeState} (x${predBiasFx.recommendedSizeMultiplier})`
+                  : precision.summaryVi,
               updatedAt: Date.now(),
             },
           };
@@ -748,6 +786,7 @@ export async function runAutoTradeTick(): Promise<{
     const seenCrypto = new Set<string>();
     const seenForex = new Set<string>();
     const bucket5m = Math.floor(Date.now() / (5 * 60 * 1000));
+    const hubPredictionRadar = computePredictionMarketMacroRadar();
 
     if (fxRes.status === "fulfilled" && fxRes.value) {
       const fxMarketClosed = isForexWeekendClosedUtc();
@@ -798,7 +837,14 @@ export async function runAutoTradeTick(): Promise<{
         const sigId = `fx_${s.pair}_${s.direction}_${bucket5m}`;
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
-        const lots = Math.max(0.01, s.recommendedLots || 0.2);
+        const predBiasFxHub = evaluatePredictionBiasAlignment(
+          s.pair,
+          "FOREX",
+          s.direction as "BUY" | "SELL",
+          hubPredictionRadar,
+        );
+        if (predBiasFxHub.isVetoed) continue;
+        const lots = Math.max(0.01, (s.recommendedLots || 0.2) * predBiasFxHub.recommendedSizeMultiplier);
         const riskDist = Math.abs((s.entryPrice ?? marketPrice) - s.stopLossPrice!);
         const isBuyFx = s.direction === "BUY";
         const refEntryFx = s.entryPrice ?? marketPrice;
@@ -895,6 +941,13 @@ export async function runAutoTradeTick(): Promise<{
 
       for (const s of crCandidates) {
         seenCrypto.add(s.pair);
+        const predBiasCrHub = evaluatePredictionBiasAlignment(
+          s.pair,
+          "CRYPTO",
+          s.direction as "BUY" | "SELL",
+          hubPredictionRadar,
+        );
+        if (predBiasCrHub.isVetoed) continue;
         const wsPrice =
           binanceWs.getMark(s.pair, 20_000)?.markPrice ?? binanceWs.getTicker(s.pair, 20_000)?.price;
         const marketPrice = wsPrice && wsPrice > 0 ? wsPrice : s.lastPrice || s.entryPrice!;
@@ -902,9 +955,10 @@ export async function runAutoTradeTick(): Promise<{
           marketPrice > 0
             ? Math.max(
                 0.001,
-                (Math.max(150, s.recommendedMarginUsd) * Math.max(1, s.recommendedLeverage)) / marketPrice,
+                ((Math.max(150, s.recommendedMarginUsd) * Math.max(1, s.recommendedLeverage)) / marketPrice) *
+                  predBiasCrHub.recommendedSizeMultiplier,
               )
-            : 0.05;
+            : 0.05 * predBiasCrHub.recommendedSizeMultiplier;
         const sigId = `cr_${s.pair}_${s.direction}_${bucket5m}`;
         const wrScore = s.winrateScore ?? s.probability;
         const grade = (s.setupGrade === "A+" || s.setupGrade === "A" ? s.setupGrade : "A") as SetupGrade;
