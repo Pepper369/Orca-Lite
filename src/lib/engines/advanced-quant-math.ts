@@ -315,18 +315,16 @@ export function estimateOrnsteinUhlenbeck(series: number[], dt: number = 1.0): O
   const b = (count * sumXY - sumX * sumY) / denominator;
   const a = (sumY - b * sumX) / count;
 
-  // Stationarity check for continuous-time Ornstein-Uhlenbeck diffusion:
-  // Discrete AR(1) coefficient phi = 1 + b = exp(-theta * dt) MUST lie strictly in (0, 1), i.e., -1 < b < 0.
-  // Negative AR(1) roots (-2 < b <= -1, phi <= 0) oscillate sign every bar and cannot come from an OU process.
+  // Stationarity check for discrete AR(1) mean-reverting process:
+  // Root must lie strictly inside the unit circle: |phi| = |1 + b| < 1, i.e., -2 < b < 0.
   const rawPhi = 1.0 + b;
   const isStationary =
     Number.isFinite(b) &&
     Number.isFinite(a) &&
     b < -1e-5 &&
-    b > -1.0 &&
-    rawPhi > 1e-4 &&
-    rawPhi < 1.0;
-  const phi = isStationary ? rawPhi : 1.0;
+    b > -2.0 &&
+    Math.abs(rawPhi) < 1.0;
+  const phi = isStationary ? Math.max(1e-4, Math.abs(rawPhi)) : 1.0;
   const theta = isStationary ? -Math.log(phi) / safeDt : 0;
   const lastPrice = cleanSeries[n - 1]!;
   const rawMu = isStationary ? -a / b : lastPrice;

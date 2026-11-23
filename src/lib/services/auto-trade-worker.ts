@@ -26,6 +26,13 @@ import {
   evaluatePrecisionTradeSetup,
   type SetupGrade,
 } from "@/lib/engines/fx-crypto-precision-engine";
+import {
+  filterExecutablePairs,
+  evaluateSpreadFilter,
+  evaluateVolatilityPumpDumpFilter,
+  DEFAULT_PAIRLIST_CONFIG,
+  type PairMarketSnapshot,
+} from "@/lib/engines/bot-pairlist-governor";
 import { getLiveTrainedMetaModel } from "@/lib/engines/meta-labeling-calibration";
 import {
   buildCryptoLiquidityContext,
@@ -202,9 +209,15 @@ async function scanLivePrecisionSetups(params: {
   const calendarEvents = await withTimeout(getGlobalMacroShieldEvents().catch(() => []), 2_000, []);
 
   if (params.needCryptoCount > 0) {
-    const candidates = CORE_REALTIME_CRYPTO_PAIRS.filter(
+    const unownedCrypto = CORE_REALTIME_CRYPTO_PAIRS.filter(
       (p) => !params.existingCryptoSymbols.has(p),
-    ).slice(0, params.needCryptoCount + 2);
+    );
+    const cryptoGov = filterExecutablePairs({
+      candidates: [...unownedCrypto],
+      assetType: "CRYPTO",
+      marketDataMap: new Map(),
+    });
+    const candidates = cryptoGov.eligiblePairs.slice(0, params.needCryptoCount + 2);
 
     const scanned = await Promise.all(
       candidates.map(async (pair) => {
@@ -252,10 +265,27 @@ async function scanLivePrecisionSetups(params: {
           const bestAsk = book.asks[0]?.price ?? 0;
           const liveSpreadPct =
             bestBid > 0 && bestAsk >= bestBid ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2) : null;
+          const prelimAtr = calcAtr(execBars, 14) ?? livePrice * 0.012;
+
+          // Freqtrade Pairlist Governor: Spread & Volatility Anomaly Gates
+          const pairSnapshot: PairMarketSnapshot = {
+            symbol: pair,
+            price: livePrice,
+            bidPrice: bestBid > 0 ? bestBid : undefined,
+            askPrice: bestAsk > 0 ? bestAsk : undefined,
+            priceChange24hPct: Number(spot?.priceChangePercent) || undefined,
+            volume24hUsd: Number(spot?.quoteVolume) || undefined,
+            atr: prelimAtr,
+            latestBar: execBars.length > 0 ? execBars[execBars.length - 1] : undefined,
+          };
+          const spreadCheck = evaluateSpreadFilter(pairSnapshot, "CRYPTO", DEFAULT_PAIRLIST_CONFIG);
+          if (!spreadCheck.passed) return null;
+          const volaCheck = evaluateVolatilityPumpDumpFilter(pairSnapshot, DEFAULT_PAIRLIST_CONFIG);
+          if (!volaCheck.passed) return null;
+
           const bars1h = resampleOhlcvBars(htfBars, 4);
           const fundingRate = funding?.fundingRate ?? (wsMicro ? wsMicro.fundingRate : null);
           const oiUsd = oi.openInterest > 0 ? oi.openInterest * livePrice : 0;
-          const prelimAtr = calcAtr(execBars, 14) ?? livePrice * 0.012;
           const liqClusters =
             oiUsd > 0
               ? detectCryptoLiquidationClusters(livePrice, oiUsd, prelimAtr, {
@@ -410,9 +440,15 @@ async function scanLivePrecisionSetups(params: {
   }
 
   if (params.needForexCount > 0) {
-    const fxCandidates = CORE_REALTIME_FOREX_PAIRS.filter(
+    const unownedForex = CORE_REALTIME_FOREX_PAIRS.filter(
       (p) => !params.existingForexSymbols.has(p),
-    ).slice(0, params.needForexCount + 2);
+    );
+    const fxGov = filterExecutablePairs({
+      candidates: [...unownedForex],
+      assetType: "FOREX",
+      marketDataMap: new Map(),
+    });
+    const fxCandidates = fxGov.eligiblePairs.slice(0, params.needForexCount + 2);
 
     const [marketsRes, macroBiasMap] = await Promise.all([
       withTimeout(getForexMarkets().catch(() => null), 2_000, null),
@@ -466,6 +502,21 @@ async function scanLivePrecisionSetups(params: {
             bqTick && bqTick.ask > bqTick.bid && pipSizeFx > 0
               ? Number(((bqTick.ask - bqTick.bid) / pipSizeFx).toFixed(2))
               : null;
+
+          // Freqtrade Pairlist Governor: Forex Spread & Volatility Gates
+          const fxSnapshot: PairMarketSnapshot = {
+            symbol: pair,
+            price: livePrice,
+            bidPrice: bqTick?.bid,
+            askPrice: bqTick?.ask,
+            priceChange24hPct: detail?.detail?.current?.changePercent ?? undefined,
+            atr: calcAtr(execBars, 14) ?? undefined,
+            latestBar: execBars.length > 0 ? execBars[execBars.length - 1] : undefined,
+          };
+          const fxSpreadCheck = evaluateSpreadFilter(fxSnapshot, "FOREX", DEFAULT_PAIRLIST_CONFIG);
+          if (!fxSpreadCheck.passed) return null;
+          const fxVolaCheck = evaluateVolatilityPumpDumpFilter(fxSnapshot, DEFAULT_PAIRLIST_CONFIG);
+          if (!fxVolaCheck.passed) return null;
           const cb = evaluateNewsCircuitBreaker(pair, Date.now(), calendarEvents);
           const flow = generateDeepFlowSignal(
             pair,

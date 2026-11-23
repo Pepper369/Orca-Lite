@@ -27,6 +27,7 @@ import {
   evaluateDynamicTimeDecayRoiExit,
   evaluatePositiveTrailingStop,
 } from "@/lib/engines/bot-trade-lifecycle-engine";
+import { recordPairCooldown } from "@/lib/engines/bot-pairlist-governor";
 import {
   aggregateTierSummary,
   assignPoolNavShares,
@@ -953,6 +954,9 @@ export async function evaluateRealtimePositionExits(options?: {
         continue;
       }
       const isProfitSl = (isBuy && sl >= entry) || (!isBuy && sl <= entry);
+      if (!isProfitSl) {
+        recordPairCooldown(o.symbol, "Auto Stoploss Hit", 20 * 60_000);
+      }
       const res = await closeTrackedBotPosition({
         orderId: o.orderId,
         reasonTag: isProfitSl ? "TRAILING PROFIT LOCK" : "AUTO SL GUARD",
