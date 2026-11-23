@@ -212,6 +212,34 @@ export function getBiquoteLiveTickAny(symbol: string): BiquoteLiveTick | null {
 }
 
 /**
+ * Ingests sub-second live tick telemetry directly from the MT5 EA broker bridge.
+ * Prioritizes actual broker spot prices over 10-15 minute delayed Yahoo Finance quotes.
+ */
+export function registerBrokerLiveTick(
+  symbol: string,
+  bid: number,
+  ask: number,
+  source: string = "mt5-ea-bridge",
+): void {
+  if (!symbol || !Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) return;
+  const sym = canon(symbol);
+  const mid = (bid + ask) / 2;
+  const existing = ticks.get(sym);
+  ticks.set(sym, {
+    symbol: sym,
+    price: mid,
+    bid,
+    ask,
+    high: existing?.high != null ? Math.max(existing.high, ask) : ask,
+    low: existing?.low != null ? Math.min(existing.low, bid) : bid,
+    dayDiffPercent: existing?.dayDiffPercent ?? 0,
+    ts: Date.now(),
+    marketState: "regular",
+    source: "biquote-public",
+  });
+}
+
+/**
  * Merges the latest real-time Biquote tick into an OHLCV series so the forming candle
  * reflects sub-second bid/ask mid price and high/low extremes without 15-45s REST lag.
  */

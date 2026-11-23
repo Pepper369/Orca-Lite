@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { evaluatePrecisionTradeSetup } from "../engines/fx-crypto-precision-engine";
+import { registerBrokerLiveTick, getBiquoteLiveTickAny } from "../realtime/biquote-poll";
+import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import type { OhlcvBar } from "../types";
 
 describe("Root-Cause Quant Architecture Invariants (Zero-Chase, Toxic Flow Veto & Robust Limits)", () => {
@@ -67,5 +69,50 @@ describe("Root-Cause Quant Architecture Invariants (Zero-Chase, Toxic Flow Veto 
       "Must trigger Toxic Adverse Flow veto against violent falling knife"
     );
     assert.strictEqual(res.grade, "NO_TRADE", "Toxic falling knife setup must be downgraded to NO_TRADE");
+  });
+
+  // RC-03: Reverse Price Bridge: Live MT5 broker tick registry
+  it("RC-03: registerBrokerLiveTick updates broker quote instantaneously without REST delay", () => {
+    const testSymbol = "XAUUSD";
+    const testBid = 2652.45;
+    const testAsk = 2652.75;
+
+    registerBrokerLiveTick(testSymbol, testBid, testAsk, "mt5-ea-bridge");
+    const tick = getBiquoteLiveTickAny(testSymbol);
+
+    assert.ok(tick != null, "Tick must be retrieved from cache");
+    assert.strictEqual(tick.bid, testBid);
+    assert.strictEqual(tick.ask, testAsk);
+    assert.strictEqual(tick.price, (testBid + testAsk) / 2);
+    assert.ok(Date.now() - tick.ts < 1000, "Timestamp must reflect instantaneous arrival");
+  });
+
+  // RC-04: Realistic Bayesian Posterior Win Probability Invariant (Cap <= 58%)
+  it("RC-04: Enforces realistic Bayesian posterior win probability cap <= 58%", () => {
+    const gateRes = evaluateHighWinrateGate({
+      symbol: "EURUSD",
+      series: mockBars,
+      candidateDirection: "BUY",
+      entryPrice: 1.085,
+      stopLossPrice: 1.082,
+      takeProfitPrice: 1.091,
+    });
+
+    const precRes = evaluatePrecisionTradeSetup({
+      symbol: "EURUSD",
+      assetType: "FOREX",
+      barsExecution: mockBars,
+      candidateDirection: "BUY",
+      spreadPipsOrPct: 1.0,
+    });
+
+    assert.ok(
+      precRes.calibratedWinRatePct <= 58,
+      `calibratedWinRatePct ${precRes.calibratedWinRatePct} must be bounded <= 58%`
+    );
+    assert.ok(
+      gateRes.commentary.includes("Bayes") || gateRes.commentary.includes("Score"),
+      "Commentary must cite Bayesian posterior or Score without claiming 90% winrate"
+    );
   });
 });

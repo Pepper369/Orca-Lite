@@ -7,6 +7,7 @@ import {
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
 import { recordBotActivity } from "@/lib/services/bot-live-telemetry";
+import { registerBrokerLiveTick } from "@/lib/realtime/biquote-poll";
 import { rateLimit } from "@/lib/rate-limit";
 import { safeInternalErrorMessage, sanitizePlainText } from "@/app/api/_security";
 
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       ticketId?: string;
       mt5Ticket?: string | number;
-      status?: "FILLED" | "REJECTED" | "CLOSED";
+      status?: "FILLED" | "REJECTED" | "CLOSED" | "PARTIAL_CLOSED";
       executionPrice?: number;
       lots?: number;
       profitUsd?: number;
@@ -63,7 +64,13 @@ export async function POST(req: Request) {
 
     const mt5Id = body.mt5Ticket ? String(body.mt5Ticket) : existing.exchangeOrderId ?? null;
     const isRejected = body.status === "REJECTED";
-    const nextStatus = isRejected ? "REJECTED_EXCHANGE" : "FILLED";
+    const isPartial = body.status === "PARTIAL_CLOSED";
+    const isClosed = body.status === "CLOSED";
+    const nextStatus = isRejected ? "REJECTED_EXCHANGE" : isClosed ? "CANCELLED" : isPartial ? existing.status : "FILLED";
+
+    if (existing.symbol && Number(body.executionPrice) > 0) {
+      registerBrokerLiveTick(existing.symbol, Number(body.executionPrice), Number(body.executionPrice), `mt5-${conn.platform}`);
+    }
 
     await saveBotExecutionOrder({
       ...existing,
@@ -75,7 +82,9 @@ export async function POST(req: Request) {
         cleanMessage ||
         (isRejected
           ? `${conn.platform} từ chối vào lệnh MT5`
-          : `${conn.platform} MT5 đã khớp ticket #${mt5Id ?? "N/A"}`),
+          : isPartial
+            ? `${conn.platform} MT5 đã chốt 50% TP1 & dời SL về hòa vốn`
+            : `${conn.platform} MT5 đã khớp ticket #${mt5Id ?? "N/A"}`),
     });
 
     const patch: Parameters<typeof updateBrokerConnectionState>[1] = {

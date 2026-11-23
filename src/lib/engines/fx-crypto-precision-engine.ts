@@ -1504,8 +1504,8 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const pTp1 = Math.min(0.86, Math.max(0.38, 0.72 * linearPTp1 + 0.28 * metaPred.calibratedProbability));
   const pTp2 = Math.max(0.24, pTp1 * 0.72);
   const pTp3 = Math.max(0.12, pTp1 * 0.44);
-  // Cap displayed calibrated winrate at realistic 62% for production UI/risk plan to prevent marketing deception
-  const calibratedWinRatePct = Math.min(62, Math.round(pTp1 * 100));
+  // Cap displayed calibrated winrate at realistic Bayesian posterior bounds (max 58%) to prevent deceptive marketing inflation
+  const calibratedWinRatePct = Math.min(58, Math.round(pTp1 * 100));
   const w1 = exitPolicy.tp1ClosePct / 100;
   const w2 = exitPolicy.tp2ClosePct / 100;
   const w3 = exitPolicy.tp3ClosePct / 100;

@@ -10,6 +10,7 @@ import {
   verifyEaBearerToken,
 } from "@/lib/services/broker-vault-store";
 import { getForexSignalsHubData } from "@/lib/services/forex-signals-hub";
+import { registerBrokerLiveTick } from "@/lib/realtime/biquote-poll";
 import { rateLimit } from "@/lib/rate-limit";
 import { safeInternalErrorMessage } from "@/app/api/_security";
 
@@ -53,6 +54,32 @@ export async function GET(req: Request) {
     lastVerifiedAt: Date.now(),
     ...(conn.connectionStatus === "AWAITING_EA" ? { connectionStatus: "CONNECTED_VERIFIED", lastError: null } : {}),
   });
+
+  // Reverse Price Bridge: Register live sub-second broker quotes sent directly by MT5 EA
+  const brokerTickHeader = req.headers.get("x-orca-broker-tick");
+  if (brokerTickHeader) {
+    const parts = brokerTickHeader.split(",");
+    if (parts.length >= 3) {
+      const sym = parts[0]?.trim();
+      const bid = parseFloat(parts[1]?.trim() ?? "0");
+      const ask = parseFloat(parts[2]?.trim() ?? "0");
+      if (sym && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+        registerBrokerLiveTick(sym, bid, ask, `mt5-${conn.platform}`);
+      }
+    }
+  } else {
+    try {
+      const { searchParams } = new URL(req.url);
+      const sym = searchParams.get("sym");
+      const bid = parseFloat(searchParams.get("bid") ?? "0");
+      const ask = parseFloat(searchParams.get("ask") ?? "0");
+      if (sym && Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
+        registerBrokerLiveTick(sym, bid, ask, `mt5-${conn.platform}`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   if (conn.killSwitched || !conn.isActive) {
     return NextResponse.json(
