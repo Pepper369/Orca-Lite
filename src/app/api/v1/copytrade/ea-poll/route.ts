@@ -4,6 +4,7 @@ import { calculateProportionalCopySize } from "@/lib/engines/copy-trade-engine";
 import {
   hasExecutionOrderByIdempotency,
   listPendingEaOrdersForConnection,
+  countActivePositionsForConnection,
   saveBotExecutionOrder,
   updateBrokerConnectionState,
   verifyEaBearerToken,
@@ -78,6 +79,20 @@ export async function GET(req: Request) {
     );
   }
 
+  // Portfolio Heat & Max Open Positions Guard: Prevent concurrent position piling on correlated assets
+  const activeCount = await countActivePositionsForConnection(conn.id);
+  const maxAllowedPositions = Math.max(1, Math.min(5, conn.maxOpenPositions ?? 3));
+  if (activeCount >= maxAllowedPositions) {
+    return NextResponse.json(
+      {
+        ok: true,
+        hasSignal: false,
+        reason: `Portfolio Heat Limit: Đang giữ ${activeCount}/${maxAllowedPositions} vị thế mở, từ chối nhồi thêm lệnh mới để bảo toàn vốn`,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   // 1) Ưu tiên các lệnh đã được Dispatch riêng vào hàng đợi PENDING_EA của tài khoản này
   const pending = await listPendingEaOrdersForConnection(conn.id);
   if (pending.length > 0) {
@@ -143,13 +158,21 @@ export async function GET(req: Request) {
       );
     }
 
-    const scaledLots = calculateProportionalCopySize({
-      masterLotsOrQty: Math.max(0.01, candidate.recommendedLots || 0.2),
+    // Institutional Position Sizing: Bound follower lots to strictly limit loss to <= 0.85% balance
+    const rawScaledLots = calculateProportionalCopySize({
+      masterLotsOrQty: Math.max(0.01, candidate.recommendedLots || 0.1),
       masterCapitalUsd: 10_000,
       followerBalanceUsd: conn.balanceUsd,
-      riskMultiplier: conn.riskMultiplier,
+      riskMultiplier: Math.min(1.0, conn.riskMultiplier), // Cap riskMultiplier to 1.0x maximum
       assetType: "FOREX",
     });
+
+    // Hard Max Lot Safety Ceiling based on account balance ($10k max 0.25 lot for FX, 0.05 for Gold)
+    const isGold = candidate.pair.toUpperCase().startsWith("XAU") || candidate.pair.toUpperCase() === "GOLD";
+    const maxAllowedLots = isGold
+      ? Math.max(0.01, Number(((conn.balanceUsd / 10_000) * 0.05).toFixed(2)))
+      : Math.max(0.01, Number(((conn.balanceUsd / 10_000) * 0.20).toFixed(2)));
+    const scaledLots = Math.min(rawScaledLots, maxAllowedLots);
     const ticketId = `ea_${randomUUID().slice(0, 12)}`;
 
     await saveBotExecutionOrder({

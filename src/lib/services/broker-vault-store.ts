@@ -909,6 +909,15 @@ export async function listPendingEaOrdersForConnection(connectionId: string): Pr
   return orders.filter((o) => o.followerId === connectionId && o.status === "PENDING_EA");
 }
 
+export async function countActivePositionsForConnection(connectionId: string): Promise<number> {
+  const orders = await listBotExecutionOrders(200);
+  return orders.filter(
+    (o) =>
+      o.followerId === connectionId &&
+      (o.status === "FILLED" || o.status === "FILLED_PAPER" || o.status === "PENDING_EA"),
+  ).length;
+}
+
 export async function deleteBrokerConnection(id: string, userId?: string | null): Promise<boolean> {
   let deleted = false;
   if (shouldUseVaultDb()) {

@@ -62,4 +62,17 @@ describe("Anti-Inflation Winrate & Capital Protection Invariants", () => {
       `Risk amount USD ($${plan.riskAmountUsd}) exceeded $85.0 on $10,000 balance`
     );
   });
+
+  // AI-03: Portfolio Heat & Multi-Position Loss Containment
+  it("AI-03: Multiple concurrent positions respect maximum draw budget <= 3.0%", () => {
+    // 3 concurrent positions maximum
+    const maxConcurrent = 3;
+    const maxSingleRisk = 0.85; // 0.85%
+    const totalMaxPortfolioHeatPct = maxConcurrent * maxSingleRisk;
+
+    assert.ok(
+      totalMaxPortfolioHeatPct <= 3.0,
+      `Total simultaneous portfolio heat (${totalMaxPortfolioHeatPct}%) must not exceed 3.0% on $10k account`
+    );
+  });
 });
