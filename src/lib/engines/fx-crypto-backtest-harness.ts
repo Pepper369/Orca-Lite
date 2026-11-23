@@ -4,9 +4,11 @@ import { getAssetPipSize } from "./asset-precision";
 import {
   applySymmetricCusumFilter,
   calculateDeflatedSharpeRatio,
+  evaluateHftExecutionFeasibility,
   filterOnlineRegimeHmm,
   forecastHarRealizedVolatility,
   type CanonicalMarketScenarioId,
+  type HftQueueModelType,
 } from "./advanced-quant-math";
 import { evaluatePrecisionTradeSetup, type SetupGrade } from "./fx-crypto-precision-engine";
 import {
@@ -245,6 +247,14 @@ export interface SimulationExecutionOptions {
   marketSlippageR?: number;
   /** Minimum penetration through limit entry (as fraction of riskDist) required for queue fill */
   minLimitPenetrationFraction?: number;
+  /** Enable microscopic HFT queue position and latency simulation (hftbacktest parity) */
+  enableHftQueueSimulation?: boolean;
+  /** Queue model selection: "POWER_PROB" | "LOG_PROB" | "RISK_ADVERSE" | "DETERMINISTIC_FIFO" */
+  hftQueueModel?: HftQueueModelType;
+  /** Feed latency in ms */
+  feedLatencyMs?: number;
+  /** Order latency in ms */
+  orderLatencyMs?: number;
 }
 
 function simulateTradeOutcome(params: {
@@ -288,18 +298,46 @@ function simulateTradeOutcome(params: {
 
   if (entryMode === "LIMIT_PULLBACK") {
     let found = -1;
+    let computedFillPrice = intendedEntry;
     const minPen = (executionOptions?.minLimitPenetrationFraction ?? 0.015) * riskDist;
+
     for (let j = 0; j < Math.min(3, barsFuture.length); j++) {
       const b = barsFuture[j]!;
-      const penetration = direction === "BUY" ? intendedEntry - b.low : b.high - intendedEntry;
-      if (penetration >= minPen && intendedEntry <= b.high && intendedEntry >= b.low) {
-        found = j;
-        break;
+
+      if (executionOptions?.enableHftQueueSimulation) {
+        // HFT Microstructure Queue & Latency Simulation (hftbacktest parity)
+        const approxAtr = riskDist * 1.5;
+        const hftResult = evaluateHftExecutionFeasibility({
+          direction,
+          intendedEntryPrice: intendedEntry,
+          barLow: b.low,
+          barHigh: b.high,
+          barClose: b.close,
+          barVolume: b.volume || 10000,
+          barAtr: approxAtr,
+          queueModel: executionOptions.hftQueueModel ?? "POWER_PROB",
+          feedLatencyMs: executionOptions.feedLatencyMs ?? 25,
+          orderLatencyMs: executionOptions.orderLatencyMs ?? 45,
+          minPenetrationFraction: executionOptions.minLimitPenetrationFraction ?? 0.02,
+        });
+
+        if (hftResult.isFeasible) {
+          found = j;
+          computedFillPrice = hftResult.fillPrice;
+          break;
+        }
+      } else {
+        const penetration = direction === "BUY" ? intendedEntry - b.low : b.high - intendedEntry;
+        if (penetration >= minPen && intendedEntry <= b.high && intendedEntry >= b.low) {
+          found = j;
+          computedFillPrice = intendedEntry;
+          break;
+        }
       }
     }
     if (found === -1) return { filled: false, netR: 0, tp1Hit: false, barsHeld: 0 };
     startIdx = found;
-    fillPrice = intendedEntry;
+    fillPrice = computedFillPrice;
   } else {
     const marketSlip = (executionOptions?.marketSlippageR ?? 0.015) * riskDist;
     fillPrice = direction === "BUY" ? barsFuture[0]!.open + marketSlip : barsFuture[0]!.open - marketSlip;

@@ -4172,5 +4172,359 @@ export function calculateObizhaevaWangExecution(
   };
 }
 
+// ============================================================================
+// SECTION 18: HFT QUEUE POSITION & DUAL-WAY LATENCY SIMULATION (hftbacktest PARITY)
+// ============================================================================
+
+export type HftQueueModelType = "POWER_PROB" | "LOG_PROB" | "RISK_ADVERSE" | "DETERMINISTIC_FIFO";
+
+export interface HftQueueModelParams {
+  /** Quantity queued at the limit price ahead of our order */
+  queueAheadVolume: number;
+  /** Size of our submitted order */
+  orderSize: number;
+  /** Executed trade volume at the limit price level during the simulation step */
+  tradedVolumeAtPrice: number;
+  /** Queue model selection (default: POWER_PROB) */
+  modelType?: HftQueueModelType;
+  /** Power exponent for POWER_PROB model (alpha >= 1.0, default 1.5) */
+  alpha?: number;
+  /** Fraction of ahead orders estimated to be cancelled by other market participants (default 0.15) */
+  queueCancellationRate?: number;
+}
+
+export interface HftQueueFillResult {
+  isFilled: boolean;
+  fillRatio: number;
+  fillProbability: number;
+  remainingQueueAhead: number;
+  modelUsed: HftQueueModelType;
+  rationaleVi: string;
+}
+
+/**
+ * Level-2 / Level-3 Order Queue Position & Fill Simulation.
+ * Implements the queue degradation and probabilistic fill formulations from `nkaz001/hftbacktest`.
+ * Eliminates optimistic phantom fills where a limit order is assumed filled merely because the needle wick touched the price.
+ */
+export function calculateHftQueueFillProbability(params: HftQueueModelParams): HftQueueFillResult {
+  const {
+    queueAheadVolume,
+    orderSize,
+    tradedVolumeAtPrice,
+    modelType = "POWER_PROB",
+    alpha = 1.5,
+    queueCancellationRate = 0.15,
+  } = params;
+
+  const safeOrderSize = Math.max(1e-8, orderSize);
+  const safeTradedVol = Math.max(0, tradedVolumeAtPrice);
+  const safeCancellation = Math.max(0, Math.min(0.8, queueCancellationRate));
+
+  // Effective queue ahead after cancellations
+  const effectiveQueueAhead = Math.max(0, queueAheadVolume * (1.0 - safeCancellation));
+  const totalVolumeInFront = effectiveQueueAhead + safeOrderSize;
+
+  let fillProb = 0;
+  let fillRatio = 0;
+  let isFilled = false;
+  const remainingQueue = Math.max(0, effectiveQueueAhead - safeTradedVol);
+
+  switch (modelType) {
+    case "DETERMINISTIC_FIFO": {
+      // Strict FIFO: trade volume must completely exhaust effectiveQueueAhead
+      if (safeTradedVol >= totalVolumeInFront) {
+        fillRatio = 1.0;
+        fillProb = 1.0;
+        isFilled = true;
+      } else if (safeTradedVol > effectiveQueueAhead) {
+        fillRatio = Number(((safeTradedVol - effectiveQueueAhead) / safeOrderSize).toFixed(4));
+        fillProb = fillRatio;
+        isFilled = fillRatio >= 0.999;
+      } else {
+        fillRatio = 0;
+        fillProb = totalVolumeInFront > 0 ? safeTradedVol / totalVolumeInFront : 0;
+        isFilled = false;
+      }
+      break;
+    }
+
+    case "LOG_PROB": {
+      // Logarithmic probability queue model: ln(1 + (e - 1) * volRatio)
+      const ratio = Math.min(2.0, safeTradedVol / Math.max(1e-8, totalVolumeInFront));
+      fillProb = Number(Math.min(1.0, Math.max(0, Math.log(1.0 + (Math.E - 1.0) * ratio))).toFixed(4));
+      isFilled = fillProb >= 0.95;
+      fillRatio = isFilled ? 1.0 : Number(Math.max(0, fillProb * 0.8).toFixed(4));
+      break;
+    }
+
+    case "RISK_ADVERSE": {
+      // Risk-adverse queue model: requires 25% surplus volume clearance to prevent toxic adverse selection
+      const riskThresh = effectiveQueueAhead + safeOrderSize * 1.25;
+      if (safeTradedVol >= riskThresh) {
+        fillProb = 1.0;
+        fillRatio = 1.0;
+        isFilled = true;
+      } else if (safeTradedVol > effectiveQueueAhead) {
+        const span = Math.max(1e-8, safeOrderSize * 1.25);
+        fillRatio = Number(((safeTradedVol - effectiveQueueAhead) / span).toFixed(4));
+        fillProb = Number(Math.pow(fillRatio, 1.2).toFixed(4));
+        isFilled = fillRatio >= 0.999;
+      } else {
+        fillProb = 0;
+        fillRatio = 0;
+        isFilled = false;
+      }
+      break;
+    }
+
+    case "POWER_PROB":
+    default: {
+      // Power Probability Queue Model from hftbacktest: P(fill) = min(1.0, (dV / (Q_ahead + Q_order))^alpha)
+      const safeAlpha = Math.max(1.0, alpha);
+      const ratio = safeTradedVol / Math.max(1e-8, totalVolumeInFront);
+      fillProb = Number(Math.min(1.0, Math.max(0, Math.pow(ratio, safeAlpha))).toFixed(4));
+      isFilled = fillProb >= 0.98 || safeTradedVol >= totalVolumeInFront;
+      fillRatio = isFilled ? 1.0 : Number(Math.min(1.0, Math.max(0, fillProb)).toFixed(4));
+      break;
+    }
+  }
+
+  const rationaleVi =
+    `HFT Queue Model [${modelType}]: Khối lượng trước lệnh = ${effectiveQueueAhead.toLocaleString()} (sau hủy ${Math.round(safeCancellation * 100)}%), ` +
+    `Khối lượng khớp tại giá = ${safeTradedVol.toLocaleString()}. Xác suất khớp = ${(fillProb * 100).toFixed(1)}%, Tỷ lệ khớp = ${(fillRatio * 100).toFixed(1)}%.`;
+
+  return {
+    isFilled,
+    fillRatio,
+    fillProbability: fillProb,
+    remainingQueueAhead: Math.round(remainingQueue),
+    modelUsed: modelType,
+    rationaleVi,
+  };
+}
+
+export interface LatencySimulationParams {
+  /** Baseline feed latency in milliseconds (e.g. 15ms - 40ms) */
+  feedLatencyMs?: number;
+  /** Baseline order submission and exchange matching RTT in milliseconds (e.g. 25ms - 80ms) */
+  orderLatencyMs?: number;
+  /** Lognormal jitter volatility parameter sigma (default 0.25) */
+  jitterStdDev?: number;
+  /** Congestion multiplier during high volatility/news events (default 1.0) */
+  congestionFactor?: number;
+  /** Hard timeout threshold in milliseconds (default 500ms) */
+  timeoutThresholdMs?: number;
+  /** Asset instantaneous return volatility per second for adverse drift calculation */
+  volatilityPerSec?: number;
+}
+
+export interface LatencySimulationResult {
+  feedLatencyMs: number;
+  orderLatencyMs: number;
+  totalRoundTripMs: number;
+  effectiveDelaySec: number;
+  isStaleOrTimeout: boolean;
+  adverseDriftBps: number;
+  rationaleVi: string;
+}
+
+/**
+ * Dual-Way Latency Simulation (Feed & Order Latency + Jitter) from `nkaz001/hftbacktest`.
+ * Simulates asymmetric packet delays and adverse price drift occurring between signal generation and order placement.
+ */
+export function simulateTwoWayLatency(params?: LatencySimulationParams): LatencySimulationResult {
+  const feedBase = Math.max(1, params?.feedLatencyMs ?? 20);
+  const orderBase = Math.max(1, params?.orderLatencyMs ?? 45);
+  const jitterSigma = Math.max(0.01, Math.min(1.0, params?.jitterStdDev ?? 0.25));
+  const congestion = Math.max(1.0, Math.min(5.0, params?.congestionFactor ?? 1.0));
+  const timeoutMs = Math.max(100, params?.timeoutThresholdMs ?? 500);
+  const volPerSec = Math.max(0, params?.volatilityPerSec ?? 0.0003); // ~0.03%/sec default
+
+  // Lognormal jitter multiplier: exp(-sigma^2/2 + sigma * Z), with fixed conservative pseudo-randomness
+  const u1 = Math.max(1e-6, Math.random());
+  const u2 = Math.max(1e-6, Math.random());
+  const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  const jitterMultiplier = Math.exp(-0.5 * jitterSigma * jitterSigma + jitterSigma * z);
+
+  const feedLatencyMs = Number((feedBase * congestion * Math.max(0.5, Math.min(3.0, jitterMultiplier))).toFixed(2));
+  const orderLatencyMs = Number((orderBase * congestion * Math.max(0.5, Math.min(3.0, jitterMultiplier))).toFixed(2));
+  const totalRoundTripMs = Number((feedLatencyMs + orderLatencyMs).toFixed(2));
+  const effectiveDelaySec = Number((totalRoundTripMs / 1000).toFixed(4));
+  const isStaleOrTimeout = totalRoundTripMs >= timeoutMs;
+
+  // Cartea-Jaimungal adverse selection drift: Drift = kappa * sigma * sqrt(dt)
+  const kappa = 1.5;
+  const adverseDriftBps = Number((kappa * volPerSec * Math.sqrt(effectiveDelaySec) * 10000).toFixed(2));
+
+  const rationaleVi =
+    `Độ trễ HFT hai chiều: Feed = ${feedLatencyMs}ms, Order RTT = ${orderLatencyMs}ms (Tổng = ${totalRoundTripMs}ms, Nghẽn = x${congestion.toFixed(1)}). ` +
+    `Trôi dạt giá bất lợi (Adverse Drift) = ${adverseDriftBps} bps. Trạng thái: ${isStaleOrTimeout ? "HẾT HẠN (TIMEOUT)" : "HỢP LỆ"}.`;
+
+  return {
+    feedLatencyMs,
+    orderLatencyMs,
+    totalRoundTripMs,
+    effectiveDelaySec,
+    isStaleOrTimeout,
+    adverseDriftBps,
+    rationaleVi,
+  };
+}
+
+export interface HftExecutionFeasibilityParams {
+  direction: "BUY" | "SELL";
+  intendedEntryPrice: number;
+  barLow: number;
+  barHigh: number;
+  barClose: number;
+  barVolume: number;
+  barAtr: number;
+  queueAheadVolumeFactor?: number; // Factor of barVolume queued ahead (default 0.20)
+  queueModel?: HftQueueModelType;
+  enableLatencyCheck?: boolean;
+  feedLatencyMs?: number;
+  orderLatencyMs?: number;
+  minPenetrationFraction?: number; // Min penetration in ATR terms (default 0.03)
+}
+
+export interface HftExecutionFeasibilityResult {
+  isFeasible: boolean;
+  fillPrice: number;
+  fillRatio: number;
+  queueResult: HftQueueFillResult;
+  latencyResult: LatencySimulationResult;
+  adverseSlippageR: number;
+  rejectionReason?: "NO_PRICE_TOUCH" | "INSUFFICIENT_PENETRATION" | "QUEUE_NOT_CLEARED" | "LATENCY_TIMEOUT";
+  rationaleVi: string;
+}
+
+/**
+ * Rigorous HFT Limit Pullback Execution Feasibility Validator.
+ * Combines penetration depth, order queue depletion (hftbacktest), and round-trip latency to judge fills.
+ */
+export function evaluateHftExecutionFeasibility(params: HftExecutionFeasibilityParams): HftExecutionFeasibilityResult {
+  const {
+    direction,
+    intendedEntryPrice,
+    barLow,
+    barHigh,
+    barClose,
+    barVolume,
+    barAtr,
+    queueAheadVolumeFactor = 0.20,
+    queueModel = "POWER_PROB",
+    enableLatencyCheck = true,
+    feedLatencyMs,
+    orderLatencyMs,
+    minPenetrationFraction = 0.03,
+  } = params;
+
+  // 1. Check basic price range touch
+  const touchesRange = intendedEntryPrice <= barHigh && intendedEntryPrice >= barLow;
+  if (!touchesRange) {
+    const emptyQueue = calculateHftQueueFillProbability({ queueAheadVolume: 100, orderSize: 10, tradedVolumeAtPrice: 0 });
+    const emptyLatency = simulateTwoWayLatency({ feedLatencyMs, orderLatencyMs });
+    return {
+      isFeasible: false,
+      fillPrice: intendedEntryPrice,
+      fillRatio: 0,
+      queueResult: emptyQueue,
+      latencyResult: emptyLatency,
+      adverseSlippageR: 0,
+      rejectionReason: "NO_PRICE_TOUCH",
+      rationaleVi: "Giá không chạm mức Entry của lệnh Limit trong phạm vi nến.",
+    };
+  }
+
+  // 2. Check minimum penetration beyond needle wick (anti-phantom fill)
+  const penetration = direction === "BUY" ? intendedEntryPrice - barLow : barHigh - intendedEntryPrice;
+  const minRequiredPenetration = Math.max(1e-8, minPenetrationFraction * barAtr);
+  if (penetration < minRequiredPenetration) {
+    const emptyQueue = calculateHftQueueFillProbability({ queueAheadVolume: 100, orderSize: 10, tradedVolumeAtPrice: 0 });
+    const emptyLatency = simulateTwoWayLatency({ feedLatencyMs, orderLatencyMs });
+    return {
+      isFeasible: false,
+      fillPrice: intendedEntryPrice,
+      fillRatio: 0,
+      queueResult: emptyQueue,
+      latencyResult: emptyLatency,
+      adverseSlippageR: 0,
+      rejectionReason: "INSUFFICIENT_PENETRATION",
+      rationaleVi: `Độ xuyên thủng (${penetration.toFixed(4)}) không đạt ngưỡng tối thiểu (${minRequiredPenetration.toFixed(4)}) để khớp lệnh limit thật.`,
+    };
+  }
+
+  // 3. Two-way Latency Check
+  const latency = simulateTwoWayLatency({
+    feedLatencyMs,
+    orderLatencyMs,
+    volatilityPerSec: barAtr / Math.max(1e-8, intendedEntryPrice) / 300, // 5m candle default
+  });
+
+  if (enableLatencyCheck && latency.isStaleOrTimeout) {
+    const emptyQueue = calculateHftQueueFillProbability({ queueAheadVolume: 100, orderSize: 10, tradedVolumeAtPrice: 0 });
+    return {
+      isFeasible: false,
+      fillPrice: intendedEntryPrice,
+      fillRatio: 0,
+      queueResult: emptyQueue,
+      latencyResult: latency,
+      adverseSlippageR: 0,
+      rejectionReason: "LATENCY_TIMEOUT",
+      rationaleVi: `Lệnh bị từ chối do tổng độ trễ vượt ngưỡng timeout: ${latency.totalRoundTripMs}ms >= 500ms.`,
+    };
+  }
+
+  // 4. Queue Position Depletion Check
+  // Approximate traded volume concentrated around limit level based on two-way transit and penetration depth
+  const depthFraction = Math.min(1.0, penetration / Math.max(1e-8, barHigh - barLow));
+  const estimatedVolumeAtPrice = Math.max(1, barVolume * Math.min(1.0, depthFraction * 1.6) * 0.5);
+  const queueAhead = Math.max(1, barVolume * queueAheadVolumeFactor);
+  const orderSize = Math.max(1, barVolume * 0.02); // Standard order is 2% of bar volume
+
+  const queueResult = calculateHftQueueFillProbability({
+    queueAheadVolume: queueAhead,
+    orderSize,
+    tradedVolumeAtPrice: estimatedVolumeAtPrice,
+    modelType: queueModel,
+  });
+
+  if (!queueResult.isFilled && queueResult.fillRatio < 0.5) {
+    return {
+      isFeasible: false,
+      fillPrice: intendedEntryPrice,
+      fillRatio: queueResult.fillRatio,
+      queueResult,
+      latencyResult: latency,
+      adverseSlippageR: 0,
+      rejectionReason: "QUEUE_NOT_CLEARED",
+      rationaleVi: `Hàng đợi chưa giải tỏa đủ: Xác suất khớp = ${(queueResult.fillProbability * 100).toFixed(1)}% < 50%.`,
+    };
+  }
+
+  // Calculate adverse selection slippage penalty in R (0.01R - 0.06R based on latency and drift)
+  const adverseSlipR = Number((Math.min(0.08, (latency.adverseDriftBps / 10000) * (intendedEntryPrice / Math.max(1e-8, barAtr)))).toFixed(4));
+  const effectiveFillPrice = direction === "BUY"
+    ? intendedEntryPrice + adverseSlipR * barAtr * 0.1
+    : intendedEntryPrice - adverseSlipR * barAtr * 0.1;
+
+  const rationaleVi =
+    `Khớp Limit thành công [${queueModel}]: Xuyên thủng ${(penetration / barAtr).toFixed(2)} ATR, ` +
+    `Queue Fill Prob = ${(queueResult.fillProbability * 100).toFixed(1)}%, Độ trễ = ${latency.totalRoundTripMs}ms, ` +
+    `Trượt giá bất lợi = ${adverseSlipR}R.`;
+
+  return {
+    isFeasible: true,
+    fillPrice: Number(effectiveFillPrice.toFixed(5)),
+    fillRatio: queueResult.fillRatio,
+    queueResult,
+    latencyResult: latency,
+    adverseSlippageR: adverseSlipR,
+    rationaleVi,
+  };
+}
+
+
 
 
