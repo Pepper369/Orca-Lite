@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useApi } from "@/lib/hooks";
-import { clientCacheGet, clientCacheSet } from "@/lib/client-cache";
+import { prefetchApi, useApi } from "@/lib/hooks";
+import { clientCacheGet } from "@/lib/client-cache";
 import type { MarketSnapshot } from "@/lib/services/market";
-import type { ApiResponse } from "@/lib/types";
 
 const SNAP_URL = "/api/v1/market/snapshot";
 const SS_KEY = "orca:ticker:snap:v1";
@@ -61,19 +60,11 @@ function pickSnap(live: MarketSnapshot | null | undefined): MarketSnapshot | nul
   return readSessionSnap();
 }
 
-/** Prefetch snapshot early — call from providers on boot. */
+/** Prefetch snapshot early — deduped via SSOT prefetchApi (prevents 5x duplicate boot fetches). */
 export function prefetchMarketSnapshot() {
   if (typeof window === "undefined") return;
   if (clientCacheGet(SNAP_URL, 45_000)) return;
-  void fetch(SNAP_URL, { headers: { Accept: "application/json" }, cache: "no-store" })
-    .then((r) => r.json())
-    .then((json: ApiResponse<MarketSnapshot>) => {
-      if (json?.success && json.data) {
-        clientCacheSet(SNAP_URL, json);
-        if (json.data.indices?.length) writeSessionSnap(json.data);
-      }
-    })
-    .catch(() => undefined);
+  prefetchApi(SNAP_URL, 15_000);
 }
 
 function useHydrated() {

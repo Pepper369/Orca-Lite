@@ -144,7 +144,12 @@ export function OrderBookPanel({
         if (!closed) setSseState("open");
       };
       es.onerror = () => {
-        if (!closed) setSseState("error");
+        if (!closed) {
+          setSseState("error");
+          // Close immediately on upstream 502/unavailable so browser stops spamming reconnect retries; REST useApi fallback takes over
+          es?.close();
+          es = null;
+        }
       };
       const applyBookEvent = (ev: Event) => {
         try {

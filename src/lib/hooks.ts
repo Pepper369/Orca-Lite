@@ -137,6 +137,7 @@ export function useApi<T>(
   const fallbackData = useMemo(() => {
     if (opts?.fallbackData) return opts.fallbackData;
     if (opts?.initialData !== undefined && opts.initialData !== null) {
+      // Never write static bootstrap initialData into clientCacheSet so real API fetches are never skipped
       const snap: ApiResponse<T> = {
         success: true,
         data: opts.initialData,
@@ -146,7 +147,6 @@ export function useApi<T>(
           ageMs: 0,
         },
       };
-      if (url && typeof window !== "undefined") clientCacheSet(url, snap);
       return snap;
     }
     if (!url || !keepPrev) return undefined;
@@ -168,8 +168,8 @@ export function useApi<T>(
   const hasWarm = url ? clientCacheHas(url, 90_000) : false;
   const refreshInterval = visible && rt.liveUpdates && !inNavFreeze ? adaptiveBase : 0;
 
-  // Align client timeout with server budget; avoid truncating revalidation while cached data is already displayed
-  const effectiveTimeout = opts?.timeoutMs ?? FETCH_TIMEOUT_MS;
+  // Guard against cold-start upstream latencies (5-10s): never abort before 15s unless caller explicitly asks for longer
+  const effectiveTimeout = Math.max(opts?.timeoutMs ?? FETCH_TIMEOUT_MS, 15_000);
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<ApiResponse<T>>(
     url,
@@ -226,5 +226,5 @@ export function useApi<T>(
 export function prefetchApi(url: string | null | undefined, timeoutMs = FETCH_TIMEOUT_MS): void {
   if (!url || typeof window === "undefined") return;
   if (clientCacheHas(url, 45_000)) return;
-  void fetcher(url, timeoutMs).catch(() => undefined);
+  void fetcher(url, Math.max(timeoutMs, 15_000)).catch(() => undefined);
 }

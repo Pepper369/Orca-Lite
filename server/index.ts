@@ -29,9 +29,11 @@ const app = new Hono();
 const isProd = process.env.NODE_ENV === "production";
 const inlineScriptHashes = computeInlineScriptHashes();
 
-// Global Middleware (opt-in HTTP request logger to avoid blocking stdout I/O in dev)
+// API request logger (enabled for /api/* in dev so API traffic is visible without spamming static assets)
 if (process.env.ORCA_HTTP_LOG === "1") {
   app.use("*", logger());
+} else if (!isProd && process.env.ORCA_HTTP_LOG !== "0") {
+  app.use("/api/*", logger());
 }
 app.use("*", async (c, next) => {
   await next();
@@ -441,8 +443,10 @@ const hasDist = fs.existsSync(path.resolve(process.cwd(), "dist", "index.html"))
 async function startUnifiedServer() {
   const honoListener = getRequestListener(app.fetch);
 
-  // Auto-boot background local C++ AI Inference Engine if GGUF model is present
-  await ensureLlamaServerRunning();
+  // Boot local C++ AI Inference Engine asynchronously so port 3000 listens immediately (no 10-15s startup block)
+  void ensureLlamaServerRunning().catch((err) =>
+    console.warn("[AI-Runtime] Background llama-server boot failed:", err),
+  );
 
   if (isProd || (!process.env.NODE_ENV && hasDist && process.env.START_PROD === "true")) {
     // Production SPA Static File Serving via Hono
@@ -515,16 +519,14 @@ async function startUnifiedServer() {
       console.log(`  ⚡ Mode:             Development (In-Process Vite HMR + Hono Engine)`);
       console.log(`  ⚡ Fixed Single Port: ${port} (Zero Multi-Port Confusion, No Proxy)\n`);
 
-      // Defer background workers 3s in dev so Vite's initial module compile gets full CPU priority
-      setTimeout(() => {
-        import("@/lib/services/fast-datafeed-hub")
-          .then((m) => m.initFastDatafeedWorker())
-          .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
+      // Start Fast Datafeed & Auto-Trade workers immediately once port is listening so caches warm early
+      import("@/lib/services/fast-datafeed-hub")
+        .then((m) => m.initFastDatafeedWorker())
+        .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
 
-        import("@/lib/services/auto-trade-worker")
-          .then((m) => m.initAutoTradeWorker())
-          .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
-      }, 3_000);
+      import("@/lib/services/auto-trade-worker")
+        .then((m) => m.initAutoTradeWorker())
+        .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
     });
 
     const cleanup = async () => {
