@@ -5,6 +5,7 @@ import {
   evaluatePositiveTrailingStop,
   DEFAULT_ROI_SCHEDULE,
 } from "../engines/bot-trade-lifecycle-engine";
+import { computeExecutionQualityTelemetry } from "../engines/bot-telemetry-types";
 
 describe("Bot Trade Lifecycle & Dynamic Exit Engine (Freqtrade Parity)", () => {
   it("evaluateDynamicTimeDecayRoiExit: adheres to Freqtrade time-decay ROI schedule", () => {
@@ -151,5 +152,84 @@ describe("Bot Trade Lifecycle & Dynamic Exit Engine (Freqtrade Parity)", () => {
 
     assert.equal(retraceRes.isTrailingActive, true);
     assert.equal(retraceRes.newStopLossPrice, activeRes.newStopLossPrice);
+  });
+
+  it("computeExecutionQualityTelemetry: enforces Truth-in-Data nulls on empty orders and computes slippage/runner conversion", () => {
+    const empty = computeExecutionQualityTelemetry([], []);
+    assert.equal(empty.trackedOrdersCount, 0);
+    assert.equal(empty.avgEntrySlippageR, null);
+    assert.equal(empty.tp1HitRatePct, null);
+    assert.equal(empty.runnerConversionPct, null);
+    assert.equal(empty.activeRunnersCount, 0);
+
+    const sample = computeExecutionQualityTelemetry(
+      [
+        // 1) LIMIT_PULLBACK hit TP1 -> TP2_TRAIL runner (SL moved to profit lock; 1R inferred via tp1/0.72)
+        {
+          status: "FILLED",
+          direction: "BUY",
+          entryPrice: 100,
+          executionPrice: 100.2, // 0.2 / 2.0 = 0.10R
+          stopLossPrice: 100.32, // Trailed to +0.16R
+          takeProfit1: 101.44, // 0.72R => risk1R = 2.0
+          positionStage: "TP2_TRAIL",
+          realizedPnlUsd: 45,
+          message: "[AUTO TP2] Chốt 30% + khóa lãi",
+          entryMode: "LIMIT_PULLBACK",
+        },
+        // 2) Hit TP1 then closed on TRAILING PROFIT LOCK
+        {
+          status: "FILLED",
+          direction: "SELL",
+          entryPrice: 200,
+          executionPrice: 199.8, // 0.2 / 4.0 = 0.05R
+          stopLossPrice: 204,
+          takeProfit1: 197.12,
+          positionStage: "CLOSED",
+          realizedPnlUsd: 28,
+          message: "[TRAILING PROFIT LOCK] Đóng runner có lãi sau TP1",
+          entryMode: "LIMIT_PULLBACK",
+        },
+        // 3) Full Stop-Loss (AUTO SL GUARD)
+        {
+          status: "FILLED",
+          direction: "BUY",
+          entryPrice: 50,
+          executionPrice: 50.15, // 0.15 / 1.0 = 0.15R
+          stopLossPrice: 49,
+          takeProfit1: 50.72,
+          positionStage: "CLOSED",
+          realizedPnlUsd: -20,
+          message: "[AUTO SL GUARD] Chạm cắt lỗ cấu trúc",
+          entryMode: "MARKET_CONFIRMED",
+        },
+        // 4) Rejected order must be excluded from tracked filled metrics
+        {
+          status: "REJECTED_SLIPPAGE",
+          direction: "BUY",
+          entryPrice: 100,
+          executionPrice: 105,
+          stopLossPrice: 98,
+          takeProfit1: 101.44,
+          positionStage: "CLOSED",
+          realizedPnlUsd: 0,
+          message: "Slippage exceeded",
+          entryMode: "LIMIT_PULLBACK",
+        },
+      ],
+      [{ positionStage: "TP2_TRAIL" }, { positionStage: "INITIAL" }],
+    );
+
+    assert.equal(sample.trackedOrdersCount, 3);
+    assert.equal(sample.resolvedOrdersCount, 3);
+    assert.equal(sample.limitPullbackCount, 2);
+    assert.equal(sample.avgEntrySlippageR, 0.1); // mean(0.10, 0.05, 0.15) = 0.100
+    assert.equal(sample.tp1HitCount, 2);
+    assert.equal(sample.tp1HitRatePct, 66.7);
+    assert.equal(sample.runnerConvertedCount, 1);
+    assert.equal(sample.runnerConversionPct, 50);
+    assert.equal(sample.profitLockStopsCount, 1);
+    assert.equal(sample.fullSlStopsCount, 1);
+    assert.equal(sample.activeRunnersCount, 1);
   });
 });

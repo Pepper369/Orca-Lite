@@ -41,6 +41,7 @@ import {
   calculateMarkToMarketPnlUsd,
   calculatePositionRoePct,
   classifyAccountEnvironment,
+  computeExecutionQualityTelemetry,
   evaluateBotTradingTimeline,
   isAccountPausedByTimeline,
   type AccountPnlTelemetry,
@@ -1403,6 +1404,7 @@ export async function buildBotLiveTelemetrySnapshot(
   const alphaDecaySummary = getAlphaDecayCacheSummary();
   const thesisEventsCount = ACTIVITY_RING.filter((e) => e.message.includes("ALPHAEAR THESIS")).length;
   const roiDecayExitsCount = ACTIVITY_RING.filter((e) => e.message.includes("FREQTRADE ROI EXIT")).length;
+  const executionQuality = computeExecutionQualityTelemetry(orders, allOpenPositions);
 
   return {
     generatedAt: now,
@@ -1437,6 +1439,7 @@ export async function buildBotLiveTelemetrySnapshot(
       alphaDecaySummary,
       thesisEventsCount,
       roiDecayExitsCount,
+      executionQuality,
     },
   };
 }

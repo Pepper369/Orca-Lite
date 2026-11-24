@@ -910,11 +910,20 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const signedSignalBody = isBuy ? lastBar.close - lastBar.open : lastBar.open - lastBar.close;
   const signedRet3 = n >= 4 ? (isBuy ? currentPrice - closes[n - 4]! : closes[n - 4]! - currentPrice) : 0;
   const signedDistE21Atr = atr14 > 0 ? (isBuy ? (currentPrice - e21) / atr14 : (e21 - currentPrice) / atr14) : 0;
+  const signedRet48Atr =
+    n >= 48 && atr14 > 0
+      ? ((currentPrice - closes[n - 48]!) / atr14) * (isBuy ? 1 : -1)
+      : 0;
+  const signedSlope21Atr =
+    atr14 > 0 ? ((e21 - e21Prev8) / atr14) * (isBuy ? 1 : -1) : 0;
   const isRealCryptoStream = assetType === "CRYPTO" && n >= 48 && lastBar.time >= 1715000000;
+  const isRealForexStream = assetType === "FOREX" && n >= 48 && lastBar.time >= 1715000000;
   const isCryptoCounterMacroDrift =
     isRealCryptoStream &&
     ((isBuy && (ret48Pct < -1.5 || e21SlopePct8 < -0.45)) ||
       (!isBuy && (ret48Pct > 1.5 || e21SlopePct8 > 0.45)));
+  const isForexCounterMacroDrift =
+    isRealForexStream && (signedRet48Atr < -1.0 || signedSlope21Atr < -0.30);
   const isCryptoSignalBarChase =
     isRealCryptoStream &&
     (signedSignalBody > atr14 * 0.30 || signedRet3 > atr14 * 0.40);
@@ -932,6 +941,12 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
       `Ngược xu hướng trung hạn 48 nến (${ret48Pct.toFixed(2)}%, dốc EMA21 ${e21SlopePct8.toFixed(2)}%) — chặn bắt dao rơi sớm`,
     );
     gatesFailed.push("Gate 3f (Macro Drift Veto): Ngược đà trượt giá trung hạn khi EMA21 còn dốc mạnh");
+    precisionScore -= 16;
+  } else if (isForexCounterMacroDrift) {
+    vetoReasons.push(
+      `FX/Gold ngược đà trung hạn 48 nến (${signedRet48Atr.toFixed(2)} ATR, dốc EMA21 ${signedSlope21Atr.toFixed(2)} ATR) — chặn bắt dao ngược dòng`,
+    );
+    gatesFailed.push("Gate 3f (FX Macro Drift Veto): Ngược xu hướng ATR 48 nến hoặc độ dốc EMA21");
     precisionScore -= 16;
   } else if (isCryptoSignalBarChase || isCryptoLateLegExtension) {
     vetoReasons.push(
@@ -1457,10 +1472,11 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
   }
 
-  // Scenario-conditioned TP1 & TP3 distances (high-winrate 0.72R harvest on real Crypto streams; S1/S2 dynamic on FX)
-  const tp1Dist = isRealCryptoStream
-    ? stopDist * 0.72
-    : stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
+  // Scenario-conditioned TP1 & TP3 distances (high-winrate 0.72R harvest on real Crypto & FX/Gold streams)
+  const tp1Dist =
+    isRealCryptoStream || isRealForexStream
+      ? stopDist * 0.72
+      : stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
   const cappedTp3R = Math.min(2.85, exitPolicy.tp3RMultiple);
   const tp3Dist = Math.max(target2Dist * 1.22, stopDist * cappedTp3R);
 
@@ -1493,15 +1509,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 6: SL cấu trúc & Net R:R 1:${netRiskReward} (Friction ${frictionR}R)`);
   }
 
-  // GATE 8: SuperTrend Volatility Ratchet + Stochastic Pullback Inflection + Anti-Adverse-Selection Entry Proximity
+  // GATE 8: SuperTrend Volatility Ratchet + Stochastic Pullback Inflection + FX Active Session & Anti-Adverse-Selection
   if (n >= 45 && candidateDirection === "AUTO") {
+    const isRealStream = isRealCryptoStream || isRealForexStream;
     const stAligned =
       execCtx.superTrendDir == null ||
       (isBuy ? execCtx.superTrendDir === "up" : execCtx.superTrendDir === "down");
     const isLaminarCleanTrend =
-      !isRealCryptoStream && erVal >= 0.25 && whipsawFlips <= 2 && htfMatches;
+      !isRealStream && erVal >= 0.25 && whipsawFlips <= 2 && htfMatches;
     const expectedSweepSide = isBuy ? "SELL_SIDE_SWEPT" : "BUY_SIDE_SWEPT";
-    const hasRecentPrimeTurtleSweep = isRealCryptoStream
+    const hasRecentPrimeTurtleSweep = isRealStream
       ? adxVal < 19 &&
         ict.recentSweeps.some(
           (s) =>
@@ -1515,9 +1532,12 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     const hasPrimeReversalOverride =
       hasRecentPrimeTurtleSweep ||
       isLiveImpulseReversalPivot ||
-      (!isRealCryptoStream && hasExhaustionShift);
+      (!isRealStream && hasExhaustionShift);
+    const barUtcHour = new Date(lastBar.time * 1000).getUTCHours();
+    const isForexActiveSession =
+      !isRealForexStream || (barUtcHour >= 7 && barUtcHour <= 20);
     const stochHookAligned =
-      !isRealCryptoStream ||
+      !isRealStream ||
       hasRecentPrimeTurtleSweep ||
       execCtx.stochK == null ||
       execCtx.stochPrevK == null ||
@@ -1545,6 +1565,12 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
         `Ngược dải biến động SuperTrend (${execCtx.superTrendDir?.toUpperCase()}) khi chưa có Prime Sweep+MSS vùng nén`,
       );
       gatesFailed.push("Gate 8a (SuperTrend Ratchet Veto): Chặn bắt ngược xu hướng biến động ATR");
+    } else if (isRealForexStream && !isForexActiveSession) {
+      precisionScore -= 12;
+      vetoReasons.push(
+        `Ngoài khung thanh khoản chính London/New York (${String(barUtcHour).padStart(2, "0")}:00 UTC) — tránh nhiễu phiên Á`,
+      );
+      gatesFailed.push("Gate 8d (FX Session Liquidity Veto): Chỉ mở lệnh FX/Gold trong phiên thanh khoản London/NY (07:00–20:59 UTC)");
     } else if ((!stochHookAligned || !rsiPullbackRoomOk || !noHeavyOpposingWick) && !isLiveImpulseReversalPivot) {
       precisionScore -= 10;
       vetoReasons.push(
@@ -1562,7 +1588,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     } else {
       // Pure quality gate: do not inflate precisionScore so marginal Grade B setups are never promoted to A/A+
       gatesPassed.push(
-        `Gate 8 (High-Winrate Inflection): Đồng thuận SuperTrend + Stochastic Hook (Gap ${naturalEntryGapR.toFixed(2)}R)`,
+        isRealForexStream
+          ? `Gate 8 (FX High-Winrate Inflection): Phiên London/NY (${String(barUtcHour).padStart(2, "0")}h UTC) + Stochastic Hook + Macro Alignment`
+          : `Gate 8 (High-Winrate Inflection): Đồng thuận SuperTrend + Stochastic Hook (Gap ${naturalEntryGapR.toFixed(2)}R)`,
       );
     }
   }

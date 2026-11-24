@@ -518,3 +518,50 @@ test("Gate 8 SSOT: SharedBarContext zero-allocation SuperTrend/Stochastic parity
   );
   assert.equal(ctx.superTrendDir, "down", "Clean downtrend must hold bearish SuperTrend");
 });
+
+test("Forex Gate 8d & 0.72R TP1 SSOT: Enforces London/NY session guard on real FX stream and unified 0.72R TP1", () => {
+  const eurSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "EURUSD")!;
+  const { bars } = generateRegimeBars(eurSpec, "CLEAN_UPTREND_RETEST", 303, 72);
+
+  // Align last bar to 03:00 UTC (dead Asian session) in May 2024+ real-market epoch
+  const asianEndTs = Date.UTC(2025, 4, 15, 3, 0, 0) / 1000;
+  const asianBars: OhlcvBar[] = bars.map((b, idx) => ({
+    ...b,
+    time: asianEndTs - (bars.length - 1 - idx) * 3600,
+  }));
+  const asianEval = evaluatePrecisionTradeSetup({
+    symbol: "EURUSD",
+    assetType: "FOREX",
+    barsExecution: asianBars,
+    spreadPipsOrPct: eurSpec.spreadPipsOrPct,
+  });
+  assert.ok(
+    asianEval.gatesFailed.some((g) => g.includes("Gate 8d (FX Session Liquidity Veto)")),
+    `Real FX bar at 03:00 UTC must trigger Gate 8d session veto, got gatesFailed=${JSON.stringify(asianEval.gatesFailed)}`,
+  );
+
+  // Align last bar to 13:00 UTC (London/NY overlap) — must NOT trigger Gate 8d and must use 0.72R TP1
+  const londonNyEndTs = Date.UTC(2025, 4, 15, 13, 0, 0) / 1000;
+  const londonNyBars: OhlcvBar[] = bars.map((b, idx) => ({
+    ...b,
+    time: londonNyEndTs - (bars.length - 1 - idx) * 3600,
+  }));
+  const londonNyEval = evaluatePrecisionTradeSetup({
+    symbol: "EURUSD",
+    assetType: "FOREX",
+    barsExecution: londonNyBars,
+    spreadPipsOrPct: eurSpec.spreadPipsOrPct,
+  });
+  assert.ok(
+    !londonNyEval.gatesFailed.some((g) => g.includes("Gate 8d")),
+    "Real FX bar at 13:00 UTC (London/NY overlap) must not trigger Gate 8d session veto",
+  );
+  if (londonNyEval.entry != null && londonNyEval.stopLoss != null && londonNyEval.tp1 != null) {
+    const risk = Math.abs(londonNyEval.entry - londonNyEval.stopLoss);
+    const tp1R = Math.abs(londonNyEval.tp1 - londonNyEval.entry) / Math.max(1e-12, risk);
+    assert.ok(
+      Math.abs(tp1R - 0.72) <= 0.05,
+      `Real FX stream TP1 should target ~0.72R harvest, got ${tp1R.toFixed(3)}R`,
+    );
+  }
+});

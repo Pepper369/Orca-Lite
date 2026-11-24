@@ -2,7 +2,7 @@
  * Shared client/server types & pure PnL/ROI math for Real-Time Bot Trading Telemetry.
  * Pure module (zero server-only imports) so React components and Node services share one SSOT.
  */
-import type { BrokerPlatform, ConnectionStatus, FollowerAccount } from "@/lib/engines/copy-trade-engine";
+import type { BrokerPlatform, ConnectionStatus, CopyExecutionOrder, FollowerAccount } from "@/lib/engines/copy-trade-engine";
 import { getBrokerMeta } from "@/lib/engines/broker-registry";
 
 export type TradingAccountAssetClass = "CRYPTO" | "FOREX" | "OTHER";
@@ -319,6 +319,20 @@ export interface BotWorkerTelemetry {
   quantFeed?: QuantEngineFeedItem[];
 }
 
+export interface ExecutionQualityTelemetry {
+  trackedOrdersCount: number;
+  resolvedOrdersCount: number;
+  limitPullbackCount: number;
+  avgEntrySlippageR: number | null;
+  tp1HitCount: number;
+  tp1HitRatePct: number | null;
+  runnerConvertedCount: number;
+  runnerConversionPct: number | null;
+  profitLockStopsCount: number;
+  fullSlStopsCount: number;
+  activeRunnersCount: number;
+}
+
 export interface BotQuantIntelligenceSummary {
   predictionRadar: {
     dataSource: "LIVE_POLYMARKET" | "BASELINE_FALLBACK" | "CUSTOM_INPUT";
@@ -337,6 +351,7 @@ export interface BotQuantIntelligenceSummary {
   };
   thesisEventsCount: number;
   roiDecayExitsCount: number;
+  executionQuality?: ExecutionQualityTelemetry;
 }
 
 export interface BotLiveTelemetrySnapshot {
@@ -648,5 +663,134 @@ export function aggregateTierSummary(
     totalRoiPct,
     dailyRealizedPnlUsd: Number(dailyRealizedPnlUsd.toFixed(2)),
     openPositionsCount,
+  };
+}
+
+/**
+ * SSOT: Pure execution-quality & runner-conversion analytics from tracked CopyExecutionOrders.
+ * Enforces Truth-in-Data: returns null for slippage/conversion rates whenever sample count is 0.
+ */
+export function computeExecutionQualityTelemetry(
+  orders: ReadonlyArray<
+    Pick<
+      CopyExecutionOrder,
+      | "status"
+      | "direction"
+      | "entryPrice"
+      | "executionPrice"
+      | "stopLossPrice"
+      | "takeProfit1"
+      | "positionStage"
+      | "realizedPnlUsd"
+      | "message"
+      | "entryMode"
+    >
+  >,
+  openPositions: ReadonlyArray<Pick<LiveOpenPosition, "positionStage">> = [],
+): ExecutionQualityTelemetry {
+  const filled = orders.filter((o) => o.status === "FILLED");
+  let limitPullbackCount = 0;
+  let slipSumR = 0;
+  let slipSamples = 0;
+  let resolvedOrdersCount = 0;
+  let tp1HitCount = 0;
+  let runnerConvertedCount = 0;
+  let profitLockStopsCount = 0;
+  let fullSlStopsCount = 0;
+
+  for (const o of filled) {
+    if (o.entryMode === "LIMIT_PULLBACK") {
+      limitPullbackCount++;
+    }
+
+    const isBuy = o.direction === "BUY";
+    const entry = Number(o.entryPrice);
+    const exec = Number(o.executionPrice);
+    const sl = Number(o.stopLossPrice);
+    const tp1 = Number(o.takeProfit1);
+    const isRunnerStage = o.positionStage === "TP1_BE" || o.positionStage === "TP2_TRAIL";
+
+    // Infer original 1R risk safely even after SL has been trailed past entry into profit lock
+    const slOnLossSide = sl > 0 && entry > 0 && (isBuy ? sl < entry : sl > entry);
+    let risk1R = 0;
+    if (!isRunnerStage && slOnLossSide) {
+      risk1R = Math.abs(entry - sl);
+    } else if (tp1 > 0 && entry > 0 && (isBuy ? tp1 > entry : tp1 < entry)) {
+      risk1R = Math.abs(tp1 - entry) / 0.72;
+    } else if (slOnLossSide) {
+      risk1R = Math.abs(entry - sl);
+    }
+
+    if (entry > 0 && exec > 0 && risk1R > 1e-12) {
+      const slipR = Math.abs(exec - entry) / risk1R;
+      if (Number.isFinite(slipR) && slipR <= 2.0) {
+        slipSumR += slipR;
+        slipSamples++;
+      }
+    }
+
+    const msg = (o.message || "").toUpperCase();
+    const isClosed = o.positionStage === "CLOSED";
+    const pnl = Number.isFinite(o.realizedPnlUsd) ? Number(o.realizedPnlUsd) : 0;
+
+    const hitTp2Or3 =
+      o.positionStage === "TP2_TRAIL" ||
+      msg.includes("AUTO TP2") ||
+      msg.includes("AUTO TP3") ||
+      msg.includes("TP2 30%");
+    const isProfitLock =
+      msg.includes("TRAILING PROFIT LOCK") ||
+      (isClosed && pnl > 0 && (msg.includes("TP1") || msg.includes("BE LOCK")));
+    const isFullSl =
+      msg.includes("AUTO SL GUARD") ||
+      (isClosed && pnl < 0 && !isRunnerStage && !hitTp2Or3);
+    const hitTp1 =
+      isRunnerStage ||
+      hitTp2Or3 ||
+      isProfitLock ||
+      msg.includes("AUTO TP1") ||
+      msg.includes("TP1 50%") ||
+      (isClosed && pnl > 0 && !msg.includes("ROI EXIT"));
+
+    if (isClosed || isRunnerStage) {
+      resolvedOrdersCount++;
+    }
+    if (hitTp1) {
+      tp1HitCount++;
+    }
+    if (hitTp2Or3) {
+      runnerConvertedCount++;
+    }
+    if (isProfitLock) {
+      profitLockStopsCount++;
+    }
+    if (isFullSl) {
+      fullSlStopsCount++;
+    }
+  }
+
+  const activeRunnersCount = openPositions.filter(
+    (p) => p.positionStage === "TP1_BE" || p.positionStage === "TP2_TRAIL",
+  ).length;
+
+  return {
+    trackedOrdersCount: filled.length,
+    resolvedOrdersCount,
+    limitPullbackCount,
+    avgEntrySlippageR:
+      slipSamples > 0 ? Number((slipSumR / slipSamples).toFixed(3)) : null,
+    tp1HitCount,
+    tp1HitRatePct:
+      resolvedOrdersCount > 0
+        ? Number(((tp1HitCount / resolvedOrdersCount) * 100).toFixed(1))
+        : null,
+    runnerConvertedCount,
+    runnerConversionPct:
+      tp1HitCount > 0
+        ? Number(((runnerConvertedCount / tp1HitCount) * 100).toFixed(1))
+        : null,
+    profitLockStopsCount,
+    fullSlStopsCount,
+    activeRunnersCount,
   };
 }

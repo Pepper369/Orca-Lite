@@ -11,7 +11,13 @@ export const QuantIntelligenceStrip = memo(function QuantIntelligenceStrip({
   intel?: BotQuantIntelligenceSummary | null;
 }) {
   if (!intel) return null;
-  const { predictionRadar: radar, alphaDecaySummary: decay, thesisEventsCount, roiDecayExitsCount } = intel;
+  const {
+    predictionRadar: radar,
+    alphaDecaySummary: decay,
+    thesisEventsCount,
+    roiDecayExitsCount,
+    executionQuality: execQ,
+  } = intel;
 
   const regimeTone =
     radar.riskRegime === "RISK_ON"
@@ -118,6 +124,39 @@ export const QuantIntelligenceStrip = memo(function QuantIntelligenceStrip({
             </span>
           ))}
         </div>
+
+        {execQ && (
+          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-line/40 sm:grid-cols-4 text-[10px]">
+            <div className="rounded bg-surface-primary/70 px-2 py-1 border border-line/40">
+              <div className="text-text-muted">Slippage (R)</div>
+              <div className="font-mono font-bold text-text-primary">
+                {execQ.avgEntrySlippageR != null ? `${execQ.avgEntrySlippageR.toFixed(2)}R` : "—"}
+              </div>
+            </div>
+            <div className="rounded bg-surface-primary/70 px-2 py-1 border border-line/40">
+              <div className="text-text-muted">TP1 Hit</div>
+              <div className="font-mono font-bold text-emerald-400">
+                {execQ.tp1HitRatePct != null ? `${execQ.tp1HitRatePct.toFixed(0)}%` : "—"}
+                <span className="ml-1 font-normal text-text-muted">({execQ.tp1HitCount})</span>
+              </div>
+            </div>
+            <div className="rounded bg-surface-primary/70 px-2 py-1 border border-line/40">
+              <div className="text-text-muted">Runner TP2/3</div>
+              <div className="font-mono font-bold text-cyan-400">
+                {execQ.runnerConversionPct != null ? `${execQ.runnerConversionPct.toFixed(0)}%` : "—"}
+                <span className="ml-1 font-normal text-text-muted">({execQ.activeRunnersCount} mở)</span>
+              </div>
+            </div>
+            <div className="rounded bg-surface-primary/70 px-2 py-1 border border-line/40">
+              <div className="text-text-muted">Lock / SL</div>
+              <div className="font-mono font-bold text-text-primary">
+                <span className="text-emerald-400">{execQ.profitLockStopsCount}</span>
+                <span className="text-text-muted"> / </span>
+                <span className="text-rose-400">{execQ.fullSlStopsCount}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
