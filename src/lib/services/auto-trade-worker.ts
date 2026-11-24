@@ -899,7 +899,7 @@ export async function runAutoTradeTick(): Promise<{
         const refEntryFx = s.entryPrice ?? marketPrice;
         const pullbackTriggered =
           s.entryMode === "LIMIT_PULLBACK"
-            ? riskDist <= 0 || Math.abs(marketPrice - refEntryFx) <= riskDist * 0.35
+            ? riskDist <= 0 || Math.abs(marketPrice - refEntryFx) <= riskDist * 0.15
             : riskDist <= 0 ||
               (isBuyFx
                 ? marketPrice >= refEntryFx - riskDist * 0.25
@@ -1032,7 +1032,7 @@ export async function runAutoTradeTick(): Promise<{
             (isBuyCr ? wsMicroCr.tickImbalancePct > -40 : wsMicroCr.tickImbalancePct < 40));
         const pullbackTriggered =
           s.entryMode === "LIMIT_PULLBACK"
-            ? riskDist <= 0 || Math.abs(marketPrice - refEntryCr) <= riskDist * 0.35
+            ? riskDist <= 0 || Math.abs(marketPrice - refEntryCr) <= riskDist * 0.15
             : riskDist <= 0 ||
               (isBuyCr
                 ? marketPrice >= refEntryCr - riskDist * 0.25

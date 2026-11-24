@@ -34,6 +34,7 @@ import {
 import { runInstitutionalValuationSuite } from "../engines/institutional-valuation-suite";
 import { conveneInvestmentCommittee } from "../engines/ai-investment-committee";
 import { resolveIndustryEvalTrack } from "../financial/fa-core";
+import { runRealHistoricalWalkForwardBacktest } from "../engines/fx-crypto-backtest-harness";
 
 test("Real-Market End-to-End Quantitative & Skills Verification", async (t) => {
   await t.test("Canonical Fixture Invariants: epoch seconds, ascending order, full-VND VN equities", () => {
@@ -183,5 +184,41 @@ test("Real-Market End-to-End Quantitative & Skills Verification", async (t) => {
     assert.equal(fptVal.dcfStatus, "REAL_FCF");
     assert.ok(fptVal.dcf !== null && fptVal.dcf.fairValuePerShare > 0);
     assert.ok(fptVal.blendedFairValue > 0);
+  });
+
+  await t.test("Real-Market Walk-Forward Precision Backtest on REAL BTCUSDT 15m & ETHUSDT 1h bars", async () => {
+    const [{ bars: btcBars }, { bars: ethBars }] = await Promise.all([
+      loadRealBars("BTCUSDT_15m", 180),
+      loadRealBars("ETHUSDT_1h", 180),
+    ]);
+
+    const rep = runRealHistoricalWalkForwardBacktest([
+      { symbol: "BTCUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0004, bars: btcBars },
+      { symbol: "ETHUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0005, bars: ethBars },
+    ]);
+
+    assert.ok(rep.totalBarsEvaluated >= 100, `Expected >= 100 evaluated real bars, got ${rep.totalBarsEvaluated}`);
+    const totalRealTrades = rep.calibrationMetrics.totalTrades + rep.holdoutMetrics.totalTrades;
+    assert.ok(totalRealTrades >= 4, `Expected >= 4 real Grade A+/A trades, got ${totalRealTrades}`);
+
+    const totalWins = rep.calibrationMetrics.wins + rep.holdoutMetrics.wins;
+    const combinedWinRatePct = Number(((totalWins / totalRealTrades) * 100).toFixed(1));
+    const weightedExpectancyR = Number(
+      (
+        (rep.calibrationMetrics.expectancyR * rep.calibrationMetrics.totalTrades +
+          rep.holdoutMetrics.expectancyR * rep.holdoutMetrics.totalTrades) /
+        totalRealTrades
+      ).toFixed(3),
+    );
+
+    // Realistic institutional bounds on real market candles (no synthetic 90%+ marketing inflation)
+    assert.ok(
+      combinedWinRatePct >= 48 && combinedWinRatePct <= 85,
+      `Expected real-market winrate in [48%, 85%], got ${combinedWinRatePct}%`,
+    );
+    assert.ok(
+      weightedExpectancyR > 0,
+      `Expected positive real-market Expectancy E[R] > 0 after spread/fee friction, got ${weightedExpectancyR}R`,
+    );
   });
 });

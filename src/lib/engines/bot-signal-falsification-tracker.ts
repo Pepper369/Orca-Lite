@@ -184,11 +184,12 @@ export function evaluateSignalThesisState(
     status = "WEAKENED";
     actionDirective = "TIGHTEN_STOP";
 
-    // Tighten SL: move halfway towards entry to cut downside risk in half
-    if (stopLossPrice > 0) {
+    // Tighten SL conservatively (retain 65% of structural stop room instead of slashing 50% into noise)
+    // and only when trade has matured (>= 20m) or already suffered >= 0.35% adverse drift
+    if (stopLossPrice > 0 && (holdingMinutes >= 20 || priceMovePct <= -0.35)) {
       const currentSlDist = Math.abs(entryPrice - stopLossPrice);
-      const tightenedDist = currentSlDist * 0.5;
-      const safeAtr = atr != null && atr > 0 ? atr * 0.8 : tightenedDist;
+      const tightenedDist = currentSlDist * 0.65;
+      const safeAtr = atr != null && atr > 0 ? atr * 0.85 : tightenedDist;
       const slDistToUse = Math.min(currentSlDist, safeAtr);
 
       const newSl = isBuy ? entryPrice - slDistToUse : entryPrice + slDistToUse;

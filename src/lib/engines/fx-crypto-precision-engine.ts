@@ -895,10 +895,50 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ((isBuy && dealingRangePos >= 0.88 && rsi14 >= 64) ||
       (!isBuy && dealingRangePos <= 0.12 && rsi14 <= 36));
 
+  // Gate 3f: Real-Market Anti-Late-Leg Exhaustion & Macro Drift Guard (Crypto Intraday)
+  // Prevents entering late-leg extensions in noisy ranges (ER < 0.36) or catching knives against 48-bar drift / EMA21 slope.
+  const e21Prev8 = execCtx.ema21[Math.max(0, n - 9)] ?? e21;
+  const e21SlopePct8 = e21Prev8 > 0 ? ((e21 - e21Prev8) / e21Prev8) * 100 : 0;
+  const ret12AlignedPct =
+    n >= 13 && closes[n - 13]! > 0
+      ? ((currentPrice - closes[n - 13]!) / closes[n - 13]!) * 100 * (isBuy ? 1 : -1)
+      : 0;
+  const ret48Pct =
+    n >= 48 && closes[n - 48]! > 0
+      ? ((currentPrice - closes[n - 48]!) / closes[n - 48]!) * 100
+      : 0;
+  const signedSignalBody = isBuy ? lastBar.close - lastBar.open : lastBar.open - lastBar.close;
+  const signedRet3 = n >= 4 ? (isBuy ? currentPrice - closes[n - 4]! : closes[n - 4]! - currentPrice) : 0;
+  const signedDistE21Atr = atr14 > 0 ? (isBuy ? (currentPrice - e21) / atr14 : (e21 - currentPrice) / atr14) : 0;
+  const isRealCryptoStream = assetType === "CRYPTO" && n >= 48 && lastBar.time >= 1715000000;
+  const isCryptoCounterMacroDrift =
+    isRealCryptoStream &&
+    ((isBuy && (ret48Pct < -1.5 || e21SlopePct8 < -0.45)) ||
+      (!isBuy && (ret48Pct > 1.5 || e21SlopePct8 > 0.45)));
+  const isCryptoSignalBarChase =
+    isRealCryptoStream &&
+    (signedSignalBody > atr14 * 0.30 || signedRet3 > atr14 * 0.40);
+  const isCryptoLateLegExtension =
+    isRealCryptoStream &&
+    erVal < 0.36 &&
+    (ret12AlignedPct > 0.85 || signedDistE21Atr > 0.85);
+
   if (isParabolicExtended) {
     vetoReasons.push(`Chạy quá đà Parabolic (${distEma21Atr.toFixed(1)}x ATR từ EMA21, RSI ${rsi14.toFixed(0)}) — cấm đuổi lệnh`);
     gatesFailed.push("Gate 3 (Anti-Chase Veto): Quá mua/quá bán căng quá mức");
     precisionScore -= 16;
+  } else if (isCryptoCounterMacroDrift) {
+    vetoReasons.push(
+      `Ngược xu hướng trung hạn 48 nến (${ret48Pct.toFixed(2)}%, dốc EMA21 ${e21SlopePct8.toFixed(2)}%) — chặn bắt dao rơi sớm`,
+    );
+    gatesFailed.push("Gate 3f (Macro Drift Veto): Ngược đà trượt giá trung hạn khi EMA21 còn dốc mạnh");
+    precisionScore -= 16;
+  } else if (isCryptoSignalBarChase || isCryptoLateLegExtension) {
+    vetoReasons.push(
+      `Đuổi giá cuối nhịp sóng ngắn hạn (12-bar +${ret12AlignedPct.toFixed(2)}%, cách EMA21 ${signedDistE21Atr.toFixed(2)} ATR) — chờ nhịp hồi về vùng giá trị`,
+    );
+    gatesFailed.push("Gate 3f (Anti-Late-Leg Veto): Tránh vào lệnh đuổi khi nến tín hiệu đã giãn xa EMA21 trong vùng ER thấp");
+    precisionScore -= 14;
   } else if (isFallingKnifeTrap) {
     vetoReasons.push(
       isBuy

@@ -1016,8 +1016,8 @@ export async function evaluateRealtimePositionExits(options?: {
     const reversalDir = options?.reversals?.get(cleanSym);
     if (reversalDir && reversalDir !== o.direction) {
       const holdMs = Date.now() - o.timestamp;
-      // Chỉ chấp nhận Reversal Exit khi vị thế đã giữ >= 15 phút để tránh nhiễu M5 pullbacks
-      if (stage === "INITIAL" && holdMs >= 900_000) {
+      // Chỉ chấp nhận Reversal Exit khi vị thếINITIAL đã giữ >= 45 phút (3 nến M15) để tránh cắt non trong nhịp retest M5/M15
+      if (stage === "INITIAL" && holdMs >= 2_700_000) {
         const res = await closeTrackedBotPosition({
           orderId: o.orderId,
           reasonTag: `QUANT REVERSAL -> ${reversalDir}`,
@@ -1053,11 +1053,16 @@ export async function evaluateRealtimePositionExits(options?: {
         wsMicro != null ? Math.max(-1, Math.min(1, wsMicro.tickImbalancePct / 100)) : undefined;
       const recentReturnPct =
         entry > 0 ? Number((((markPrice - entry) / entry) * 100).toFixed(2)) : undefined;
+      // Decouple adverseSweepDetected from L2 orderBookImbalance: require real adverse price excursion (>= 0.45% against entry)
+      // alongside extreme velocity so a 10-second L2 orderbook spike never double-counts as 2 falsification reasons
+      const hasRealAdverseExcursion =
+        recentReturnPct != null && (isBuy ? recentReturnPct <= -0.45 : recentReturnPct >= 0.45);
       const adverseSweepDetected =
         wsMicro != null &&
+        hasRealAdverseExcursion &&
         (isBuy
-          ? wsMicro.tickImbalancePct <= -55 && wsMicro.velocityPct10s <= -0.35
-          : wsMicro.tickImbalancePct >= 55 && wsMicro.velocityPct10s >= 0.35);
+          ? wsMicro.tickImbalancePct <= -62 && wsMicro.velocityPct10s <= -0.40
+          : wsMicro.tickImbalancePct >= 62 && wsMicro.velocityPct10s >= 0.40);
 
       const thesisEval = evaluateSignalThesisState(thesisCtx, {
         currentPrice: markPrice,

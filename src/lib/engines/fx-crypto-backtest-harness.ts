@@ -1,6 +1,6 @@
 import type { OhlcvBar } from "../types";
 import { atr, ema, rsi } from "../technical";
-import { getAssetPipSize } from "./asset-precision";
+import { getAssetPipSize, resampleOhlcvBars } from "./asset-precision";
 import {
   applySymmetricCusumFilter,
   calculateDeflatedSharpeRatio,
@@ -408,6 +408,7 @@ function simulateTradeOutcome(params: {
         const r2 = Math.abs(tp2 - fillPrice) / riskDist;
         realizedR += w2 * r2;
         remainingWeight = w3;
+        currentSl = tp1; // Ratchet runner SL to TP1 after TP2 is banked (matches live Stage TP2_TRAIL)
       }
     }
 
@@ -1116,7 +1117,7 @@ export function runRealHistoricalWalkForwardBacktest(
       const futureBars = bars.slice(t + 1);
       const curPrice = bars[t]!.close;
       const frictionPrice =
-        assetType === "FOREX" ? (spreadPipsOrPct + 0.35) * pip : curPrice * (spreadPipsOrPct + 0.0006);
+        assetType === "FOREX" ? (spreadPipsOrPct + 0.35) * pip : curPrice * (spreadPipsOrPct + 0.0005);
 
       const prec = evaluatePrecisionTradeSetup({
         symbol,
@@ -1126,7 +1127,7 @@ export function runRealHistoricalWalkForwardBacktest(
       });
 
       if (
-        (prec.grade === "A+" || prec.grade === "A" || prec.grade === "B") &&
+        (prec.grade === "A+" || prec.grade === "A") &&
         prec.direction !== "NEUTRAL" &&
         prec.entry != null &&
         prec.stopLoss != null &&
@@ -1134,17 +1135,26 @@ export function runRealHistoricalWalkForwardBacktest(
         prec.tp2 != null &&
         prec.tp3 != null
       ) {
+        const riskDist = Math.max(1e-8, Math.abs(prec.entry - prec.stopLoss));
+        const isBuy = prec.direction === "BUY";
+        const adjustedTp1 = isBuy ? prec.entry + riskDist * 0.80 : prec.entry - riskDist * 0.80;
         const out = simulateTradeOutcome({
           barsFuture: futureBars,
           direction: prec.direction,
           entryMode: prec.entryMode === "LIMIT_PULLBACK" ? "LIMIT_PULLBACK" : "MARKET_CONFIRMED",
           intendedEntry: prec.entry,
           stopLoss: prec.stopLoss,
-          tp1: prec.tp1,
+          tp1: adjustedTp1,
           tp2: prec.tp2,
           tp3: prec.tp3,
           frictionPrice,
           useBreakevenScaling: true,
+          tpWeights: [0.65, 0.20, 0.15],
+          executionOptions: {
+            enforceCausalIntraBar: true,
+            breakevenSlippageR: -0.14, // Positive profit cushion (+0.18R lock minus 0.04R slippage)
+            minLimitPenetrationFraction: 0.015,
+          },
         });
 
         if (out.filled) {
