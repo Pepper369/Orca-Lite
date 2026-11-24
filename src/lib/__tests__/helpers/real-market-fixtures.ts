@@ -17,6 +17,12 @@ import type { OhlcvBar } from "../../types";
 export type RealFixtureSeriesKey =
   | "BTCUSDT_15m"
   | "ETHUSDT_1h"
+  | "SOLUSDT_1h"
+  | "BNBUSDT_15m"
+  | "EURUSD_1h"
+  | "GBPUSD_1h"
+  | "USDJPY_1h"
+  | "XAUUSD_1h"
   | "FPT_1d"
   | "VCB_1d"
   | "HPG_1d";
@@ -96,9 +102,14 @@ export async function loadRealBars(key: RealFixtureSeriesKey, limit?: number): P
   const timer = setTimeout(() => controller.abort(), 8_000);
   timer.unref?.();
   try {
-    if (key === "BTCUSDT_15m" || key === "ETHUSDT_1h") {
+    if (
+      key === "BTCUSDT_15m" ||
+      key === "ETHUSDT_1h" ||
+      key === "SOLUSDT_1h" ||
+      key === "BNBUSDT_15m"
+    ) {
       const [symbol, interval] = key.split("_");
-      const n = Math.min(500, limit ?? 180);
+      const n = Math.min(1000, limit ?? 180);
       const res = await fetch(
         `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${n}`,
         { signal: controller.signal },
@@ -117,6 +128,13 @@ export async function loadRealBars(key: RealFixtureSeriesKey, limit?: number): P
           .filter((b) => b.close > 0);
         if (bars.length > 0) return { bars, mode: "LIVE" };
       }
+    } else if (
+      key === "EURUSD_1h" ||
+      key === "GBPUSD_1h" ||
+      key === "USDJPY_1h" ||
+      key === "XAUUSD_1h"
+    ) {
+      return { bars: loadRealBarsSync(key, limit), mode: "SNAPSHOT" };
     } else {
       const symbol = key.split("_")[0]!;
       const to = Math.floor(Date.now() / 1000);

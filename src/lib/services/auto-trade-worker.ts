@@ -120,7 +120,7 @@ interface WorkerGlobalState {
   latestTickFn?: () => Promise<unknown>;
 }
 
-const WORKER_CODE_VERSION = 8;
+const WORKER_CODE_VERSION = 9;
 
 const g = globalThis as typeof globalThis & {
   __orcaAutoTradeWorkerState?: WorkerGlobalState;
@@ -200,7 +200,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   });
 }
 
-function isEligibleGrade(grade?: string | null, winrateScore?: number): boolean {
+function isEligibleGrade(
+  grade?: string | null,
+  winrateScore?: number,
+  triPillar?: { quantPass: boolean; ictPass: boolean; smcPass: boolean } | null,
+): boolean {
+  if (triPillar && (!triPillar.quantPass || (!triPillar.ictPass && !triPillar.smcPass))) {
+    return false;
+  }
   if (grade) return grade === "A+" || grade === "A";
   return (winrateScore ?? 0) >= 75;
 }
@@ -363,7 +370,7 @@ async function scanLivePrecisionSetups(params: {
 
           if (
             precision.direction === "NEUTRAL" ||
-            !isEligibleGrade(precision.grade, precision.precisionScore) ||
+            !isEligibleGrade(precision.grade, precision.precisionScore, precision.triPillarComposition) ||
             precision.stopLoss == null ||
             precision.tp1 == null ||
             precision.vetoReasons.length > 0
@@ -455,6 +462,8 @@ async function scanLivePrecisionSetups(params: {
               masterCapitalUsd: 10_000,
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,
+              triPillarScore: precision.triPillarComposition.totalScore,
+              triPillarQuantScore: precision.triPillarComposition.quantScore,
               recommendedLeverage,
               entryMode: precision.entryMode,
               entryZone: precision.entryZone,
@@ -484,7 +493,7 @@ async function scanLivePrecisionSetups(params: {
               takeProfit3: roundedTp3 ?? null,
               recommendedLeverage,
               masterLotsOrQty: Number(baseQty.toFixed(4)),
-              ictSetup: precision.liquiditySweepDetected ? "ICT Sweep + MSS + OTE" : "SMC Order Flow + FVG/BPR",
+              ictSetup: `60/30/10 [Q${precision.triPillarComposition.quantScore}/I${precision.triPillarComposition.ictScore}/S${precision.triPillarComposition.smcScore}] ${precision.liquiditySweepDetected ? "ICT Sweep + OTE" : "FVG/BPR"}`,
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
               summaryVi:
@@ -641,7 +650,7 @@ async function scanLivePrecisionSetups(params: {
 
           if (
             precision.direction === "NEUTRAL" ||
-            !isEligibleGrade(precision.grade, precision.precisionScore) ||
+            !isEligibleGrade(precision.grade, precision.precisionScore, precision.triPillarComposition) ||
             precision.stopLoss == null ||
             precision.tp1 == null ||
             precision.vetoReasons.length > 0
@@ -723,6 +732,8 @@ async function scanLivePrecisionSetups(params: {
               masterCapitalUsd: 10_000,
               winrateScore: precision.precisionScore,
               setupGrade: precision.grade,
+              triPillarScore: precision.triPillarComposition.totalScore,
+              triPillarQuantScore: precision.triPillarComposition.quantScore,
               recommendedLeverage: 1,
               entryMode: precision.entryMode,
               entryZone: precision.entryZone,
@@ -752,7 +763,7 @@ async function scanLivePrecisionSetups(params: {
               takeProfit3: roundedTp3Fx ?? null,
               recommendedLeverage: 1,
               masterLotsOrQty: lotsFx,
-              ictSetup: precision.liquiditySweepDetected ? "ICT Judas/Turtle Sweep + OTE" : "SMC Deep Flow + FVG/BPR",
+              ictSetup: `60/30/10 [Q${precision.triPillarComposition.quantScore}/I${precision.triPillarComposition.ictScore}/S${precision.triPillarComposition.smcScore}] ${precision.liquiditySweepDetected ? "ICT Sweep + OTE" : "Deep Flow + FVG"}`,
               regimeState: `${precision.regime.state} (${precision.regime.hmmState ?? "TREND"})`,
               liquiditySweepDetected: precision.liquiditySweepDetected,
               summaryVi:
@@ -1108,9 +1119,12 @@ export async function runAutoTradeTick(): Promise<{
       quantFeedItems.push(ps.feedItem);
     }
 
-    // Sort signals & quant feed by highest winrateScore & expectancyR first
+    // Sort signals by Tri-Pillar 60% Quant + 30% ICT + 10% SMC priority, then winrateScore & expectancyR
     signalsToDispatch.sort(
       (a, b) =>
+        (b.signal.triPillarScore ?? b.signal.winrateScore ?? 0) -
+          (a.signal.triPillarScore ?? a.signal.winrateScore ?? 0) ||
+        (b.signal.triPillarQuantScore ?? 0) - (a.signal.triPillarQuantScore ?? 0) ||
         (b.signal.winrateScore ?? 0) - (a.signal.winrateScore ?? 0) ||
         (b.signal.expectancyR ?? 0) - (a.signal.expectancyR ?? 0),
     );

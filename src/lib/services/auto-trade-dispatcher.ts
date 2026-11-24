@@ -62,6 +62,10 @@ export interface DispatchableSignalInput {
   masterCapitalUsd: number;
   winrateScore: number;
   setupGrade?: SetupGrade;
+  /** Tri-Pillar 60% Quant + 30% ICT + 10% SMC total score (0-100) for bot signal prioritization */
+  triPillarScore?: number;
+  /** Quant pillar sub-score (0-60) */
+  triPillarQuantScore?: number;
   recommendedLeverage?: number;
   entryMode?: "LIMIT_PULLBACK" | "MARKET_CONFIRMED" | "WAIT";
   entryZone?: [number, number] | null;

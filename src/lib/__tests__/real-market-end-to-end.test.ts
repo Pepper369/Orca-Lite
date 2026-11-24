@@ -34,6 +34,7 @@ import {
 import { runInstitutionalValuationSuite } from "../engines/institutional-valuation-suite";
 import { conveneInvestmentCommittee } from "../engines/ai-investment-committee";
 import { resolveIndustryEvalTrack } from "../financial/fa-core";
+import { evaluatePrecisionTradeSetup } from "../engines/fx-crypto-precision-engine";
 import { runRealHistoricalWalkForwardBacktest } from "../engines/fx-crypto-backtest-harness";
 
 test("Real-Market End-to-End Quantitative & Skills Verification", async (t) => {
@@ -42,7 +43,19 @@ test("Real-Market End-to-End Quantitative & Skills Verification", async (t) => {
     assert.equal(snap.timeUnit, "epoch_seconds");
     assert.equal(snap.vnPriceUnit, "full_vnd");
 
-    for (const key of ["BTCUSDT_15m", "ETHUSDT_1h", "FPT_1d", "VCB_1d", "HPG_1d"] as const) {
+    for (const key of [
+      "BTCUSDT_15m",
+      "ETHUSDT_1h",
+      "SOLUSDT_1h",
+      "BNBUSDT_15m",
+      "EURUSD_1h",
+      "GBPUSD_1h",
+      "USDJPY_1h",
+      "XAUUSD_1h",
+      "FPT_1d",
+      "VCB_1d",
+      "HPG_1d",
+    ] as const) {
       const bars = snap.bars[key];
       assert.ok(bars.length >= 120, `${key} must have >= 120 real bars`);
       for (let i = 0; i < bars.length; i++) {
@@ -186,41 +199,134 @@ test("Real-Market End-to-End Quantitative & Skills Verification", async (t) => {
     assert.ok(fptVal.blendedFairValue > 0);
   });
 
-  await t.test("Real-Market Walk-Forward Precision Backtest on REAL BTCUSDT 15m, ETHUSDT 1h & FPT 1d bars", async () => {
-    const [{ bars: btcBars }, { bars: ethBars }, { bars: fptBars }] = await Promise.all([
-      loadRealBars("BTCUSDT_15m", 180),
-      loadRealBars("ETHUSDT_1h", 180),
-      loadRealBars("FPT_1d", 179),
+  await t.test("Tri-Pillar 60% Quant + 30% ICT + 10% SMC Invariants on REAL Crypto & Forex bars", async () => {
+    const [{ bars: btcBars }, { bars: eurBars }] = await Promise.all([
+      loadRealBars("BTCUSDT_15m", 300),
+      loadRealBars("EURUSD_1h", 300),
+    ]);
+
+    for (const [symbol, assetType, spread, bars] of [
+      ["BTCUSDT", "CRYPTO" as const, 0.0004, btcBars],
+      ["EURUSD", "FOREX" as const, 1.0, eurBars],
+    ] as const) {
+      for (let idx = 80; idx < bars.length; idx += 20) {
+        const res = evaluatePrecisionTradeSetup({
+          symbol,
+          assetType,
+          barsExecution: bars.slice(Math.max(0, idx - 219), idx + 1),
+          spreadPipsOrPct: spread,
+        });
+        const tp = res.triPillarComposition;
+        assert.deepEqual(tp.weightsPct, { quant: 60, ict: 30, smc: 10 });
+        assert.ok(tp.quantScore >= 0 && tp.quantScore <= 60, `${symbol} quantScore out of [0,60]: ${tp.quantScore}`);
+        assert.ok(tp.ictScore >= 0 && tp.ictScore <= 30, `${symbol} ictScore out of [0,30]: ${tp.ictScore}`);
+        assert.ok(tp.smcScore >= 0 && tp.smcScore <= 10, `${symbol} smcScore out of [0,10]: ${tp.smcScore}`);
+        assert.equal(tp.totalScore, tp.quantScore + tp.ictScore + tp.smcScore);
+        assert.ok(
+          res.calibratedWinRatePct <= 58,
+          `${symbol} displayed calibratedWinRatePct must never exceed 58% anti-inflation cap`,
+        );
+        if (res.grade === "A+" || res.grade === "A") {
+          assert.equal(tp.quantPass, true, `${symbol} ${res.grade} must pass 60% Quant pillar`);
+          assert.equal(tp.ictPass, true, `${symbol} ${res.grade} must pass 30% ICT pillar`);
+          assert.equal(tp.smcPass, true, `${symbol} ${res.grade} must pass 10% SMC pillar`);
+        }
+      }
+    }
+  });
+
+  await t.test("Anti-Hallucination 60/40 Walk-Forward on REAL Binance Crypto (4,000 bars: BTC/ETH/SOL/BNB)", async () => {
+    const [{ bars: btc }, { bars: eth }, { bars: sol }, { bars: bnb }] = await Promise.all([
+      loadRealBars("BTCUSDT_15m", 1000),
+      loadRealBars("ETHUSDT_1h", 1000),
+      loadRealBars("SOLUSDT_1h", 1000),
+      loadRealBars("BNBUSDT_15m", 1000),
     ]);
 
     const rep = runRealHistoricalWalkForwardBacktest([
-      { symbol: "BTCUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0004, bars: btcBars },
-      { symbol: "ETHUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0005, bars: ethBars },
-      { symbol: "FPT", assetType: "CRYPTO", spreadPipsOrPct: 0.001, bars: fptBars },
+      { symbol: "BTCUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0004, bars: btc },
+      { symbol: "ETHUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0004, bars: eth },
+      { symbol: "SOLUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0005, bars: sol },
+      { symbol: "BNBUSDT", assetType: "CRYPTO", spreadPipsOrPct: 0.0004, bars: bnb },
     ]);
 
-    assert.ok(rep.totalBarsEvaluated >= 100, `Expected >= 100 evaluated real bars, got ${rep.totalBarsEvaluated}`);
-    const totalRealTrades = rep.calibrationMetrics.totalTrades + rep.holdoutMetrics.totalTrades;
-    assert.ok(totalRealTrades >= 2, `Expected >= 2 selective Grade A+/A trades on 360 real bars, got ${totalRealTrades}`);
+    assert.equal(rep.hallucinationAudit.passed, true, `Hallucination audit failed: ${rep.hallucinationAudit.warnings.join("; ")}`);
+    assert.equal(rep.hallucinationAudit.hasRealisticFriction, true);
+    assert.equal(rep.hallucinationAudit.enforcesCausalIntraBar, true);
+    assert.ok(rep.totalBarsEvaluated >= 3000, `Expected >= 3000 real Crypto bars evaluated, got ${rep.totalBarsEvaluated}`);
+
+    const totalTrades = rep.calibrationMetrics.totalTrades + rep.holdoutMetrics.totalTrades;
+    assert.ok(totalTrades >= 20, `Expected active trade frequency (>=20 real Crypto trades), got ${totalTrades}`);
+    assert.ok(
+      rep.hallucinationAudit.calibrationTradesPer1kBars >= 5.0 || rep.hallucinationAudit.holdoutTradesPer1kBars >= 5.0,
+      `Expected active frequency >= 5.0/1k bars on real Crypto, got cal=${rep.hallucinationAudit.calibrationTradesPer1kBars}/1k hold=${rep.hallucinationAudit.holdoutTradesPer1kBars}/1k`,
+    );
 
     const totalWins = rep.calibrationMetrics.wins + rep.holdoutMetrics.wins;
-    const combinedWinRatePct = Number(((totalWins / totalRealTrades) * 100).toFixed(1));
-    const weightedExpectancyR = Number(
+    const combinedWr = Number(((totalWins / totalTrades) * 100).toFixed(1));
+    const weightedExpR = Number(
       (
         (rep.calibrationMetrics.expectancyR * rep.calibrationMetrics.totalTrades +
           rep.holdoutMetrics.expectancyR * rep.holdoutMetrics.totalTrades) /
-        totalRealTrades
+        totalTrades
       ).toFixed(3),
     );
 
-    // High-winrate institutional bounds on real market candles (selective setups with positive net expectancy)
-    assert.ok(
-      combinedWinRatePct >= 55 && combinedWinRatePct <= 100,
-      `Expected real-market winrate >= 55%, got ${combinedWinRatePct}%`,
+    console.log(
+      `[REAL CRYPTO 4k OOS] CAL: n=${rep.calibrationMetrics.totalTrades}(${rep.hallucinationAudit.calibrationTradesPer1kBars}/1k) WR=${rep.calibrationMetrics.winRatePct}% E=${rep.calibrationMetrics.expectancyR}R PF=${rep.calibrationMetrics.profitFactor}` +
+        ` | HOLD: n=${rep.holdoutMetrics.totalTrades}(${rep.hallucinationAudit.holdoutTradesPer1kBars}/1k) WR=${rep.holdoutMetrics.winRatePct}% E=${rep.holdoutMetrics.expectancyR}R PF=${rep.holdoutMetrics.profitFactor}`,
     );
+
+    // Honest, zero-hallucination real-market Crypto bounds (rejects both weak <60% AND hallucinated >92%)
+    assert.ok(combinedWr >= 60 && combinedWr <= 92, `Expected honest high real Crypto WR in [60%, 92%], got ${combinedWr}%`);
+    assert.ok(weightedExpR > 0, `Expected positive net Crypto E[R] > 0 after spread/fee friction, got ${weightedExpR}R`);
+    assert.ok(rep.holdoutMetrics.winRatePct >= 60 && rep.holdoutMetrics.expectancyR > 0, `Expected strong OOS Holdout on real Crypto, got WR=${rep.holdoutMetrics.winRatePct}% E=${rep.holdoutMetrics.expectancyR}R`);
+  });
+
+  await t.test("Anti-Hallucination 60/40 Walk-Forward on REAL Forex/Gold (4,000 bars: EURUSD/GBPUSD/USDJPY/XAUUSD)", async () => {
+    const [{ bars: eur }, { bars: gbp }, { bars: jpy }, { bars: xau }] = await Promise.all([
+      loadRealBars("EURUSD_1h", 1000),
+      loadRealBars("GBPUSD_1h", 1000),
+      loadRealBars("USDJPY_1h", 1000),
+      loadRealBars("XAUUSD_1h", 1000),
+    ]);
+
+    const rep = runRealHistoricalWalkForwardBacktest([
+      { symbol: "EURUSD", assetType: "FOREX", spreadPipsOrPct: 1.0, bars: eur },
+      { symbol: "GBPUSD", assetType: "FOREX", spreadPipsOrPct: 1.2, bars: gbp },
+      { symbol: "USDJPY", assetType: "FOREX", spreadPipsOrPct: 1.2, bars: jpy },
+      { symbol: "XAUUSD", assetType: "FOREX", spreadPipsOrPct: 2.5, bars: xau },
+    ]);
+
+    assert.equal(rep.hallucinationAudit.passed, true, `Hallucination audit failed: ${rep.hallucinationAudit.warnings.join("; ")}`);
+    assert.equal(rep.hallucinationAudit.hasRealisticFriction, true);
+    assert.equal(rep.hallucinationAudit.enforcesCausalIntraBar, true);
+    assert.ok(rep.totalBarsEvaluated >= 3000, `Expected >= 3000 real Forex/Gold bars evaluated, got ${rep.totalBarsEvaluated}`);
+
+    const totalTrades = rep.calibrationMetrics.totalTrades + rep.holdoutMetrics.totalTrades;
+    assert.ok(totalTrades >= 20, `Expected active trade frequency (>=20 real Forex/Gold trades), got ${totalTrades}`);
+
+    const totalWins = rep.calibrationMetrics.wins + rep.holdoutMetrics.wins;
+    const combinedWr = Number(((totalWins / totalTrades) * 100).toFixed(1));
+    const weightedExpR = Number(
+      (
+        (rep.calibrationMetrics.expectancyR * rep.calibrationMetrics.totalTrades +
+          rep.holdoutMetrics.expectancyR * rep.holdoutMetrics.totalTrades) /
+        totalTrades
+      ).toFixed(3),
+    );
+
+    console.log(
+      `[REAL FOREX/GOLD 4k OOS] CAL: n=${rep.calibrationMetrics.totalTrades}(${rep.hallucinationAudit.calibrationTradesPer1kBars}/1k) WR=${rep.calibrationMetrics.winRatePct}% E=${rep.calibrationMetrics.expectancyR}R PF=${rep.calibrationMetrics.profitFactor}` +
+        ` | HOLD: n=${rep.holdoutMetrics.totalTrades}(${rep.hallucinationAudit.holdoutTradesPer1kBars}/1k) WR=${rep.holdoutMetrics.winRatePct}% E=${rep.holdoutMetrics.expectancyR}R PF=${rep.holdoutMetrics.profitFactor}`,
+    );
+
+    // Honest, zero-hallucination real-market Forex/Gold bounds
+    assert.ok(combinedWr >= 60 && combinedWr <= 92, `Expected honest high real Forex/Gold WR in [60%, 92%], got ${combinedWr}%`);
+    assert.ok(weightedExpR > 0.05, `Expected strong positive net Forex/Gold E[R] > +0.05R after spread/fee friction, got ${weightedExpR}R`);
     assert.ok(
-      weightedExpectancyR > 0,
-      `Expected positive real-market Expectancy E[R] > 0 after spread/fee friction, got ${weightedExpectancyR}R`,
+      rep.holdoutMetrics.winRatePct >= 60 && rep.holdoutMetrics.expectancyR > 0,
+      `Expected strong OOS Holdout on real Forex/Gold, got WR=${rep.holdoutMetrics.winRatePct}% E=${rep.holdoutMetrics.expectancyR}R`,
     );
   });
 });

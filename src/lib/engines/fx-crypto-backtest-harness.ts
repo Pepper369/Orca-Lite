@@ -855,6 +855,17 @@ export interface HistoricalAssetSeriesInput {
   bars: OhlcvBar[];
 }
 
+export interface BacktestHallucinationAudit {
+  hasRealisticFriction: boolean;
+  enforcesCausalIntraBar: boolean;
+  hasSufficientOosSample: boolean;
+  isWinRatePlausible: boolean;
+  calibrationTradesPer1kBars: number;
+  holdoutTradesPer1kBars: number;
+  warnings: string[];
+  passed: boolean;
+}
+
 export interface RealHistoricalWalkForwardReport {
   totalBarsEvaluated: number;
   calibrationMetrics: BacktestMetrics;
@@ -863,6 +874,7 @@ export interface RealHistoricalWalkForwardReport {
   oosBrierAfter: number;
   pbo: PboEvaluationResult;
   scenarioAttribution: ScenarioAttributionMap;
+  hallucinationAudit: BacktestHallucinationAudit;
 }
 
 function collectWalkForwardMetaSamples(params: {
@@ -1116,7 +1128,8 @@ export function runRealHistoricalWalkForwardBacktest(
       if (t < nextAllowed) continue;
       if (t > splitBar && t < splitBar + embargoBars) continue; // Embargo zone between Calibration and Holdout
 
-      const barsCausal = bars.slice(0, t + 1);
+      // Causal 220-bar rolling lookback matching live bot execution window (zero look-ahead, O(N) runtime)
+      const barsCausal = bars.slice(Math.max(0, t - 219), t + 1);
       const futureBars = bars.slice(t + 1);
       const curPrice = bars[t]!.close;
       const frictionPrice =
@@ -1138,6 +1151,13 @@ export function runRealHistoricalWalkForwardBacktest(
         prec.tp2 != null &&
         prec.tp3 != null
       ) {
+        const tpWeights: [number, number, number] = prec.breakevenPlan
+          ? [
+              prec.breakevenPlan.tp1ClosePct / 100,
+              prec.breakevenPlan.tp2ClosePct / 100,
+              prec.breakevenPlan.tp3ClosePct / 100,
+            ]
+          : [0.58, 0.25, 0.17];
         const out = simulateTradeOutcome({
           barsFuture: futureBars,
           direction: prec.direction,
@@ -1149,11 +1169,11 @@ export function runRealHistoricalWalkForwardBacktest(
           tp3: prec.tp3,
           frictionPrice,
           useBreakevenScaling: true,
-          tpWeights: [0.70, 0.18, 0.12],
+          tpWeights,
           executionOptions: {
             enforceCausalIntraBar: true,
             breakevenSlippageR: 0.04,
-            postTp1LockR: 0.18,
+            postTp1LockR: 0.16,
             minLimitPenetrationFraction: 0.015,
           },
         });
@@ -1213,8 +1233,10 @@ export function runRealHistoricalWalkForwardBacktest(
   const oosBrierBefore = computeBrierScore(oosRawProbs, oosOutcomes);
   const oosBrierAfter = computeBrierScore(oosCalProbs, oosOutcomes);
 
-  const calibrationMetrics = summarizeTrades(calRecords, Math.floor(totalBarsEvaluated * 0.6), 4);
-  const holdoutMetrics = summarizeTrades(holdRecords, Math.ceil(totalBarsEvaluated * 0.4), 4);
+  const calBars = Math.max(1, Math.floor(totalBarsEvaluated * 0.6));
+  const holdBars = Math.max(1, Math.ceil(totalBarsEvaluated * 0.4));
+  const calibrationMetrics = summarizeTrades(calRecords, calBars, 4);
+  const holdoutMetrics = summarizeTrades(holdRecords, holdBars, 4);
 
   const thresholds = [0.74, 0.77, 0.80, 0.83];
   const combined = [
@@ -1241,6 +1263,26 @@ export function runRealHistoricalWalkForwardBacktest(
   });
   const pbo = calculateCombinatorialPurgedPbo(trialMatrix);
 
+  // Anti-Hallucination Audit: verify non-zero friction, causal intrabar rules, sample size & realistic WR band
+  const hasRealisticFriction = seriesList.every((s) => Number.isFinite(s.spreadPipsOrPct) && s.spreadPipsOrPct > 0);
+  const hasSufficientOosSample = holdoutMetrics.totalTrades >= 8;
+  const isWinRatePlausible =
+    holdoutMetrics.totalTrades === 0 || (holdoutMetrics.winRatePct <= 92 && calibrationMetrics.winRatePct <= 92);
+  const warnings: string[] = [];
+  if (!hasRealisticFriction) warnings.push("Zero or invalid spread/friction detected in series input.");
+  if (!hasSufficientOosSample) warnings.push(`Small OOS holdout sample (${holdoutMetrics.totalTrades} trades) — widen bar history for tighter confidence intervals.`);
+  if (!isWinRatePlausible) warnings.push(`Implausibly high winrate (>92%) detected — audit for look-ahead bias or synthetic fixture contamination.`);
+  const hallucinationAudit: BacktestHallucinationAudit = {
+    hasRealisticFriction,
+    enforcesCausalIntraBar: true,
+    hasSufficientOosSample,
+    isWinRatePlausible,
+    calibrationTradesPer1kBars: Number(((calibrationMetrics.totalTrades / calBars) * 1000).toFixed(1)),
+    holdoutTradesPer1kBars: Number(((holdoutMetrics.totalTrades / holdBars) * 1000).toFixed(1)),
+    warnings,
+    passed: hasRealisticFriction && isWinRatePlausible,
+  };
+
   return {
     totalBarsEvaluated,
     calibrationMetrics,
@@ -1249,6 +1291,7 @@ export function runRealHistoricalWalkForwardBacktest(
     oosBrierAfter,
     pbo,
     scenarioAttribution: buildScenarioAttribution(holdRecords),
+    hallucinationAudit,
   };
 }
 

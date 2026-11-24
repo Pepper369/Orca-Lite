@@ -918,42 +918,21 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     atr14 > 0 ? ((e21 - e21Prev8) / atr14) * (isBuy ? 1 : -1) : 0;
   const isRealCryptoStream = assetType === "CRYPTO" && n >= 48 && lastBar.time >= 1715000000;
   const isRealForexStream = assetType === "FOREX" && n >= 48 && lastBar.time >= 1715000000;
-  const isCryptoCounterMacroDrift =
-    isRealCryptoStream &&
-    ((isBuy && (ret48Pct < -1.5 || e21SlopePct8 < -0.45)) ||
-      (!isBuy && (ret48Pct > 1.5 || e21SlopePct8 > 0.45)));
-  const isForexCounterMacroDrift =
-    isRealForexStream && (signedRet48Atr < -1.0 || signedSlope21Atr < -0.30);
-  const isCryptoSignalBarChase =
-    isRealCryptoStream &&
-    (signedSignalBody > atr14 * 0.30 || signedRet3 > atr14 * 0.40);
-  const isCryptoLateLegExtension =
-    isRealCryptoStream &&
-    erVal < 0.36 &&
-    (ret12AlignedPct > 0.85 || signedDistE21Atr > 0.85);
+  const isRealStream = isRealCryptoStream || isRealForexStream;
+  // Soften macro drift hard-veto on real streams to prevent falling-knife traps while letting
+  // the 60% Quant pillar score nuanced trend, slope, and value pullback smoothly.
+  const isExtremeCounterMacroDrift = isRealStream && signedRet48Atr < -1.0;
 
   if (isParabolicExtended) {
     vetoReasons.push(`Chạy quá đà Parabolic (${distEma21Atr.toFixed(1)}x ATR từ EMA21, RSI ${rsi14.toFixed(0)}) — cấm đuổi lệnh`);
     gatesFailed.push("Gate 3 (Anti-Chase Veto): Quá mua/quá bán căng quá mức");
     precisionScore -= 16;
-  } else if (isCryptoCounterMacroDrift) {
+  } else if (isExtremeCounterMacroDrift) {
     vetoReasons.push(
-      `Ngược xu hướng trung hạn 48 nến (${ret48Pct.toFixed(2)}%, dốc EMA21 ${e21SlopePct8.toFixed(2)}%) — chặn bắt dao rơi sớm`,
+      `Ngược xu hướng trung hạn 48 nến (${signedRet48Atr.toFixed(2)} ATR, dốc EMA21 ${signedSlope21Atr.toFixed(2)} ATR) — chặn bắt dao ngược dòng`,
     );
-    gatesFailed.push("Gate 3f (Macro Drift Veto): Ngược đà trượt giá trung hạn khi EMA21 còn dốc mạnh");
+    gatesFailed.push("Gate 3f (Macro Drift Veto): Ngược xu hướng ATR 48 nến (-1.0 ATR)");
     precisionScore -= 16;
-  } else if (isForexCounterMacroDrift) {
-    vetoReasons.push(
-      `FX/Gold ngược đà trung hạn 48 nến (${signedRet48Atr.toFixed(2)} ATR, dốc EMA21 ${signedSlope21Atr.toFixed(2)} ATR) — chặn bắt dao ngược dòng`,
-    );
-    gatesFailed.push("Gate 3f (FX Macro Drift Veto): Ngược xu hướng ATR 48 nến hoặc độ dốc EMA21");
-    precisionScore -= 16;
-  } else if (isCryptoSignalBarChase || isCryptoLateLegExtension) {
-    vetoReasons.push(
-      `Đuổi giá cuối nhịp sóng ngắn hạn (12-bar +${ret12AlignedPct.toFixed(2)}%, cách EMA21 ${signedDistE21Atr.toFixed(2)} ATR) — chờ nhịp hồi về vùng giá trị`,
-    );
-    gatesFailed.push("Gate 3f (Anti-Late-Leg Veto): Tránh vào lệnh đuổi khi nến tín hiệu đã giãn xa EMA21 trong vùng ER thấp");
-    precisionScore -= 14;
   } else if (isFallingKnifeTrap) {
     vetoReasons.push(
       isBuy
@@ -1354,10 +1333,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     upperStopCap,
     Math.max(structuralVolUnit * 0.94, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
   );
-  // After Gate 6 evaluates raw compression friction on gate6StopDist, apply 1.34x ATR anti-wick cushion on real Crypto streams
+  // Apply unified 1.38x ATR institutional anti-wick cushion on BOTH real Crypto and real Forex/Gold streams
   const stopDist =
-    assetType === "CRYPTO" && isRealCryptoStream && candidateStopLoss == null
-      ? Math.max(gate6StopDist, atr14 * 1.34)
+    isRealStream && candidateStopLoss == null
+      ? Math.max(gate6StopDist, atr14 * 1.38)
       : gate6StopDist;
   const rawSl = isBuy ? rawEntry - stopDist : rawEntry + stopDist;
 
@@ -1472,11 +1451,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
   }
 
-  // Scenario-conditioned TP1 & TP3 distances (high-winrate 0.72R harvest on real Crypto & FX/Gold streams)
-  const tp1Dist =
-    isRealCryptoStream || isRealForexStream
-      ? stopDist * 0.72
-      : stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
+  // Scenario-conditioned TP1 & TP3 distances (balanced 0.80R TP1 + 42% runner payoff asymmetry on real Crypto & FX/Gold)
+  const tp1Dist = isRealStream
+    ? stopDist * 0.80
+    : stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
   const cappedTp3R = Math.min(2.85, exitPolicy.tp3RMultiple);
   const tp3Dist = Math.max(target2Dist * 1.22, stopDist * cappedTp3R);
 
@@ -1509,88 +1487,80 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesPassed.push(`Gate 6: SL cấu trúc & Net R:R 1:${netRiskReward} (Friction ${frictionR}R)`);
   }
 
-  // GATE 8: SuperTrend Volatility Ratchet + Stochastic Pullback Inflection + FX Active Session & Anti-Adverse-Selection
-  if (n >= 45 && candidateDirection === "AUTO") {
-    const isRealStream = isRealCryptoStream || isRealForexStream;
-    const stAligned =
-      execCtx.superTrendDir == null ||
-      (isBuy ? execCtx.superTrendDir === "up" : execCtx.superTrendDir === "down");
-    const isLaminarCleanTrend =
-      !isRealStream && erVal >= 0.25 && whipsawFlips <= 2 && htfMatches;
-    const expectedSweepSide = isBuy ? "SELL_SIDE_SWEPT" : "BUY_SIDE_SWEPT";
-    const hasRecentPrimeTurtleSweep = isRealStream
-      ? adxVal < 19 &&
-        ict.recentSweeps.some(
-          (s) =>
-            s.side === expectedSweepSide &&
-            s.barIndex === n - 1 &&
-            s.sweepType === "TURTLE_SOUP" &&
-            s.conviction === "INSTITUTIONAL_PRIME" &&
-            s.mssConfirmed,
-        )
-      : (isBuy ? bullSweepRecent : bearSweepRecent) && (hasMss || adxVal < 26);
-    const hasPrimeReversalOverride =
-      hasRecentPrimeTurtleSweep ||
-      isLiveImpulseReversalPivot ||
-      (!isRealStream && hasExhaustionShift);
-    const barUtcHour = new Date(lastBar.time * 1000).getUTCHours();
-    const isForexActiveSession =
-      !isRealForexStream || (barUtcHour >= 7 && barUtcHour <= 20);
-    const stochHookAligned =
-      !isRealStream ||
-      hasRecentPrimeTurtleSweep ||
-      execCtx.stochK == null ||
-      execCtx.stochPrevK == null ||
-      (isBuy
-        ? (execCtx.stochK >= execCtx.stochPrevK || execCtx.stochK <= 35) && execCtx.stochK <= 76
-        : (execCtx.stochK <= execCtx.stochPrevK || execCtx.stochK >= 65) && execCtx.stochK >= 24);
-    const rsiPullbackRoomOk =
-      !isRealCryptoStream ||
-      hasRecentPrimeTurtleSweep ||
-      (isBuy ? rsi14 <= 56 : rsi14 >= 44);
-    const oppWickRatio =
-      lastRange > 1e-12
-        ? isBuy
-          ? (lastBar.high - Math.max(lastBar.open, lastBar.close)) / lastRange
-          : (Math.min(lastBar.open, lastBar.close) - lastBar.low) / lastRange
-        : 0;
-    const noHeavyOpposingWick = !isRealCryptoStream || oppWickRatio <= 0.41;
-    const naturalEntryGapR = Math.abs(currentPrice - rawEntry) / Math.max(1e-12, gate6StopDist);
-    const isAdverseSelectionDeepGap =
-      isRealCryptoStream && naturalEntryGapR > 0.25 && !hasPrimeReversalOverride;
+  // Shared causal Quant telemetry used by BOTH Gate 8 and the 60% Quant pillar of Tri-Pillar 60/30/10
+  const stAligned =
+    execCtx.superTrendDir == null ||
+    (isBuy ? execCtx.superTrendDir === "up" : execCtx.superTrendDir === "down");
+  const barUtcHour = new Date(lastBar.time * 1000).getUTCHours();
+  const isLondonNySession = barUtcHour >= 7 && barUtcHour <= 20;
+  const isKillzoneSession =
+    (barUtcHour >= 7 && barUtcHour <= 10) || (barUtcHour >= 12 && barUtcHour <= 16);
+  const stochHookAligned =
+    execCtx.stochK == null ||
+    execCtx.stochPrevK == null ||
+    (isBuy
+      ? (execCtx.stochK >= execCtx.stochPrevK || execCtx.stochK <= 35) && execCtx.stochK <= 76
+      : (execCtx.stochK <= execCtx.stochPrevK || execCtx.stochK >= 65) && execCtx.stochK >= 24);
+  const oppWickRatio =
+    lastRange > 1e-12
+      ? isBuy
+        ? (lastBar.high - Math.max(lastBar.open, lastBar.close)) / lastRange
+        : (Math.min(lastBar.open, lastBar.close) - lastBar.low) / lastRange
+      : 0;
+  const naturalEntryGapR = Math.abs(currentPrice - rawEntry) / Math.max(1e-12, gate6StopDist);
 
-    if (isRealCryptoStream && !stAligned && !hasPrimeReversalOverride) {
+  // GATE 8: Asset-Native Institutional Guard (SuperTrend + Anti-Chase Value Pullback for 24/7 Crypto,
+  // London/NY Liquidity for FX/Gold) + Shared Stochastic Pullback Inflection, Anti-Rejection Wick & Entry Proximity.
+  const signedBodyAtrGate8 = atr14 > 0 ? signedSignalBody / atr14 : 0;
+  if (n >= 45 && candidateDirection === "AUTO" && isRealStream) {
+    const maxGapAllowed = isRealCryptoStream ? 0.25 : 0.35;
+    const isAdverseGap = naturalEntryGapR > maxGapAllowed && !isLiveImpulseReversalPivot;
+    const isHeavyOppWick = oppWickRatio > 0.45 && !isLiveImpulseReversalPivot;
+    const isCryptoChaseBar =
+      isRealCryptoStream &&
+      !isLiveImpulseReversalPivot &&
+      (signedBodyAtrGate8 > 0.35 || (isBuy ? rsi14 > 58 : rsi14 < 42));
+    if (isRealCryptoStream && !stAligned && !isLiveImpulseReversalPivot) {
       precisionScore -= 14;
       vetoReasons.push(
-        `Ngược dải biến động SuperTrend (${execCtx.superTrendDir?.toUpperCase()}) khi chưa có Prime Sweep+MSS vùng nén`,
+        `Ngược dải biến động SuperTrend (${execCtx.superTrendDir?.toUpperCase()}) trên luồng Crypto 24/7`,
       );
       gatesFailed.push("Gate 8a (SuperTrend Ratchet Veto): Chặn bắt ngược xu hướng biến động ATR");
-    } else if (isRealForexStream && !isForexActiveSession) {
+    } else if (isRealForexStream && !isLondonNySession && !isLiveImpulseReversalPivot) {
       precisionScore -= 12;
       vetoReasons.push(
         `Ngoài khung thanh khoản chính London/New York (${String(barUtcHour).padStart(2, "0")}:00 UTC) — tránh nhiễu phiên Á`,
       );
       gatesFailed.push("Gate 8d (FX Session Liquidity Veto): Chỉ mở lệnh FX/Gold trong phiên thanh khoản London/NY (07:00–20:59 UTC)");
-    } else if ((!stochHookAligned || !rsiPullbackRoomOk || !noHeavyOpposingWick) && !isLiveImpulseReversalPivot) {
+    } else if (!stochHookAligned && !isLiveImpulseReversalPivot) {
       precisionScore -= 10;
       vetoReasons.push(
-        !noHeavyOpposingWick
-          ? `Râu nến từ chối ngược chiều lớn (${(oppWickRatio * 100).toFixed(0)}% biên độ) — chờ hấp thụ xong`
-          : `Nhịp hồi Stochastic (${execCtx.stochK?.toFixed(1)}) chưa ở điểm uốn vùng giá trị`,
+        `Nhịp hồi Stochastic (${execCtx.stochK?.toFixed(1)}) chưa xác nhận điểm uốn vùng giá trị`,
       );
-      gatesFailed.push("Gate 8b (Pullback Inflection & Wick Veto): Chưa đạt điểm uốn tối ưu hoặc bị râu từ chối");
-    } else if (isAdverseSelectionDeepGap) {
+      gatesFailed.push("Gate 8b (Stochastic Inflection Veto): Chờ điểm uốn Stochastic đồng thuận");
+    } else if (isCryptoChaseBar) {
       precisionScore -= 10;
       vetoReasons.push(
-        `Điểm chờ Limit cách quá xa giá hiện tại (${naturalEntryGapR.toFixed(2)}R) — tránh rủi ro lựa chọn bất lợi (Adverse Selection)`,
+        `Nến Crypto đang đuổi giá (Body ${signedBodyAtrGate8.toFixed(2)} ATR, RSI ${rsi14.toFixed(1)}) — chờ nhịp hồi về vùng giá trị`,
+      );
+      gatesFailed.push("Gate 8b (Crypto Anti-Chase Pullback Veto): Chờ nến hồi gọn (Body<=0.35 ATR, RSI vùng giá trị)");
+    } else if (isHeavyOppWick) {
+      precisionScore -= 10;
+      vetoReasons.push(
+        `Râu nến từ chối ngược chiều lớn (${(oppWickRatio * 100).toFixed(0)}% biên độ) — tránh hấp thụ ngược`,
+      );
+      gatesFailed.push("Gate 8b (Rejection Wick Veto): Tránh vào lệnh đối đầu râu từ chối mạnh");
+    } else if (isAdverseGap) {
+      precisionScore -= 10;
+      vetoReasons.push(
+        `Điểm chờ Limit cách quá xa giá hiện tại (${naturalEntryGapR.toFixed(2)}R > ${maxGapAllowed}R) — tránh rủi ro lựa chọn bất lợi`,
       );
       gatesFailed.push("Gate 8c (Entry Proximity Veto): Chờ giá tiếp cận sát vùng OTE/FVG thực tế");
     } else {
-      // Pure quality gate: do not inflate precisionScore so marginal Grade B setups are never promoted to A/A+
       gatesPassed.push(
         isRealForexStream
-          ? `Gate 8 (FX High-Winrate Inflection): Phiên London/NY (${String(barUtcHour).padStart(2, "0")}h UTC) + Stochastic Hook + Macro Alignment`
-          : `Gate 8 (High-Winrate Inflection): Đồng thuận SuperTrend + Stochastic Hook (Gap ${naturalEntryGapR.toFixed(2)}R)`,
+          ? `Gate 8 (FX Quant Inflection): Phiên London/NY (${String(barUtcHour).padStart(2, "0")}h UTC) + Stochastic Hook (Gap ${naturalEntryGapR.toFixed(2)}R)`
+          : `Gate 8 (Crypto 24/7 Value Pullback): SuperTrend + Stochastic Hook + Anti-Chase (Gap ${naturalEntryGapR.toFixed(2)}R)`,
       );
     }
   }
@@ -1679,39 +1649,75 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
 
   // ------------------------------------------------------------------
   // TRI-PILLAR WEIGHTED COMPOSITION: QUANT (60%) + ICT (30%) + SMC (10%)
+  // Unified causal OHLCV + microstructure formula across Crypto 24/7 & Forex/Gold:
+  //   - Quant (0..60): Trend/Volatility (25) + Pullback Value/Inflection (21) + Execution/Session/L2 Stat (14)
+  //   - ICT   (0..30): Liquidity Sweep/Turtle Soup + FVG/IFVG/BPR + Forward Liquidity + OTE/AMD
+  //   - SMC   (0..10): MSS/BOS + HTF/Macro Structure POI
   // ------------------------------------------------------------------
-  let quantRegimePts = 12;
-  if (regimeState === "TRENDING_UP" || regimeState === "TRENDING_DOWN") quantRegimePts += 5;
-  if (!isDeadChop && (adxVal >= 18 || erVal >= 0.28)) quantRegimePts += 3;
+  // Pillar 1: QUANT (0 - 60 pts = 60% weight)
+  let quantTrendPts = 0;
+  if (stAligned) quantTrendPts += 10;
+  else if (!isRealStream && hasSweep && (hasMss || hasDiv)) quantTrendPts += 8;
+  if (signedRet48Atr >= 0) quantTrendPts += 8;
+  else if (signedRet48Atr >= -0.6) quantTrendPts += 4;
+  if (signedSlope21Atr >= 0) quantTrendPts += 7;
+  else if (signedSlope21Atr >= -0.2) quantTrendPts += 3;
 
-  let quantMicroPts = 6;
-  if ((isBuy && realImbalance >= adaptiveImbalanceThresh) || (!isBuy && realImbalance <= -adaptiveImbalanceThresh)) quantMicroPts += 5;
-  if (microSkewBps != null && ((isBuy && microSkewBps >= 1.5) || (!isBuy && microSkewBps <= -1.5))) quantMicroPts += 3;
-  if ((spoofState === "BULLISH_ICEBERG_ABSORPTION" && isBuy) || (spoofState === "BEARISH_ICEBERG_ABSORPTION" && !isBuy)) quantMicroPts += 4;
-  if ((absorptionType === "BULLISH_ABSORPTION" && isBuy) || (absorptionType === "BEARISH_ABSORPTION" && !isBuy)) quantMicroPts += 4;
-  if ((volumeDeltaDivergence === "BULLISH_DIVERGENCE" && isBuy) || (volumeDeltaDivergence === "BEARISH_DIVERGENCE" && !isBuy)) quantMicroPts += 4;
+  let quantTimingPts = 0;
+  if (stochHookAligned) quantTimingPts += 8;
+  else if (isBuy ? (execCtx.stochK ?? 50) <= 80 : (execCtx.stochK ?? 50) >= 20) quantTimingPts += 3;
+  const signedBodyAtr = atr14 > 0 ? signedSignalBody / atr14 : 0;
+  const signedRet3Atr = atr14 > 0 ? signedRet3 / atr14 : 0;
+  if (signedBodyAtr <= 0.35 && signedRet3Atr <= 0.55) quantTimingPts += 7;
+  else if (signedBodyAtr <= 0.65) quantTimingPts += 3;
+  const rsiValueOk = isBuy ? rsi14 <= 58 : rsi14 >= 42;
+  const rsiRoomOk = isBuy ? rsi14 <= 66 : rsi14 >= 34;
+  if (rsiValueOk) quantTimingPts += 6;
+  else if (rsiRoomOk) quantTimingPts += 3;
 
-  let quantStatPts = 6;
-  if (cusumAligned > 0) quantStatPts += 4;
-  if (pace.isIrreversibleLock && ((isBuy && pace.lockDirection === "BULLISH_LOCKED") || (!isBuy && pace.lockDirection === "BEARISH_LOCKED"))) quantStatPts += 4;
-  if (metaPred.calibratedProbability >= 0.50) quantStatPts += 4;
-  const quantScore = Math.min(60, Math.max(10, quantRegimePts + quantMicroPts + quantStatPts));
+  let quantMicroStatPts = 0;
+  if (oppWickRatio <= 0.40) quantMicroStatPts += 4;
+  else if (oppWickRatio <= 0.48) quantMicroStatPts += 2;
+  if (naturalEntryGapR <= 0.30) quantMicroStatPts += 3;
+  if (isKillzoneSession) quantMicroStatPts += 4;
+  else if (isLondonNySession) quantMicroStatPts += 3;
+  else if (assetType === "CRYPTO") quantMicroStatPts += 1;
 
-  let ictSweepPts = hasSweep ? (hasSweep && (hasMss || hasDiv) ? 13 : 10) : 4;
+  // Statistical & L2 Microstructure confirmation bonus (capped inside 60pt pillar ceiling)
+  let quantStatLiveBonus = 0;
+  if ((isBuy && realImbalance >= adaptiveImbalanceThresh) || (!isBuy && realImbalance <= -adaptiveImbalanceThresh)) quantStatLiveBonus += 2;
+  if (cusumAligned > 0) quantStatLiveBonus += 2;
+  if (metaPred.calibratedProbability >= 0.50) quantStatLiveBonus += 2;
+  if (microSkewBps != null && ((isBuy && microSkewBps >= 1.5) || (!isBuy && microSkewBps <= -1.5))) quantStatLiveBonus += 2;
+  if ((spoofState === "BULLISH_ICEBERG_ABSORPTION" && isBuy) || (spoofState === "BEARISH_ICEBERG_ABSORPTION" && !isBuy)) quantStatLiveBonus += 3;
+  if ((absorptionType === "BULLISH_ABSORPTION" && isBuy) || (absorptionType === "BEARISH_ABSORPTION" && !isBuy)) quantStatLiveBonus += 2;
+  if ((volumeDeltaDivergence === "BULLISH_DIVERGENCE" && isBuy) || (volumeDeltaDivergence === "BEARISH_DIVERGENCE" && !isBuy)) quantStatLiveBonus += 2;
+  if (pace.isIrreversibleLock && ((isBuy && pace.lockDirection === "BULLISH_LOCKED") || (!isBuy && pace.lockDirection === "BEARISH_LOCKED"))) quantStatLiveBonus += 2;
+  quantMicroStatPts += Math.min(6, quantStatLiveBonus);
+
+  const quantScore = Math.min(60, Math.max(8, quantTrendPts + quantTimingPts + quantMicroStatPts));
+
+  // Pillar 2: ICT (0 - 30 pts = 30% weight)
+  const ictSweepPts = hasSweep ? (hasSweep && (hasMss || hasDiv) ? 13 : 10) : 4;
   let ictFvgPts = ifvgOrBprMatches ? 6 : 2;
   if (fwdLiq?.primaryTarget && ((isBuy && fwdLiq.primaryTarget.side === "BUY_SIDE") || (!isBuy && fwdLiq.primaryTarget.side === "SELL_SIDE"))) ictFvgPts += 3;
   let ictOtePts = inValuePullback ? 5 : 2;
   if (amdMatches && ict.amdPowerOf3?.phase === "MANIPULATION_JUDAS") ictOtePts += 3;
   const ictScore = Math.min(30, Math.max(5, ictSweepPts + ictFvgPts + ictOtePts));
 
-  let smcMssPts = hasMss ? 6 : 2;
-  let smcStructPts = htfMatches ? 4 : (htfMatches || macroMatches) ? 2 : 0;
+  // Pillar 3: SMC (0 - 10 pts = 10% weight)
+  const smcMssPts = hasMss ? 6 : 2;
+  const smcStructPts = htfMatches ? 4 : macroMatches ? 2 : 0;
   const smcScore = Math.min(10, Math.max(2, smcMssPts + smcStructPts));
 
   const triPillarTotal = quantScore + ictScore + smcScore;
-  const quantPass = quantScore >= 30;
-  const ictPass = ictScore >= 11;
-  const smcPass = smcScore >= 3;
+  const quantMinPass = isRealCryptoStream ? 46 : isRealForexStream ? 44 : 30;
+  const ictMinPass = 11;
+  const smcMinPass = isRealStream ? 4 : 3;
+  const minTotalForExecution = isRealCryptoStream ? 72 : isRealForexStream ? 76 : 50;
+  const quantPass = quantScore >= quantMinPass;
+  const ictPass = ictScore >= ictMinPass;
+  const smcPass = smcScore >= smcMinPass;
 
   const triPillarComposition: TriPillarComposition = {
     quantScore,
@@ -1722,7 +1728,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     quantPass,
     ictPass,
     smcPass,
-    rationaleVi: `Tri-Pillar 60/30/10: Quant ${quantScore}/60 (${quantPass ? "PASS" : "FAIL"}) + ICT ${ictScore}/30 (${ictPass ? "PASS" : "FAIL"}) + SMC ${smcScore}/10 (${smcPass ? "PASS" : "FAIL"})`,
+    rationaleVi: `Tri-Pillar 60/30/10 (${triPillarTotal}/100): Quant ${quantScore}/60 (${quantPass ? "PASS" : "FAIL"}) + ICT ${ictScore}/30 (${ictPass ? "PASS" : "FAIL"}) + SMC ${smcScore}/10 (${smcPass ? "PASS" : "FAIL"})`,
   };
 
   // Net Expectancy Bleed Guard: Veto low-edge setups where friction destroys mathematical expectancy
@@ -1733,19 +1739,38 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     gatesFailed.push("Gate 6b (Net Expectancy Bleed Veto): Kỳ vọng toán học sau ma sát không đạt chuẩn an toàn");
   }
 
+  // Enforce 60% Quant + 30% ICT + 10% SMC Tri-Pillar Gate on real live/historical streams
+  if (isRealStream && candidateDirection === "AUTO") {
+    if (!quantPass || !ictPass || !smcPass || triPillarTotal < minTotalForExecution) {
+      vetoReasons.push(
+        `Tri-Pillar 60/30/10 chưa đạt ngưỡng (${triPillarTotal}/${minTotalForExecution}: Quant ${quantScore}/60, ICT ${ictScore}/30, SMC ${smcScore}/10)`,
+      );
+      gatesFailed.push(
+        `Gate 8e (Tri-Pillar 60/30/10 Gate): Yêu cầu Quant>=${quantMinPass}/60, ICT>=${ictMinPass}/30, SMC>=${smcMinPass}/10 & Total>=${minTotalForExecution}`,
+      );
+    } else {
+      gatesPassed.push(
+        `Gate 8e (Tri-Pillar 60/30/10 PASS): Tổng ${triPillarTotal}/100 (Quant ${quantScore}/60 + ICT ${ictScore}/30 + SMC ${smcScore}/10)`,
+      );
+    }
+  }
+
   // Assign final setup grade with Tri-Pillar 60/30/10 Hierarchical Enforcement:
-  // - Grade A+: Requires ALL 3 pillars to pass (Quant 60% >= 32, ICT 30% >= 12, SMC 10% >= 4)
-  // - Grade A : Requires Quant 60% >= 32 AND at least one of (ICT >= 12 or SMC >= 4)
+  // - Grade A+: Requires ALL 3 pillars to pass + Apex Tri-Pillar score (>= 74 on real streams)
+  // - Grade A : Requires Quant 60% PASS + structural ICT/SMC confluence (actually enforced, not bypassed!)
   // - Grade B : Moderate confluence setups with positive expectancy
   let grade: SetupGrade = "NO_TRADE";
   if (vetoReasons.length === 0 && resolvedDir !== "NEUTRAL" && !scenarioVector.isHardLockout) {
-    const isTriPillarApex = quantPass && ictPass && smcPass;
+    const isTriPillarApex = quantPass && ictPass && smcPass && (!isRealStream || triPillarTotal >= 74);
+    const isTriPillarGradeA = isRealStream
+      ? quantPass && ictPass && smcPass && triPillarTotal >= minTotalForExecution
+      : quantPass && (ictPass || smcPass);
 
     if (precisionScore >= 78 && expectancyR >= 0.28 && isTriPillarApex) {
       grade = "A+";
-    } else if (precisionScore >= 65 && expectancyR >= 0.14) {
+    } else if (precisionScore >= 65 && expectancyR >= 0.14 && isTriPillarGradeA) {
       grade = "A";
-    } else if (precisionScore >= 54 && expectancyR >= 0.03) {
+    } else if (precisionScore >= 54 && expectancyR >= 0.03 && (!isRealStream || quantPass)) {
       grade = "B";
     }
   }
@@ -1822,8 +1847,9 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ouZScore: ouProcess.currentZScore,
   };
 
-  const effTp1Pct = isRealCryptoStream ? Math.max(70, exitPolicy.tp1ClosePct) : exitPolicy.tp1ClosePct;
-  const effTp2Pct = isRealCryptoStream ? Math.min(18, 100 - effTp1Pct - 5) : exitPolicy.tp2ClosePct;
+  // Balanced 58/25/17 runner harvest on real Crypto & FX/Gold streams (lifts average winner while keeping high TP1 hit rate)
+  const effTp1Pct = isRealStream ? 58 : exitPolicy.tp1ClosePct;
+  const effTp2Pct = isRealStream ? 25 : exitPolicy.tp2ClosePct;
   const effTp3Pct = 100 - effTp1Pct - effTp2Pct;
   const breakevenPlan: PrecisionTradeSetup["breakevenPlan"] = {
     tp1ClosePct: effTp1Pct,

@@ -208,13 +208,13 @@ test("Compound Engineering Walk-Forward Lift: Calibration & Out-of-Sample Holdou
   const cal = runWalkForwardComparison({ split: "CALIBRATION" });
   const hold = runWalkForwardComparison({ split: "HOLDOUT" });
 
-  console.log("\n=== WALK-FORWARD CALIBRATION (Seeds: " + cal.seeds.join(",") + ") ===");
+  console.log("\n=== [SYNTHETIC REGRESSION FIXTURE — NOT REAL MARKET WR] CALIBRATION (Seeds: " + cal.seeds.join(",") + ") ===");
   console.log("Legacy Baseline   :", cal.legacyBaseline);
   console.log("Upgraded A+/A     :", cal.upgradedAAPlus);
   console.log("Upgraded All B/A  :", cal.upgradedAllGrades);
   console.log(`WinRate Lift: +${cal.winRateLiftPp}pp | Trap Reduction: ${cal.trapReductionPct}%`);
 
-  console.log("\n=== WALK-FORWARD HOLDOUT OOS (Seeds: " + hold.seeds.join(",") + ") ===");
+  console.log("\n=== [SYNTHETIC REGRESSION FIXTURE — NOT REAL MARKET WR] HOLDOUT OOS (Seeds: " + hold.seeds.join(",") + ") ===");
   console.log("Legacy Baseline   :", hold.legacyBaseline);
   console.log("Upgraded A+/A     :", hold.upgradedAAPlus);
   console.log("Upgraded All B/A  :", hold.upgradedAllGrades);
@@ -519,7 +519,7 @@ test("Gate 8 SSOT: SharedBarContext zero-allocation SuperTrend/Stochastic parity
   assert.equal(ctx.superTrendDir, "down", "Clean downtrend must hold bearish SuperTrend");
 });
 
-test("Forex Gate 8d & 0.72R TP1 SSOT: Enforces London/NY session guard on real FX stream and unified 0.72R TP1", () => {
+test("Forex Gate 8d, 0.80R TP1 & Tri-Pillar 60/30/10 SSOT: Enforces London/NY session guard, 58/25/17 harvest, and 60/30/10 weights", () => {
   const eurSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "EURUSD")!;
   const { bars } = generateRegimeBars(eurSpec, "CLEAN_UPTREND_RETEST", 303, 72);
 
@@ -540,7 +540,7 @@ test("Forex Gate 8d & 0.72R TP1 SSOT: Enforces London/NY session guard on real F
     `Real FX bar at 03:00 UTC must trigger Gate 8d session veto, got gatesFailed=${JSON.stringify(asianEval.gatesFailed)}`,
   );
 
-  // Align last bar to 13:00 UTC (London/NY overlap) — must NOT trigger Gate 8d and must use 0.72R TP1
+  // Align last bar to 13:00 UTC (London/NY overlap) — must NOT trigger Gate 8d and must use 0.80R TP1 + 58/25/17 scaling + 60/30/10 Tri-Pillar
   const londonNyEndTs = Date.UTC(2025, 4, 15, 13, 0, 0) / 1000;
   const londonNyBars: OhlcvBar[] = bars.map((b, idx) => ({
     ...b,
@@ -556,12 +556,22 @@ test("Forex Gate 8d & 0.72R TP1 SSOT: Enforces London/NY session guard on real F
     !londonNyEval.gatesFailed.some((g) => g.includes("Gate 8d")),
     "Real FX bar at 13:00 UTC (London/NY overlap) must not trigger Gate 8d session veto",
   );
+  assert.deepEqual(londonNyEval.triPillarComposition.weightsPct, { quant: 60, ict: 30, smc: 10 });
+  assert.equal(
+    londonNyEval.triPillarComposition.totalScore,
+    londonNyEval.triPillarComposition.quantScore +
+      londonNyEval.triPillarComposition.ictScore +
+      londonNyEval.triPillarComposition.smcScore,
+  );
+  assert.equal(londonNyEval.breakevenPlan.tp1ClosePct, 58);
+  assert.equal(londonNyEval.breakevenPlan.tp2ClosePct, 25);
+  assert.equal(londonNyEval.breakevenPlan.tp3ClosePct, 17);
   if (londonNyEval.entry != null && londonNyEval.stopLoss != null && londonNyEval.tp1 != null) {
     const risk = Math.abs(londonNyEval.entry - londonNyEval.stopLoss);
     const tp1R = Math.abs(londonNyEval.tp1 - londonNyEval.entry) / Math.max(1e-12, risk);
     assert.ok(
-      Math.abs(tp1R - 0.72) <= 0.05,
-      `Real FX stream TP1 should target ~0.72R harvest, got ${tp1R.toFixed(3)}R`,
+      Math.abs(tp1R - 0.80) <= 0.05,
+      `Real FX stream TP1 should target ~0.80R harvest, got ${tp1R.toFixed(3)}R`,
     );
   }
 });
