@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/lib/hooks";
 import { useMarketStream } from "@/lib/hooks/use-market-stream";
 import { VN_SECTOR_MAP } from "@/lib/vn/master";
 import { resolveCanonicalPreset } from "@/lib/quant/screener-taxonomy";
-import type { CryptoMarketRow, IndexQuote } from "@/lib/types";
+import type { IndexQuote } from "@/lib/types";
 import {
   Badge,
   Chg,
@@ -16,7 +17,6 @@ import {
   Loading,
   MetaLine,
   Panel,
-  priceDigits,
 } from "@/components/ui";
 import {
   SlidersHorizontal,
@@ -39,21 +39,34 @@ import {
   Sparkles,
   Bell,
 } from "lucide-react";
-import { ScreenerMiniChart } from "@/components/screener-mini-chart";
 import { ScreenerMatrixToolbar } from "@/components/screener-matrix-toolbar";
-import { ScreenerAiSynthesisModal } from "@/components/screener-ai-synthesis-modal";
-import { ScreenerWebhookAlertModal } from "@/components/screener-webhook-alert-modal";
 import {
-  CustomScreenerBuilder,
   loadCustomPresets,
   removeCustomPreset,
   type CustomScreenerPreset,
-} from "@/components/custom-screener-builder";
+} from "@/lib/custom-screener-presets";
 import type {
   ScreenerPreset,
   ScreenerStockItem,
   ScreenerResponseData,
 } from "@/lib/services/screener-snapshot-service";
+
+const ScreenerMiniChart = dynamic(
+  () => import("@/components/screener-mini-chart").then((m) => m.ScreenerMiniChart),
+  { ssr: false },
+);
+const ScreenerAiSynthesisModal = dynamic(
+  () => import("@/components/screener-ai-synthesis-modal").then((m) => m.ScreenerAiSynthesisModal),
+  { ssr: false },
+);
+const ScreenerWebhookAlertModal = dynamic(
+  () => import("@/components/screener-webhook-alert-modal").then((m) => m.ScreenerWebhookAlertModal),
+  { ssr: false },
+);
+const CustomScreenerBuilder = dynamic(
+  () => import("@/components/custom-screener-builder").then((m) => m.CustomScreenerBuilder),
+  { ssr: false },
+);
 
 export function Field({
   label,
@@ -5158,73 +5171,33 @@ export function VnScreener({
         </div>
       </Panel>
 
-      {/* Custom Screener Builder Modal */}
-      <CustomScreenerBuilder
-        isOpen={showCustomBuilder}
-        onClose={() => setShowCustomBuilder(false)}
-        onApplyPreset={handleApplyCustomPreset}
-      />
+      {/* Custom Screener Builder Modal (lazy-loaded on open) */}
+      {showCustomBuilder && (
+        <CustomScreenerBuilder
+          isOpen={showCustomBuilder}
+          onClose={() => setShowCustomBuilder(false)}
+          onApplyPreset={handleApplyCustomPreset}
+        />
+      )}
 
-      {/* Orca AI Screener Copilot Modal */}
-      <ScreenerAiSynthesisModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        preset={preset}
-        stocks={rows}
-        totalMatched={data?.total ?? rows.length}
-      />
+      {/* Orca AI Screener Copilot Modal (lazy-loaded on open) */}
+      {isAiModalOpen && (
+        <ScreenerAiSynthesisModal
+          isOpen={isAiModalOpen}
+          onClose={() => setIsAiModalOpen(false)}
+          preset={preset}
+          stocks={rows}
+          totalMatched={data?.total ?? rows.length}
+        />
+      )}
 
-      {/* Screener Webhook Alert Bot Modal */}
-      <ScreenerWebhookAlertModal
-        isOpen={isAlertModalOpen}
-        onClose={() => setIsAlertModalOpen(false)}
-      />
+      {/* Screener Webhook Alert Bot Modal (lazy-loaded on open) */}
+      {isAlertModalOpen && (
+        <ScreenerWebhookAlertModal
+          isOpen={isAlertModalOpen}
+          onClose={() => setIsAlertModalOpen(false)}
+        />
+      )}
     </div>
-  );
-}
-
-export function CryptoScreener() {
-  const [url] = useState("/api/v1/screener?universe=crypto&limit=40");
-  const { res, data, meta, isLoading } = useApi<{ universe: string; rows: CryptoMarketRow[] }>(url, {
-    refreshInterval: 30_000,
-    timeoutMs: 5_000,
-  });
-  const activeRows = data?.rows?.length ? data.rows : [];
-  return (
-    <Panel title={`Crypto: ${activeRows.length} mã`} pad={false}>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-[12px]">
-          <thead>
-            <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-3">
-              <th className="px-3.5 py-2">Mã</th>
-              <th className="py-2 text-right">Giá</th>
-              <th className="py-2 text-right">24h %</th>
-              <th className="py-2 pr-3.5 text-right">Vol</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeRows.map((r) => (
-              <tr key={r.symbol} className="row-hover border-b border-line/40">
-                <td className="px-3.5 py-2">
-                  <Link href={`/crypto/${r.symbol}`} className="font-semibold hover:text-accent">
-                    {r.baseAsset}
-                  </Link>
-                </td>
-                <td className="num py-2 text-right">{fmtNum(r.price, priceDigits(r.price))}</td>
-                <td className="py-2 text-right">
-                  <Chg value={r.changePercent} arrow={false} />
-                </td>
-                <td className="num py-2 pr-3.5 text-right text-ink-2">
-                  {fmtCompact(r.quoteVolume)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="border-t border-line px-3.5 py-2">
-        <MetaLine meta={meta} />
-      </div>
-    </Panel>
   );
 }

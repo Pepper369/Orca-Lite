@@ -99,15 +99,23 @@ function renderInlineBold(text: string) {
   });
 }
 
-export function AiAssistantWidget() {
+export function AiAssistantWidget({
+  initialOpen = false,
+  initialMode,
+}: {
+  initialOpen?: boolean;
+  initialMode?: WidgetMode;
+} = {}) {
   const pathname = usePathname();
   const { settings } = useSettings();
   const isPersonalFinanceRoute = pathname.startsWith("/personal-finance");
 
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initialOpen);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [mode, setMode] = useState<WidgetMode>(isPersonalFinanceRoute ? "finance" : "market");
+  const [mode, setMode] = useState<WidgetMode>(
+    initialMode ?? (isPersonalFinanceRoute ? "finance" : "market"),
+  );
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -409,19 +417,13 @@ export function AiAssistantWidget() {
             onClick={() => setIsOpen(true)}
             aria-label="Mở Trợ lý AI Orca"
             title="Mở Trợ lý ORCA AI"
-            className="group relative flex size-14 items-center justify-center rounded-full bg-slate-900/90 border-2 border-cyan-400/50 shadow-2xl shadow-cyan-500/30 hover:border-cyan-300 hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer select-none"
+            className="group relative flex size-14 items-center justify-center rounded-full bg-slate-900/95 border-2 border-cyan-400/50 shadow-xl shadow-cyan-500/20 hover:border-cyan-300 hover:scale-105 active:scale-95 transition-transform duration-150 cursor-pointer select-none"
           >
-            {/* Ambient Pulsing Glow */}
-            <span className="absolute -inset-1 rounded-full bg-gradient-to-tr from-cyan-500 to-teal-400 opacity-30 blur-md group-hover:opacity-60 transition-opacity animate-pulse pointer-events-none" />
-
             {/* Clean Orca Brand Mark */}
-            <OrcaMark size={32} className="relative select-none pointer-events-none drop-shadow-md group-hover:scale-105 transition-transform duration-300" />
+            <OrcaMark size={32} className="relative select-none pointer-events-none" />
 
             {/* Online Indicator Badge */}
-            <span className="absolute top-0 right-0 flex size-3.5">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
-              <span className="relative inline-flex size-3.5 rounded-full border-2 border-slate-900 bg-emerald-500" />
-            </span>
+            <span className="absolute top-0 right-0 inline-flex size-3.5 rounded-full border-2 border-slate-900 bg-emerald-500" />
           </button>
         </div>
       )}

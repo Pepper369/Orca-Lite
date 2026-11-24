@@ -39,7 +39,7 @@ const VnScreener = dynamic(
   { ssr: false, loading: PanelFallback },
 );
 const CryptoScreener = dynamic(
-  () => import("./screener-panels").then((m) => m.CryptoScreener),
+  () => import("./crypto-screener-panel").then((m) => m.CryptoScreener),
   { ssr: false, loading: PanelFallback },
 );
 const SectorFlowScreener = dynamic(

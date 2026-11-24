@@ -62,7 +62,7 @@ import { sanitizeImageSrc } from "@/lib/security/xss";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { NotifBell } from "@/components/notif-bell";
 import { PriceAlertEngine } from "@/components/price-alert-engine";
-import { AiAssistantWidget } from "@/components/ai-assistant-widget";
+import { AiAssistantLauncher } from "@/components/ai-assistant-launcher";
 
 const SIDEBAR_EXPANDED = 268;
 const SIDEBAR_COLLAPSED = 60;
@@ -631,7 +631,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
         onOpenDrawer={() => setMobileOpen(true)}
         onNav={onNav}
       />
-      <AiAssistantWidget />
+      <AiAssistantLauncher />
     </div>
   );
 }
