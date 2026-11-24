@@ -526,10 +526,12 @@ export function StockDetailClient({
   symbol: rawSymbol,
   initialDetail,
   initialMeta,
+  isActive = true,
 }: {
   symbol: string;
   initialDetail?: VnStockDetail | null;
   initialMeta?: Meta | null;
+  isActive?: boolean;
 }) {
   const symbol = (rawSymbol ?? "").toUpperCase();
   const [activeTab, setActiveTab] = useState<FireantTabId>("overview");
@@ -538,7 +540,7 @@ export function StockDetailClient({
   const { res, data, meta: apiMeta, isLoading, isValidating, mutate } = useApi<VnStockDetail>(
     symbol ? `/api/v1/stocks/${encodeURIComponent(symbol)}` : null,
     {
-      refreshInterval: 15_000,
+      refreshInterval: isActive ? 15_000 : 0,
       timeoutMs: 12_000,
       keepPreviousData: true,
       initialData: initialDetail ?? undefined,
@@ -671,7 +673,7 @@ export function StockDetailClient({
           </div>
           <div className="flex-1 min-h-[380px] sm:min-h-[460px] p-1 bg-surface-primary">
             <ErrorBoundary name="chart" resetKey={detail.symbol}>
-              <OrcaChart symbol={detail.symbol} assetType="stock" title={detail.symbol} height={460} />
+              <OrcaChart symbol={detail.symbol} assetType="stock" title={detail.symbol} height={460} active={isActive} />
             </ErrorBoundary>
           </div>
         </div>
@@ -716,7 +718,7 @@ export function StockDetailClient({
           <div className="flex-1 p-2 sm:p-2.5 overflow-y-auto max-h-[500px]">
             {microTab === "orderbook" && (
               <ErrorBoundary name="orderbook" resetKey={detail.symbol}>
-                <OrderBookPanel symbol={detail.symbol} compact initialData={detail.orderBook} />
+                <OrderBookPanel symbol={detail.symbol} compact initialData={detail.orderBook} active={isActive} />
               </ErrorBoundary>
             )}
             {microTab === "flow" && (

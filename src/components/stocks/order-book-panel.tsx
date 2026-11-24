@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/hooks";
 import type { VnOrderBook, VnTrade } from "@/lib/services/stock-orderbook";
 import type { FreshnessStatus } from "@/lib/types";
@@ -52,18 +52,29 @@ export function OrderBookPanel({
   symbol,
   compact = false,
   initialData,
+  active = true,
 }: {
   symbol: string;
   compact?: boolean;
   initialData?: VnOrderBook | null;
+  active?: boolean;
 }) {
-  const { res, data: restData, meta: restMeta, isLoading, mutate } = useApi<VnOrderBook>(
-    symbol ? `/api/v1/stocks/${symbol}/orderbook` : null,
-    { refreshInterval: 10_000, timeoutMs: 7_000, initialData: initialData ?? undefined },
-  );
-
   const [live, setLive] = useState<VnOrderBook | null>(null);
   const [sseState, setSseState] = useState<"connecting" | "open" | "error" | "off">("off");
+
+  // Disable redundant 10s REST poll when SSE stream is healthy or when parent tab is hidden
+  const { res, data: restData, meta: restMeta, isLoading, mutate } = useApi<VnOrderBook>(
+    symbol ? `/api/v1/stocks/${symbol}/orderbook` : null,
+    {
+      refreshInterval: active && sseState !== "open" ? 10_000 : 0,
+      timeoutMs: 7_000,
+      initialData: initialData ?? undefined,
+    },
+  );
+  const restDataRef = useRef<VnOrderBook | null>(restData ?? null);
+  useEffect(() => {
+    restDataRef.current = restData ?? null;
+  }, [restData]);
 
   // Orca interactive controls: Mode (3-levels vs Full) & Trade Filter (all, buy, sell, whale)
   const [viewMode, setViewMode] = useState<"l3" | "full">("l3");
@@ -73,7 +84,7 @@ export function OrderBookPanel({
     (partial: Partial<VnOrderBook> & { symbol?: string }) => {
       window.setTimeout(() => {
         setLive((prev) => {
-          const base = prev ?? restData ?? null;
+          const base = prev ?? restDataRef.current ?? null;
           if (!base && !partial.bids && !partial.asks) return prev;
           const next: VnOrderBook = {
             symbol: partial.symbol ?? base?.symbol ?? symbol,
@@ -104,7 +115,7 @@ export function OrderBookPanel({
         });
       }, 0);
     },
-    [restData, symbol],
+    [symbol],
   );
 
   // Sync REST payload into live state
@@ -120,9 +131,9 @@ export function OrderBookPanel({
     }
   }, [restData]);
 
-  // SSE stream for real-time orderbook updates
+  // SSE stream for real-time orderbook updates (pauses cleanly when tab is hidden)
   useEffect(() => {
-    if (!symbol) return;
+    if (!symbol || !active) return;
     let es: EventSource | null = null;
     let closed = false;
     const url = `/api/v1/stocks/${symbol}/orderbook/stream`;
@@ -184,7 +195,7 @@ export function OrderBookPanel({
       es?.close();
       setSseState("off");
     };
-  }, [symbol, mergeBook]);
+  }, [symbol, active, mergeBook]);
 
   const data = live ?? restData;
 

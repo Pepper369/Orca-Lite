@@ -343,7 +343,7 @@ export function ApexQuantBadgeComponent({
 
   if (isSuper) {
     colorClass = "bg-amber-500/20 text-amber-200 border-amber-400/50 font-bold shadow-xs";
-    dotClass = "bg-amber-400 animate-pulse";
+    dotClass = "bg-amber-400";
     label = "Chân Sóng";
   } else if (isLeader) {
     colorClass = "bg-emerald-500/15 text-emerald-300 border-emerald-400/40 font-semibold";
@@ -758,7 +758,7 @@ export function SqueezeBadge({
     return (
       <span
         title={`Bứt phá Volatility Squeeze Tăng${slope ? ` (${slope})` : ""}`}
-        className="inline-flex items-center gap-1 rounded bg-emerald-500/25 border border-emerald-400 px-1.5 py-0.5 text-[10px] font-bold text-emerald-200 whitespace-nowrap animate-pulse"
+        className="inline-flex items-center gap-1 rounded bg-emerald-500/25 border border-emerald-400 px-1.5 py-0.5 text-[10px] font-bold text-emerald-200 whitespace-nowrap"
       >
         <span className="size-1.5 rounded-full bg-emerald-400" />
         Nổ Squeeze
@@ -1189,14 +1189,14 @@ export function MtfCandleBadge({
     <div className="inline-flex items-center gap-1 flex-wrap">
       {status && status !== "NO_CLUSTER" && (
         <span
-          className={`inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-all ${
+          className={`inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold border transition-colors ${
             isTriple
               ? "bg-rose-500/15 text-rose-300 border-rose-500/40 shadow-xs font-bold"
               : "bg-amber-500/15 text-amber-300 border-amber-500/30"
           }`}
           title={badgeVi ?? "Cụm nến đa khung"}
         >
-          <span className={`size-1.5 rounded-full ${isTriple ? "bg-rose-400 animate-pulse" : "bg-amber-400"}`} />
+          <span className={`size-1.5 rounded-full ${isTriple ? "bg-rose-400" : "bg-amber-400"}`} />
           <span>{badgeVi ?? status}</span>
           {score != null && <span className="opacity-75">({score}đ)</span>}
         </span>
@@ -2258,7 +2258,7 @@ export function VnScreener({
   );
 
   const getPriceCellClass = (flashDir: "up" | "down" | null, extra = "") =>
-    `num py-2.5 text-right font-semibold transition-all duration-300 ${
+    `num py-2.5 text-right font-semibold transition-colors duration-200 ${
       flashDir === "up"
         ? "bg-emerald-500/25 text-emerald-300 font-bold"
         : flashDir === "down"
@@ -3147,7 +3147,7 @@ export function VnScreener({
                   return (
                     <div
                       key={row.symbol}
-                      className="group flex flex-col justify-between rounded-xl border border-border-subtle bg-panel-2/60 hover:bg-panel-2 hover:border-accent-primary/50 transition-all p-3 shadow-xs hover:shadow-md"
+                      className="group flex flex-col justify-between rounded-xl border border-border-subtle bg-panel-2/60 hover:bg-panel-2 hover:border-accent-primary/50 transition-colors p-3 shadow-xs hover:shadow-md"
                     >
                       <div>
                         {/* Header: Symbol, Name, Price, Change */}
@@ -3196,7 +3196,7 @@ export function VnScreener({
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <div className={`text-[13px] font-bold font-mono transition-all duration-300 ${
+                            <div className={`text-[13px] font-bold font-mono transition-colors duration-200 ${
                               flash === "up"
                                 ? "bg-emerald-500/25 text-emerald-300 rounded px-1"
                                 : flash === "down"
@@ -5136,7 +5136,7 @@ export function VnScreener({
                 </div>
               </div>
               <div className="shrink-0 text-right">
-                <span className={`num block text-[13px] font-semibold transition-all duration-300 ${
+                <span className={`num block text-[13px] font-semibold transition-colors duration-200 ${
                   flash === "up" ? "bg-emerald-500/25 text-emerald-300 rounded px-1" : flash === "down" ? "bg-rose-500/25 text-rose-300 rounded px-1" : ""
                 }`}>
                   <span className="inline-flex items-center gap-1">

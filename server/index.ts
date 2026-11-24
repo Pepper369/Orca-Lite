@@ -29,8 +29,10 @@ const app = new Hono();
 const isProd = process.env.NODE_ENV === "production";
 const inlineScriptHashes = computeInlineScriptHashes();
 
-// Global Middleware
-app.use("*", logger());
+// Global Middleware (opt-in HTTP request logger to avoid blocking stdout I/O in dev)
+if (process.env.ORCA_HTTP_LOG === "1") {
+  app.use("*", logger());
+}
 app.use("*", async (c, next) => {
   await next();
   const secHeaders = getSecurityHeaders({
@@ -513,15 +515,16 @@ async function startUnifiedServer() {
       console.log(`  ⚡ Mode:             Development (In-Process Vite HMR + Hono Engine)`);
       console.log(`  ⚡ Fixed Single Port: ${port} (Zero Multi-Port Confusion, No Proxy)\n`);
 
-      // Start Fast Datafeed background worker & prewarm
-      import("@/lib/services/fast-datafeed-hub")
-        .then((m) => m.initFastDatafeedWorker())
-        .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
+      // Defer background workers 3s in dev so Vite's initial module compile gets full CPU priority
+      setTimeout(() => {
+        import("@/lib/services/fast-datafeed-hub")
+          .then((m) => m.initFastDatafeedWorker())
+          .catch((err) => console.warn("[Server] FastDatafeed worker initialization failed:", err));
 
-      // Start Auto-Trade Worker (idle until at least one account enables autoExecuteEnabled)
-      import("@/lib/services/auto-trade-worker")
-        .then((m) => m.initAutoTradeWorker())
-        .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
+        import("@/lib/services/auto-trade-worker")
+          .then((m) => m.initAutoTradeWorker())
+          .catch((err) => console.warn("[Server] AutoTrade worker initialization failed:", err));
+      }, 3_000);
     });
 
     const cleanup = async () => {

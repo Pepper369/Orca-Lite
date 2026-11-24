@@ -505,7 +505,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center justify-between gap-1.5 sm:gap-2 border-b border-border-subtle bg-surface-base/95 backdrop-blur-md px-2.5 sm:px-3 sticky top-0 z-30">
+          <header className="flex h-12 shrink-0 items-center justify-between gap-1.5 sm:gap-2 border-b border-border-subtle bg-surface-base px-2.5 sm:px-3 sticky top-0 z-30">
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <button
                 type="button"

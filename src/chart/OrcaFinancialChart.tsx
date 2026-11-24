@@ -28,6 +28,7 @@ interface Props {
   height?: number;
   title?: string;
   extraLevels?: { label: string; price: number; color: string }[];
+  active?: boolean;
 }
 
 const CHART_KINDS: { id: ChartKind; label: string }[] = [
@@ -97,7 +98,7 @@ function lastPointValue(pts: { value?: number }[] | undefined | null): number | 
   return null;
 }
 
-function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height = 430, title, extraLevels }: Props) {
+function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height = 430, title, extraLevels, active = true }: Props) {
   const { settings, update } = useSettings();
   const prefs = settings.chart;
   const tfs = useMemo(() => tfsFor(assetType), [assetType]);
@@ -142,10 +143,6 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   useEffect(() => {
     dataRef.current = data ?? null;
   }, [data]);
-
-  useEffect(() => {
-    void mutate();
-  }, [chartUrl, mutate]);
 
   const readout = useMemo(() => {
     const ind = data?.indicators;
@@ -253,7 +250,6 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
     }
 
     if (dataTf && dataTf !== wantTf) return;
-    if (isValidating && !data?.candles?.length) return;
     if (!data?.candles?.length) return;
     if (seq !== loadSeqRef.current) return;
 
@@ -302,7 +298,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
     } catch {
       /* safety */
     }
-  }, [data, tf, prefs.volume, prefs.indicators, engineReady, isValidating]);
+  }, [data, tf, prefs.volume, prefs.indicators, engineReady]);
 
   useEffect(() => {
     const mgr = mgrRef.current;
@@ -369,7 +365,7 @@ function OrcaFinancialChartInner({ symbol, assetType, defaultTimeframe, height =
   }, [wyckoffOverlay, wyckoffOn, engineReady]);
 
   const supportsLive = supportsLiveChart(assetType);
-  const canLive = Boolean(engineReady && supportsLive && symbol);
+  const canLive = Boolean(active && engineReady && supportsLive && symbol);
   const [prevCanLive, setPrevCanLive] = useState(canLive);
   if (prevCanLive !== canLive) {
     setPrevCanLive(canLive);

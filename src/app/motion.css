@@ -441,7 +441,6 @@ html {
 .orca-page-transition,
 .orca-page-enter {
   animation: orca-page-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: opacity, transform;
 }
 
 @keyframes orca-tab-in {
@@ -459,7 +458,6 @@ html {
 [role="tabpanel"],
 .tab-content {
   animation: orca-tab-in 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: opacity, transform;
 }
 
 /* ——— Smooth theme & mode transitions ——— */
@@ -468,11 +466,8 @@ html[data-theme] {
 }
 
 body,
-header,
-.panel,
-.orca-panel,
-.seg {
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+header {
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
 }
 
 /* ——— Ultra-responsive button & mode clicks ——— */
@@ -498,7 +493,6 @@ button:not(:disabled):active,
 
 .agent-msg-enter {
   animation: orca-msg-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: transform, opacity;
 }
 
 @keyframes orca-caret-pulse {

@@ -90,7 +90,7 @@ export function StockKeepAliveWorkspace({
         style={{ display: activeTab === "overview" ? "block" : "none" }}
         aria-hidden={activeTab !== "overview"}
       >
-        <StockDetailClient symbol={symbol} />
+        <StockDetailClient symbol={symbol} isActive={activeTab === "overview"} />
       </div>
 
       {/* Financials (BCTC) */}

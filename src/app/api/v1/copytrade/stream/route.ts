@@ -33,10 +33,12 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder();
 
   let closed = false;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   let offBus: (() => void) | null = null;
   let inflight = false;
   let pendingPush = false;
+  let lastPayloadSig = "";
+  let lastPushAt = 0;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -51,16 +53,34 @@ export async function GET(req: Request) {
         }
       };
 
-      const pushSnapshot = async () => {
+      const scheduleNext = (hasOpenPositions: boolean) => {
+        if (closed) return;
+        if (timer) clearTimeout(timer);
+        // Adaptive cadence: 2.5s when positions are open, 5s when idle
+        timer = setTimeout(() => {
+          void pushSnapshot(false);
+        }, hasOpenPositions ? 2_500 : 5_000);
+      };
+
+      const pushSnapshot = async (force = false) => {
         if (closed) return;
         if (inflight) {
           pendingPush = true;
           return;
         }
         inflight = true;
+        let hasOpen = false;
         try {
           const snapshot = await buildBotLiveTelemetrySnapshot(userId);
-          sendEvent("telemetry", snapshot);
+          hasOpen = snapshot.openPositions.length > 0;
+          const now = Date.now();
+          const sig = `${snapshot.realNav.totalNavUsd}|${snapshot.demoNav.totalNavUsd}|${snapshot.openPositions.length}|${snapshot.openPositions.map((p) => `${p.orderId}:${p.markPrice}:${p.positionStage}`).join(",")}|${snapshot.recentEvents[0]?.id ?? ""}|${snapshot.worker.lastTickAt ?? 0}`;
+          // Skip redundant identical frames when idle, while keeping >= 15s keepalive heartbeat
+          if (force || sig !== lastPayloadSig || now - lastPushAt >= 15_000) {
+            lastPayloadSig = sig;
+            lastPushAt = now;
+            sendEvent("telemetry", snapshot);
+          }
         } catch (err) {
           sendEvent("error", {
             message: safeInternalErrorMessage(err, "Telemetry sync error"),
@@ -70,27 +90,24 @@ export async function GET(req: Request) {
           inflight = false;
           if (pendingPush && !closed) {
             pendingPush = false;
-            void pushSnapshot();
+            void pushSnapshot(true);
+          } else {
+            scheduleNext(hasOpen);
           }
         }
       };
 
       // Initial immediate snapshot
-      void pushSnapshot();
+      void pushSnapshot(true);
 
       // Instant push on any bot execution / worker / account event
       offBus = eventBus.on(BOT_TELEMETRY_CHANNEL, () => {
-        void pushSnapshot();
+        void pushSnapshot(true);
       });
-
-      // Periodic 2.5s mark-to-market live PnL heartbeat
-      timer = setInterval(() => {
-        void pushSnapshot();
-      }, 2_500);
 
       req.signal.addEventListener("abort", () => {
         closed = true;
-        if (timer) clearInterval(timer);
+        if (timer) clearTimeout(timer);
         offBus?.();
         try {
           controller.close();
@@ -101,7 +118,7 @@ export async function GET(req: Request) {
     },
     cancel() {
       closed = true;
-      if (timer) clearInterval(timer);
+      if (timer) clearTimeout(timer);
       offBus?.();
     },
   });
