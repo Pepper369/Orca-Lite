@@ -57,10 +57,16 @@ export function PriceAlertEngine() {
       } catch {
         /* */
       }
-      setSymbols([...syms].slice(0, 40));
+      setSymbols((prev) => {
+        const next = [...syms].slice(0, 40);
+        if (prev.length === next.length && prev.every((s, idx) => s === next[idx])) {
+          return prev;
+        }
+        return next;
+      });
     };
     window.setTimeout(() => refresh(), 0);
-    const t = window.setInterval(refresh, 15_000);
+    const t = window.setInterval(refresh, 60_000);
     window.addEventListener("orca-alerts-changed", refresh as EventListener);
     return () => {
       window.clearInterval(t);
@@ -116,8 +122,14 @@ export function PriceAlertEngine() {
     }
   }, [quotes, enabled, prevRef, firingRef]);
 
-  // REST backup: faster when SSE down, slower when SSE open
-  usePriceAlertMonitor(enabled ? (status === "open" ? Math.max(pollMs, 20_000) : pollMs) : 0);
+  // REST backup: only active when at least one alert/position symbol is tracked
+  usePriceAlertMonitor(
+    enabled && symbols.length > 0
+      ? status === "open"
+        ? Math.max(pollMs, 20_000)
+        : pollMs
+      : 0,
+  );
 
   return null;
 }

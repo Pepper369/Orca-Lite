@@ -16,14 +16,30 @@ type ReportItem = {
   generatedAt: string;
 };
 
+const VN_TIME_FMT =
+  typeof Intl !== "undefined"
+    ? new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : null;
+
+const VN_DATE_FMT =
+  typeof Intl !== "undefined"
+    ? new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Ho_Chi_Minh",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      })
+    : null;
+
 function vnMinutesNow(): number {
   try {
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Ho_Chi_Minh",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
+    if (!VN_TIME_FMT) return new Date().getHours() * 60 + new Date().getMinutes();
+    const parts = VN_TIME_FMT.formatToParts(new Date());
     const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
     const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
     return h * 60 + m;
@@ -34,12 +50,8 @@ function vnMinutesNow(): number {
 
 function vnDateKey(): string {
   try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Ho_Chi_Minh",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
+    if (!VN_DATE_FMT) return new Date().toISOString().slice(0, 10);
+    return VN_DATE_FMT.format(new Date());
   } catch {
     return new Date().toISOString().slice(0, 10);
   }
@@ -91,11 +103,6 @@ export function NotifBell() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
-
-  useEffect(() => {
     const onDoc = (e: Event) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
@@ -105,41 +112,48 @@ export function NotifBell() {
 
   useEffect(() => {
     if (!n.priceAlerts) return;
-    const bump = () => setAlertTick((t) => t + 1);
+    const bump = () => {
+      setAlertTick((t) => t + 1);
+      setNow(Date.now());
+    };
     window.addEventListener("orca-alerts-changed", bump as EventListener);
-    const t = window.setInterval(bump, 20_000);
     return () => {
       window.removeEventListener("orca-alerts-changed", bump as EventListener);
-      window.clearInterval(t);
     };
   }, [n.priceAlerts]);
 
   const articles = data?.articles ?? [];
-  const freshNews = n.marketNews
-    ? articles.filter((a) => {
-        const t = Date.parse(a.publishedAt);
-        return Number.isFinite(t) && now - t < 30 * 60_000;
-      })
-    : [];
+  const freshNews = useMemo(
+    () =>
+      n.marketNews
+        ? articles.filter((a) => {
+            const t = Date.parse(a.publishedAt);
+            return Number.isFinite(t) && now - t < 30 * 60_000;
+          })
+        : [],
+    [n.marketNews, articles, now],
+  );
 
-  void alertTick;
-  void reportTick;
+  const triggeredAlerts = useMemo(() => {
+    void alertTick;
+    if (!n.priceAlerts || typeof window === "undefined") return [];
+    return loadAlerts()
+      .filter((a) => a.status === "triggered")
+      .slice(0, 6)
+      .map((a) => ({
+        id: a.id,
+        symbol: a.symbol,
+        price: a.triggeredPrice,
+        at: a.triggeredAt,
+      }));
+  }, [n.priceAlerts, alertTick]);
 
-  const triggeredAlerts =
-    n.priceAlerts && typeof window !== "undefined"
-      ? loadAlerts()
-          .filter((a) => a.status === "triggered")
-          .slice(0, 6)
-          .map((a) => ({
-            id: a.id,
-            symbol: a.symbol,
-            price: a.triggeredPrice,
-            at: a.triggeredAt,
-          }))
-      : [];
-
-  const reportItems = (reportData?.items ?? []).filter((r) =>
-    ["morning_brief", "intraday_brief", "market_summary"].includes(r.type),
+  const reportItems = useMemo(
+    () =>
+      (reportData?.items ?? []).filter((r) =>
+        ["morning_brief", "intraday_brief", "market_summary"].includes(r.type),
+      ),
+    [reportData],
   );
 
   const recentReports = useMemo(() => {
@@ -177,18 +191,24 @@ export function NotifBell() {
     }
   }, [unreadReports, n.reportReady]);
 
-  const mins = vnMinutesNow();
-  const inMorningWindow = mins >= 7 * 60 && mins < 10 * 60;
-  const digestKey = "orca.digest.seen." + vnDateKey();
-  let digestSeen = false;
-  if (typeof window !== "undefined") {
-    try {
-      digestSeen = localStorage.getItem(digestKey) === "1";
-    } catch {
-      /* */
+  const { digestKey, showDigest } = useMemo(() => {
+    void reportTick;
+    const mins = vnMinutesNow();
+    const inMorningWindow = mins >= 7 * 60 && mins < 10 * 60;
+    const key = "orca.digest.seen." + vnDateKey();
+    let digestSeen = false;
+    if (typeof window !== "undefined") {
+      try {
+        digestSeen = localStorage.getItem(key) === "1";
+      } catch {
+        /* */
+      }
     }
-  }
-  const showDigest = n.digestMorning && inMorningWindow && !digestSeen;
+    return {
+      digestKey: key,
+      showDigest: n.digestMorning && inMorningWindow && !digestSeen,
+    };
+  }, [n.digestMorning, reportTick, now]);
 
   const badgeCount =
     (freshNews.length > 0 ? 1 : 0) +
@@ -215,8 +235,13 @@ export function NotifBell() {
       <button
         type="button"
         onClick={() => {
-          setOpen((o) => !o);
-          if (!open) void mutateReports?.();
+          const opening = !open;
+          setOpen(opening);
+          if (opening) {
+            setNow(Date.now());
+            setAlertTick((t) => t + 1);
+            void mutateReports?.();
+          }
         }}
         className="relative grid size-9 place-items-center rounded-lg text-text-secondary hover:bg-surface-elevated hover:text-text-primary"
         aria-label="Thông báo"

@@ -27,23 +27,25 @@ export function usePathname(): string {
   return pathname;
 }
 
+const ROUTER_INSTANCE = {
+  push: (href: string, _options?: { scroll?: boolean }) => {
+    window.history.pushState(null, "", toSameOriginPath(href));
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  },
+  replace: (href: string, _options?: { scroll?: boolean }) => {
+    window.history.replaceState(null, "", toSameOriginPath(href));
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  },
+  refresh: () => {
+    window.dispatchEvent(new CustomEvent("orca:refresh"));
+  },
+  back: () => window.history.back(),
+  forward: () => window.history.forward(),
+  prefetch: (_href: string) => {},
+};
+
 export function useRouter() {
-  return {
-    push: (href: string, _options?: { scroll?: boolean }) => {
-      window.history.pushState(null, "", toSameOriginPath(href));
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    },
-    replace: (href: string, _options?: { scroll?: boolean }) => {
-      window.history.replaceState(null, "", toSameOriginPath(href));
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    },
-    refresh: () => {
-      window.dispatchEvent(new CustomEvent("orca:refresh"));
-    },
-    back: () => window.history.back(),
-    forward: () => window.history.forward(),
-    prefetch: (_href: string) => {},
-  };
+  return ROUTER_INSTANCE;
 }
 
 export function useSearchParams(): URLSearchParams {

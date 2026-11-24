@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useApi } from "@/lib/hooks";
+import { useApi, useIsDesktop } from "@/lib/hooks";
 import type { CryptoSummary } from "@/lib/services/crypto";
 import type { CryptoMarketRow, Meta } from "@/lib/types";
 import { Badge, Chg, fmtCompact, fmtNum, FreshnessDot, Loading, MetaLine, Panel, priceDigits, Unavailable } from "@/components/ui";
@@ -15,21 +15,29 @@ type MarketsData = { rows: CryptoMarketRow[]; summary: CryptoSummary };
 
 type FilterTab = "all" | "volume" | "gainers" | "losers";
 
+const CRYPTO_PAGE_SIZE = 40;
+
 export function CryptoMarketPage() {
-  const { data, meta, isLoading, isValidating, mutate } = useApi<MarketsData>("/api/v1/crypto/markets?limit=120", {
-    refreshInterval: 15_000,
-    keepPreviousData: true,
-    timeoutMs: 5_000,
-    initialData: (BOOTSTRAP_CRYPTO_DATA as MarketsData),
-  });
+  const isDesktop = useIsDesktop();
+  const [viewMode, setViewMode] = useState<"signals" | "market">("signals");
+  // Only poll 120-coin market table when the market view is active
+  const { data, meta } = useApi<MarketsData>(
+    viewMode === "market" ? "/api/v1/crypto/markets?limit=120" : null,
+    {
+      refreshInterval: 15_000,
+      keepPreviousData: true,
+      timeoutMs: 5_000,
+      initialData: (BOOTSTRAP_CRYPTO_DATA as MarketsData),
+    },
+  );
   const { fmtUsd } = usePrefCurrency();
   const [tab, setTab] = useState<FilterTab>("volume");
   const [q, setQ] = useState("");
-  const [viewMode, setViewMode] = useState<"signals" | "market">("signals");
+  const [visibleLimit, setVisibleLimit] = useState(CRYPTO_PAGE_SIZE);
 
   const activeData = (data?.rows?.length ? data : BOOTSTRAP_CRYPTO_DATA) as MarketsData;
 
-  const rows = useMemo(() => {
+  const allRows = useMemo(() => {
     let r = activeData.rows;
     if (tab === "gainers") r = [...r].sort((a, b) => (b.changePercent ?? 0) - (a.changePercent ?? 0));
     else if (tab === "losers") r = [...r].sort((a, b) => (a.changePercent ?? 0) - (b.changePercent ?? 0));
@@ -39,8 +47,10 @@ export function CryptoMarketPage() {
       const needle = q.trim().toUpperCase();
       r = r.filter((x) => x.symbol.includes(needle) || x.baseAsset.includes(needle));
     }
-    return r.slice(0, 80);
+    return r;
   }, [activeData, tab, q]);
+
+  const rows = useMemo(() => allRows.slice(0, visibleLimit), [allRows, visibleLimit]);
 
   const s = activeData.summary;
   const btcRow = activeData.rows.find((r) => r.symbol === "BTCUSDT");
@@ -157,14 +167,20 @@ export function CryptoMarketPage() {
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-text-muted" />
               <input
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setVisibleLimit(CRYPTO_PAGE_SIZE);
+                }}
                 placeholder="Tìm mã / token…"
-                className="w-32 rounded-lg border border-border-subtle bg-surface-elevated py-1.5 pl-8 pr-6 text-[12px] text-text-primary outline-none transition-all placeholder:text-text-muted focus:w-44 focus:border-accent-primary/60 sm:w-40 sm:focus:w-56"
+                className="w-32 rounded-lg border border-border-subtle bg-surface-elevated py-1.5 pl-8 pr-6 text-[12px] text-text-primary outline-none transition-colors placeholder:text-text-muted focus:w-44 focus:border-accent-primary/60 sm:w-40 sm:focus:w-56"
               />
               {q && (
                 <button
                   type="button"
-                  onClick={() => setQ("")}
+                  onClick={() => {
+                    setQ("");
+                    setVisibleLimit(CRYPTO_PAGE_SIZE);
+                  }}
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
                   aria-label="Xóa tìm kiếm"
                 >
@@ -187,7 +203,10 @@ export function CryptoMarketPage() {
                   key={t}
                   type="button"
                   data-active={tab === t}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    setTab(t);
+                    setVisibleLimit(CRYPTO_PAGE_SIZE);
+                  }}
                 >
                   {label}
                 </button>
@@ -196,142 +215,151 @@ export function CryptoMarketPage() {
           </div>
         }
       >
-        {/* Mobile List View */}
-        <div className="divide-y divide-border-subtle md:hidden">
-          {rows.map((r, i) => {
-            const digits = priceDigits(r.price);
-            const rangeMin = r.low ?? r.price;
-            const rangeMax = r.high ?? r.price;
-            const span = Math.max(1e-8, rangeMax - rangeMin);
-            const pos = Math.max(0, Math.min(100, ((r.price - rangeMin) / span) * 100));
+        {!isDesktop ? (
+          <div className="divide-y divide-border-subtle">
+            {rows.map((r, i) => {
+              const digits = priceDigits(r.price);
+              const rangeMin = r.low ?? r.price;
+              const rangeMax = r.high ?? r.price;
+              const span = Math.max(1e-8, rangeMax - rangeMin);
+              const pos = Math.max(0, Math.min(100, ((r.price - rangeMin) / span) * 100));
 
-            return (
-              <Link
-                key={r.symbol}
-                href={`/crypto/${r.symbol}`}
-                className="row-hover flex items-center justify-between px-3.5 py-3 transition-colors"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="num w-5 shrink-0 text-center text-[10px] text-text-muted">{i + 1}</span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[13.5px] font-semibold text-text-primary">{r.baseAsset}</span>
-                      <span className="text-[10px] text-text-muted">USDT</span>
-                    </div>
-                    <div className="mt-0.5 text-[10.5px] text-text-muted">Vol ${fmtCompact(r.quoteVolume ?? 0)}</div>
-                  </div>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <div className="num text-[13.5px] font-semibold text-text-primary">{fmtNum(r.price, digits)}</div>
-                  <div className="mt-0.5 flex items-center justify-end gap-1.5">
-                    <Chg value={r.changePercent} arrow={false} className="text-[11px]" />
-                  </div>
-                  <div className="mt-1 w-20">
-                    <div className="h-1 overflow-hidden rounded-full bg-surface-elevated">
-                      <div
-                        className="h-full bg-accent-primary"
-                        style={{ width: `${pos}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* Desktop Pro Table View */}
-        <div className="hidden overflow-x-auto md:block max-h-[calc(100vh-250px)] overflow-y-auto">
-          <table className="w-full min-w-[720px] text-[12px]">
-            <thead className="sticky top-0 bg-surface-base z-10 backdrop-blur-sm">
-              <tr className="border-b border-border-subtle text-left text-[10px] uppercase tracking-wider text-text-muted">
-                <th className="px-4 py-2.5 font-medium">#</th>
-                <th className="py-2.5 font-medium">Cặp giao dịch</th>
-                <th className="py-2.5 text-right font-medium">Giá trực tiếp</th>
-                <th className="py-2.5 text-right font-medium">Biến động 24h</th>
-                <th className="py-2.5 text-center font-medium">Biên dao động 24h (Low — High)</th>
-                <th className="py-2.5 text-right font-medium">Khối lượng 24h</th>
-                <th className="py-2.5 text-center font-medium">Đánh giá</th>
-                <th className="py-2.5 pr-4 text-right font-medium">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const digits = priceDigits(r.price);
-                const rangeMin = r.low ?? r.price;
-                const rangeMax = r.high ?? r.price;
-                const span = Math.max(1e-8, rangeMax - rangeMin);
-                const pos = Math.max(0, Math.min(100, ((r.price - rangeMin) / span) * 100));
-
-                return (
-                  <tr key={r.symbol} className="row-hover border-b border-border-subtle/40">
-                    <td className="num px-4 py-2.5 text-text-muted">{i + 1}</td>
-                    <td className="py-2.5">
-                      <Link
-                        href={`/crypto/${r.symbol}`}
-                        className="group flex items-center gap-2 font-semibold text-text-primary hover:text-accent-primary"
-                      >
-                        <span className="flex size-6 items-center justify-center rounded-md border border-border-subtle bg-surface-elevated text-[10.5px] font-bold text-accent-primary">
-                          {r.baseAsset.slice(0, 1)}
-                        </span>
-                        <span>
-                          {r.baseAsset}
-                          <span className="ml-1 text-[10px] font-normal text-text-muted">/USDT</span>
-                        </span>
-                      </Link>
-                    </td>
-                    <td className="num py-2.5 text-right font-medium text-text-primary">
-                      {fmtNum(r.price, digits)}
-                    </td>
-                    <td className="py-2.5 text-right font-medium">
-                      <Chg value={r.changePercent} arrow={false} />
-                    </td>
-                    <td className="py-2.5 text-center">
-                      <div className="mx-auto flex max-w-[180px] items-center gap-2 text-[10.5px] text-text-muted">
-                        <span className="num">{fmtNum(rangeMin, digits)}</span>
-                        <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-surface-elevated">
-                          <div
-                            className="absolute inset-y-0 left-0 rounded-full bg-accent-primary"
-                            style={{ width: `${pos}%` }}
-                          />
-                        </div>
-                        <span className="num">{fmtNum(rangeMax, digits)}</span>
+              return (
+                <Link
+                  key={r.symbol}
+                  href={`/crypto/${r.symbol}`}
+                  className="row-hover flex items-center justify-between px-3.5 py-3 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="num w-5 shrink-0 text-center text-[10px] text-text-muted">{i + 1}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[13.5px] font-semibold text-text-primary">{r.baseAsset}</span>
+                        <span className="text-[10px] text-text-muted">USDT</span>
                       </div>
-                    </td>
-                    <td className="num py-2.5 text-right text-text-secondary">
-                      ${fmtCompact(r.quoteVolume ?? 0)}
-                    </td>
-                    <td className="py-2.5 text-center">
-                      {(r.changePercent ?? 0) >= 5 ? (
-                        <Badge tone="up">
-                          <TrendingUp className="mr-0.5 size-3" /> Tăng mạnh
-                        </Badge>
-                      ) : (r.changePercent ?? 0) <= -5 ? (
-                        <Badge tone="down">
-                          <TrendingDown className="mr-0.5 size-3" /> Giảm sâu
-                        </Badge>
-                      ) : (
-                        <Badge tone="neutral">Dao động hẹp</Badge>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right">
-                      <Link
-                        href={`/crypto/${r.symbol}`}
-                        className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-surface-elevated/70 px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:border-accent-primary/50 hover:bg-accent-primary/10 hover:text-accent-primary"
-                      >
-                        Terminal <ArrowUpRight className="size-3" />
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      <div className="mt-0.5 text-[10.5px] text-text-muted">Vol ${fmtCompact(r.quoteVolume ?? 0)}</div>
+                    </div>
+                  </div>
 
-        <div className="border-t border-border-subtle px-4 py-2.5">
+                  <div className="shrink-0 text-right">
+                    <div className="num text-[13.5px] font-semibold text-text-primary">{fmtNum(r.price, digits)}</div>
+                    <div className="mt-0.5 flex items-center justify-end gap-1.5">
+                      <Chg value={r.changePercent} arrow={false} className="text-[11px]" />
+                    </div>
+                    <div className="mt-1 w-20">
+                      <div className="h-1 overflow-hidden rounded-full bg-surface-elevated">
+                        <div
+                          className="h-full bg-accent-primary"
+                          style={{ width: `${pos}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-[calc(100vh-250px)] overflow-y-auto">
+            <table className="w-full min-w-[720px] text-[12px]">
+              <thead className="sticky top-0 bg-surface-base z-10">
+                <tr className="border-b border-border-subtle text-left text-[10px] uppercase tracking-wider text-text-muted">
+                  <th className="px-4 py-2.5 font-medium">#</th>
+                  <th className="py-2.5 font-medium">Cặp giao dịch</th>
+                  <th className="py-2.5 text-right font-medium">Giá trực tiếp</th>
+                  <th className="py-2.5 text-right font-medium">Biến động 24h</th>
+                  <th className="py-2.5 text-center font-medium">Biên dao động 24h (Low — High)</th>
+                  <th className="py-2.5 text-right font-medium">Khối lượng 24h</th>
+                  <th className="py-2.5 text-center font-medium">Đánh giá</th>
+                  <th className="py-2.5 pr-4 text-right font-medium">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const digits = priceDigits(r.price);
+                  const rangeMin = r.low ?? r.price;
+                  const rangeMax = r.high ?? r.price;
+                  const span = Math.max(1e-8, rangeMax - rangeMin);
+                  const pos = Math.max(0, Math.min(100, ((r.price - rangeMin) / span) * 100));
+
+                  return (
+                    <tr key={r.symbol} className="row-hover border-b border-border-subtle/40">
+                      <td className="num px-4 py-2.5 text-text-muted">{i + 1}</td>
+                      <td className="py-2.5">
+                        <Link
+                          href={`/crypto/${r.symbol}`}
+                          className="group flex items-center gap-2 font-semibold text-text-primary hover:text-accent-primary"
+                        >
+                          <span className="flex size-6 items-center justify-center rounded-md border border-border-subtle bg-surface-elevated text-[10.5px] font-bold text-accent-primary">
+                            {r.baseAsset.slice(0, 1)}
+                          </span>
+                          <span>
+                            {r.baseAsset}
+                            <span className="ml-1 text-[10px] font-normal text-text-muted">/USDT</span>
+                          </span>
+                        </Link>
+                      </td>
+                      <td className="num py-2.5 text-right font-medium text-text-primary">
+                        {fmtNum(r.price, digits)}
+                      </td>
+                      <td className="py-2.5 text-right font-medium">
+                        <Chg value={r.changePercent} arrow={false} />
+                      </td>
+                      <td className="py-2.5 text-center">
+                        <div className="mx-auto flex max-w-[180px] items-center gap-2 text-[10.5px] text-text-muted">
+                          <span className="num">{fmtNum(rangeMin, digits)}</span>
+                          <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-surface-elevated">
+                            <div
+                              className="absolute inset-y-0 left-0 rounded-full bg-accent-primary"
+                              style={{ width: `${pos}%` }}
+                            />
+                          </div>
+                          <span className="num">{fmtNum(rangeMax, digits)}</span>
+                        </div>
+                      </td>
+                      <td className="num py-2.5 text-right text-text-secondary">
+                        ${fmtCompact(r.quoteVolume ?? 0)}
+                      </td>
+                      <td className="py-2.5 text-center">
+                        {(r.changePercent ?? 0) >= 5 ? (
+                          <Badge tone="up">
+                            <TrendingUp className="mr-0.5 size-3" /> Tăng mạnh
+                          </Badge>
+                        ) : (r.changePercent ?? 0) <= -5 ? (
+                          <Badge tone="down">
+                            <TrendingDown className="mr-0.5 size-3" /> Giảm sâu
+                          </Badge>
+                        ) : (
+                          <Badge tone="neutral">Dao động hẹp</Badge>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <Link
+                          href={`/crypto/${r.symbol}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-border-subtle bg-surface-elevated/70 px-2 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:border-accent-primary/50 hover:bg-accent-primary/10 hover:text-accent-primary"
+                        >
+                          Terminal <ArrowUpRight className="size-3" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle px-4 py-2.5">
           <MetaLine meta={meta} />
+          {allRows.length > visibleLimit ? (
+            <button
+              type="button"
+              onClick={() => setVisibleLimit((n) => n + CRYPTO_PAGE_SIZE)}
+              className="rounded-md border border-accent-primary/40 bg-accent-primary/10 px-3 py-1 text-[11px] font-semibold text-accent-primary hover:bg-accent-primary/20 transition-colors"
+            >
+              Xem thêm +{Math.min(CRYPTO_PAGE_SIZE, allRows.length - visibleLimit)} cặp ({rows.length}/{allRows.length})
+            </button>
+          ) : null}
         </div>
       </Panel>
     </div>

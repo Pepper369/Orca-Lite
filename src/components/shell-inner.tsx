@@ -239,6 +239,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sideAnimating, setSideAnimating] = useState(false);
   const sideAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverPrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [prevPathname, setPrevPathname] = useState(pathname);
   if (prevPathname !== pathname) {
@@ -255,6 +256,7 @@ export function ShellInner({ children }: { children: ReactNode }) {
     }
     return () => {
       if (sideAnimTimer.current) clearTimeout(sideAnimTimer.current);
+      if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
     };
   }, []);
 
@@ -311,13 +313,16 @@ export function ShellInner({ children }: { children: ReactNode }) {
 
   const onHover = useCallback(
     (href: string) => {
-      try {
-        router.prefetch(href);
-      } catch {
-        /* ignore */
-      }
-      // P4-A: warm route APIs on hover
-      prefetchRouteApis(href);
+      if (hoverPrefetchTimer.current) clearTimeout(hoverPrefetchTimer.current);
+      hoverPrefetchTimer.current = setTimeout(() => {
+        try {
+          router.prefetch(href);
+        } catch {
+          /* ignore */
+        }
+        // P4-A: warm route APIs only after intentional hover (150ms debounce)
+        prefetchRouteApis(href);
+      }, 150);
     },
     [router],
   );

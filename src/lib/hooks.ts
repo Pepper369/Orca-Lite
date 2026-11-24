@@ -99,12 +99,30 @@ function usePageVisible(): boolean {
   return useSyncExternalStore(subscribePageVisibility, getPageVisibility, getServerPageVisibility);
 }
 
+function subscribeIsDesktop(listener: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const mq = window.matchMedia("(min-width: 768px)");
+  mq.addEventListener("change", listener);
+  return () => mq.removeEventListener("change", listener);
+}
+
+function getIsDesktopSnapshot(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return window.matchMedia("(min-width: 768px)").matches;
+}
+
+/** SSOT viewport hook so heavy tables render only mobile OR desktop DOM (never both). */
+export function useIsDesktop(): boolean {
+  return useSyncExternalStore(subscribeIsDesktop, getIsDesktopSnapshot, () => true);
+}
+
 export function useApi<T>(
   url: string | null,
   opts?: {
     refreshInterval?: number;
     timeoutMs?: number;
     keepPreviousData?: boolean;
+    revalidateOnFocus?: boolean;
     initialData?: T;
     fallbackData?: ApiResponse<T>;
   },
@@ -112,7 +130,9 @@ export function useApi<T>(
   const rt = getSettingsSnapshot().realtime;
   const visible = usePageVisible();
 
-  const baseRefresh = resolveRefresh(opts?.refreshInterval);
+  const requestedRefresh = opts?.refreshInterval;
+  const hasExplicitPolling = typeof requestedRefresh === "number" && requestedRefresh > 0;
+  const baseRefresh = hasExplicitPolling ? resolveRefresh(requestedRefresh) : 0;
   const keepPrev = opts?.keepPreviousData !== false;
   const fallbackData = useMemo(() => {
     if (opts?.fallbackData) return opts.fallbackData;
@@ -135,11 +155,12 @@ export function useApi<T>(
 
   const currentFreshness = fallbackData?.meta?.freshness;
 
+  // Respect caller's polling budget: slow down on stale/degraded feeds, never speed up faster than requested
   const adaptiveBase = (() => {
+    if (!hasExplicitPolling || baseRefresh <= 0) return 0;
     const f = currentFreshness;
     if (f === "STALE" || f === "UNAVAILABLE") return Math.max(baseRefresh, 40_000);
     if (f === "DELAYED" || f === "DEGRADED") return Math.max(baseRefresh, 24_000);
-    if (f === "LIVE") return Math.max(8_000, Math.min(baseRefresh, 12_000));
     return baseRefresh;
   })();
 
@@ -155,7 +176,7 @@ export function useApi<T>(
     (key: string) => fetcher<T>(key, effectiveTimeout),
     {
       refreshInterval,
-      revalidateOnFocus: rt.backgroundRefresh && !inNavFreeze,
+      revalidateOnFocus: Boolean(opts?.revalidateOnFocus) && !inNavFreeze,
       revalidateOnReconnect: rt.autoReconnect,
       focusThrottleInterval: rt.lowDataMode ? 60_000 : 18_000,
       shouldRetryOnError: rt.autoReconnect,

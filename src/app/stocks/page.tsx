@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useApi } from "@/lib/hooks";
+import { useApi, useIsDesktop } from "@/lib/hooks";
 import { clientCacheWarm } from "@/lib/client-cache";
 import { prefetchRouteApis } from "@/lib/nav-prefetch";
 import { VN_SECTOR_MAP, DEFAULT_VN_WATCHLIST, sectorOf } from "@/lib/vn/master";
@@ -26,17 +26,10 @@ function hitsBand(price: number | null | undefined, band: number | null | undefi
   return Math.abs(price - band) <= 0.051;
 }
 
+const TABLE_PAGE_SIZE = 60;
+
 export default function VnMarketCenterPage() {
-  // P3-D: progressive paint — VN30 first (fast), full board in background
-  const {
-    data: boardCore,
-    isLoading: coreLoading,
-  } = useApi<StocksData>(`/api/v1/stocks?board=vn30`, {
-    refreshInterval: 4_000,
-    timeoutMs: 4_000,
-    keepPreviousData: true,
-    initialData: (BOOTSTRAP_STOCKS_DATA as StocksData),
-  });
+  const isDesktop = useIsDesktop();
 
   const {
     res,
@@ -45,16 +38,29 @@ export default function VnMarketCenterPage() {
     isLoading,
     error,
   } = useApi<StocksData>(`/api/v1/stocks?board=full`, {
-    refreshInterval: 8_000,
+    refreshInterval: 12_000,
     timeoutMs: 6_000,
     keepPreviousData: true,
   });
 
-  const rawData = boardFull?.quotes?.length ? boardFull : boardCore?.quotes?.length ? boardCore : null;
+  // Progressive paint: stop polling VN30 once full board has loaded (eliminates redundant 4s dual polling)
+  const hasFullBoard = Boolean(boardFull?.quotes?.length);
+  const {
+    data: boardCore,
+    isLoading: coreLoading,
+  } = useApi<StocksData>(hasFullBoard ? null : `/api/v1/stocks?board=vn30`, {
+    refreshInterval: 8_000,
+    timeoutMs: 4_000,
+    keepPreviousData: true,
+    initialData: (BOOTSTRAP_STOCKS_DATA as StocksData),
+  });
+
+  const rawData = hasFullBoard ? boardFull : boardCore?.quotes?.length ? boardCore : null;
   const data = rawData ?? BOOTSTRAP_STOCKS_DATA;
   const [q, setQ] = useState("");
   const [sector, setSector] = useState("");
   const [viewMode, setViewMode] = useState<"dien" | "table">("dien");
+  const [visibleLimit, setVisibleLimit] = useState(TABLE_PAGE_SIZE);
 
   const quotes = useMemo(() => {
     let list = data?.quotes ?? [];
@@ -67,6 +73,11 @@ export default function VnMarketCenterPage() {
     if (sector) list = list.filter((x) => sectorOf(x.symbol) === sector);
     return list;
   }, [data, q, sector]);
+
+  const visibleQuotes = useMemo(
+    () => quotes.slice(0, visibleLimit),
+    [quotes, visibleLimit],
+  );
 
   const bandStats = useMemo(() => {
     let atCeiling = 0;
@@ -127,14 +138,20 @@ export default function VnMarketCenterPage() {
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-text-muted" />
               <input
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setVisibleLimit(TABLE_PAGE_SIZE);
+                }}
                 placeholder="Tìm mã / tên…"
                 className="w-full rounded-md border border-border-subtle bg-surface-elevated py-1 pl-7 pr-2 text-xs outline-none focus:border-accent-primary/50 text-text-primary"
               />
             </div>
             <select
               value={sector}
-              onChange={(e) => setSector(e.target.value)}
+              onChange={(e) => {
+                setSector(e.target.value);
+                setVisibleLimit(TABLE_PAGE_SIZE);
+              }}
               className="rounded-md border border-border-subtle bg-surface-elevated px-2 py-1 text-xs text-text-secondary outline-none focus:border-accent-primary/50"
             >
               <option value="">Tất cả ngành</option>
@@ -221,181 +238,207 @@ export default function VnMarketCenterPage() {
               </span>
             }
           >
-            <div className="space-y-1.5 md:hidden">
-              {quotes.length === 0 ? (
-                <p className="py-6 text-center text-[12px] text-text-muted">Không có mã khớp bộ lọc.</p>
-              ) : (
-                quotes.map((qu) => {
-                  const atCeil = hitsBand(qu.price, qu.ceilingPrice);
-                  const atFloor = !atCeil && hitsBand(qu.price, qu.floorPrice);
-                  const isVolumeSurge = (qu.changePercent ?? 0) >= 1.5 && (qu.volume ?? 0) >= 1_500_000;
-                  return (
-                  <Link
-                    key={qu.symbol}
-                    href={`/stocks/${qu.symbol}`}
-                    className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 active:bg-surface-elevated ${
-                      atCeil
-                        ? "border-violet-500/50 bg-violet-500/10"
-                        : atFloor
-                          ? "border-sky-400/50 bg-sky-400/10"
-                          : "border-border-subtle bg-surface-elevated/60"
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-accent-primary">{qu.symbol}</span>
-                        {atCeil ? (
-                          <span className="rounded border border-violet-500/40 bg-violet-500/20 px-1 text-[9px] font-bold uppercase text-violet-300">
-                            Trần
-                          </span>
-                        ) : null}
-                        {atFloor ? (
-                          <span className="rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300">
-                            Sàn
-                          </span>
-                        ) : null}
-                        {isVolumeSurge ? (
-                          <span className="rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300">
-                            ⚡ Tiền vào
-                          </span>
-                        ) : null}
-                        <AddToWatchlist assetType="stock" symbol={qu.symbol} />
-                      </div>
-                      {qu.name ? <div className="truncate text-[11px] text-text-muted">{qu.name}</div> : null}
-                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-text-muted">
-                        <span className="num">KL {fmtCompact(qu.volume)}</span>
-                        <span className="num">GT {fmtCompact(qu.quoteVolume)}</span>
-                        {qu.ceilingPrice != null ? (
-                          <span className="num text-violet-300">Trần {fmtNum(qu.ceilingPrice, 2)}</span>
-                        ) : null}
-                        {qu.floorPrice != null ? (
-                          <span className="num text-sky-300">Sàn {fmtNum(qu.floorPrice, 2)}</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div
-                        className={`num text-[15px] font-semibold ${
-                          atCeil ? "text-violet-300" : atFloor ? "text-sky-300" : ""
-                        }`}
-                      >
-                        {fmtNum(qu.price, 2)}
-                      </div>
-                      <Chg value={qu.changePercent} arrow={false} className="text-[12px]" />
-                    </div>
-                  </Link>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="table-scroll hidden max-h-[min(70vh,720px)] w-full md:block">
-              <table className="stock-table w-full table-fixed text-left">
-                <colgroup>
-                  <col className="w-[18%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[8%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[11%]" />
-                </colgroup>
-                <thead className="sticky top-0 z-10 bg-background-secondary text-[10px] uppercase tracking-wider text-text-muted">
-                  <tr>
-                    <th className="pl-2 text-left sm:pl-3">Mã</th>
-                    <th className="text-right">Giá</th>
-                    <th className="text-right">%</th>
-                    <th className="text-right">TC</th>
-                    <th className="text-right text-violet-300">Trần</th>
-                    <th className="text-right text-sky-300">Sàn</th>
-                    <th className="text-right">KL</th>
-                    <th className="text-right">GT</th>
-                    <th className="text-right text-accent-primary">Áp Lực Mua</th>
-                    <th className="pr-2 text-right sm:pr-3">Theo dõi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quotes.map((qu) => {
+            {!isDesktop ? (
+              <div className="space-y-1.5">
+                {visibleQuotes.length === 0 ? (
+                  <p className="py-6 text-center text-[12px] text-text-muted">Không có mã khớp bộ lọc.</p>
+                ) : (
+                  visibleQuotes.map((qu) => {
                     const atCeil = hitsBand(qu.price, qu.ceilingPrice);
                     const atFloor = !atCeil && hitsBand(qu.price, qu.floorPrice);
-                    const buyPressure = Math.max(15, Math.min(90, Math.round(50 + (qu.changePercent ?? 0) * 4)));
                     const isVolumeSurge = (qu.changePercent ?? 0) >= 1.5 && (qu.volume ?? 0) >= 1_500_000;
                     return (
-                    <tr
+                    <Link
                       key={qu.symbol}
-                      className={`border-t border-border-subtle/70 hover:bg-surface-elevated/50 ${
-                        atCeil ? "bg-violet-500/10" : atFloor ? "bg-sky-400/10" : ""
+                      href={`/stocks/${qu.symbol}`}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 active:bg-surface-elevated ${
+                        atCeil
+                          ? "border-violet-500/50 bg-violet-500/10"
+                          : atFloor
+                            ? "border-sky-400/50 bg-sky-400/10"
+                            : "border-border-subtle bg-surface-elevated/60"
                       }`}
                     >
-                      <td className="py-2 pl-2 sm:pl-3">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <Link
-                            href={`/stocks/${qu.symbol}`}
-                            prefetch={true}
-                            onMouseEnter={() => {
-                              prefetchRouteApis(`/stocks/${qu.symbol}`);
-                              clientCacheWarm(`/api/v1/stocks/${qu.symbol}`);
-                            }}
-                            className="font-semibold text-accent-primary hover:underline font-mono"
-                          >
-                            {qu.symbol}
-                          </Link>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-accent-primary">{qu.symbol}</span>
                           {atCeil ? (
-                            <span className="shrink-0 rounded border border-violet-500/40 bg-violet-500/20 px-1 text-[9px] font-bold uppercase text-violet-300" title="Giá chạm trần">
+                            <span className="rounded border border-violet-500/40 bg-violet-500/20 px-1 text-[9px] font-bold uppercase text-violet-300">
                               Trần
                             </span>
                           ) : null}
                           {atFloor ? (
-                            <span className="shrink-0 rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300" title="Giá chạm sàn">
+                            <span className="rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300">
                               Sàn
                             </span>
                           ) : null}
                           {isVolumeSurge ? (
-                            <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300 animate-pulse" title="Đột biến thanh khoản: Tiền đổ vào mạnh">
+                            <span className="rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300">
                               ⚡ Tiền vào
                             </span>
                           ) : null}
+                          <AddToWatchlist assetType="stock" symbol={qu.symbol} />
                         </div>
-                        {qu.name ? (
-                          <div className="truncate text-[10px] text-text-muted" title={qu.name}>
-                            {qu.name}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className={`num py-2 text-right font-medium ${atCeil ? "text-violet-300" : atFloor ? "text-sky-300" : ""}`}>
-                        {fmtNum(qu.price, 2)}
-                      </td>
-                      <td className="py-2 text-right">
-                        <Chg value={qu.changePercent} arrow={false} />
-                      </td>
-                      <td className="num py-2 text-right text-text-muted">
-                        {qu.referencePrice != null ? fmtNum(qu.referencePrice, 2) : "—"}
-                      </td>
-                      <td className="num py-2 text-right text-violet-300">
-                        {qu.ceilingPrice != null ? fmtNum(qu.ceilingPrice, 2) : "—"}
-                      </td>
-                      <td className="num py-2 text-right text-sky-300">
-                        {qu.floorPrice != null ? fmtNum(qu.floorPrice, 2) : "—"}
-                      </td>
-                      <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.volume)}</td>
-                      <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.quoteVolume)}</td>
-                      <td className="py-2 text-right font-mono text-[11px]">
-                        <span className={`font-semibold ${buyPressure >= 55 ? "text-up" : buyPressure <= 45 ? "text-down" : "text-text-muted"}`}>
-                          {buyPressure}%
-                        </span>
-                      </td>
-                      <td className="py-2 pr-2 text-right sm:pr-3">
-                        <AddToWatchlist assetType="stock" symbol={qu.symbol} />
-                      </td>
-                    </tr>
+                        {qu.name ? <div className="truncate text-[11px] text-text-muted">{qu.name}</div> : null}
+                        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-text-muted">
+                          <span className="num">KL {fmtCompact(qu.volume)}</span>
+                          <span className="num">GT {fmtCompact(qu.quoteVolume)}</span>
+                          {qu.ceilingPrice != null ? (
+                            <span className="num text-violet-300">Trần {fmtNum(qu.ceilingPrice, 2)}</span>
+                          ) : null}
+                          {qu.floorPrice != null ? (
+                            <span className="num text-sky-300">Sàn {fmtNum(qu.floorPrice, 2)}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div
+                          className={`num text-[15px] font-semibold ${
+                            atCeil ? "text-violet-300" : atFloor ? "text-sky-300" : ""
+                          }`}
+                        >
+                          {fmtNum(qu.price, 2)}
+                        </div>
+                        <Chg value={qu.changePercent} arrow={false} className="text-[12px]" />
+                      </div>
+                    </Link>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  })
+                )}
+              </div>
+            ) : (
+              <div className="table-scroll max-h-[min(70vh,720px)] w-full">
+                <table className="stock-table w-full table-fixed text-left">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[8%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10 bg-background-secondary text-[10px] uppercase tracking-wider text-text-muted">
+                    <tr>
+                      <th className="pl-2 text-left sm:pl-3">Mã</th>
+                      <th className="text-right">Giá</th>
+                      <th className="text-right">%</th>
+                      <th className="text-right">TC</th>
+                      <th className="text-right text-violet-300">Trần</th>
+                      <th className="text-right text-sky-300">Sàn</th>
+                      <th className="text-right">KL</th>
+                      <th className="text-right">GT</th>
+                      <th className="text-right text-accent-primary">Áp Lực Mua</th>
+                      <th className="pr-2 text-right sm:pr-3">Theo dõi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleQuotes.map((qu) => {
+                      const atCeil = hitsBand(qu.price, qu.ceilingPrice);
+                      const atFloor = !atCeil && hitsBand(qu.price, qu.floorPrice);
+                      const buyPressure = Math.max(15, Math.min(90, Math.round(50 + (qu.changePercent ?? 0) * 4)));
+                      const isVolumeSurge = (qu.changePercent ?? 0) >= 1.5 && (qu.volume ?? 0) >= 1_500_000;
+                      return (
+                      <tr
+                        key={qu.symbol}
+                        className={`border-t border-border-subtle/70 hover:bg-surface-elevated/50 ${
+                          atCeil ? "bg-violet-500/10" : atFloor ? "bg-sky-400/10" : ""
+                        }`}
+                      >
+                        <td className="py-2 pl-2 sm:pl-3">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Link
+                              href={`/stocks/${qu.symbol}`}
+                              prefetch={false}
+                              onMouseEnter={() => {
+                                prefetchRouteApis(`/stocks/${qu.symbol}`);
+                                clientCacheWarm(`/api/v1/stocks/${qu.symbol}`);
+                              }}
+                              className="font-semibold text-accent-primary hover:underline font-mono"
+                            >
+                              {qu.symbol}
+                            </Link>
+                            {atCeil ? (
+                              <span className="shrink-0 rounded border border-violet-500/40 bg-violet-500/20 px-1 text-[9px] font-bold uppercase text-violet-300" title="Giá chạm trần">
+                                Trần
+                              </span>
+                            ) : null}
+                            {atFloor ? (
+                              <span className="shrink-0 rounded border border-sky-400/40 bg-sky-400/20 px-1 text-[9px] font-bold uppercase text-sky-300" title="Giá chạm sàn">
+                                Sàn
+                              </span>
+                            ) : null}
+                            {isVolumeSurge ? (
+                              <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300" title="Đột biến thanh khoản: Tiền đổ vào mạnh">
+                                ⚡ Tiền vào
+                              </span>
+                            ) : null}
+                          </div>
+                          {qu.name ? (
+                            <div className="truncate text-[10px] text-text-muted" title={qu.name}>
+                              {qu.name}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className={`num py-2 text-right font-medium ${atCeil ? "text-violet-300" : atFloor ? "text-sky-300" : ""}`}>
+                          {fmtNum(qu.price, 2)}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Chg value={qu.changePercent} arrow={false} />
+                        </td>
+                        <td className="num py-2 text-right text-text-muted">
+                          {qu.referencePrice != null ? fmtNum(qu.referencePrice, 2) : "—"}
+                        </td>
+                        <td className="num py-2 text-right text-violet-300">
+                          {qu.ceilingPrice != null ? fmtNum(qu.ceilingPrice, 2) : "—"}
+                        </td>
+                        <td className="num py-2 text-right text-sky-300">
+                          {qu.floorPrice != null ? fmtNum(qu.floorPrice, 2) : "—"}
+                        </td>
+                        <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.volume)}</td>
+                        <td className="num py-2 text-right text-text-secondary">{fmtCompact(qu.quoteVolume)}</td>
+                        <td className="py-2 text-right font-mono text-[11px]">
+                          <span className={`font-semibold ${buyPressure >= 55 ? "text-up" : buyPressure <= 45 ? "text-down" : "text-text-muted"}`}>
+                            {buyPressure}%
+                          </span>
+                        </td>
+                        <td className="py-2 pr-2 text-right sm:pr-3">
+                          <AddToWatchlist assetType="stock" symbol={qu.symbol} />
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {quotes.length > visibleLimit ? (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle pt-2.5 text-[11px] text-text-muted">
+                <span>
+                  Đang hiển thị <strong className="text-text-primary">{visibleQuotes.length}</strong> / {quotes.length} mã
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit((n) => n + TABLE_PAGE_SIZE)}
+                    className="rounded-md border border-accent-primary/40 bg-accent-primary/10 px-3 py-1 font-semibold text-accent-primary hover:bg-accent-primary/20 transition-colors"
+                  >
+                    Xem thêm +{Math.min(TABLE_PAGE_SIZE, quotes.length - visibleLimit)} mã
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit(quotes.length)}
+                    className="rounded-md border border-border-subtle bg-surface-elevated px-2.5 py-1 font-medium text-text-secondary hover:text-text-primary transition-colors"
+                  >
+                    Hiện tất cả
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </Panel>
           ) : null}
 

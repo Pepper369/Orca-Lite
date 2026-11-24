@@ -135,7 +135,14 @@ function FireAntIndexChart({
   sessionLabel: string;
 }) {
   const [tf, setTf] = useState<ChartTf>("1M");
+  const [chartReady, setChartReady] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<ReturnType<typeof import("lightweight-charts").createChart> | null>(null);
+  const areaSeriesRef = useRef<ReturnType<ReturnType<typeof import("lightweight-charts").createChart>["addSeries"]> | null>(null);
+  const volSeriesRef = useRef<ReturnType<ReturnType<typeof import("lightweight-charts").createChart>["addSeries"]> | null>(null);
+  const refLineRef = useRef<ReturnType<ReturnType<ReturnType<typeof import("lightweight-charts").createChart>["addSeries"]>["createPriceLine"]> | null>(null);
+  const lwLineStyleRef = useRef<number>(2);
+  const fittedKeyRef = useRef<string>("");
 
   const cfg = TF_CONFIG[tf];
   const { data, isLoading } = useApi<ChartMarketData>(
@@ -148,9 +155,10 @@ function FireAntIndexChart({
   const topColor = isDown ? "rgba(239, 68, 68, 0.22)" : "rgba(34, 197, 94, 0.22)";
   const bottomColor = isDown ? "rgba(239, 68, 68, 0.0)" : "rgba(34, 197, 94, 0.0)";
 
+  // Effect 1: Create chart + series ONCE per mount (eliminates destroy/recreate & forced reflow on price ticks)
   useEffect(() => {
     const el = hostRef.current;
-    if (!el || !data?.candles?.length) return;
+    if (!el) return;
     let cancelled = false;
     let ro: ResizeObserver | null = null;
     let chart: ReturnType<typeof import("lightweight-charts").createChart> | null = null;
@@ -183,7 +191,7 @@ function FireAntIndexChart({
         },
         timeScale: {
           borderColor: borderSubtle,
-          timeVisible: tf === "1D" || tf === "1W",
+          timeVisible: false,
         },
         crosshair: {
           mode: lw.CrosshairMode.Normal,
@@ -191,9 +199,9 @@ function FireAntIndexChart({
       });
 
       const areaSeries = chart.addSeries(lw.AreaSeries, {
-        lineColor,
-        topColor,
-        bottomColor,
+        lineColor: "#22c55e",
+        topColor: "rgba(34, 197, 94, 0.22)",
+        bottomColor: "rgba(34, 197, 94, 0.0)",
         lineWidth: 2,
         priceLineVisible: true,
         lastValueVisible: true,
@@ -207,46 +215,10 @@ function FireAntIndexChart({
         scaleMargins: { top: 0.8, bottom: 0 },
       });
 
-      const seen = new Set<number>();
-      const sorted = [...data.candles]
-        .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.close) && b.close > 0)
-        .sort((a, b) => a.time - b.time)
-        .filter((b) => {
-          const t = b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time);
-          if (seen.has(t)) return false;
-          seen.add(t);
-          return true;
-        });
-
-      const areaPts = sorted.map((b) => ({
-        time: (b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time)) as import("lightweight-charts").UTCTimestamp,
-        value: b.close,
-      }));
-      const volPts = sorted.map((b) => ({
-        time: (b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time)) as import("lightweight-charts").UTCTimestamp,
-        value: Math.max(0, b.volume ?? 0),
-        color: b.close >= b.open ? "rgba(34, 197, 94, 0.28)" : "rgba(239, 68, 68, 0.28)",
-      }));
-
-      areaSeries.setData(areaPts);
-      volSeries.setData(volPts);
-
-      const refPrice =
-        quote?.value != null && quote?.change != null
-          ? quote.value - quote.change
-          : sorted[0]?.open ?? null;
-      if (refPrice && Number.isFinite(refPrice)) {
-        areaSeries.createPriceLine({
-          price: refPrice,
-          color: "#eab308",
-          lineWidth: 1,
-          lineStyle: lw.LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "TC",
-        });
-      }
-
-      chart.timeScale().fitContent();
+      chartRef.current = chart;
+      areaSeriesRef.current = areaSeries;
+      volSeriesRef.current = volSeries;
+      lwLineStyleRef.current = lw.LineStyle.Dashed;
 
       ro = new ResizeObserver((entries) => {
         const w = entries[0]?.contentRect.width;
@@ -255,11 +227,18 @@ function FireAntIndexChart({
         }
       });
       ro.observe(hostRef.current);
+      if (!cancelled) setChartReady(true);
     })();
 
     return () => {
       cancelled = true;
       ro?.disconnect();
+      refLineRef.current = null;
+      areaSeriesRef.current = null;
+      volSeriesRef.current = null;
+      chartRef.current = null;
+      fittedKeyRef.current = "";
+      setChartReady(false);
       if (chart) {
         try {
           chart.remove();
@@ -268,7 +247,78 @@ function FireAntIndexChart({
         }
       }
     };
-  }, [data, lineColor, topColor, bottomColor, quote?.change, quote?.value, tf]);
+  }, []);
+
+  // Effect 2: Update series data & visual options in-place (< 1ms, zero canvas teardown)
+  useEffect(() => {
+    const chart = chartRef.current;
+    const areaSeries = areaSeriesRef.current;
+    const volSeries = volSeriesRef.current;
+    if (!chartReady || !chart || !areaSeries || !volSeries || !data?.candles?.length) return;
+
+    chart.applyOptions({
+      timeScale: { timeVisible: tf === "1D" || tf === "1W" },
+    });
+    areaSeries.applyOptions({
+      lineColor,
+      topColor,
+      bottomColor,
+    });
+
+    const seen = new Set<number>();
+    const sorted = [...data.candles]
+      .filter((b) => Number.isFinite(b.time) && Number.isFinite(b.close) && b.close > 0)
+      .sort((a, b) => a.time - b.time)
+      .filter((b) => {
+        const t = b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time);
+        if (seen.has(t)) return false;
+        seen.add(t);
+        return true;
+      });
+
+    const areaPts = sorted.map((b) => ({
+      time: (b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time)) as import("lightweight-charts").UTCTimestamp,
+      value: b.close,
+    }));
+    const volPts = sorted.map((b) => ({
+      time: (b.time > 1e11 ? Math.floor(b.time / 1000) : Math.floor(b.time)) as import("lightweight-charts").UTCTimestamp,
+      value: Math.max(0, b.volume ?? 0),
+      color: b.close >= b.open ? "rgba(34, 197, 94, 0.28)" : "rgba(239, 68, 68, 0.28)",
+    }));
+
+    areaSeries.setData(areaPts);
+    volSeries.setData(volPts);
+
+    if (refLineRef.current) {
+      try {
+        areaSeries.removePriceLine(refLineRef.current);
+      } catch {
+        /* ignore */
+      }
+      refLineRef.current = null;
+    }
+
+    const refPrice =
+      quote?.value != null && quote?.change != null
+        ? quote.value - quote.change
+        : sorted[0]?.open ?? null;
+    if (refPrice && Number.isFinite(refPrice)) {
+      refLineRef.current = areaSeries.createPriceLine({
+        price: refPrice,
+        color: "#eab308",
+        lineWidth: 1,
+        lineStyle: lwLineStyleRef.current,
+        axisLabelVisible: true,
+        title: "TC",
+      });
+    }
+
+    const fitKey = `${symbol}:${tf}`;
+    if (fittedKeyRef.current !== fitKey) {
+      fittedKeyRef.current = fitKey;
+      chart.timeScale().fitContent();
+    }
+  }, [chartReady, data, lineColor, topColor, bottomColor, quote?.change, quote?.value, symbol, tf]);
 
   return (
     <section className="rounded-lg border border-border-subtle bg-surface-primary flex flex-col">

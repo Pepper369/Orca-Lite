@@ -149,14 +149,35 @@ export function clientCacheGet<T>(key: string, maxAgeMs?: number): T | undefined
   return undefined;
 }
 
+const IDB_WRITE_THROTTLE_MS = 60_000;
+const lastIdbWriteAt = new Map<string, number>();
+
+function scheduleIdleIdbSet(key: string, entry: Entry) {
+  if (typeof window === "undefined") return;
+  const now = Date.now();
+  const lastAt = lastIdbWriteAt.get(key) ?? 0;
+  if (now - lastAt < IDB_WRITE_THROTTLE_MS) return;
+  lastIdbWriteAt.set(key, now);
+
+  const persist = () => {
+    const latest = store.get(key);
+    if (latest) void idbSet(key, latest);
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(persist, { timeout: 3_000 });
+  } else {
+    globalThis.setTimeout(persist, 1_000);
+  }
+}
+
 export function clientCacheSet(key: string, payload: unknown) {
   const prev = store.get(key);
   const entry: Entry = { at: Date.now(), payload, hits: (prev?.hits ?? 0) + 1 };
   store.set(key, entry);
   trim();
-  // Asynchronously persist sticky keys to IndexedDB for instant load on revisit
+  // Throttle IndexedDB persistence (max 1 write/60s per key, deferred to browser idle time)
   if (isSticky(key)) {
-    void idbSet(key, entry);
+    scheduleIdleIdbSet(key, entry);
   }
 }
 
