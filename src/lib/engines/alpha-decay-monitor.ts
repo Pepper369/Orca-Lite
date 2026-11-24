@@ -114,9 +114,7 @@ export function computeRollingRankIcSeries(
   if (n < windowSize) return out;
 
   for (let i = windowSize; i <= n; i++) {
-    const subFactor = factor.slice(i - windowSize, i);
-    const subRet = forwardReturns.slice(i - windowSize, i);
-    const ic = computeSpearmanRankCorr(subFactor, subRet);
+    const ic = computeSpearmanRankCorr(factor, forwardReturns, i - windowSize, windowSize);
     if (Number.isFinite(ic)) {
       out.push(ic);
     }

@@ -19,7 +19,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "tsx --conditions=react-server --test src/lib/__tests__/pillar*.test.ts src/lib/__tests__/security-audit.test.ts",
-    "test:all": "tsx --conditions=react-server --test src/lib/__tests__/*.test.ts",
+    "test:quant": "tsx --conditions=react-server --test src/lib/__tests__/real-market-end-to-end.test.ts src/lib/__tests__/formulaic-alpha-qlib.test.ts src/lib/__tests__/alpha-decay-monitor.test.ts src/lib/__tests__/arctic-timeseries-engine.test.ts src/lib/__tests__/institutional-greeks-gsquant.test.ts src/lib/__tests__/institutional-valuation-suite.test.ts src/lib/__tests__/prediction-market-radar.test.ts src/lib/__tests__/ai-investment-committee.test.ts src/lib/__tests__/bot-*.test.ts src/lib/__tests__/data-integrity-audit.test.ts src/lib/__tests__/quant-suite-integration.test.ts src/lib/engines/__tests__/*.test.ts",
+    "test:live": "tsx --conditions=react-server --test src/lib/__tests__/real-market-end-to-end.test.ts",
+    "test:snapshot": "tsx scripts/snapshot-real-test-data.ts",
+    "test:all": "tsx --conditions=react-server --test src/lib/__tests__/*.test.ts src/lib/engines/__tests__/*.test.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

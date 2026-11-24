@@ -50,34 +50,70 @@ export function computePearsonCorr(x: number[], y: number[]): number {
 
 /**
  * Computes Spearman Rank Correlation coefficient using fractional ranking for ties.
+ * Allocation-light implementation using Int32Array index sorting & Float64Array rank buffers
+ * (avoids per-element `{ val, idx }` heap object churn in rolling Rank-IC windows).
  */
-export function computeSpearmanRankCorr(x: number[], y: number[]): number {
-  const n = Math.min(x.length, y.length);
+export function computeSpearmanRankCorr(
+  x: number[],
+  y: number[],
+  start = 0,
+  length?: number,
+): number {
+  const maxLen = Math.min(x.length, y.length) - start;
+  const n = length != null ? Math.min(length, maxLen) : maxLen;
   if (n < 3) return 0;
 
-  const toRanks = (arr: number[]): number[] => {
-    const indexed = arr.slice(0, n).map((val, idx) => ({ val: Number.isFinite(val) ? val : 0, idx }));
-    indexed.sort((a, b) => a.val - b.val);
+  const idxBuf = new Int32Array(n);
+  const rankX = new Float64Array(n);
+  const rankY = new Float64Array(n);
 
-    const ranks = new Array<number>(n);
+  const fillRanks = (src: number[], out: Float64Array) => {
+    for (let i = 0; i < n; i++) idxBuf[i] = i;
+    idxBuf.sort((a, b) => {
+      const va = src[start + a]!;
+      const vb = src[start + b]!;
+      const fa = Number.isFinite(va) ? va : 0;
+      const fb = Number.isFinite(vb) ? vb : 0;
+      return fa - fb;
+    });
     let i = 0;
     while (i < n) {
+      const v0 = src[start + idxBuf[i]!]!;
+      const f0 = Number.isFinite(v0) ? v0 : 0;
       let j = i;
-      while (j < n - 1 && indexed[j + 1]!.val === indexed[j]!.val) {
+      while (j < n - 1) {
+        const vj = src[start + idxBuf[j + 1]!]!;
+        const fj = Number.isFinite(vj) ? vj : 0;
+        if (fj !== f0) break;
         j++;
       }
-      const avgRank = (i + j + 2) / 2.0; // 1-based average rank
+      const avgRank = (i + j + 2) * 0.5;
       for (let k = i; k <= j; k++) {
-        ranks[indexed[k]!.idx] = avgRank;
+        out[idxBuf[k]!] = avgRank;
       }
       i = j + 1;
     }
-    return ranks;
   };
 
-  const rankX = toRanks(x);
-  const rankY = toRanks(y);
-  return computePearsonCorr(rankX, rankY);
+  fillRanks(x, rankX);
+  fillRanks(y, rankY);
+
+  // Direct Pearson on Float64Array rank buffers (mean of 1..n ranks is always (n + 1) / 2)
+  const meanR = (n + 1) * 0.5;
+  let cov = 0;
+  let varX = 0;
+  let varY = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = rankX[i]! - meanR;
+    const dy = rankY[i]! - meanR;
+    cov += dx * dy;
+    varX += dx * dx;
+    varY += dy * dy;
+  }
+  const denom = Math.sqrt(varX * varY);
+  if (denom <= 1e-12 || !Number.isFinite(denom)) return 0;
+  const r = cov / denom;
+  return Number(Math.max(-1.0, Math.min(1.0, r)).toFixed(5));
 }
 
 /**
@@ -361,12 +397,10 @@ export function evaluateFactorQualityQlib(
   const overallPearsonIc = computePearsonCorr(validX, validY);
   const overallRankIc = computeSpearmanRankCorr(validX, validY);
 
-  // 2. Rolling Rank-IC series to compute volatility and ICIR
+  // 2. Rolling Rank-IC series to compute volatility and ICIR (zero-slice window indexing)
   const rollingRankIcs: number[] = [];
   for (let i = rollingWindow; i <= validX.length; i++) {
-    const subX = validX.slice(i - rollingWindow, i);
-    const subY = validY.slice(i - rollingWindow, i);
-    const rIc = computeSpearmanRankCorr(subX, subY);
+    const rIc = computeSpearmanRankCorr(validX, validY, i - rollingWindow, rollingWindow);
     if (Number.isFinite(rIc)) {
       rollingRankIcs.push(rIc);
     }
