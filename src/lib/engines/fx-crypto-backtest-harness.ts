@@ -243,6 +243,8 @@ export interface SimulationExecutionOptions {
   enforceCausalIntraBar?: boolean;
   /** Realistic adverse slippage in R units when stopping out at Breakeven (e.g. 0.04R) */
   breakevenSlippageR?: number;
+  /** Positive profit lock offset in R units moved above/below entry upon hitting TP1 (default 0 = raw breakeven) */
+  postTp1LockR?: number;
   /** Market order latency slippage (as fraction of riskDist, e.g. 0.02) */
   marketSlippageR?: number;
   /** Minimum penetration through limit entry (as fraction of riskDist) required for queue fill */
@@ -377,8 +379,8 @@ function simulateTradeOutcome(params: {
     const b = barsFuture[k]!;
     const hitSl = direction === "BUY" ? b.low <= currentSl : b.high >= currentSl;
     if (hitSl) {
-      const isAtBe = currentSl === fillPrice;
-      const beSlipPenalty = isAtBe ? beSlipR : 0;
+      const isPostTp1Be = tp1Hit && !tp2Hit;
+      const beSlipPenalty = isPostTp1Be ? beSlipR : 0;
       const exitR =
         (direction === "BUY" ? (currentSl - fillPrice) / riskDist : (fillPrice - currentSl) / riskDist) -
         beSlipPenalty;
@@ -397,7 +399,8 @@ function simulateTradeOutcome(params: {
         const r1 = Math.abs(tp1 - fillPrice) / riskDist;
         realizedR += w1 * r1;
         remainingWeight = Number((1 - w1).toFixed(4));
-        currentSl = fillPrice; // Move SL to Breakeven!
+        const lockR = executionOptions?.postTp1LockR ?? 0;
+        currentSl = direction === "BUY" ? fillPrice + riskDist * lockR : fillPrice - riskDist * lockR;
       }
     }
 
@@ -1108,7 +1111,7 @@ export function runRealHistoricalWalkForwardBacktest(
     const embargoBars = 5;
     let nextAllowed = 45;
 
-    for (let t = 45; t <= bars.length - 20; t += 2) {
+    for (let t = 45; t <= bars.length - 20; t += 1) {
       totalBarsEvaluated++;
       if (t < nextAllowed) continue;
       if (t > splitBar && t < splitBar + embargoBars) continue; // Embargo zone between Calibration and Holdout
@@ -1135,24 +1138,22 @@ export function runRealHistoricalWalkForwardBacktest(
         prec.tp2 != null &&
         prec.tp3 != null
       ) {
-        const riskDist = Math.max(1e-8, Math.abs(prec.entry - prec.stopLoss));
-        const isBuy = prec.direction === "BUY";
-        const adjustedTp1 = isBuy ? prec.entry + riskDist * 0.80 : prec.entry - riskDist * 0.80;
         const out = simulateTradeOutcome({
           barsFuture: futureBars,
           direction: prec.direction,
           entryMode: prec.entryMode === "LIMIT_PULLBACK" ? "LIMIT_PULLBACK" : "MARKET_CONFIRMED",
           intendedEntry: prec.entry,
           stopLoss: prec.stopLoss,
-          tp1: adjustedTp1,
+          tp1: prec.tp1,
           tp2: prec.tp2,
           tp3: prec.tp3,
           frictionPrice,
           useBreakevenScaling: true,
-          tpWeights: [0.65, 0.20, 0.15],
+          tpWeights: [0.70, 0.18, 0.12],
           executionOptions: {
             enforceCausalIntraBar: true,
-            breakevenSlippageR: -0.14, // Positive profit cushion (+0.18R lock minus 0.04R slippage)
+            breakevenSlippageR: 0.04,
+            postTp1LockR: 0.18,
             minLimitPenetrationFraction: 0.015,
           },
         });
@@ -1215,18 +1216,21 @@ export function runRealHistoricalWalkForwardBacktest(
   const calibrationMetrics = summarizeTrades(calRecords, Math.floor(totalBarsEvaluated * 0.6), 4);
   const holdoutMetrics = summarizeTrades(holdRecords, Math.ceil(totalBarsEvaluated * 0.4), 4);
 
-  const thresholds = [0.48, 0.53, 0.58, 0.63];
+  const thresholds = [0.74, 0.77, 0.80, 0.83];
   const combined = [
-    ...calSamples.map((s) => ({ netR: s.netR, prob: s.features.primaryScoreNorm })),
+    ...calSamples.map((s) => ({
+      netR: s.netR,
+      prob: Math.min(0.84, Math.max(0.38, 0.30 + s.features.primaryScoreNorm * 0.56)),
+    })),
     ...holdRecords.map((r) => ({ netR: r.netR, prob: r.rawProb })),
   ];
-  const foldCount = 4;
+  const foldCount = Math.max(2, Math.min(4, combined.length));
   const foldSize = Math.max(1, Math.floor(combined.length / foldCount));
   const trialMatrix = thresholds.map((th) => {
     const foldPerf: number[] = [];
     for (let f = 0; f < foldCount; f++) {
-      const s = f * foldSize;
-      const e = f === foldCount - 1 ? combined.length : (f + 1) * foldSize;
+      const s = Math.min(combined.length, f * foldSize);
+      const e = f === foldCount - 1 ? combined.length : Math.min(combined.length, (f + 1) * foldSize);
       let sumR = 0;
       for (let idx = s; idx < e; idx++) {
         if (combined[idx]!.prob >= th) sumR += combined[idx]!.netR;

@@ -11,6 +11,7 @@ import {
 } from "../engines/ict-smc-liquidity-engine";
 import { evaluateHighWinrateGate } from "../engines/high-winrate-gate";
 import { evaluatePrecisionTradeSetup } from "../engines/fx-crypto-precision-engine";
+import { buildSharedBarContext, stochastic, superTrend } from "../engines/unified-ta-kernel";
 import {
   BENCHMARK_ASSETS,
   calibrateAndRegisterLiveMetaModels,
@@ -493,4 +494,27 @@ test("Microstructure Stress Audit: Verifies Robustness Under Double-Spread & Hig
     audit.extremeCombinedStress.profitFactor >= 4.0,
     `Extreme stress profit factor must stay >= 4.0, got ${audit.extremeCombinedStress.profitFactor}`,
   );
+});
+
+test("Gate 8 SSOT: SharedBarContext zero-allocation SuperTrend/Stochastic parity & Counter-SuperTrend veto", () => {
+  const btcSpec = BENCHMARK_ASSETS.find((a) => a.symbol === "BTCUSDT")!;
+  const { bars } = generateRegimeBars(btcSpec, "CLEAN_DOWNTREND_RETEST", 202, 80);
+  // Shift timestamps to real-market epoch (>= May 2024) to exercise full Gate 8 real-stream enforcement
+  const modernBars: OhlcvBar[] = bars.map((b, idx) => ({ ...b, time: 1730000000 + idx * 900 }));
+  const ctx = buildSharedBarContext(modernBars);
+
+  const fullSt = superTrend(ctx.highs, ctx.lows, ctx.closes, 10, 2.8);
+  const fullStoch = stochastic(ctx.highs, ctx.lows, ctx.closes, 14, 3);
+  const lastIdx = modernBars.length - 1;
+
+  assert.equal(ctx.superTrendDir, fullSt.direction[lastIdx]);
+  assert.ok(
+    ctx.stochK != null && fullStoch[lastIdx] != null && Math.abs(ctx.stochK - fullStoch[lastIdx]!) < 1e-9,
+    "O(18) scalar stochK must match full O(N) stochastic(14, 3) series exactly",
+  );
+  assert.ok(
+    ctx.stochPrevK != null && fullStoch[lastIdx - 1] != null && Math.abs(ctx.stochPrevK - fullStoch[lastIdx - 1]!) < 1e-9,
+    "O(18) scalar stochPrevK must match full O(N) stochastic(14, 3) prev bar exactly",
+  );
+  assert.equal(ctx.superTrendDir, "down", "Clean downtrend must hold bearish SuperTrend");
 });

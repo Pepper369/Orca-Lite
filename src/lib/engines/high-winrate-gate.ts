@@ -431,6 +431,27 @@ export function evaluateHighWinrateGate(params: {
   const trailingBuffer =
     assetType === "FOREX" ? 1.0 : Number(Math.max(pipSize * 2, entryPrice * 0.0015).toPrecision(4));
 
+  if (params.precomputed?.superTrendDir != null) {
+    const stMatches = isBuy
+      ? params.precomputed.superTrendDir === "up"
+      : params.precomputed.superTrendDir === "down";
+    const sk = params.precomputed.stochK;
+    const sp = params.precomputed.stochPrevK;
+    const stochHook =
+      sk == null || sp == null
+        ? true
+        : isBuy
+          ? sk >= sp - 0.5 || sk <= 35
+          : sk <= sp + 0.5 || sk >= 65;
+    if (stMatches && stochHook) {
+      score += 5;
+      passedGates.push("Gate 8 (SuperTrend + Stoch Hook): Đồng thuận dải biến động & điểm uốn nhịp hồi");
+    } else if (!stMatches && !liquiditySweepDetected) {
+      score -= 8;
+      failedGates.push("Gate 8: Ngược dải biến động SuperTrend khi chưa có quét thanh khoản");
+    }
+  }
+
   passedGates.push("Gate 6: Kích hoạt kế hoạch Breakeven (Chốt 50% tại TP1, dời SL hòa vốn)");
 
   const winrateScore = Math.min(95, Math.max(30, Math.round(score)));

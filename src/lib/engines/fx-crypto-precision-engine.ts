@@ -1334,11 +1334,16 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const minFrictionSafeStop =
     candidateStopLoss == null ? Math.min(structuralVolUnit * maxVolMultForStop, totalFrictionPrice / 0.19) : 0;
   const upperStopCap = Math.max(structuralVolUnit * 1.6, minFrictionSafeStop);
-  const stopDist = Math.min(
+  const gate6StopDist = Math.min(
     structuralVolUnit * maxStopCapMult,
     upperStopCap,
     Math.max(structuralVolUnit * 0.94, Math.max(pip * 5, minFrictionSafeStop, rawStopDist)),
   );
+  // After Gate 6 evaluates raw compression friction on gate6StopDist, apply 1.34x ATR anti-wick cushion on real Crypto streams
+  const stopDist =
+    assetType === "CRYPTO" && isRealCryptoStream && candidateStopLoss == null
+      ? Math.max(gate6StopDist, atr14 * 1.34)
+      : gate6StopDist;
   const rawSl = isBuy ? rawEntry - stopDist : rawEntry + stopDist;
 
   // Liquidity targets from Support/Resistance, ICT Pools & Forward Liquidity Forecast
@@ -1452,8 +1457,10 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     );
   }
 
-  // Scenario-conditioned TP1 & TP3 distances (S1 extends runner TP3 while capping at 2.85R for fast capital turnover; S2 tightens TP1)
-  const tp1Dist = stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
+  // Scenario-conditioned TP1 & TP3 distances (high-winrate 0.72R harvest on real Crypto streams; S1/S2 dynamic on FX)
+  const tp1Dist = isRealCryptoStream
+    ? stopDist * 0.72
+    : stopDist * Math.min(0.98, Math.max(0.80, exitPolicy.tp1RMultiple * 0.94));
   const cappedTp3R = Math.min(2.85, exitPolicy.tp3RMultiple);
   const tp3Dist = Math.max(target2Dist * 1.22, stopDist * cappedTp3R);
 
@@ -1461,7 +1468,7 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   const tp2Raw = isBuy ? rawEntry + target2Dist : rawEntry - target2Dist;
   const tp3Raw = isBuy ? rawEntry + tp3Dist : rawEntry - tp3Dist;
 
-  const rawFrictionR = totalFrictionPrice / Math.max(1e-12, stopDist);
+  const rawFrictionR = totalFrictionPrice / Math.max(1e-12, gate6StopDist);
   const empFriction =
     input.empiricalFrictionROverride != null &&
     Number.isFinite(input.empiricalFrictionROverride) &&
@@ -1484,6 +1491,80 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
   } else {
     precisionScore += 6;
     gatesPassed.push(`Gate 6: SL cấu trúc & Net R:R 1:${netRiskReward} (Friction ${frictionR}R)`);
+  }
+
+  // GATE 8: SuperTrend Volatility Ratchet + Stochastic Pullback Inflection + Anti-Adverse-Selection Entry Proximity
+  if (n >= 45 && candidateDirection === "AUTO") {
+    const stAligned =
+      execCtx.superTrendDir == null ||
+      (isBuy ? execCtx.superTrendDir === "up" : execCtx.superTrendDir === "down");
+    const isLaminarCleanTrend =
+      !isRealCryptoStream && erVal >= 0.25 && whipsawFlips <= 2 && htfMatches;
+    const expectedSweepSide = isBuy ? "SELL_SIDE_SWEPT" : "BUY_SIDE_SWEPT";
+    const hasRecentPrimeTurtleSweep = isRealCryptoStream
+      ? adxVal < 19 &&
+        ict.recentSweeps.some(
+          (s) =>
+            s.side === expectedSweepSide &&
+            s.barIndex === n - 1 &&
+            s.sweepType === "TURTLE_SOUP" &&
+            s.conviction === "INSTITUTIONAL_PRIME" &&
+            s.mssConfirmed,
+        )
+      : (isBuy ? bullSweepRecent : bearSweepRecent) && (hasMss || adxVal < 26);
+    const hasPrimeReversalOverride =
+      hasRecentPrimeTurtleSweep ||
+      isLiveImpulseReversalPivot ||
+      (!isRealCryptoStream && hasExhaustionShift);
+    const stochHookAligned =
+      !isRealCryptoStream ||
+      hasRecentPrimeTurtleSweep ||
+      execCtx.stochK == null ||
+      execCtx.stochPrevK == null ||
+      (isBuy
+        ? (execCtx.stochK >= execCtx.stochPrevK || execCtx.stochK <= 35) && execCtx.stochK <= 76
+        : (execCtx.stochK <= execCtx.stochPrevK || execCtx.stochK >= 65) && execCtx.stochK >= 24);
+    const rsiPullbackRoomOk =
+      !isRealCryptoStream ||
+      hasRecentPrimeTurtleSweep ||
+      (isBuy ? rsi14 <= 56 : rsi14 >= 44);
+    const oppWickRatio =
+      lastRange > 1e-12
+        ? isBuy
+          ? (lastBar.high - Math.max(lastBar.open, lastBar.close)) / lastRange
+          : (Math.min(lastBar.open, lastBar.close) - lastBar.low) / lastRange
+        : 0;
+    const noHeavyOpposingWick = !isRealCryptoStream || oppWickRatio <= 0.41;
+    const naturalEntryGapR = Math.abs(currentPrice - rawEntry) / Math.max(1e-12, gate6StopDist);
+    const isAdverseSelectionDeepGap =
+      isRealCryptoStream && naturalEntryGapR > 0.25 && !hasPrimeReversalOverride;
+
+    if (isRealCryptoStream && !stAligned && !hasPrimeReversalOverride) {
+      precisionScore -= 14;
+      vetoReasons.push(
+        `Ngược dải biến động SuperTrend (${execCtx.superTrendDir?.toUpperCase()}) khi chưa có Prime Sweep+MSS vùng nén`,
+      );
+      gatesFailed.push("Gate 8a (SuperTrend Ratchet Veto): Chặn bắt ngược xu hướng biến động ATR");
+    } else if ((!stochHookAligned || !rsiPullbackRoomOk || !noHeavyOpposingWick) && !isLiveImpulseReversalPivot) {
+      precisionScore -= 10;
+      vetoReasons.push(
+        !noHeavyOpposingWick
+          ? `Râu nến từ chối ngược chiều lớn (${(oppWickRatio * 100).toFixed(0)}% biên độ) — chờ hấp thụ xong`
+          : `Nhịp hồi Stochastic (${execCtx.stochK?.toFixed(1)}) chưa ở điểm uốn vùng giá trị`,
+      );
+      gatesFailed.push("Gate 8b (Pullback Inflection & Wick Veto): Chưa đạt điểm uốn tối ưu hoặc bị râu từ chối");
+    } else if (isAdverseSelectionDeepGap) {
+      precisionScore -= 10;
+      vetoReasons.push(
+        `Điểm chờ Limit cách quá xa giá hiện tại (${naturalEntryGapR.toFixed(2)}R) — tránh rủi ro lựa chọn bất lợi (Adverse Selection)`,
+      );
+      gatesFailed.push("Gate 8c (Entry Proximity Veto): Chờ giá tiếp cận sát vùng OTE/FVG thực tế");
+    } else {
+      // Pure quality gate: do not inflate precisionScore so marginal Grade B setups are never promoted to A/A+
+      gatesPassed.push(
+        `Gate 8 (High-Winrate Inflection): Đồng thuận SuperTrend + Stochastic Hook (Gap ${naturalEntryGapR.toFixed(2)}R)`,
+      );
+    }
   }
 
   // Run High-Winrate Gate cross-check reusing SSOT ICT result (zero duplicate sweep/OTE computation)
@@ -1713,10 +1794,13 @@ export function evaluatePrecisionTradeSetup(input: PrecisionSetupInput): Precisi
     ouZScore: ouProcess.currentZScore,
   };
 
+  const effTp1Pct = isRealCryptoStream ? Math.max(70, exitPolicy.tp1ClosePct) : exitPolicy.tp1ClosePct;
+  const effTp2Pct = isRealCryptoStream ? Math.min(18, 100 - effTp1Pct - 5) : exitPolicy.tp2ClosePct;
+  const effTp3Pct = 100 - effTp1Pct - effTp2Pct;
   const breakevenPlan: PrecisionTradeSetup["breakevenPlan"] = {
-    tp1ClosePct: exitPolicy.tp1ClosePct,
-    tp2ClosePct: exitPolicy.tp2ClosePct,
-    tp3ClosePct: exitPolicy.tp3ClosePct,
+    tp1ClosePct: effTp1Pct,
+    tp2ClosePct: effTp2Pct,
+    tp3ClosePct: effTp3Pct,
     moveSlToBeAtTp1: exitPolicy.moveSlToBeAtTp1,
     trailingAtrMult: exitPolicy.trailingAtrMultiplier,
   };

@@ -850,10 +850,10 @@ export async function evaluateRealtimePositionExits(options?: {
       o.initialLotsOrQty && o.initialLotsOrQty > 0 ? o.initialLotsOrQty : o.copiedLotsOrQty;
     const minViableQty = assetType === "FOREX" ? 0.01 : Math.max(0.0001, initialQty * 0.08);
 
-    // 0) Dynamic Time-Decay ROI Exit (Freqtrade Parity for mature/stagnant trades that haven't reached TP1)
+    // 0) Dynamic Time-Decay ROI Exit (Freqtrade Parity ONLY for stagnant INITIAL-stage trades >= 90m; never cannibalize TP1_BE / TP2_TRAIL runners)
     const holdDurationMs = Date.now() - o.timestamp;
     const hasReachedTp1 = tp1 > 0 && ((isBuy && markPrice >= tp1) || (!isBuy && markPrice <= tp1));
-    const isMatureForRoiDecay = holdDurationMs >= 20 * 60_000;
+    const isMatureForRoiDecay = stage === "INITIAL" && holdDurationMs >= 90 * 60_000;
 
     if (!hasReachedTp1 && isMatureForRoiDecay) {
       const roiEval = evaluateDynamicTimeDecayRoiExit({
@@ -895,7 +895,12 @@ export async function evaluateRealtimePositionExits(options?: {
       const remainQty = roundOrderQuantity(o.copiedLotsOrQty - closeQty, assetType);
 
       if (hasHigherTp && closeQty > 0 && remainQty >= minViableQty) {
-        const beBuffer = Math.max(pip * 1.5, entry * (assetType === "CRYPTO" ? 0.001 : 0.00015));
+        const riskLockCushion = sl > 0 ? Math.abs(entry - sl) * 0.16 : 0;
+        const beBuffer = Math.max(
+          pip * 1.5,
+          entry * (assetType === "CRYPTO" ? 0.001 : 0.00015),
+          riskLockCushion,
+        );
         const rawBeSl = isBuy ? entry + beBuffer : entry - beBuffer;
         const safeBeSl = roundPrice(
           isBuy ? Math.min(rawBeSl, markPrice - pip * 2) : Math.max(rawBeSl, markPrice + pip * 2),

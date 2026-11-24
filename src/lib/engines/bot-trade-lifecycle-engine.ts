@@ -94,9 +94,10 @@ export function evaluateDynamicTimeDecayRoiExit(params: EvaluateRoiDecayParams):
     }
   }
 
-  // Check if current profit satisfies the tier's requirement
+  // Check if current profit satisfies the tier's requirement (minTargetPct is fallback ONLY when stopLossPrice is absent)
+  const hasValidStop = Boolean(stopLossPrice && stopLossPrice > 0 && Math.abs(entryPrice - stopLossPrice) > 1e-8);
   const satisfiesR = currentProfitR >= matchedTier.minTargetR;
-  const satisfiesPct = currentProfitPct >= matchedTier.minTargetPct;
+  const satisfiesPct = !hasValidStop && currentProfitPct >= matchedTier.minTargetPct;
   const shouldExit = satisfiesR || satisfiesPct;
 
   let exitReason = "HOLD_ACTIVE";

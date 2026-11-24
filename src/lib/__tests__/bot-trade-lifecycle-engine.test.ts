@@ -60,6 +60,17 @@ describe("Bot Trade Lifecycle & Dynamic Exit Engine (Freqtrade Parity)", () => {
     });
     assert.equal(timeoutRes.shouldExit, true);
     assert.ok(timeoutRes.exitReason.includes("TIME_EXHAUSTION_EXIT"));
+
+    // 5. High-ATR asset protection: when stopLossPrice is present (e.g. 3% riskDist), +0.65% (+0.22R) at 65m must NOT trigger 0.5R exit via minTargetPct fallback
+    const highAtrRes = evaluateDynamicTimeDecayRoiExit({
+      direction: "BUY",
+      entryPrice: 100.0,
+      markPrice: 100.65, // +0.65% > 0.6% minTargetPct, but only +0.217R < 0.5R minTargetR
+      stopLossPrice: 97.0, // 3.0 pts = 1R
+      openedTimestampMs: openedAt,
+      currentTimestampMs: openedAt + 65 * 60000,
+    });
+    assert.equal(highAtrRes.shouldExit, false);
   });
 
   it("evaluateDynamicTimeDecayRoiExit: works symmetrically on SELL / Short positions", () => {

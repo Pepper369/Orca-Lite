@@ -334,6 +334,10 @@ export interface SharedBarContext {
   adx14: number | null;
   macdFull: { macd: (number | null)[]; signal: (number | null)[]; histogram: (number | null)[] };
   efficiencyRatio14: number;
+  superTrendDir: "up" | "down" | null;
+  superTrendLine: number | null;
+  stochK: number | null;
+  stochPrevK: number | null;
 }
 
 /**
@@ -378,6 +382,30 @@ export function buildSharedBarContext(bars: OhlcvBar[]): SharedBarContext {
     efficiencyRatio14 = pathSum > 0 ? Math.min(1, netChange / pathSum) : 0;
   }
 
+  const st10 = n >= 12 ? superTrend(highs, lows, closes, 10, 2.8) : null;
+  const superTrendDir = st10 && n > 0 ? (st10.direction[n - 1] ?? null) : null;
+  const superTrendLine = st10 && n > 0 ? (st10.superTrend[n - 1] ?? null) : null;
+
+  // O(18) zero-allocation tail Stochastic(14, 3) calculation at [n-1] and [n-2]
+  let stochK: number | null = null;
+  let stochPrevK: number | null = null;
+  if (n >= 17) {
+    const rawTail = [0, 0, 0, 0]; // indices n-4, n-3, n-2, n-1
+    for (let offset = 0; offset < 4; offset++) {
+      const idx = n - 4 + offset;
+      let hi = -Infinity;
+      let lo = Infinity;
+      for (let j = idx - 13; j <= idx; j++) {
+        if (highs[j]! > hi) hi = highs[j]!;
+        if (lows[j]! < lo) lo = lows[j]!;
+      }
+      const rng = hi - lo;
+      rawTail[offset] = rng <= 0 ? 50 : ((closes[idx]! - lo) / rng) * 100;
+    }
+    stochPrevK = (rawTail[0]! + rawTail[1]! + rawTail[2]!) / 3;
+    stochK = (rawTail[1]! + rawTail[2]! + rawTail[3]!) / 3;
+  }
+
   return {
     bars,
     n,
@@ -395,5 +423,9 @@ export function buildSharedBarContext(bars: OhlcvBar[]): SharedBarContext {
     adx14: n > 0 ? (adx14Series[n - 1] ?? null) : null,
     macdFull,
     efficiencyRatio14,
+    superTrendDir,
+    superTrendLine,
+    stochK,
+    stochPrevK,
   };
 }
